@@ -1,7 +1,7 @@
 [project]
 name = "reconciliator"
 version = "0.1.0"
-description = "Add your description here"
+description = "High-Performance Finnish Bibliographic Authority Reconciliation & Agent URI Enrichment Engine"
 readme = "README.md"
 license = "MIT"
 authors = [
