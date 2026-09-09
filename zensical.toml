@@ -1,0 +1,37 @@
+[project]
+site_name = "reconciliator"
+site_description = "High-Performance Finnish Bibliographic Authority Reconciliation & Agent URI Enrichment Engine"
+site_url = "https://mikkovihonen.github.io/reconciliator/"
+docs_dir = "docs"
+site_dir = "site"
+
+nav = [
+    { "Home" = "index.md" },
+    { "Architecture Specification" = "initial_architecture.md" }
+]
+
+[project.theme]
+name = "material"
+palette = [
+    { scheme = "default", primary = "indigo", accent = "indigo", toggle = { icon = "material/brightness-7", name = "Switch to dark mode" } },
+    { scheme = "slate", primary = "indigo", accent = "indigo", toggle = { icon = "material/brightness-4", name = "Switch to light mode" } }
+]
+features = [
+    "navigation.instant",
+    "navigation.tracking",
+    "navigation.sections",
+    "navigation.top",
+    "content.code.copy",
+    "search.suggest",
+    "search.highlight"
+]
+
+[project.markdown_extensions]
+pymdownx.arithmatex = { generic = true }
+pymdownx.highlight = { anchor_linenums = true }
+pymdownx.superfences = {}
+pymdownx.details = {}
+admonition = {}
+tables = {}
+toc = { permalink = true }
+

@@ -1,0 +1,38 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+
+<http://www.yso.fi/onto/yso/p2591> a skos:Concept ;
+    skos:prefLabel "lääkärit"@fi ;
+    skos:prefLabel "läkare"@sv ;
+    skos:prefLabel "physicians"@en ;
+    skos:altLabel "tohtorit"@fi .
+
+<http://urn.fi/URN:NBN:fi:au:slm:s123> a skos:Concept ;
+    skos:prefLabel "historialliset romaanit"@fi ;
+    skos:prefLabel "historiska romaner"@sv .
+
+<http://www.yso.fi/onto/kauno/k123> a skos:Concept ;
+    skos:prefLabel "satuhahmot"@fi ;
+    skos:prefLabel "sagofigurer"@sv .
+
+<http://urn.fi/URN:NBN:fi:au:seko:s789> a skos:Concept ;
+    skos:prefLabel "viulu"@fi ;
+    skos:prefLabel "fiol"@sv .
+
+<http://www.yso.fi/onto/muso/p100> a skos:Concept ;
+    skos:prefLabel "sinfoniat"@fi ;
+    skos:prefLabel "symfonier"@sv .
+
+# Legacy mapping definitions
+<http://www.yso.fi/onto/ysa/Y1002> a skos:Concept ;
+    skos:prefLabel "lääkärit"@fi ;
+    skos:exactMatch <http://www.yso.fi/onto/yso/p2591> .
+
+<http://urn.fi/URN:NBN:fi:au:kaunokki:k99> a skos:Concept ;
+    skos:prefLabel "historialliset romaanit"@fi ;
+    skos:exactMatch <http://urn.fi/URN:NBN:fi:au:slm:s123> .
+
+<http://www.yso.fi/onto/musa/m100> a skos:Concept ;
+    skos:prefLabel "viulu"@fi ;
+    skos:exactMatch <http://urn.fi/URN:NBN:fi:au:seko:s789> .
+

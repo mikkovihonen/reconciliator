@@ -1,0 +1,2 @@
+Title: {{ title }}{% if subtitle %} - {{ subtitle }}{% endif %} | Authors: {{ agents | join_names }} | Surnames: {{ agents | join_surnames }} | Year: {{ publication_year | default('n/a', true) }} | Main Classification: {{ classifications | primary_code }} | All Classifications: {{ classifications | join_classifications }} | YKL: {{ classifications | join_classifications(scheme='ykl') }} | Topics: {{ subjects.topical | join_labels }}
+

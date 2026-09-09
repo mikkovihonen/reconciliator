@@ -1,0 +1,109 @@
+# config.yaml - Complete Configuration Surface for Reconciliator
+
+# 1. Storage & Persistence File Paths
+storage:
+  authority_db: "data/authority.db"
+  finto_db: "data/finto.db"
+  progress_db: "data/progress.db"
+  index_path: "data/authority.faiss"
+
+# 2. Embedding Model, Serialization Template & Hardware Acceleration
+embedding:
+  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
+  template_path: "reconciliator/templates/default_serialization.j2"
+  device: "auto"        # "auto" | "cuda" | "mps" | "cpu"
+  batch_size: 64        # Inference batch size for dense sentence embedding
+  force_template: false # When true, permits reconciliation even if template hash differs from index metadata
+
+# 3. FINTO Thesauri & Migration Ingestion
+ingest_finto:
+  input_path: "tests/fixtures/sample_finto.ttl" # Directory or file path containing SKOS / Turtle / RDF dumps
+  vocabularies:
+    - "yso"
+    - "kauno"
+    - "muso"
+    - "slm"
+    - "seko"
+  legacy_thesauri:
+    - "ysa"
+    - "allars"
+    - "kaunokki"
+    - "musa"
+
+# 4. Melinda Authority Ingestion
+ingest_melinda:
+  source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
+  input_path: null      # Local XML file path when source_type is "file"
+  oai_url: "https://api.melinda.kansalliskirjasto.fi/oai/request"
+  metadata_prefix: "marc21"
+  set_spec: null
+  workers: 4
+  from_date: null       # "YYYY-MM-DD"
+  until_date: null      # "YYYY-MM-DD"
+  slice_days: 30
+  batch_size: 500
+
+# 5. Wikidata Authority Ingestion
+ingest_wikidata:
+  dump_path: "data/wikidata/latest-all.json.gz"
+  batch_size: 1000
+
+# 6. Target Reconciliation & Enrichment
+reconcile:
+  target_file: "tests/fixtures/sample_target.xml"
+  output_file: "data/enriched_records.xml"
+  enrich: true          # true: inject novel $0/$1 URIs; false: audit & report only
+  fold_legacy: true     # true: reconcile and fold legacy subject headings against finto.db
+  threshold: 0.85       # Minimum hybrid score for candidate acceptance
+
+  # Report Set 1: Agent & Descriptive Authority Reports (Melinda/Asteri, Wikidata, ISNI, VIAF)
+  agent_reports:
+    detailed_file: "data/reports/agent_reconciliation_uris.tsv"     # Row per reconciled agent URI
+    summary_file: "data/reports/agent_reconciliation_summary.tsv"   # Aggregate agent metrics
+
+  # Report Set 2: Subject Headings Reconciliation Reports (FINTO: YSO, SLM, KAUNO, MUSO, SEKO)
+  subject_reports:
+    detailed_file: "data/reports/subject_reconciliation_uris.tsv"   # Row per reconciled subject URI
+    summary_file: "data/reports/subject_reconciliation_summary.tsv" # Aggregate subject & thesauri metrics
+
+  sparse_rerank:
+    enabled: true       # Toggle sparse reranking on/off (if false, pure dense scoring is used)
+    dense_weight: 0.6   # Weight of dense semantic cosine similarity (0.0 - 1.0)
+    sparse_weight: 0.4  # Weight of sparse BM25 lexical similarity (0.0 - 1.0)
+    top_k: 50           # Number of FAISS dense candidates retrieved for sparse reranking
+    short_circuit:
+      enabled: true     # Fast-path shortcut: candidates with dense score >= threshold bypass sparse BM25 reranking
+      threshold: 0.98   # Configurable dense similarity threshold for short-circuiting (default 0.98)
+    require_volume_match: true   # Reject conflicting volume/part numbers ("osa 1" vs "osa 2")
+    require_surname_match: true  # Require at least one matching author surname token
+    max_year_difference: 5       # Max allowable publication year discrepancy before disqualification
+    year_penalty_threshold: 1    # Year discrepancy after which linear proximity penalty begins
+  link_policy: "priority_fallback"  # "priority_fallback" or "all"
+  vocabularies:
+    - "KANTO"
+    - "YSO"
+    - "MUSO"
+    - "KAUNO"
+    - "SLM"
+    - "SEKO"
+    - "VIAF"
+    - "ISNI"
+    - "WIKIDATA"
+  agent_priority:
+    - "KANTO"
+    - "ISNI"
+    - "VIAF"
+    - "WIKIDATA"
+  subject_priority:
+    - "YSO"
+    - "KAUNO"
+    - "MUSO"
+    - "SLM"
+    - "SEKO"
+    - "WIKIDATA"
+
+# 7. Telemetry & Progress Monitoring
+telemetry:
+  heartbeat_interval_seconds: 1.0
+  watch_interval_seconds: 1.0
+

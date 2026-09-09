@@ -1,0 +1,101 @@
+# Byte-compiled / optimized / C-extension files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C-extensions and native binaries
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing and code coverage
+.pytest_cache/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+.tox/
+.nox/
+
+# Linters, formatters, and type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pyre/
+.pytype/
+
+# Jupyter / IPython notebooks
+.ipynb_checkpoints
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local project configuration (keep config.example.yaml tracked)
+config.yaml
+
+# Reconciliator data, databases, vector indices, and output reports
+data/
+reports/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.faiss
+*.index
+
+# Local model cache and weights
+.cache/
+models/
+
+# Documentation builds (Zensical site output and generated index)
+site/
+docs/index.md
+
+# Operating System files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# IDEs and text editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+

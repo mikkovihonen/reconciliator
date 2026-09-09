@@ -1,0 +1,89 @@
+# Test configuration fixture
+storage:
+  authority_db: "test_authority.db"
+  finto_db: "test_finto.db"
+  progress_db: "test_progress.db"
+  index_path: "test_authority.faiss"
+
+embedding:
+  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
+  template_path: "../../src/reconciliator/templates/default_serialization.j2"
+  device: "cpu"
+  batch_size: 16
+  force_template: false
+
+ingest_finto:
+  input_path: "sample_finto.ttl"
+  vocabularies:
+    - "yso"
+    - "kauno"
+    - "muso"
+    - "slm"
+    - "seko"
+  legacy_thesauri:
+    - "ysa"
+    - "allars"
+    - "kaunokki"
+    - "musa"
+
+ingest_melinda:
+  source_type: "file"
+  input_path: "sample_melinda.xml"
+  workers: 1
+  batch_size: 10
+
+ingest_wikidata:
+  dump_path: "sample_wikidata.json.gz"
+  batch_size: 10
+
+reconcile:
+  target_file: "sample_target.xml"
+  output_file: "test_enriched_records.xml"
+  enrich: true
+  fold_legacy: true
+  threshold: 0.85
+  agent_reports:
+    detailed_file: "reports/agent_uris.tsv"
+    summary_file: "reports/agent_summary.tsv"
+  subject_reports:
+    detailed_file: "reports/subject_uris.tsv"
+    summary_file: "reports/subject_summary.tsv"
+  sparse_rerank:
+    enabled: true
+    dense_weight: 0.6
+    sparse_weight: 0.4
+    top_k: 10
+    short_circuit:
+      enabled: true
+      threshold: 0.98
+    require_volume_match: true
+    require_surname_match: true
+    max_year_difference: 5
+    year_penalty_threshold: 1
+  link_policy: "priority_fallback"
+  vocabularies:
+    - "KANTO"
+    - "YSO"
+    - "MUSO"
+    - "KAUNO"
+    - "SLM"
+    - "SEKO"
+    - "VIAF"
+    - "ISNI"
+    - "WIKIDATA"
+  agent_priority:
+    - "KANTO"
+    - "ISNI"
+    - "VIAF"
+    - "WIKIDATA"
+  subject_priority:
+    - "YSO"
+    - "KAUNO"
+    - "MUSO"
+    - "SLM"
+    - "SEKO"
+
+telemetry:
+  heartbeat_interval_seconds: 0.1
+  watch_interval_seconds: 0.1
+

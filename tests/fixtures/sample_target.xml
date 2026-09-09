@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+  <record>
+    <controlfield tag="001">TARGET-001</controlfield>
+    <datafield tag="020" ind1=" " ind2=" ">
+      <subfield code="a">978-951-0-00001-0</subfield>
+    </datafield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Waltari, Mika</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Sinuhe egyptiläinen :</subfield>
+      <subfield code="b">viisitoista kirjaa lääkäri Sinuhen elämästä</subfield>
+      <subfield code="n">osa 1</subfield>
+    </datafield>
+    <datafield tag="260" ind1=" " ind2=" ">
+      <subfield code="a">Helsinki</subfield>
+      <subfield code="b">WSOY</subfield>
+      <subfield code="c">1945</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2=" ">
+      <subfield code="a">lääkärit</subfield>
+      <subfield code="2">ysa</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2=" ">
+      <subfield code="a">historialliset romaanit</subfield>
+      <subfield code="2">kaunokki</subfield>
+    </datafield>
+  </record>
+  <record>
+    <controlfield tag="001">TARGET-002</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Mika Waltari</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Sinuhe egyptiläinen</subfield>
+      <subfield code="n">osa 2</subfield>
+    </datafield>
+    <datafield tag="260" ind1=" " ind2=" ">
+      <subfield code="a">Helsinki</subfield>
+      <subfield code="b">WSOY</subfield>
+      <subfield code="c">1945</subfield>
+    </datafield>
+  </record>
+</collection>
+
