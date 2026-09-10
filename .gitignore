@@ -72,6 +72,8 @@ reports/
 *.sqlite3
 *.faiss
 *.index
+*.marcxml
+
 
 # Local model cache and weights
 .cache/

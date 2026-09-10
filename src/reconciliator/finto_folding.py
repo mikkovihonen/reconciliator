@@ -37,7 +37,9 @@ class FintoFolder:
             (target_field, target_vocab, target_uri, target_pref_label, mapping_type)
         """
         clean_heading = heading.strip().rstrip(".,; ")
-        norm_vocab = (source_vocab or "").strip().lower()
+        raw_vocab = (source_vocab or "").strip().lower()
+        # Strip language suffix like /fin, /swe, /eng (e.g. yso/fin -> yso, slm/fin -> slm)
+        norm_vocab = raw_vocab.split("/")[0].strip()
 
         # If already canonical modern ontology URI/code and no finto_store
         if self.finto_store is None:
@@ -50,7 +52,7 @@ class FintoFolder:
                 target_vocab = "seko"
             return target_field, target_vocab, source_uri or "", clean_heading, "none"
 
-        # 1. Check legacy URI in finto_mappings
+        # 1. Check legacy URI in finto_mappings or canonical URI in finto_concepts
         if source_uri:
             mapping = self.finto_store.find_legacy_mapping_by_uri(source_uri)
             if mapping:
@@ -73,6 +75,26 @@ class FintoFolder:
                     mapping.target_uri,
                     pref_label,
                     mapping.mapping_type,
+                )
+
+            # Check if source_uri is already a modern canonical concept URI
+            concept = self.finto_store.find_concept_by_uri(source_uri)
+            if concept:
+                pref_label = (
+                    (concept.pref_label_sv if lang == "sv" else concept.pref_label_fi)
+                    or concept.pref_label_fi
+                    or concept.pref_label_en
+                    or clean_heading
+                )
+                target_field = concept.target_field or source_field
+                if concept.vocabulary == "slm" and target_field == "650":
+                    target_field = "655"
+                return (
+                    target_field,
+                    concept.vocabulary,
+                    concept.uri,
+                    pref_label,
+                    "existing_canonical",
                 )
 
         # 2. Check legacy label in finto_mappings

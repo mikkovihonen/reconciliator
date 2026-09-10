@@ -1,4 +1,4 @@
-"""Unit tests for MARCXMLEnricher tree mutation and enrichment toggles."""
+from pathlib import Path
 
 from lxml import etree
 
@@ -72,3 +72,26 @@ def test_enrich_disabled_does_not_mutate() -> None:
     f100 = enriched_elem.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='100']")[0]
     u0 = _get_subfields(f100, "0")
     assert len(u0) == 0
+
+
+def test_iter_marc_record_elements(tmp_path: Path) -> None:
+    from reconciliator.loaders.marcxml import iter_marc_record_elements
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+    <collection xmlns="http://www.loc.gov/MARC21/slim">
+      <record>
+        <controlfield tag="001">REC-1</controlfield>
+      </record>
+      <record>
+        <controlfield tag="001">REC-2</controlfield>
+      </record>
+    </collection>
+    """
+    file_path = tmp_path / "test.marcxml"
+    file_path.write_text(xml_content, encoding="utf-8")
+
+    elements = list(iter_marc_record_elements(file_path))
+    assert len(elements) == 2
+    # Elements are yielded with byte offsets > 0
+    assert elements[0][1] > 0
+    assert elements[1][1] >= elements[0][1]

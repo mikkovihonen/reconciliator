@@ -72,10 +72,13 @@ def clean_title(title: str, strip_articles: bool = True) -> str:
 
 
 def extract_year(text: Optional[str]) -> Optional[int]:
-    """Extract clean 4-digit Gregorian year."""
+    """
+    Extract clean 4-digit Gregorian year.
+    Supports standard cataloging copyright/phonogram notations: 'c2001', 'cop. 1986', 'p2010', '[1995]'.
+    """
     if not text:
         return None
-    match = re.search(r"\b(1[5-9]\d{2}|20\d{2})\b", text)
+    match = re.search(r"(?<!\d)(1[5-9]\d{2}|20\d{2})(?!\d)", text)
     if match:
         return int(match.group(1))
     return None

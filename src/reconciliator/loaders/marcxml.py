@@ -357,6 +357,35 @@ def iter_marcxml_records(file_path: Path | str, source: str = "target") -> Itera
         parsed = parse_marc_record_elem(elem, source=source)
         yield parsed
         elem.clear()
-        while elem.getprevious() is not None:
-            del elem.getparent()[0]
+        parent = elem.getparent()
+        if parent is not None:
+            while elem.getprevious() is not None:
+                del parent[0]
     del context
+
+
+def iter_marc_record_elements(
+    file_path: Path | str,
+) -> Iterator[tuple[etree._Element, int]]:
+    """Stream raw lxml MARCXML <record> elements and file byte offsets with O(1) memory cleanup."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"MARCXML file not found at: {path}")
+
+    with open(path, "rb") as in_f:
+        context = etree.iterparse(
+            in_f,
+            events=("end",),
+            tag=(
+                "{http://www.loc.gov/MARC21/slim}record",
+                "record",
+            ),
+        )
+        for _, elem in context:
+            yield elem, in_f.tell()
+            elem.clear()
+            parent = elem.getparent()
+            if parent is not None:
+                while elem.getprevious() is not None:
+                    del parent[0]
+        del context

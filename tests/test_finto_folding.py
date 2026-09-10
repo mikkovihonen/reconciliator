@@ -136,3 +136,31 @@ def test_fold_sample_legacy_thesauri_fixture(populated_finto_store: FintoStore) 
     assert "http://www.yso.fi/onto/yso/p2591" in topical_uris
     genre_uris = [s.uri for s in norm1.subjects.genre_form]
     assert "http://urn.fi/URN:NBN:fi:au:slm:s123" in genre_uris
+
+
+def test_fold_with_language_suffix(populated_finto_store: FintoStore) -> None:
+    folder = FintoFolder(populated_finto_store)
+    # ysa/fin must normalize to ysa and fold to yso
+    t_field, t_vocab, t_uri, t_label, m_type = folder.fold_subject_heading(
+        heading="lääkärit",
+        source_vocab="ysa/fin",
+        source_field="650",
+    )
+    assert t_field == "650"
+    assert t_vocab == "yso"
+    assert t_uri == "http://www.yso.fi/onto/yso/p2591"
+
+
+def test_fold_existing_canonical_uri(populated_finto_store: FintoStore) -> None:
+    folder = FintoFolder(populated_finto_store)
+    # When record already has a canonical YSO URI, return it directly
+    t_field, t_vocab, t_uri, t_label, m_type = folder.fold_subject_heading(
+        heading="lääkärit",
+        source_vocab="yso/fin",
+        source_field="650",
+        source_uri="http://www.yso.fi/onto/yso/p2591",
+    )
+    assert t_field == "650"
+    assert t_vocab == "yso"
+    assert t_uri == "http://www.yso.fi/onto/yso/p2591"
+    assert m_type == "existing_canonical"

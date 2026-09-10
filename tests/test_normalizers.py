@@ -68,6 +68,11 @@ def test_title_cleaning() -> None:
 
 def test_year_and_publisher_cleaning() -> None:
     assert extract_year("Helsinki, 1945.") == 1945
+    assert extract_year("c2001") == 2001
+    assert extract_year("p2010") == 2010
+    assert extract_year("cop. 1986") == 1986
+    assert extract_year("[1995]") == 1995
+    assert extract_year("2003, c2001") == 2003
     assert clean_publisher("Kustannusosakeyhtiö Otava Oy") == "Otava"
     assert clean_publisher("WSOY Ab") == "WSOY"
 

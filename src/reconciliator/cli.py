@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
 
 import typer
 from lxml import etree
@@ -18,7 +18,10 @@ from reconciliator.finto_store import FintoStore
 from reconciliator.ingestion.finto import ingest_finto_file
 from reconciliator.ingestion.melinda import ingest_melinda_pipeline
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
-from reconciliator.loaders.marcxml import MARC_NS, parse_marc_record_elem
+from reconciliator.loaders.marcxml import (
+    iter_marc_record_elements,
+    parse_marc_record_elem,
+)
 from reconciliator.matcher import ReconciliationEngine
 from reconciliator.models import TaskProgress
 from reconciliator.normalizers.record import RecordNormalizer
@@ -281,214 +284,228 @@ def reconcile_cmd(
         task_type="reconciliation",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
-    tracker.start_task(stage="reconciling")
+    bytes_total = r_cfg.target_file.stat().st_size if r_cfg.target_file.exists() else None
+    tracker.start_task(stage="reconciling", bytes_total=bytes_total)
 
     start_time_sec = time.time()
     console.print(f"[cyan]Reconciling {r_cfg.target_file}...[/cyan]")
 
-    # Parse XML document
-    tree = etree.parse(str(r_cfg.target_file))
-    root = tree.getroot()
-    records = root.findall(".//marc:record", MARC_NS)
-    if not records:
-        records = root.findall(".//record")
-    if not records and (root.tag.endswith("record") or root.tag == "record"):
-        records = [root]
-
-    tracker.update_progress(items_total=len(records))
-    reporter.total_records = len(records)
-
-    for rec_elem in records:
-        raw_rec = parse_marc_record_elem(rec_elem, source="target")
-        target_record = normalizer.normalize(raw_rec)
-
-        res = engine.reconcile_record(target_record)
-        if res.accepted_candidates:
-            reporter.matched_records += 1
-
-        # Record agent report rows
-        best_match = res.matches[0] if res.matches else None
-        match_tier = best_match.match_tier if best_match else "unmatched"
-        match_score = best_match.match_score if best_match else 0.0
-        dense_score = best_match.dense_score if best_match else None
-        sparse_score = best_match.sparse_score if best_match else None
-
-        for idx, agent in enumerate(target_record.agents):
-            selected = res.selected_agent_uris.get(idx, [])
-            suppressed = res.suppressed_agent_uris.get(idx, [])
-            existing = set(agent.uri_subfield_0 + agent.uri_subfield_1)
-            discovered_map = {u.uri: u for u in res.discovered_agent_uris.get(idx, [])}
-
-            # Field tag determination: use recorded field_tag, or fallback by is_personal / position
-            field_tag = agent.field_tag
-            if not field_tag:
-                if agent.is_personal:
-                    field_tag = "100" if idx == 0 else "700"
-                else:
-                    field_tag = "110" if idx == 0 else "710"
-
-            for uri in selected:
-                is_novel = uri not in existing
-                action = (
-                    "injected"
-                    if (r_cfg.enrich and is_novel)
-                    else ("existing" if not is_novel else "proposed")
-                )
-                subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
-                disc_uri = discovered_map.get(uri)
-                cand_source_id = (
-                    disc_uri.source_record_id
-                    if disc_uri
-                    else (res.accepted_candidates[0].source_id if res.accepted_candidates else "")
-                )
-                cand_source = (
-                    disc_uri.source
-                    if disc_uri
-                    else (res.accepted_candidates[0].source if res.accepted_candidates else "")
-                )
-                agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
-
-                reporter.add_agent_row(
-                    AgentReportRow(
-                        target_record_id=target_record.source_id,
-                        target_title=target_record.title,
-                        target_year=target_record.publication_year,
-                        target_isbn=target_record.identifiers.isbn[0]
-                        if target_record.identifiers.isbn
-                        else None,
-                        field_tag=field_tag,
-                        field_occurrence=idx + 1,
-                        subfield_code=subfield_code,
-                        target_heading=agent.name,
-                        target_role=agent.role,
-                        uri=uri,
-                        vocabulary=detect_vocabulary(uri) or "OTHER",
-                        authority_label=agent.name,
-                        authority_record_id=cand_source_id,
-                        authority_source=cand_source,
-                        match_tier=match_tier,
-                        match_score=match_score,
-                        dense_score=dense_score,
-                        sparse_score=sparse_score,
-                        agent_name_score=agent_name_score,
-                        action=action,
-                        is_novel=is_novel,
-                    )
-                )
-
-            for uri in suppressed:
-                subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
-                disc_uri = discovered_map.get(uri)
-                cand_source_id = (
-                    disc_uri.source_record_id
-                    if disc_uri
-                    else (res.accepted_candidates[0].source_id if res.accepted_candidates else "")
-                )
-                cand_source = (
-                    disc_uri.source
-                    if disc_uri
-                    else (res.accepted_candidates[0].source if res.accepted_candidates else "")
-                )
-                agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
-
-                reporter.add_agent_row(
-                    AgentReportRow(
-                        target_record_id=target_record.source_id,
-                        target_title=target_record.title,
-                        target_year=target_record.publication_year,
-                        target_isbn=target_record.identifiers.isbn[0]
-                        if target_record.identifiers.isbn
-                        else None,
-                        field_tag=field_tag,
-                        field_occurrence=idx + 1,
-                        subfield_code=subfield_code,
-                        target_heading=agent.name,
-                        target_role=agent.role,
-                        uri=uri,
-                        vocabulary=detect_vocabulary(uri) or "OTHER",
-                        authority_label=agent.name,
-                        authority_record_id=cand_source_id,
-                        authority_source=cand_source,
-                        match_tier=match_tier,
-                        match_score=match_score,
-                        dense_score=dense_score,
-                        sparse_score=sparse_score,
-                        agent_name_score=agent_name_score,
-                        action="suppressed_by_priority",
-                        is_novel=True,
-                    )
-                )
-
-        # Record subject report rows
-        all_subjects = (
-            [("650", s) for s in target_record.subjects.topical]
-            + [("655", s) for s in target_record.subjects.genre_form]
-            + [("651", s) for s in target_record.subjects.geographic]
-            + [("382", s) for s in target_record.subjects.medium_of_performance]
-        )
-        for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
-            s_tag = sub_item.source_field or default_tag
-            t_tag = sub_item.target_field or default_tag
-            s_vocab = sub_item.source_vocab or ""
-            s_uri = sub_item.source_uri or ""
-            t_vocab = sub_item.vocabulary or ""
-            t_uri = sub_item.uri or ""
-            s_heading = sub_item.source_heading or sub_item.pref_label
-            m_type = sub_item.mapping_type or "pref_label_lookup"
-            tag_changed = s_tag != t_tag
-
-            if not t_uri:
-                action = "unmapped"
-                is_novel = False
-            elif s_uri and s_uri == t_uri:
-                action = "existing"
-                is_novel = False
-            elif r_cfg.enrich:
-                action = "injected"
-                is_novel = True
-            else:
-                action = "proposed"
-                is_novel = True
-
-            reporter.add_subject_row(
-                SubjectReportRow(
-                    target_record_id=target_record.source_id,
-                    target_title=target_record.title,
-                    source_field_tag=s_tag,
-                    field_occurrence=s_idx + 1,
-                    source_heading=s_heading,
-                    source_vocab=s_vocab,
-                    source_uri=s_uri,
-                    language=target_record.language or "fi",
-                    target_field_tag=t_tag,
-                    target_vocab=t_vocab,
-                    target_uri=t_uri,
-                    target_pref_label=sub_item.pref_label,
-                    mapping_type=m_type,
-                    action=action,
-                    is_novel=is_novel,
-                    tag_changed=tag_changed,
-                )
-            )
-
-        # Mutate XML if output_file requested
-        if r_cfg.output_file:
-            enricher.enrich_record_tree(
-                rec_elem,
-                res,
-                enrich=r_cfg.enrich,
-                fold_legacy=r_cfg.fold_legacy,
-            )
-
-        tracker.update_progress(items_increment=1)
-
-    # Write output XML
+    out_f: Optional[IO[bytes]] = None
     if r_cfg.output_file:
         r_cfg.output_file.parent.mkdir(parents=True, exist_ok=True)
-        tree.write(
-            str(r_cfg.output_file), encoding="utf-8", xml_declaration=True, pretty_print=True
+        out_f = open(r_cfg.output_file, "wb")
+        out_f.write(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n'
+            b'<collection xmlns="http://www.loc.gov/MARC21/slim">\n'
         )
-        console.print(f"[green]Wrote output MARCXML to {r_cfg.output_file}[/green]")
+
+    total_records = 0
+    try:
+        for rec_elem, byte_offset in iter_marc_record_elements(r_cfg.target_file):
+            total_records += 1
+            raw_rec = parse_marc_record_elem(rec_elem, source="target")
+            target_record = normalizer.normalize(raw_rec)
+
+            res = engine.reconcile_record(target_record)
+            if res.accepted_candidates:
+                reporter.matched_records += 1
+
+            # Record agent report rows
+            best_match = res.matches[0] if res.matches else None
+            match_tier = best_match.match_tier if best_match else "unmatched"
+            match_score = best_match.match_score if best_match else 0.0
+            dense_score = best_match.dense_score if best_match else None
+            sparse_score = best_match.sparse_score if best_match else None
+
+            for idx, agent in enumerate(target_record.agents):
+                selected = res.selected_agent_uris.get(idx, [])
+                suppressed = res.suppressed_agent_uris.get(idx, [])
+                existing = set(agent.uri_subfield_0 + agent.uri_subfield_1)
+                discovered_map = {u.uri: u for u in res.discovered_agent_uris.get(idx, [])}
+
+                # Field tag determination: use recorded field_tag, or fallback by is_personal / position
+                field_tag = agent.field_tag
+                if not field_tag:
+                    if agent.is_personal:
+                        field_tag = "100" if idx == 0 else "700"
+                    else:
+                        field_tag = "110" if idx == 0 else "710"
+
+                for uri in selected:
+                    is_novel = uri not in existing
+                    action = (
+                        "injected"
+                        if (r_cfg.enrich and is_novel)
+                        else ("existing" if not is_novel else "proposed")
+                    )
+                    subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
+                    disc_uri = discovered_map.get(uri)
+                    cand_source_id = (
+                        disc_uri.source_record_id
+                        if disc_uri
+                        else (
+                            res.accepted_candidates[0].source_id if res.accepted_candidates else ""
+                        )
+                    )
+                    cand_source = (
+                        disc_uri.source
+                        if disc_uri
+                        else (res.accepted_candidates[0].source if res.accepted_candidates else "")
+                    )
+                    agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
+
+                    reporter.add_agent_row(
+                        AgentReportRow(
+                            target_record_id=target_record.source_id,
+                            target_title=target_record.title,
+                            target_year=target_record.publication_year,
+                            target_isbn=target_record.identifiers.isbn[0]
+                            if target_record.identifiers.isbn
+                            else None,
+                            field_tag=field_tag,
+                            field_occurrence=idx + 1,
+                            subfield_code=subfield_code,
+                            target_heading=agent.name,
+                            target_role=agent.role,
+                            uri=uri,
+                            vocabulary=detect_vocabulary(uri) or "OTHER",
+                            authority_label=agent.name,
+                            authority_record_id=cand_source_id,
+                            authority_source=cand_source,
+                            match_tier=match_tier,
+                            match_score=match_score,
+                            dense_score=dense_score,
+                            sparse_score=sparse_score,
+                            agent_name_score=agent_name_score,
+                            action=action,
+                            is_novel=is_novel,
+                        )
+                    )
+
+                for uri in suppressed:
+                    subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
+                    disc_uri = discovered_map.get(uri)
+                    cand_source_id = (
+                        disc_uri.source_record_id
+                        if disc_uri
+                        else (
+                            res.accepted_candidates[0].source_id if res.accepted_candidates else ""
+                        )
+                    )
+                    cand_source = (
+                        disc_uri.source
+                        if disc_uri
+                        else (res.accepted_candidates[0].source if res.accepted_candidates else "")
+                    )
+                    agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
+
+                    reporter.add_agent_row(
+                        AgentReportRow(
+                            target_record_id=target_record.source_id,
+                            target_title=target_record.title,
+                            target_year=target_record.publication_year,
+                            target_isbn=target_record.identifiers.isbn[0]
+                            if target_record.identifiers.isbn
+                            else None,
+                            field_tag=field_tag,
+                            field_occurrence=idx + 1,
+                            subfield_code=subfield_code,
+                            target_heading=agent.name,
+                            target_role=agent.role,
+                            uri=uri,
+                            vocabulary=detect_vocabulary(uri) or "OTHER",
+                            authority_label=agent.name,
+                            authority_record_id=cand_source_id,
+                            authority_source=cand_source,
+                            match_tier=match_tier,
+                            match_score=match_score,
+                            dense_score=dense_score,
+                            sparse_score=sparse_score,
+                            agent_name_score=agent_name_score,
+                            action="suppressed_by_priority",
+                            is_novel=True,
+                        )
+                    )
+
+            # Record subject report rows
+            all_subjects = (
+                [("650", s) for s in target_record.subjects.topical]
+                + [("655", s) for s in target_record.subjects.genre_form]
+                + [("651", s) for s in target_record.subjects.geographic]
+                + [("382", s) for s in target_record.subjects.medium_of_performance]
+            )
+            for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
+                s_tag = sub_item.source_field or default_tag
+                t_tag = sub_item.target_field or default_tag
+                s_vocab = sub_item.source_vocab or ""
+                s_uri = sub_item.source_uri or ""
+                t_vocab = sub_item.vocabulary or ""
+                t_uri = sub_item.uri or ""
+                s_heading = sub_item.source_heading or sub_item.pref_label
+                m_type = sub_item.mapping_type or "pref_label_lookup"
+                tag_changed = s_tag != t_tag
+
+                if not t_uri:
+                    action = "unmapped"
+                    is_novel = False
+                elif s_uri and s_uri == t_uri:
+                    action = "existing"
+                    is_novel = False
+                elif r_cfg.enrich:
+                    action = "injected"
+                    is_novel = True
+                else:
+                    action = "proposed"
+                    is_novel = True
+
+                reporter.add_subject_row(
+                    SubjectReportRow(
+                        target_record_id=target_record.source_id,
+                        target_title=target_record.title,
+                        source_field_tag=s_tag,
+                        field_occurrence=s_idx + 1,
+                        source_heading=s_heading,
+                        source_vocab=s_vocab,
+                        source_uri=s_uri,
+                        language=target_record.language or "fi",
+                        target_field_tag=t_tag,
+                        target_vocab=t_vocab,
+                        target_uri=t_uri,
+                        target_pref_label=sub_item.pref_label,
+                        mapping_type=m_type,
+                        action=action,
+                        is_novel=is_novel,
+                        tag_changed=tag_changed,
+                    )
+                )
+
+            # Mutate XML and stream write if output_file requested
+            if out_f is not None:
+                enricher.enrich_record_tree(
+                    rec_elem,
+                    res,
+                    enrich=r_cfg.enrich,
+                    fold_legacy=r_cfg.fold_legacy,
+                )
+                out_f.write(etree.tostring(rec_elem, encoding="utf-8", pretty_print=True))
+                out_f.write(b"\n")
+
+            tracker.update_progress(
+                items_increment=1,
+                bytes_processed=byte_offset,
+            )
+    finally:
+        if out_f is not None:
+            out_f.write(b"</collection>\n")
+            out_f.close()
+            console.print(f"[green]Wrote output MARCXML to {r_cfg.output_file}[/green]")
+
+    reporter.total_records = total_records
+    tracker.update_progress(
+        items_total=total_records,
+        bytes_processed=bytes_total,
+        force=True,
+    )
 
     # Write TSV Reports
     reporter.elapsed_seconds = time.time() - start_time_sec
