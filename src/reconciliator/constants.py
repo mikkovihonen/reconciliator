@@ -34,3 +34,4 @@ FICTIONAL_QUALIFIERS: Final[tuple[str, ...]] = (
 __all__ = [
     "FICTIONAL_QUALIFIERS",
 ]
+

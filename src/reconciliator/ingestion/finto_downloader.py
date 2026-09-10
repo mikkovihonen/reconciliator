@@ -85,6 +85,7 @@ class FintoDownloader:
             return dest_file
 
         tmp_file = out_path / f"{vocab_id}{ext}.tmp"
+        url = f"{self.api_url}/{vocab_id}/data"
         headers = {
             "User-Agent": self.user_agent,
             "Accept": f"{format}, application/x-turtle, text/n3;q=0.9, */*;q=0.1",

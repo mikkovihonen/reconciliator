@@ -16,8 +16,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from lxml import etree
+import pytest
 
 from reconciliator.agent_transfer import AgentAligner
+from reconciliator.constants import FICTIONAL_QUALIFIERS
 from reconciliator.finto_folding import FintoFolder, format_target_vocab
 from reconciliator.finto_store import FintoStore
 from reconciliator.ingestion.finto import ingest_bridge_files
@@ -26,17 +28,12 @@ from reconciliator.ingestion.wikidata import extract_wikidata_yso_aliases
 from reconciliator.loaders.marcxml import parse_marc_record_elem
 from reconciliator.matcher import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord, FintoConcept
-from reconciliator.normalizers.agent import (
-    strip_agent_dates,
-)
-from reconciliator.normalizers.linguistic import (
-    fold_diacritics,
-    fold_label,
-    strip_biographical_dates,
-)
+from reconciliator.normalizers.agent import normalize_agent_name, strip_agent_dates, strip_agent_relators
+from reconciliator.normalizers.linguistic import fold_diacritics, fold_label, strip_biographical_dates
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
 from reconciliator.xml_enricher import MARCXMLEnricher
+
 
 # ---------------------------------------------------------------------------
 # 1. Native Diacritic Folding
@@ -255,10 +252,7 @@ def test_bundled_bridge_vocabularies_ingestion(tmp_path: Path) -> None:
     mappings = parse_bridge_turtle(countries_bridge)
     assert len(mappings) > 0
     # E.g. fi -> http://www.yso.fi/onto/yso/p94426 (Suomi)
-    fi_mapping = next(
-        (m for m in mappings if "http://id.loc.gov/vocabulary/countries/fi" in m["source_uri"]),
-        None,
-    )
+    fi_mapping = next((m for m in mappings if "http://id.loc.gov/vocabulary/countries/fi" in m["source_uri"]), None)
     assert fi_mapping is not None
     assert fi_mapping["target_uri"] == "http://www.yso.fi/onto/yso/p94426"
 
@@ -358,27 +352,17 @@ def test_wikidata_p2347_alias_extraction_and_dual_enrichment(tmp_path: Path) -> 
     # 2. $2 is yso/fin (or yso-paikat/fin)
     # 3. $0 is injected with modern YSO URI
     # 4. $1 is injected with Wikidata entity URI http://www.wikidata.org/entity/Q33
-    f651 = enriched_elem.findall(
-        ".//{http://www.loc.gov/MARC21/slim}datafield[@tag='651']"
-    ) or enriched_elem.findall(".//datafield[@tag='651']")
+    f651 = enriched_elem.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='651']") or enriched_elem.findall(
+        ".//datafield[@tag='651']"
+    )
     assert len(f651) == 1
-    a_val = f651[0].findtext("{http://www.loc.gov/MARC21/slim}subfield[@code='a']") or f651[
-        0
-    ].findtext("subfield[@code='a']")
+    a_val = f651[0].findtext("{http://www.loc.gov/MARC21/slim}subfield[@code='a']") or f651[0].findtext("subfield[@code='a']")
     assert a_val == "Suomi"
 
-    u0 = [
-        e.text
-        for e in f651[0].findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='0']")
-        or f651[0].findall(".//subfield[@code='0']")
-    ]
+    u0 = [e.text for e in f651[0].findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='0']") or f651[0].findall(".//subfield[@code='0']")]
     assert "http://www.yso.fi/onto/yso/p105436" in u0
 
-    u1 = [
-        e.text
-        for e in f651[0].findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='1']")
-        or f651[0].findall(".//subfield[@code='1']")
-    ]
+    u1 = [e.text for e in f651[0].findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='1']") or f651[0].findall(".//subfield[@code='1']")]
     assert "http://www.wikidata.org/entity/Q33" in u1
 
 
@@ -418,9 +402,7 @@ def test_finto_downloader_canonical_dump_prioritized(tmp_path: Path) -> None:
 
     mock_resp = MagicMock()
     mock_resp.raise_for_status.return_value = None
-    mock_resp.iter_bytes.return_value = [
-        b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
-    ]
+    mock_resp.iter_bytes.return_value = [b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"]
 
     mock_stream_ctx = MagicMock()
     mock_stream_ctx.__enter__.return_value = mock_resp

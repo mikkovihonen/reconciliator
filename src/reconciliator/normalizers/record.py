@@ -362,6 +362,7 @@ class RecordNormalizer:
             names_245c = parse_245c_agents(raw_data["statement_of_responsibility"])
             for n in names_245c:
                 s_name = extract_surname(n)
+                agents.append(Agent(name=n, surname=s_name, role="aut", field_tag="245"))
                 fict = any(q in n.lower() for q in FICTIONAL_QUALIFIERS)
                 agents.append(
                     Agent(name=n, surname=s_name, role="aut", field_tag="245", is_fictional=fict)
@@ -380,6 +381,8 @@ class RecordNormalizer:
             field = item.get("field", "650")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
+                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
@@ -409,6 +412,8 @@ class RecordNormalizer:
             field = item.get("field", "655")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
+                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
@@ -436,6 +441,8 @@ class RecordNormalizer:
             field = item.get("field", "651")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
+                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
@@ -463,6 +470,8 @@ class RecordNormalizer:
             field = item.get("field", "382")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
+                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,

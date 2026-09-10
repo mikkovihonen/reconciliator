@@ -55,9 +55,14 @@ class MARCXMLEnricher:
                     vocab = f2_elems[0].text.strip() if f2_elems and f2_elems[0].text else None
 
                     # Get $0
+                    f0_elems = field.findall("marc:subfield[@code='0']", MARC_NS) or field.findall(
+                        "subfield[@code='0']"
+                    )
+                    existing_uris = [e.text.strip() for e in f0_elems if e.text]
                     existing_uris = _get_subfields(field, "0")
                     source_uri = existing_uris[0] if existing_uris else None
 
+                    target_field, target_vocab, target_uri, target_label, mapping_type = (
                     target_field, target_vocab, target_uri, target_label, mapping_type, qid = (
                         self.finto_folder.fold_subject_heading(
                             heading=heading,
