@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
-from typing import IO, Optional
+from typing import IO, Any, Iterator, Optional
 
 import typer
 from lxml import etree
@@ -18,6 +19,11 @@ from reconciliator.finto_store import FintoStore
 from reconciliator.ingestion.finto import ingest_finto_file
 from reconciliator.ingestion.melinda import ingest_melinda_pipeline
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
+from reconciliator.loaders.bibra import (
+    bibra_to_marcxml_elem,
+    enrich_bibra_json,
+    iter_bibra_records,
+)
 from reconciliator.loaders.marcxml import (
     iter_marc_record_elements,
     parse_marc_record_elem,
@@ -290,20 +296,52 @@ def reconcile_cmd(
     start_time_sec = time.time()
     console.print(f"[cyan]Reconciling {r_cfg.target_file}...[/cyan]")
 
+    # Format detection
+    is_bibra = False
+    if r_cfg.target_format == "bibra":
+        is_bibra = True
+    elif r_cfg.target_format == "auto":
+        suffix = r_cfg.target_file.suffix.lower()
+        if suffix in (".json", ".jsonl", ".ndjson"):
+            is_bibra = True
+
+    is_json_output = False
+    if r_cfg.output_file:
+        if r_cfg.output_format == "bibra":
+            is_json_output = True
+        elif r_cfg.output_format == "marcxml":
+            is_json_output = False
+        else:
+            if r_cfg.output_file.suffix.lower() in (".json", ".jsonl", ".ndjson"):
+                is_json_output = True
+            else:
+                is_json_output = False
+
     out_f: Optional[IO[bytes]] = None
     if r_cfg.output_file:
         r_cfg.output_file.parent.mkdir(parents=True, exist_ok=True)
         out_f = open(r_cfg.output_file, "wb")
-        out_f.write(
-            b'<?xml version="1.0" encoding="UTF-8"?>\n'
-            b'<collection xmlns="http://www.loc.gov/MARC21/slim">\n'
-        )
+        if not is_json_output:
+            out_f.write(
+                b'<?xml version="1.0" encoding="UTF-8"?>\n'
+                b'<collection xmlns="http://www.loc.gov/MARC21/slim">\n'
+            )
+
+    def _iter_records() -> Iterator[
+        tuple[Optional[etree._Element], dict[str, Any], int, Optional[dict[str, Any]]]
+    ]:
+        if is_bibra:
+            for raw_rec_item, b_offset, bib_item in iter_bibra_records(r_cfg.target_file):
+                yield None, raw_rec_item, b_offset, bib_item
+        else:
+            for r_elem, b_offset in iter_marc_record_elements(r_cfg.target_file):
+                raw_rec_item = parse_marc_record_elem(r_elem, source="target")
+                yield r_elem, raw_rec_item, b_offset, None
 
     total_records = 0
     try:
-        for rec_elem, byte_offset in iter_marc_record_elements(r_cfg.target_file):
+        for rec_elem, raw_rec, byte_offset, bibra_item in _iter_records():
             total_records += 1
-            raw_rec = parse_marc_record_elem(rec_elem, source="target")
             target_record = normalizer.normalize(raw_rec)
 
             res = engine.reconcile_record(target_record)
@@ -479,16 +517,33 @@ def reconcile_cmd(
                     )
                 )
 
-            # Mutate XML and stream write if output_file requested
+            # Mutate / serialize and stream write if output_file requested
             if out_f is not None:
-                enricher.enrich_record_tree(
-                    rec_elem,
-                    res,
-                    enrich=r_cfg.enrich,
-                    fold_legacy=r_cfg.fold_legacy,
-                )
-                out_f.write(etree.tostring(rec_elem, encoding="utf-8", pretty_print=True))
-                out_f.write(b"\n")
+                if is_json_output:
+                    orig_dict = (
+                        bibra_item
+                        if bibra_item is not None
+                        else target_record.model_dump(by_alias=True)
+                    )
+                    enriched_json = enrich_bibra_json(orig_dict, res, target_record=target_record)
+                    out_f.write(json.dumps(enriched_json, ensure_ascii=False).encode("utf-8"))
+                    out_f.write(b"\n")
+                else:
+                    if rec_elem is not None:
+                        enricher.enrich_record_tree(
+                            rec_elem,
+                            res,
+                            enrich=r_cfg.enrich,
+                            fold_legacy=r_cfg.fold_legacy,
+                        )
+                        out_f.write(etree.tostring(rec_elem, encoding="utf-8", pretty_print=True))
+                        out_f.write(b"\n")
+                    elif bibra_item is not None:
+                        synth_elem = bibra_to_marcxml_elem(
+                            bibra_item, res, target_record=target_record
+                        )
+                        out_f.write(etree.tostring(synth_elem, encoding="utf-8", pretty_print=True))
+                        out_f.write(b"\n")
 
             tracker.update_progress(
                 items_increment=1,
@@ -496,9 +551,10 @@ def reconcile_cmd(
             )
     finally:
         if out_f is not None:
-            out_f.write(b"</collection>\n")
+            if not is_json_output:
+                out_f.write(b"</collection>\n")
             out_f.close()
-            console.print(f"[green]Wrote output MARCXML to {r_cfg.output_file}[/green]")
+            console.print(f"[green]Wrote output to {r_cfg.output_file}[/green]")
 
     reporter.total_records = total_records
     tracker.update_progress(

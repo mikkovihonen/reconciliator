@@ -118,7 +118,9 @@ class ReconcileConfig(BaseModel):
     """Offline reconciliation and enrichment configuration."""
 
     target_file: Path
+    target_format: Literal["auto", "marcxml", "bibra"] = "auto"
     output_file: Optional[Path] = None
+    output_format: Literal["auto", "marcxml", "bibra"] = "auto"
     agent_reports: ReportSetPathsConfig
     subject_reports: ReportSetPathsConfig
     enrich: bool = True
