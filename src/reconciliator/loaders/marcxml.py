@@ -7,6 +7,8 @@ from typing import Any, Iterator, Optional
 
 from lxml import etree
 
+from reconciliator.constants import FICTIONAL_QUALIFIERS
+
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}
 
 
@@ -209,6 +211,9 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
         for f in _get_datafields(record_elem, tag):
             name = _get_subfield(f, "a")
             if name:
+                sub_c = _get_subfield(f, "c") or ""
+                full_literal = f"{name} {sub_c}".strip() if sub_c else name
+                is_fictional = any(q in full_literal.lower() for q in FICTIONAL_QUALIFIERS)
                 role = _get_subfield(f, "4") or _get_subfield(f, "e")
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
@@ -217,6 +222,7 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
                         "field_tag": tag,
                         "name": name,
                         "is_personal": True,
+                        "is_fictional": is_fictional,
                         "role": role,
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
@@ -227,6 +233,9 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
         for f in _get_datafields(record_elem, tag):
             name = _get_subfield(f, "a")
             if name:
+                sub_c = _get_subfield(f, "c") or ""
+                full_literal = f"{name} {sub_c}".strip() if sub_c else name
+                is_fictional = any(q in full_literal.lower() for q in FICTIONAL_QUALIFIERS)
                 role = _get_subfield(f, "4") or _get_subfield(f, "e")
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
@@ -235,6 +244,7 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
                         "field_tag": tag,
                         "name": name,
                         "is_personal": False,
+                        "is_fictional": is_fictional,
                         "role": role,
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,

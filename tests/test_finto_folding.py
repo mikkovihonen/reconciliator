@@ -71,7 +71,7 @@ def populated_finto_store(tmp_path: Path) -> FintoStore:
 
 def test_fold_ysa_by_uri(populated_finto_store: FintoStore) -> None:
     folder = FintoFolder(populated_finto_store)
-    t_field, t_vocab, t_uri, t_label, m_type = folder.fold_subject_heading(
+    t_field, t_vocab, t_uri, t_label, m_type, qid = folder.fold_subject_heading(
         heading="lääkärit",
         source_vocab="ysa",
         source_field="650",
@@ -79,29 +79,30 @@ def test_fold_ysa_by_uri(populated_finto_store: FintoStore) -> None:
     )
 
     assert t_field == "650"
-    assert t_vocab == "yso"
+    assert t_vocab == "yso/fin"
     assert t_uri == "http://www.yso.fi/onto/yso/p2591"
     assert t_label == "lääkärit"
     assert m_type == "exact_match"
+    assert qid is None
 
 
 def test_fold_kaunokki_genre_strictly_to_slm(populated_finto_store: FintoStore) -> None:
     folder = FintoFolder(populated_finto_store)
     # Kaunokki term in 655 must fold to SLM, never KAUNO
-    t_field, t_vocab, t_uri, t_label, _ = folder.fold_subject_heading(
+    t_field, t_vocab, t_uri, t_label, _, _ = folder.fold_subject_heading(
         heading="historialliset romaanit",
         source_vocab="kaunokki",
         source_field="655",
     )
 
     assert t_field == "655"
-    assert t_vocab == "slm"
+    assert t_vocab == "slm/fin"
     assert t_uri == "http://urn.fi/URN:NBN:fi:au:slm:s123"
 
 
 def test_fold_musa_to_seko(populated_finto_store: FintoStore) -> None:
     folder = FintoFolder(populated_finto_store)
-    t_field, t_vocab, t_uri, t_label, _ = folder.fold_subject_heading(
+    t_field, t_vocab, t_uri, t_label, _, _ = folder.fold_subject_heading(
         heading="viulu",
         source_vocab="musa",
         source_field="382",
@@ -141,26 +142,26 @@ def test_fold_sample_legacy_thesauri_fixture(populated_finto_store: FintoStore) 
 def test_fold_with_language_suffix(populated_finto_store: FintoStore) -> None:
     folder = FintoFolder(populated_finto_store)
     # ysa/fin must normalize to ysa and fold to yso
-    t_field, t_vocab, t_uri, t_label, m_type = folder.fold_subject_heading(
+    t_field, t_vocab, t_uri, t_label, m_type, _ = folder.fold_subject_heading(
         heading="lääkärit",
         source_vocab="ysa/fin",
         source_field="650",
     )
     assert t_field == "650"
-    assert t_vocab == "yso"
+    assert t_vocab == "yso/fin"
     assert t_uri == "http://www.yso.fi/onto/yso/p2591"
 
 
 def test_fold_existing_canonical_uri(populated_finto_store: FintoStore) -> None:
     folder = FintoFolder(populated_finto_store)
     # When record already has a canonical YSO URI, return it directly
-    t_field, t_vocab, t_uri, t_label, m_type = folder.fold_subject_heading(
+    t_field, t_vocab, t_uri, t_label, m_type, _ = folder.fold_subject_heading(
         heading="lääkärit",
         source_vocab="yso/fin",
         source_field="650",
         source_uri="http://www.yso.fi/onto/yso/p2591",
     )
     assert t_field == "650"
-    assert t_vocab == "yso"
+    assert t_vocab == "yso/fin"
     assert t_uri == "http://www.yso.fi/onto/yso/p2591"
     assert m_type == "existing_canonical"

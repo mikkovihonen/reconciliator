@@ -26,6 +26,11 @@ class AgentAligner:
         discovered: dict[int, list[AgentURI]] = {i: [] for i in range(len(target_agents))}
 
         for idx, target_agent in enumerate(target_agents):
+            if target_agent.is_fictional:
+                # Fictional characters (e.g. James Bond, Muumipeikko) must not be linked
+                # to real human authority records in KANTO / Asteri. Skipped by design.
+                continue
+
             target_name = target_agent.name.lower()
             seen_uris: set[str] = set()
 

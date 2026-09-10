@@ -34,6 +34,7 @@ class Agent(BaseModel):
     role: Optional[str] = None  # e.g. "aut", "edt", "trl"
     field_tag: Optional[str] = None  # e.g. "100", "700", "110", "710", "111", "711"
     is_personal: bool = True
+    is_fictional: bool = False
     uri_subfield_0: list[str] = Field(default_factory=list)  # KANTO / ISNI / VIAF
     uri_subfield_1: list[str] = Field(default_factory=list)  # Wikidata QID
 
@@ -50,6 +51,7 @@ class SubjectItem(BaseModel):
     source_uri: Optional[str] = None
     source_heading: Optional[str] = None
     mapping_type: Optional[str] = None
+    wikidata_qid: Optional[str] = None
 
 
 class SubjectsContainer(BaseModel):

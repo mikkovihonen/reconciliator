@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Sequence
 
 from reconciliator.db import get_db_connection
 from reconciliator.models import FintoConcept, FintoMapping
+from reconciliator.normalizers.linguistic import fold_label
 
 
 def init_finto_db(conn: sqlite3.Connection) -> None:
@@ -61,6 +62,41 @@ def init_finto_db(conn: sqlite3.Connection) -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mappings_target_uri ON finto_mappings(target_uri);"
+        )
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS relator_terms (
+                folded_term TEXT PRIMARY KEY,
+                raw_term TEXT NOT NULL,
+                lang TEXT NOT NULL,
+                code TEXT,
+                uri TEXT
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_relators_lang ON relator_terms(lang);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS finto_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                folded_label TEXT NOT NULL,
+                raw_label TEXT NOT NULL,
+                lang TEXT NOT NULL,
+                concept_uri TEXT NOT NULL,
+                wikidata_qid TEXT,
+                vocabulary TEXT NOT NULL,
+                target_field TEXT NOT NULL,
+                is_preferred INTEGER NOT NULL,
+                source TEXT NOT NULL
+            );
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_finto_aliases_lookup ON finto_aliases(folded_label, target_field);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_finto_aliases_uri ON finto_aliases(concept_uri);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_finto_aliases_qid ON finto_aliases(wikidata_qid);"
         )
 
 
@@ -234,3 +270,234 @@ class FintoStore:
                 mapping_type=row["mapping_type"],
                 target_field=row["target_field"],
             )
+
+    def insert_relators(self, terms: Sequence[dict[str, Any] | tuple[Any, ...] | str]) -> None:
+        """Bulk insert or replace relator terms in relator_terms."""
+        if not terms:
+            return
+        rows: list[tuple[str, str, str, Optional[str], Optional[str]]] = []
+        for t in terms:
+            if isinstance(t, dict):
+                raw = str(t.get("raw_term", ""))
+                folded = str(t.get("folded_term") or fold_label(raw))
+                lang = str(t.get("lang", "fi"))
+                code = t.get("code")
+                uri = t.get("uri")
+            elif isinstance(t, (tuple, list)):
+                raw = str(t[0])
+                folded = fold_label(raw)
+                lang = str(t[1]) if len(t) > 1 else "fi"
+                code = t[2] if len(t) > 2 else None
+                uri = t[3] if len(t) > 3 else None
+            else:
+                raw = str(t)
+                folded = fold_label(raw)
+                lang = "fi"
+                code = None
+                uri = None
+            rows.append((folded, raw, lang, code, uri))
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO relator_terms (folded_term, raw_term, lang, code, uri)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(folded_term) DO UPDATE SET
+                    raw_term = excluded.raw_term,
+                    lang = excluded.lang,
+                    code = excluded.code,
+                    uri = excluded.uri;
+                """,
+                rows,
+            )
+
+    def is_known_relator(self, folded_term: str) -> bool:
+        """Check whether a folded role term exists in relator_terms."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM relator_terms WHERE folded_term = ? LIMIT 1;",
+                (folded_term.strip().casefold(),),
+            ).fetchone()
+            return bool(row)
+
+    def get_all_relators(self) -> set[str]:
+        """Retrieve all known folded relator terms."""
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT folded_term FROM relator_terms;").fetchall()
+            return {r["folded_term"] for r in rows}
+
+    def insert_aliases(self, aliases: list[dict[str, Any]]) -> None:
+        """Bulk insert alias records into finto_aliases."""
+        if not aliases:
+            return
+        rows = [
+            (
+                a["folded_label"],
+                a["raw_label"],
+                a["lang"],
+                a["concept_uri"],
+                a.get("wikidata_qid"),
+                a["vocabulary"],
+                a.get("target_field", "650"),
+                a.get("is_preferred", 1),
+                a.get("source", "finto"),
+            )
+            for a in aliases
+        ]
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO finto_aliases (
+                    folded_label, raw_label, lang, concept_uri, wikidata_qid,
+                    vocabulary, target_field, is_preferred, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                rows,
+            )
+
+    def find_concept_by_alias(
+        self,
+        folded_label: str,
+        target_field: Optional[str] = None,
+        vocabulary: Optional[str] = None,
+    ) -> tuple[Optional[FintoConcept], Optional[str]]:
+        """Look up concept by normalized alias.
+
+        Returns (concept, wikidata_qid) or (None, None).
+        """
+        clean = folded_label.strip()
+        if not clean:
+            return None, None
+
+        with self.get_connection() as conn:
+            params: list[Any] = [clean]
+            where_clauses = ["folded_label = ?"]
+            if target_field:
+                where_clauses.append("target_field = ?")
+                params.append(target_field)
+            if vocabulary:
+                where_clauses.append("vocabulary = ?")
+                params.append(vocabulary)
+
+            query = f"""
+                SELECT concept_uri, wikidata_qid
+                FROM finto_aliases
+                WHERE {" AND ".join(where_clauses)}
+                ORDER BY is_preferred DESC, id ASC
+                LIMIT 1;
+            """
+            row = conn.execute(query, params).fetchone()
+            if not row and target_field:
+                # Fallback: try without target_field filter
+                fallback_query = """
+                    SELECT concept_uri, wikidata_qid
+                    FROM finto_aliases
+                    WHERE folded_label = ?
+                    ORDER BY is_preferred DESC, id ASC
+                    LIMIT 1;
+                """
+                row = conn.execute(fallback_query, (clean,)).fetchone()
+
+            if not row:
+                return None, None
+
+            concept_uri = row["concept_uri"]
+            wikidata_qid = row["wikidata_qid"]
+            concept = self.find_concept_by_uri(concept_uri)
+            return concept, wikidata_qid
+
+    def rebuild_aliases_from_concepts(self) -> int:
+        """Rebuild finto_aliases table from finto_concepts and finto_mappings."""
+        aliases_to_insert: list[dict[str, Any]] = []
+
+        with self.get_connection() as conn:
+            # Clear existing Finto-derived aliases
+            conn.execute("DELETE FROM finto_aliases WHERE source IN ('finto', 'finto_mapping');")
+
+            # 1. From finto_concepts
+            legacy_vocabs = {"ysa", "allars", "kaunokki", "bella", "musa", "cilla"}
+            rows = conn.execute("SELECT * FROM finto_concepts;").fetchall()
+            for r in rows:
+                c_uri = r["uri"]
+                c_vocab = r["vocabulary"]
+                if c_vocab in legacy_vocabs or r["is_deprecated"]:
+                    continue
+                t_field = r["target_field"] or "650"
+
+                for col, lang in (
+                    ("pref_label_fi", "fi"),
+                    ("pref_label_sv", "sv"),
+                    ("pref_label_en", "en"),
+                ):
+                    raw = r[col]
+                    if raw and raw.strip():
+                        folded = fold_label(raw)
+                        if folded:
+                            aliases_to_insert.append(
+                                {
+                                    "folded_label": folded,
+                                    "raw_label": raw.strip(),
+                                    "lang": lang,
+                                    "concept_uri": c_uri,
+                                    "wikidata_qid": None,
+                                    "vocabulary": c_vocab,
+                                    "target_field": t_field,
+                                    "is_preferred": 1,
+                                    "source": "finto",
+                                }
+                            )
+
+                for alt_col, lang in (("alt_labels_fi", "fi"), ("alt_labels_sv", "sv")):
+                    raw_json = r[alt_col]
+                    if raw_json:
+                        try:
+                            alts = json.loads(raw_json)
+                            for alt in alts:
+                                if alt and str(alt).strip():
+                                    folded = fold_label(str(alt))
+                                    if folded:
+                                        aliases_to_insert.append(
+                                            {
+                                                "folded_label": folded,
+                                                "raw_label": str(alt).strip(),
+                                                "lang": lang,
+                                                "concept_uri": c_uri,
+                                                "wikidata_qid": None,
+                                                "vocabulary": c_vocab,
+                                                "target_field": t_field,
+                                                "is_preferred": 0,
+                                                "source": "finto",
+                                            }
+                                        )
+                        except Exception:
+                            pass
+
+            # 2. From finto_mappings
+            mapping_rows = conn.execute("SELECT * FROM finto_mappings;").fetchall()
+            for m in mapping_rows:
+                t_uri = m["target_uri"]
+                t_vocab = m["target_vocab"]
+                t_field = m["target_field"] or "650"
+                for lbl_col, lang in (
+                    ("legacy_label_fi", "fi"),
+                    ("legacy_label_sv", "sv"),
+                ):
+                    raw = m[lbl_col]
+                    if raw and raw.strip():
+                        folded = fold_label(raw)
+                        if folded:
+                            aliases_to_insert.append(
+                                {
+                                    "folded_label": folded,
+                                    "raw_label": raw.strip(),
+                                    "lang": lang,
+                                    "concept_uri": t_uri,
+                                    "wikidata_qid": None,
+                                    "vocabulary": t_vocab,
+                                    "target_field": t_field,
+                                    "is_preferred": 0,
+                                    "source": "finto_mapping",
+                                }
+                            )
+
+        self.insert_aliases(aliases_to_insert)
+        return len(aliases_to_insert)

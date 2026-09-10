@@ -11,6 +11,22 @@ import httpx2
 from reconciliator.progress import ProgressTracker
 from reconciliator.version import get_default_user_agent
 
+CANONICAL_DUMP_URLS: dict[str, str] = {
+    "yso": "https://api.finto.fi/download/yso/yso-skos.ttl",
+    "yso-paikat": "https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl",
+    "yso-aika": "https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl",
+    "finaf": "https://api.finto.fi/download/finaf/finaf-skos.ttl",
+    "kauno": "https://api.finto.fi/download/kauno/kauno-skos.ttl",
+    "kaunokki": "https://api.finto.fi/download/kaunokki/kaunokki-skos.ttl",
+    "muso": "https://api.finto.fi/download/muso/muso-skos.ttl",
+    "slm": "https://api.finto.fi/download/slm/slm-skos.ttl",
+    "allars": "https://api.finto.fi/download/allars/allars-skos.ttl",
+    "ysa": "https://api.finto.fi/download/ysa/ysa-skos.ttl",
+    "musa": "https://api.finto.fi/download/musa/musa-skos.ttl",
+    "seko": "https://api.finto.fi/download/seko/seko-skos.ttl",
+    "mts": "https://api.finto.fi/download/metatietosanasto/metatietosanasto-skos.ttl",
+}
+
 
 class FintoDownloader:
     """Client for discovering and downloading SKOS vocabularies from Finto's Skosmos REST API."""
@@ -57,6 +73,7 @@ class FintoDownloader:
         Download a single vocabulary in SKOS format (default: Turtle) to output_dir.
 
         Uses atomic file replacement to avoid leaving corrupt or partial files.
+        Prioritizes static pre-built dump endpoints before falling back to REST API.
         """
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
@@ -68,11 +85,31 @@ class FintoDownloader:
             return dest_file
 
         tmp_file = out_path / f"{vocab_id}{ext}.tmp"
-        url = f"{self.api_url}/{vocab_id}/data"
         headers = {
             "User-Agent": self.user_agent,
             "Accept": f"{format}, application/x-turtle, text/n3;q=0.9, */*;q=0.1",
         }
+
+        # Try fast static dump if available and requesting Turtle
+        if "turtle" in format and vocab_id in CANONICAL_DUMP_URLS:
+            dump_url = CANONICAL_DUMP_URLS[vocab_id]
+            try:
+                with httpx2.Client(
+                    timeout=self.timeout_seconds, headers=headers, follow_redirects=True
+                ) as client:
+                    with client.stream("GET", dump_url) as response:
+                        response.raise_for_status()
+                        with open(tmp_file, "wb") as out_f:
+                            for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                                out_f.write(chunk)
+                        tmp_file.replace(dest_file)
+                        return dest_file
+            except Exception:
+                if tmp_file.exists():
+                    tmp_file.unlink(missing_ok=True)
+
+        # Fallback to Skosmos REST API
+        url = f"{self.api_url}/{vocab_id}/data"
 
         try:
             with httpx2.Client(

@@ -55,13 +55,10 @@ class MARCXMLEnricher:
                     vocab = f2_elems[0].text.strip() if f2_elems and f2_elems[0].text else None
 
                     # Get $0
-                    f0_elems = field.findall("marc:subfield[@code='0']", MARC_NS) or field.findall(
-                        "subfield[@code='0']"
-                    )
-                    existing_uris = [e.text.strip() for e in f0_elems if e.text]
+                    existing_uris = _get_subfields(field, "0")
                     source_uri = existing_uris[0] if existing_uris else None
 
-                    target_field, target_vocab, target_uri, target_label, mapping_type = (
+                    target_field, target_vocab, target_uri, target_label, mapping_type, qid = (
                         self.finto_folder.fold_subject_heading(
                             heading=heading,
                             source_vocab=vocab,
@@ -90,6 +87,16 @@ class MARCXMLEnricher:
                     if enrich and target_uri and target_uri not in existing_uris:
                         sub_0 = etree.SubElement(field, subfield_tag, code="0")
                         sub_0.text = target_uri
+
+                    # Inject $1 Wikidata URI if enrich is active and qid is present
+                    if enrich and qid:
+                        existing_subj_u1 = _get_subfields(field, "1")
+                        wikidata_uri = f"http://www.wikidata.org/entity/{qid}"
+                        if wikidata_uri not in existing_subj_u1 and not any(
+                            e.endswith(qid) for e in existing_subj_u1
+                        ):
+                            sub_1 = etree.SubElement(field, subfield_tag, code="1")
+                            sub_1.text = wikidata_uri
 
         # 2. Agent Enrichment ($0 Asteri/ISNI/VIAF and $1 Wikidata QID)
         if enrich:

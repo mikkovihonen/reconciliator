@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from reconciliator.finto_store import FintoStore
 from reconciliator.models import FintoConcept, FintoMapping
+from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
+from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
 
 
 def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMapping]]:
@@ -74,6 +76,8 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
                     return "cilla"
                 if "/bella/" in lu or ":bella:" in lu:
                     return "bella"
+                if "/mts/" in lu or ":mts:" in lu or "metatietosanasto" in lu:
+                    return "mts"
                 if "/yso/" in lu or ":yso:" in lu:
                     return "yso"
                 return "yso"
@@ -149,6 +153,83 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
     return concepts, mappings
 
 
+def ingest_bridge_files(finto_store: FintoStore, extra_bridge_dir: Optional[Path] = None) -> int:
+    """Ingest bundled and optional custom bridge files into finto_mappings and finto_aliases."""
+    bridge_files = get_bundled_bridge_files()
+    if extra_bridge_dir and extra_bridge_dir.is_dir():
+        bridge_files.extend(sorted(extra_bridge_dir.glob("*.ttl")))
+
+    total_bridge_mappings: list[FintoMapping] = []
+    total_bridge_aliases: list[dict[str, Any]] = []
+
+    for bf in bridge_files:
+        stem = bf.stem.replace(".ttl", "")
+        content = bf.read_text(encoding="utf-8")
+        bridges = parse_bridge_turtle(content, bridge_vocab=stem)
+        target_field = "651" if "countries" in stem else "650"
+
+        for b in bridges:
+            source_uri = b["source_uri"]
+            target_uri = b["target_uri"]
+            pref_fi = b.get("pref_label_fi")
+            pref_sv = b.get("pref_label_sv")
+            pref_en = b.get("pref_label_en")
+            notation = b.get("notation")
+
+            total_bridge_mappings.append(
+                FintoMapping(
+                    legacy_uri=source_uri,
+                    legacy_vocab=stem,
+                    legacy_label_fi=pref_fi,
+                    legacy_label_sv=pref_sv,
+                    target_uri=target_uri,
+                    target_vocab="yso",
+                    mapping_type="exact_match",
+                    target_field=target_field,
+                )
+            )
+
+            for label, lang in ((pref_fi, "fi"), (pref_sv, "sv"), (pref_en, "en")):
+                if label:
+                    folded = fold_label(label)
+                    if folded:
+                        total_bridge_aliases.append(
+                            {
+                                "folded_label": folded,
+                                "raw_label": label,
+                                "lang": lang,
+                                "concept_uri": target_uri,
+                                "wikidata_qid": None,
+                                "vocabulary": "yso",
+                                "target_field": target_field,
+                                "is_preferred": 1,
+                                "source": "bridge",
+                            }
+                        )
+
+            if notation:
+                total_bridge_aliases.append(
+                    {
+                        "folded_label": fold_label(notation),
+                        "raw_label": notation,
+                        "lang": "und",
+                        "concept_uri": target_uri,
+                        "wikidata_qid": None,
+                        "vocabulary": "yso",
+                        "target_field": target_field,
+                        "is_preferred": 0,
+                        "source": "bridge",
+                    }
+                )
+
+    if total_bridge_mappings:
+        finto_store.insert_mappings(total_bridge_mappings)
+    if total_bridge_aliases:
+        finto_store.insert_aliases(total_bridge_aliases)
+
+    return len(total_bridge_mappings)
+
+
 def ingest_finto_file(
     input_path: Path | str,
     finto_store: FintoStore,
@@ -193,6 +274,30 @@ def ingest_finto_file(
 
     finto_store.insert_concepts(total_concepts)
     finto_store.insert_mappings(total_mappings)
+
+    # Ingest MTS contributor roles into relator_terms
+    mts_roles: list[dict[str, Any]] = []
+    for c in total_concepts:
+        if c.vocabulary == "mts":
+            for lbl, lang in (
+                (c.pref_label_fi, "fi"),
+                (c.pref_label_sv, "sv"),
+                (c.pref_label_en, "en"),
+            ):
+                if lbl:
+                    folded = fold_label(lbl)
+                    if folded:
+                        mts_roles.append(
+                            {"folded_term": folded, "raw_term": lbl, "lang": lang, "uri": c.uri}
+                        )
+    if mts_roles:
+        finto_store.insert_relators(mts_roles)
+
+    # Ingest bundled bridge vocabularies
+    ingest_bridge_files(finto_store)
+
+    # Rebuild normalized aliases index
+    finto_store.rebuild_aliases_from_concepts()
 
     if tracker:
         tracker.complete_task(

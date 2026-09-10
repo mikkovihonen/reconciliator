@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from reconciliator.constants import FICTIONAL_QUALIFIERS
 from reconciliator.finto_folding import FintoFolder
 from reconciliator.models import (
     Agent,
@@ -338,6 +339,9 @@ class RecordNormalizer:
         for raw_agent in raw_data.get("agents", []):
             name_raw = raw_agent.get("name", "")
             is_personal = raw_agent.get("is_personal", True)
+            is_fictional = bool(raw_agent.get("is_fictional", False)) or any(
+                q in name_raw.lower() for q in FICTIONAL_QUALIFIERS
+            )
             norm_name, surname = normalize_agent_name(name_raw, is_personal=is_personal)
             if norm_name:
                 agents.append(
@@ -347,6 +351,7 @@ class RecordNormalizer:
                         role=raw_agent.get("role"),
                         field_tag=raw_agent.get("field_tag"),
                         is_personal=is_personal,
+                        is_fictional=is_fictional,
                         uri_subfield_0=list(raw_agent.get("uri_subfield_0", [])),
                         uri_subfield_1=list(raw_agent.get("uri_subfield_1", [])),
                     )
@@ -357,7 +362,10 @@ class RecordNormalizer:
             names_245c = parse_245c_agents(raw_data["statement_of_responsibility"])
             for n in names_245c:
                 s_name = extract_surname(n)
-                agents.append(Agent(name=n, surname=s_name, role="aut", field_tag="245"))
+                fict = any(q in n.lower() for q in FICTIONAL_QUALIFIERS)
+                agents.append(
+                    Agent(name=n, surname=s_name, role="aut", field_tag="245", is_fictional=fict)
+                )
 
         # Subjects folding via FintoFolder
         raw_subjects = raw_data.get("subjects", {})
@@ -366,13 +374,18 @@ class RecordNormalizer:
         geographic: list[SubjectItem] = []
         medium_of_perf: list[SubjectItem] = []
 
+        rec_lang = language or "fi"
         for item in raw_subjects.get("topical", []):
             heading = item.get("heading") or item.get("pref_label", "")
             field = item.get("field", "650")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+                heading=heading,
+                source_vocab=vocab,
+                source_field=field,
+                source_uri=uri,
+                lang=rec_lang,
             )
             sub_item = SubjectItem(
                 uri=t_uri,
@@ -384,6 +397,7 @@ class RecordNormalizer:
                 source_uri=uri,
                 source_heading=heading,
                 mapping_type=m_type,
+                wikidata_qid=qid,
             )
             if t_field == "655":
                 genre_form.append(sub_item)
@@ -395,8 +409,12 @@ class RecordNormalizer:
             field = item.get("field", "655")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+                heading=heading,
+                source_vocab=vocab,
+                source_field=field,
+                source_uri=uri,
+                lang=rec_lang,
             )
             genre_form.append(
                 SubjectItem(
@@ -409,6 +427,7 @@ class RecordNormalizer:
                     source_uri=uri,
                     source_heading=heading,
                     mapping_type=m_type,
+                    wikidata_qid=qid,
                 )
             )
 
@@ -417,8 +436,12 @@ class RecordNormalizer:
             field = item.get("field", "651")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+                heading=heading,
+                source_vocab=vocab,
+                source_field=field,
+                source_uri=uri,
+                lang=rec_lang,
             )
             geographic.append(
                 SubjectItem(
@@ -431,6 +454,7 @@ class RecordNormalizer:
                     source_uri=uri,
                     source_heading=heading,
                     mapping_type=m_type,
+                    wikidata_qid=qid,
                 )
             )
 
@@ -439,8 +463,12 @@ class RecordNormalizer:
             field = item.get("field", "382")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+                heading=heading,
+                source_vocab=vocab,
+                source_field=field,
+                source_uri=uri,
+                lang=rec_lang,
             )
             medium_of_perf.append(
                 SubjectItem(
@@ -453,6 +481,7 @@ class RecordNormalizer:
                     source_uri=uri,
                     source_heading=heading,
                     mapping_type=m_type,
+                    wikidata_qid=qid,
                 )
             )
 

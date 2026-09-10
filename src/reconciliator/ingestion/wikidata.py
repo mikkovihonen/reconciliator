@@ -13,6 +13,7 @@ import orjson
 from reconciliator.config import WikidataIngestConfig
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.models import BibliographicRecord
+from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import AuthorityStore
@@ -528,3 +529,74 @@ def ingest_wikidata_pipeline(
         tracker.complete_task(metadata={"records_ingested": total_ingested})
 
     return total_ingested
+
+
+def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract alias records from a Wikidata entity with property P2347 (YSO ID)."""
+    claims = entity.get("claims", {})
+    if "P2347" not in claims:
+        return []
+
+    qid = entity.get("id", "")
+    yso_id = get_claim_snak_value(claims, "P2347")
+    if not yso_id:
+        return []
+
+    yso_str = str(yso_id).strip()
+    if not yso_str.startswith("http"):
+        yso_uri = (
+            f"http://www.yso.fi/onto/yso/{yso_str if yso_str.startswith('p') else 'p' + yso_str}"
+        )
+    else:
+        yso_uri = yso_str
+
+    instance_of = get_claim_qids(claims, "P31")
+    is_place = any(
+        k in instance_of for k in ("Q515", "Q6256", "Q532", "Q15284", "Q486970", "Q1048835")
+    )
+    target_field = "651" if is_place else "650"
+
+    aliases: list[dict[str, Any]] = []
+    labels = entity.get("labels", {})
+    for lang, l_data in labels.items():
+        val = l_data.get("value", "") if isinstance(l_data, dict) else str(l_data)
+        if val and val.strip():
+            folded = fold_label(val)
+            if folded:
+                aliases.append(
+                    {
+                        "folded_label": folded,
+                        "raw_label": val.strip(),
+                        "lang": lang,
+                        "concept_uri": yso_uri,
+                        "wikidata_qid": qid,
+                        "vocabulary": "yso",
+                        "target_field": target_field,
+                        "is_preferred": 1,
+                        "source": "wikidata",
+                    }
+                )
+
+    all_aliases = entity.get("aliases", {})
+    for lang, a_list in all_aliases.items():
+        if isinstance(a_list, list):
+            for a_item in a_list:
+                val = a_item.get("value", "") if isinstance(a_item, dict) else str(a_item)
+                if val and val.strip():
+                    folded = fold_label(val)
+                    if folded:
+                        aliases.append(
+                            {
+                                "folded_label": folded,
+                                "raw_label": val.strip(),
+                                "lang": lang,
+                                "concept_uri": yso_uri,
+                                "wikidata_qid": qid,
+                                "vocabulary": "yso",
+                                "target_field": target_field,
+                                "is_preferred": 0,
+                                "source": "wikidata",
+                            }
+                        )
+
+    return aliases
