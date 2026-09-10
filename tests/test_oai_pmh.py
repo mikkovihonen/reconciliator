@@ -44,3 +44,18 @@ def test_harvest_partition_mocked() -> None:
             records[0].find(".//{http://www.loc.gov/MARC21/slim}controlfield[@tag='001']").text
             == "000100201"
         )
+
+
+def test_oai_pmh_user_agent() -> None:
+    """Test that OAIPMHHarvester uses default canonical User-Agent from version.py."""
+    from reconciliator.version import get_default_user_agent
+
+    expected_ua = get_default_user_agent()
+    harvester = OAIPMHHarvester(endpoint_url="http://example.org/oai")
+    assert harvester.user_agent == expected_ua
+    assert harvester.user_agent.startswith("reconciliator/")
+
+    custom_harvester = OAIPMHHarvester(
+        endpoint_url="http://example.org/oai", user_agent="custom-oai/1.0"
+    )
+    assert custom_harvester.user_agent == "custom-oai/1.0"

@@ -15,22 +15,45 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
     """
     Fast regex-based parser for SKOS Turtle (.ttl) concepts and mappings.
     Extracts skos:Concept, prefLabels, altLabels, exactMatch, and isReplacedBy.
+    Supports both full URIs (<...>) and prefixed IRIs (@prefix ...).
     """
     concepts: list[FintoConcept] = []
     mappings: list[FintoMapping] = []
 
+    # Extract prefix declarations
+    prefixes: dict[str, str] = {}
+    for m in re.finditer(
+        r"(?:@prefix|PREFIX)\s+([a-zA-Z0-9_-]+:)\s+<([^>]+)>", content, re.IGNORECASE
+    ):
+        prefixes[m.group(1)] = m.group(2)
+
+    def _resolve_uri(raw: str) -> str:
+        raw = raw.strip()
+        if raw.startswith("<") and raw.endswith(">"):
+            return raw[1:-1]
+        for pfx, base in prefixes.items():
+            if raw.startswith(pfx):
+                return base + raw[len(pfx) :]
+        return raw
+
     # Block split by concept definition
     # e.g. <http://www.yso.fi/onto/yso/p1234> a skos:Concept ; ... .
-    blocks = re.split(r"(?:^|\n)\s*<([^>]+)>\s+a\s+skos:Concept\b", content)
+    # or yso:p1234 a skos:Concept ; ... .
+    blocks = re.split(
+        r"(?:^|\n)\s*(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+skos:Concept\b",
+        content,
+    )
     if len(blocks) > 1:
-        # blocks[0] is header/prefixes, then alternating (uri, body)
+        # blocks[0] is header/prefixes, then alternating (raw_subject, body)
         for i in range(1, len(blocks), 2):
-            uri = blocks[i].strip()
+            uri = _resolve_uri(blocks[i])
             body = blocks[i + 1]
 
             # Detect vocabulary from URI
             def _detect_finto_vocab(u: str) -> str:
                 lu = u.lower()
+                if "/yso-paikat/" in lu or ":yso-paikat:" in lu:
+                    return "yso-paikat"
                 if "/kauno/" in lu or ":kauno:" in lu:
                     return "kauno"
                 if "/kaunokki/" in lu or ":kaunokki:" in lu:
@@ -78,6 +101,8 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
                 target_field = "655"
             elif vocab == "seko":
                 target_field = "382"
+            elif vocab == "yso-paikat":
+                target_field = "651"
 
             concept = FintoConcept(
                 uri=uri,
@@ -92,9 +117,13 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
             concepts.append(concept)
 
             # Check mappings
-            # skos:exactMatch <http://www.yso.fi/onto/yso/p1234>
-            matches = re.findall(r"(?:skos:exactMatch|dct:isReplacedBy)\s+<([^>]+)>", body)
-            for target_uri in matches:
+            # skos:exactMatch <http://www.yso.fi/onto/yso/p1234> or prefixed
+            matches = re.findall(
+                r"(?:skos:exactMatch|dct:isReplacedBy)\s+(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)",
+                body,
+            )
+            for raw_match in matches:
+                target_uri = _resolve_uri(raw_match)
                 target_v = _detect_finto_vocab(target_uri)
 
                 t_field = "650"
@@ -102,6 +131,8 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
                     t_field = "655"
                 elif target_v == "seko":
                     t_field = "382"
+                elif target_v == "yso-paikat":
+                    t_field = "651"
 
                 mapping = FintoMapping(
                     legacy_uri=uri,
@@ -123,30 +154,53 @@ def ingest_finto_file(
     finto_store: FintoStore,
     tracker: Optional[ProgressTracker] = None,
 ) -> tuple[int, int]:
-    """Ingest FINTO Turtle or mapping file into finto.db."""
+    """Ingest FINTO Turtle or mapping file(s) into finto.db.
+
+    Supports either a single file (.ttl) or a directory containing multiple .ttl files.
+    """
     path = Path(input_path)
     if not path.exists():
-        raise FileNotFoundError(f"FINTO input file not found: {path}")
+        raise FileNotFoundError(f"FINTO input path not found: {path}")
+
+    files: list[Path] = []
+    if path.is_dir():
+        files = sorted(path.glob("*.ttl"))
+        if not files:
+            files = sorted(path.rglob("*.ttl"))
+        if not files:
+            raise FileNotFoundError(f"No .ttl files found in directory: {path}")
+    else:
+        files = [path]
 
     if tracker:
         tracker.start_task(stage="parsing_finto")
 
-    content = path.read_text(encoding="utf-8")
-    concepts, mappings = parse_turtle_simple(content)
+    total_concepts: list[FintoConcept] = []
+    total_mappings: list[FintoMapping] = []
+
+    for file_path in files:
+        content = file_path.read_text(encoding="utf-8")
+        concepts, mappings = parse_turtle_simple(content)
+        total_concepts.extend(concepts)
+        total_mappings.extend(mappings)
 
     if tracker:
         tracker.update_progress(
             stage="inserting_concepts",
-            items_total=len(concepts) + len(mappings),
+            items_total=len(total_concepts) + len(total_mappings),
             force=True,
         )
 
-    finto_store.insert_concepts(concepts)
-    finto_store.insert_mappings(mappings)
+    finto_store.insert_concepts(total_concepts)
+    finto_store.insert_mappings(total_mappings)
 
     if tracker:
         tracker.complete_task(
-            metadata={"concepts_ingested": len(concepts), "mappings_ingested": len(mappings)}
+            metadata={
+                "concepts_ingested": len(total_concepts),
+                "mappings_ingested": len(total_mappings),
+                "files_ingested": [f.name for f in files],
+            }
         )
 
-    return len(concepts), len(mappings)
+    return len(total_concepts), len(total_mappings)

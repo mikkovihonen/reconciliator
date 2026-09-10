@@ -10,13 +10,15 @@ from typing import IO, Any, Iterator, Optional
 import typer
 from lxml import etree
 from rich.console import Console
+from rich.table import Table
 
-from reconciliator.config import load_config
+from reconciliator.config import AppConfig, FintoDownloadConfig, load_config
 from reconciliator.db import reset_all_storage
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.finto_folding import FintoFolder
 from reconciliator.finto_store import FintoStore
 from reconciliator.ingestion.finto import ingest_finto_file
+from reconciliator.ingestion.finto_downloader import FintoDownloader
 from reconciliator.ingestion.melinda import ingest_melinda_pipeline
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
 from reconciliator.loaders.bibra import (
@@ -143,6 +145,109 @@ def status_cmd(
         else:
             table = format_task_table(tasks)
             console.print(table)
+
+
+@app.command("download-finto")
+def download_finto_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    vocab: Optional[list[str]] = typer.Option(
+        None,
+        "--vocab",
+        "-v",
+        help="Specific vocabulary ID to download (repeatable, e.g. -v yso -v slm)",
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None, "--output-dir", "-o", help="Target directory for downloaded .ttl files"
+    ),
+    all_vocabs: bool = typer.Option(
+        False, "--all", help="Discover and download all vocabularies available on Finto"
+    ),
+    list_vocabs: bool = typer.Option(
+        False, "--list", help="List all vocabularies available on Finto and exit"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Force re-download even if file already exists"
+    ),
+    ingest: bool = typer.Option(
+        False, "--ingest", help="Automatically ingest downloaded vocabularies into finto.db"
+    ),
+) -> None:
+    """Download FINTO value vocabularies in SKOS Turtle format for offline use."""
+    cfg = load_config(config) if config.exists() else AppConfig()
+    dl_cfg = cfg.download_finto or FintoDownloadConfig()
+
+    api_url = dl_cfg.api_url
+    target_dir = output_dir or dl_cfg.output_dir
+    overwrite = force or dl_cfg.overwrite
+
+    downloader = FintoDownloader(api_url=api_url, timeout_seconds=dl_cfg.timeout_seconds)
+
+    if list_vocabs:
+        console.print(f"[cyan]Fetching available vocabularies from {api_url}...[/cyan]")
+        vocabs = downloader.list_vocabularies()
+        table = Table(title="FINTO Vocabularies")
+        table.add_column("ID", style="bold green")
+        table.add_column("Title")
+        table.add_column("URI")
+        for v in vocabs:
+            table.add_row(str(v.get("id", "")), str(v.get("title", "")), str(v.get("uri", "")))
+        console.print(table)
+        return
+
+    if all_vocabs:
+        console.print(f"[cyan]Discovering all vocabularies from {api_url}...[/cyan]")
+        vocabs = downloader.list_vocabularies()
+        vocab_ids = [str(v["id"]) for v in vocabs if "id" in v]
+    elif vocab:
+        vocab_ids = vocab
+    else:
+        vocab_ids = dl_cfg.vocabularies
+
+    if not vocab_ids:
+        console.print("[yellow]No vocabularies specified or discovered to download.[/yellow]")
+        return
+
+    tracker = ProgressTracker(
+        db_path=cfg.storage.progress_db,
+        task_id=f"finto-download-{int(time.time())}",
+        task_type="finto_ingest",
+        heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
+    )
+
+    console.print(f"[cyan]Downloading {len(vocab_ids)} vocabularies to {target_dir}...[/cyan]")
+
+    def _progress_cb(v_id: str, idx: int, total: int) -> None:
+        console.print(f"  [{idx}/{total}] Downloading [bold green]{v_id}[/bold green]...")
+
+    downloaded = downloader.download_vocabularies(
+        vocab_ids=vocab_ids,
+        output_dir=target_dir,
+        overwrite=overwrite,
+        format=dl_cfg.format,
+        tracker=tracker,
+        on_progress=_progress_cb,
+    )
+    console.print(
+        f"[green]Successfully downloaded {len(downloaded)} vocabularies to {target_dir}.[/green]"
+    )
+
+    if ingest:
+        console.print(
+            f"[cyan]Ingesting downloaded vocabularies into finto.db ({cfg.storage.finto_db})...[/cyan]"
+        )
+        finto_store = FintoStore(cfg.storage.finto_db)
+        ingest_tracker = ProgressTracker(
+            db_path=cfg.storage.progress_db,
+            task_id=f"finto-ingest-{int(time.time())}",
+            task_type="finto_ingest",
+            heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
+        )
+        c_count, m_count = ingest_finto_file(target_dir, finto_store, tracker=ingest_tracker)
+        console.print(
+            f"[green]Successfully ingested {c_count} concepts and {m_count} mappings into {cfg.storage.finto_db}.[/green]"
+        )
 
 
 @app.command("ingest-finto")

@@ -34,11 +34,26 @@ class EmbeddingConfig(BaseModel):
         return self
 
 
+class FintoDownloadConfig(BaseModel):
+    """Configuration for downloading FINTO value vocabularies."""
+
+    api_url: str = "https://api.finto.fi/rest/v1"
+    output_dir: Path = Path("data/finto")
+    vocabularies: list[str] = Field(
+        default_factory=lambda: ["yso", "yso-paikat", "slm", "kauno", "muso", "seko"]
+    )
+    format: str = "text/turtle"
+    timeout_seconds: float = 120.0
+    overwrite: bool = False
+
+
 class FintoIngestConfig(BaseModel):
     """Configuration for FINTO thesauri and migration ingestion."""
 
-    input_path: Path
-    vocabularies: list[str] = Field(default_factory=lambda: ["yso", "kauno", "muso", "slm", "seko"])
+    input_path: Path = Path("data/finto")
+    vocabularies: list[str] = Field(
+        default_factory=lambda: ["yso", "yso-paikat", "kauno", "muso", "slm", "seko"]
+    )
     legacy_thesauri: list[str] = Field(
         default_factory=lambda: ["ysa", "allars", "kaunokki", "musa"]
     )
@@ -165,6 +180,7 @@ class AppConfig(BaseModel):
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    download_finto: Optional[FintoDownloadConfig] = None
     ingest_finto: Optional[FintoIngestConfig] = None
     ingest_melinda: Optional[MelindaIngestConfig] = None
     ingest_wikidata: Optional[WikidataIngestConfig] = None
@@ -212,6 +228,10 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
                     config.embedding.template_path = pkg_template
                 else:
                     config.embedding.template_path = candidate
+
+    # Download configs
+    if config.download_finto and config.download_finto.output_dir:
+        config.download_finto.output_dir = resolve_p(config.download_finto.output_dir)  # type: ignore[assignment]
 
     # Ingestion configs
     if config.ingest_finto and config.ingest_finto.input_path:

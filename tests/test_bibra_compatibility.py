@@ -123,10 +123,12 @@ def test_iter_bibra_records_single_json_and_array(tmp_path: Path) -> None:
     # JSON Array
     array_path = tmp_path / "array.json"
     array_path.write_text(
-        json.dumps([
-            {"title": "Doc A", "creator": ["Author A"], "year": "2019"},
-            {"title": "Doc B", "creator": ["Author B"], "year": "2020"},
-        ]),
+        json.dumps(
+            [
+                {"title": "Doc A", "creator": ["Author A"], "year": "2019"},
+                {"title": "Doc B", "creator": ["Author B"], "year": "2020"},
+            ]
+        ),
         encoding="utf-8",
     )
     records_arr = list(iter_bibra_records(array_path))
@@ -371,7 +373,11 @@ telemetry:
         reconcile_cmd(config=config_file)
 
     assert enriched_json.exists()
-    json_lines = [json.loads(line) for line in enriched_json.read_text(encoding="utf-8").splitlines() if line.strip()]
+    json_lines = [
+        json.loads(line)
+        for line in enriched_json.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(json_lines) == 2
     assert "reconciliation" in json_lines[0]
     assert json_lines[0]["reconciliation"]["status"] == "matched"

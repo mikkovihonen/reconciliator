@@ -13,6 +13,7 @@ except ImportError:
     import httpx  # type: ignore[no-redef]
 
 from reconciliator.progress import ProgressTracker
+from reconciliator.version import get_default_user_agent
 
 OAI_NS = {
     "oai": "http://www.openarchives.org/OAI/2.0/",
@@ -54,11 +55,13 @@ class OAIPMHHarvester:
         metadata_prefix: str = "marc21",
         set_spec: Optional[str] = None,
         timeout: float = 60.0,
+        user_agent: Optional[str] = None,
     ) -> None:
         self.endpoint_url = endpoint_url
         self.metadata_prefix = metadata_prefix
         self.set_spec = set_spec
         self.timeout = timeout
+        self.user_agent = user_agent if user_agent is not None else get_default_user_agent()
 
     def harvest_partition(
         self,
@@ -67,7 +70,11 @@ class OAIPMHHarvester:
         tracker: Optional[ProgressTracker] = None,
     ) -> Iterator[etree._Element]:
         """Harvest records for a given date slice, following resumptionTokens."""
-        client = httpx.Client(timeout=self.timeout)
+        client = httpx.Client(
+            timeout=self.timeout,
+            headers={"User-Agent": self.user_agent},
+            follow_redirects=True,
+        )
         params: dict[str, str] = {
             "verb": "ListRecords",
             "metadataPrefix": self.metadata_prefix,
