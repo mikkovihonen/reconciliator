@@ -99,3 +99,10 @@ ehthumbs.db
 *.sublime-workspace
 *.sublime-project
 
+# .pi-container
+.pi-container/agent/bin
+.pi-container/agent/sessions
+.pi-container/agent/trust.json
+.pi-container/agent/models-store.json
+.pi-container/exports/
+.pi-container/agent/sessions/
