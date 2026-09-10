@@ -1,5 +1,7 @@
 """Unit tests for SparseReranker, BM25 scoring, volume discrimination, and short-circuiting."""
 
+from typing import Optional
+
 from reconciliator.config import ShortCircuitConfig, SparseRerankConfig
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.sparse import SparseReranker
@@ -10,7 +12,7 @@ def make_record(
     title: str,
     surname: str = "Waltari",
     year: int = 1945,
-    volume: str = "osa 1",
+    volume: Optional[str] = "osa 1",
 ) -> BibliographicRecord:
     return BibliographicRecord(
         source_id=source_id,

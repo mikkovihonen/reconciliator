@@ -471,7 +471,7 @@ Implemented in [`config.example.yaml`](#config-example-yaml). This reference con
   ingest_melinda:
     source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
     input_path: null      # Local XML file path when source_type is "file"
-    oai_url: "https://api.melinda.kansalliskirjasto.fi/oai/request"
+    oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
     metadata_prefix: "marc21"
     set_spec: null
     workers: 4
@@ -700,7 +700,7 @@ Implemented across [`reconciliator/harvest/oai_pmh.py`](#reconciliator-harvest-o
 - **Configuration Surface**: Configured in the YAML file under `ingest_melinda`:
   - `source_type`: `"oai"` (open OAI-PMH harvest) or `"file"` (local static MARCXML file).
   - `input_path`: path to local MARCXML file (when `source_type` is `"file"`).
-  - `oai_url`: National Library of Finland's open OAI-PMH endpoint (e.g. `https://api.melinda.kansalliskirjasto.fi/oai/request`).
+  - `oai_url`: National Library of Finland's open OAI-PMH endpoint (e.g. `https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib`).
   - `workers`: pool size of worker threads (default 4).
   - `from_date` / `until_date`: temporal partition interval (`YYYY-MM-DD`).
   - `slice_days`: partition window width in days (default 30).

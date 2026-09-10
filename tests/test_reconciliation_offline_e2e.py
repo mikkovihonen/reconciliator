@@ -1,6 +1,7 @@
 """End-to-end offline integration test verifying the full reconciliation and enrichment pipeline."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -85,7 +86,7 @@ telemetry:
     mock_model = MagicMock()
     mock_model.get_sentence_embedding_dimension.return_value = 128
 
-    def mock_encode(texts, **kwargs):
+    def mock_encode(texts: list[str], **kwargs: Any) -> np.ndarray[Any, Any]:
         # Generate predictable normalized vectors
         res = np.zeros((len(texts), 128), dtype=np.float32)
         for i, t in enumerate(texts):

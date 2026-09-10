@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Optional
 
@@ -12,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, Template
 from reconciliator.models import Agent, BibliographicRecord, ClassificationItem, SubjectItem
 
 
-def join_names(agents: list[Agent | dict[str, Any]], delimiter: str = ", ") -> str:
+def join_names(agents: Sequence[Agent | dict[str, Any]], delimiter: str = ", ") -> str:
     """Safe null-handling extractor for Agent names."""
     names: list[str] = []
     for a in agents:
@@ -26,7 +27,7 @@ def join_names(agents: list[Agent | dict[str, Any]], delimiter: str = ", ") -> s
     return delimiter.join(names)
 
 
-def join_surnames(agents: list[Agent | dict[str, Any]], delimiter: str = ", ") -> str:
+def join_surnames(agents: Sequence[Agent | dict[str, Any]], delimiter: str = ", ") -> str:
     """Extract agent surnames, falling back to name if surname is absent."""
     surnames: list[str] = []
     for a in agents:
@@ -41,7 +42,7 @@ def join_surnames(agents: list[Agent | dict[str, Any]], delimiter: str = ", ") -
     return delimiter.join(surnames)
 
 
-def join_labels(subjects: list[SubjectItem | dict[str, Any]], delimiter: str = ", ") -> str:
+def join_labels(subjects: Sequence[SubjectItem | dict[str, Any]], delimiter: str = ", ") -> str:
     """Safe null-handling extractor for SubjectItem pref_labels."""
     labels: list[str] = []
     for s in subjects:
@@ -55,7 +56,7 @@ def join_labels(subjects: list[SubjectItem | dict[str, Any]], delimiter: str = "
     return delimiter.join(labels)
 
 
-def primary_code(classifications: list[ClassificationItem | dict[str, Any]]) -> str:
+def primary_code(classifications: Sequence[ClassificationItem | dict[str, Any]]) -> str:
     """Safe extractor for the code of the primary classification item."""
     for c in classifications:
         if isinstance(c, ClassificationItem):
@@ -68,7 +69,7 @@ def primary_code(classifications: list[ClassificationItem | dict[str, Any]]) -> 
 
 
 def join_classifications(
-    classifications: list[ClassificationItem | dict[str, Any]],
+    classifications: Sequence[ClassificationItem | dict[str, Any]],
     delimiter: str = ", ",
     scheme: Optional[str] = None,
 ) -> str:

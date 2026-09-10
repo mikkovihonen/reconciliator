@@ -36,9 +36,11 @@ BIB_INDICATORS = (
     b'"P212"',
     b'"P957"',
     b'"P3595"',
+    b'"P213"',
     b'"Q571"',
     b'"Q7725634"',
     b'"Q47461344"',
+    b'"Q2085381"',
     b'"P1476"',
 )
 
@@ -65,6 +67,22 @@ def get_claim_qids(claims: dict[str, Any], prop: str) -> list[str]:
     return qids
 
 
+def extract_claim_qualifier_string(
+    claims: dict[str, Any], prop: str, qual_props: tuple[str, ...] = ("P1810", "P1932")
+) -> Optional[str]:
+    """Extract string qualifier from property statements (e.g. P1810 'stated as', P1932)."""
+    for stmt in claims.get(prop, []):
+        quals = stmt.get("qualifiers", {})
+        for q_prop in qual_props:
+            for q_stmt in quals.get(q_prop, []):
+                val = q_stmt.get("datavalue", {}).get("value")
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+                elif isinstance(val, dict) and "text" in val and str(val["text"]).strip():
+                    return str(val["text"]).strip()
+    return None
+
+
 def parse_wikidata_entity(
     entity: dict[str, Any], author_cache: dict[str, dict[str, Any]]
 ) -> Optional[dict[str, Any]]:
@@ -73,9 +91,15 @@ def parse_wikidata_entity(
     claims = entity.get("claims", {})
     labels = entity.get("labels", {})
 
-    # Check if author entity: cache if contains identifier claims
-    is_human = "Q5" in get_claim_qids(claims, "P31")
-    if is_human or "P3595" in claims or "P213" in claims or "P214" in claims:
+    # Check if author or entity (organization, publisher, place): cache if contains identifiers or relevant type
+    instance_of = get_claim_qids(claims, "P31")
+    is_human = "Q5" in instance_of
+    is_org_or_place = any(
+        k in instance_of for k in ("Q2085381", "Q4830453", "Q43229", "Q515", "Q6256")
+    )
+    has_auth_ids = "P3595" in claims or "P213" in claims or "P214" in claims
+
+    if is_human or is_org_or_place or has_auth_ids:
         name_val = ""
         for lang in ("fi", "sv", "en"):
             if lang in labels:
@@ -91,21 +115,21 @@ def parse_wikidata_entity(
         isni = get_claim_snak_value(claims, "P213")
         viaf = get_claim_snak_value(claims, "P214")
 
-        author_cache[qid] = {
-            "qid": qid,
-            "name": name_val,
-            "family_name": fam_name,
-            "asteri_id": asteri_id,
-            "isni": isni,
-            "viaf": viaf,
-        }
+        if name_val or asteri_id or isni or viaf:
+            author_cache[qid] = {
+                "qid": qid,
+                "name": name_val,
+                "family_name": fam_name,
+                "asteri_id": asteri_id,
+                "isni": isni,
+                "viaf": viaf,
+            }
 
-    # Human entities are authors, never bibliographic book records
-    if is_human:
+    # Human authors and organizations/places are never bibliographic book records
+    if is_human or is_org_or_place:
         return None
 
     # Check if bibliographic work / book
-    instance_of = get_claim_qids(claims, "P31")
     is_book = any(k in instance_of for k in ("Q571", "Q7725634", "Q47461344", "Q3331189"))
     has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
 
@@ -173,17 +197,27 @@ def parse_wikidata_entity(
             if m:
                 year_str = m.group(1)
 
-    # Publisher
-    publisher = None
-    pub_qids = get_claim_qids(claims, "P123")
-    if pub_qids:
-        publisher = pub_qids[0]
+    # Publisher: first check qualifier (P1810 / P1932 'stated as'), then cached entity name
+    publisher = extract_claim_qualifier_string(claims, "P123")
+    if not publisher:
+        pub_qids = get_claim_qids(claims, "P123")
+        if pub_qids and pub_qids[0] in author_cache:
+            p_name = author_cache[pub_qids[0]].get("name")
+            if p_name and not re.match(r"^Q\d+$", p_name):
+                publisher = p_name
+    if publisher and re.match(r"^Q\d+$", publisher.strip()):
+        publisher = None
 
-    # Publication Place
-    publication_place = None
-    place_qids = get_claim_qids(claims, "P291")
-    if place_qids:
-        publication_place = place_qids[0]
+    # Publication Place: first check qualifier, then cached entity name
+    publication_place = extract_claim_qualifier_string(claims, "P291")
+    if not publication_place:
+        place_qids = get_claim_qids(claims, "P291")
+        if place_qids and place_qids[0] in author_cache:
+            pl_name = author_cache[place_qids[0]].get("name")
+            if pl_name and not re.match(r"^Q\d+$", pl_name):
+                publication_place = pl_name
+    if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
+        publication_place = None
 
     # Language & Original Language
     language = None
@@ -218,17 +252,23 @@ def parse_wikidata_entity(
                 extent_val = int(m.group(1))
 
     # Series & Series Numbering
-    series_title = None
+    series_title = extract_claim_qualifier_string(claims, "P179")
     series_numbering = None
-    series_qids = get_claim_qids(claims, "P179")
-    if series_qids:
-        series_title = series_qids[0]
-        p179_stmts = claims.get("P179", [])
-        if p179_stmts:
-            quals = p179_stmts[0].get("qualifiers", {})
-            p1545 = quals.get("P1545", [])
-            if p1545:
-                series_numbering = str(p1545[0].get("datavalue", {}).get("value", ""))
+    p179_stmts = claims.get("P179", [])
+    if p179_stmts:
+        quals = p179_stmts[0].get("qualifiers", {})
+        p1545 = quals.get("P1545", [])
+        if p1545:
+            series_numbering = str(p1545[0].get("datavalue", {}).get("value", ""))
+
+    if not series_title:
+        series_qids = get_claim_qids(claims, "P179")
+        if series_qids and series_qids[0] in author_cache:
+            s_name = author_cache[series_qids[0]].get("name")
+            if s_name and not re.match(r"^Q\d+$", s_name):
+                series_title = s_name
+    if series_title and re.match(r"^Q\d+$", series_title.strip()):
+        series_title = None
 
     # Volume Designation
     volume_str = None
@@ -282,10 +322,18 @@ def parse_wikidata_entity(
 
     # Agents
     agents: list[dict[str, Any]] = []
-    for prop, role in (("P50", "aut"), ("P98", "edt"), ("P655", "trl"), ("P110", "ill")):
+    for prop, role in (
+        ("P50", "aut"),
+        ("P98", "edt"),
+        ("P655", "trl"),
+        ("P110", "ill"),
+        ("P86", "cmp"),
+        ("P767", "ctb"),
+    ):
         for a_qid in get_claim_qids(claims, prop):
             author_info = author_cache.get(a_qid, {})
-            name = author_info.get("name") or a_qid
+            qual_name = extract_claim_qualifier_string(claims, prop)
+            name = author_info.get("name") or qual_name or a_qid
             u0: list[str] = []
             if author_info.get("asteri_id"):
                 u0.append(f"https://urn.fi/URN:NBN:fi:au:pn:{author_info['asteri_id']}")
@@ -306,6 +354,22 @@ def parse_wikidata_entity(
                 }
             )
 
+    # Fallback: if no author agents found from P50, check claims.P2093 (author name string)
+    if not any(a.get("role") == "aut" for a in agents):
+        for stmt in claims.get("P2093", []):
+            datavalue = stmt.get("mainsnak", {}).get("datavalue", {})
+            val = datavalue.get("value")
+            if isinstance(val, str) and val.strip():
+                agents.append(
+                    {
+                        "name": val.strip(),
+                        "is_personal": True,
+                        "role": "aut",
+                        "uri_subfield_0": [],
+                        "uri_subfield_1": [],
+                    }
+                )
+
     # Subjects
     subjects: dict[str, list[dict[str, Any]]] = {
         "topical": [],
@@ -314,20 +378,24 @@ def parse_wikidata_entity(
         "medium_of_performance": [],
     }
     for s_qid in get_claim_qids(claims, "P921"):
+        s_heading = author_cache.get(s_qid, {}).get("name") or s_qid
         subjects["topical"].append(
-            {"heading": s_qid, "field": "650", "vocabulary": "yso", "uri": None}
+            {"heading": s_heading, "field": "650", "vocabulary": "yso", "uri": None}
         )
     for g_qid in get_claim_qids(claims, "P136"):
+        g_heading = author_cache.get(g_qid, {}).get("name") or g_qid
         subjects["genre_form"].append(
-            {"heading": g_qid, "field": "655", "vocabulary": "slm", "uri": None}
+            {"heading": g_heading, "field": "655", "vocabulary": "slm", "uri": None}
         )
     for geo_qid in get_claim_qids(claims, "P840"):
+        geo_heading = author_cache.get(geo_qid, {}).get("name") or geo_qid
         subjects["geographic"].append(
-            {"heading": geo_qid, "field": "651", "vocabulary": "yso", "uri": None}
+            {"heading": geo_heading, "field": "651", "vocabulary": "yso", "uri": None}
         )
     for mus_qid in get_claim_qids(claims, "P870"):
+        mus_heading = author_cache.get(mus_qid, {}).get("name") or mus_qid
         subjects["medium_of_performance"].append(
-            {"heading": mus_qid, "field": "382", "vocabulary": "seko", "uri": None}
+            {"heading": mus_heading, "field": "382", "vocabulary": "seko", "uri": None}
         )
 
     return {

@@ -159,24 +159,59 @@ def extract_extent(extent_str: Optional[str]) -> Optional[int]:
 
 
 def normalize_classifications(
-    raw_classifications: list[tuple[str, str]],
+    raw_classifications: list[Any],
 ) -> list[ClassificationItem]:
     """
     Normalize classifications and flag the primary classification based on scheme priority:
     Priority hierarchy: ykl -> udc -> ddc -> lcc.
+    Accepts tuples (code, scheme), dicts {'code': ..., 'scheme': ..., 'is_primary': ...},
+    or ClassificationItem objects.
     """
-    items: list[ClassificationItem] = []
-    for code_str, scheme_str in raw_classifications:
-        clean_code = re.sub(r"[\[\]]", "", code_str).strip()
-        clean_scheme = scheme_str.lower().strip() or "ykl"
+    items: list[tuple[str, str, bool]] = []
+    has_explicit_primary = False
+
+    for entry in raw_classifications:
+        if isinstance(entry, ClassificationItem):
+            clean_code = re.sub(r"[\[\]]", "", entry.code).strip()
+            clean_scheme = entry.scheme.lower().strip() or "ykl"
+            is_prim = entry.is_primary
+        elif isinstance(entry, dict):
+            code_val = str(entry.get("code") or "")
+            scheme_val = str(entry.get("scheme") or "ykl")
+            clean_code = re.sub(r"[\[\]]", "", code_val).strip()
+            clean_scheme = scheme_val.lower().strip() or "ykl"
+            is_prim = bool(entry.get("is_primary", False))
+        elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            code_val = str(entry[0] or "")
+            scheme_val = str(entry[1] or "ykl")
+            clean_code = re.sub(r"[\[\]]", "", code_val).strip()
+            clean_scheme = scheme_val.lower().strip() or "ykl"
+            is_prim = bool(entry[2]) if len(entry) >= 3 else False
+        else:
+            continue
+
         if clean_code:
-            items.append(ClassificationItem(code=clean_code, scheme=clean_scheme, is_primary=False))
+            if is_prim:
+                has_explicit_primary = True
+            items.append((clean_code, clean_scheme, is_prim))
 
     if not items:
         return []
 
-    # Flag primary according to hierarchy: ykl -> udc -> ddc -> lcc -> first
-    schemes = [c.scheme for c in items]
+    # If an explicit primary was specified (e.g. preferred rank from Wikidata), retain it
+    if has_explicit_primary:
+        seen_primary = False
+        result: list[ClassificationItem] = []
+        for code, scheme, prim in items:
+            if prim and not seen_primary:
+                result.append(ClassificationItem(code=code, scheme=scheme, is_primary=True))
+                seen_primary = True
+            else:
+                result.append(ClassificationItem(code=code, scheme=scheme, is_primary=False))
+        return result
+
+    # Otherwise flag primary according to hierarchy: ykl -> udc -> ddc -> lcc -> first
+    schemes = [scheme for _, scheme, _ in items]
     primary_idx = -1
     for pref in ("ykl", "udc", "ddc", "lcc"):
         if pref in schemes:
@@ -185,12 +220,10 @@ def normalize_classifications(
     if primary_idx == -1:
         primary_idx = 0
 
-    result: list[ClassificationItem] = []
-    for i, item in enumerate(items):
-        result.append(
-            ClassificationItem(code=item.code, scheme=item.scheme, is_primary=(i == primary_idx))
-        )
-    return result
+    return [
+        ClassificationItem(code=code, scheme=scheme, is_primary=(i == primary_idx))
+        for i, (code, scheme, _) in enumerate(items)
+    ]
 
 
 class RecordNormalizer:

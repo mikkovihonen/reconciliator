@@ -45,6 +45,12 @@ def reset_cmd(
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
+    all_components: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Reset all storage (authority.db, finto.db, progress.db, FAISS index)",
+    ),
     authority: bool = typer.Option(
         False, "--authority", help="Reset authority.db and FAISS index only"
     ),
@@ -56,7 +62,7 @@ def reset_cmd(
     cfg = load_config(config)
 
     # Determine which components to reset
-    if not (authority or finto or progress):
+    if all_components or not (authority or finto or progress):
         reset_auth = True
         reset_fin = True
         reset_prog = True

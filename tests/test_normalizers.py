@@ -88,3 +88,24 @@ def test_classifications_normalization() -> None:
     assert classes[0].code == "82-3" and not classes[0].is_primary
     assert classes[1].code == "84.2" and classes[1].is_primary
     assert classes[2].code == "839.73" and not classes[2].is_primary
+
+    # Dict-based classifications (from Wikidata ingestion)
+    raw_dicts = [
+        {"code": "82-3", "scheme": "udc", "is_primary": True},
+        {"code": "813.54", "scheme": "ddc", "is_primary": False},
+    ]
+    classes_dict = normalize_classifications(raw_dicts)
+    assert len(classes_dict) == 2
+    assert classes_dict[0].code == "82-3" and classes_dict[0].is_primary
+    assert classes_dict[1].code == "813.54" and not classes_dict[1].is_primary
+
+    # Mixed inputs (tuple + dict)
+    raw_mixed = [
+        ("82-3", "udc"),
+        {"code": "84.2", "scheme": "ykl", "is_primary": False},
+    ]
+    classes_mixed = normalize_classifications(raw_mixed)
+    assert len(classes_mixed) == 2
+    # ykl prioritized over udc when no explicit primary is set
+    assert classes_mixed[0].code == "82-3" and not classes_mixed[0].is_primary
+    assert classes_mixed[1].code == "84.2" and classes_mixed[1].is_primary
