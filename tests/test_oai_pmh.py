@@ -37,7 +37,7 @@ def test_harvest_partition_mocked() -> None:
     mock_resp.content = sample_oai_xml
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("reconciliator.harvest.oai_pmh.httpx.Client.get", return_value=mock_resp):
+    with patch("httpx2.Client.get", return_value=mock_resp):
         records = list(harvester.harvest_partition(from_date="2021-01-01", until_date="2021-01-31"))
         assert len(records) == 1
         assert (

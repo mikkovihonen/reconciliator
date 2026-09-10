@@ -7,10 +7,7 @@ from typing import Iterator, Optional
 
 from lxml import etree
 
-try:
-    import httpx2 as httpx
-except ImportError:
-    import httpx  # type: ignore[no-redef]
+import httpx2
 
 from reconciliator.progress import ProgressTracker
 from reconciliator.version import get_default_user_agent
@@ -70,7 +67,7 @@ class OAIPMHHarvester:
         tracker: Optional[ProgressTracker] = None,
     ) -> Iterator[etree._Element]:
         """Harvest records for a given date slice, following resumptionTokens."""
-        client = httpx.Client(
+        client = httpx2.Client(
             timeout=self.timeout,
             headers={"User-Agent": self.user_agent},
             follow_redirects=True,
