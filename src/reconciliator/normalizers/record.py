@@ -381,8 +381,6 @@ class RecordNormalizer:
             field = item.get("field", "650")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
@@ -412,8 +410,6 @@ class RecordNormalizer:
             field = item.get("field", "655")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
@@ -441,8 +437,6 @@ class RecordNormalizer:
             field = item.get("field", "651")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
@@ -470,8 +464,6 @@ class RecordNormalizer:
             field = item.get("field", "382")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
-                heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,

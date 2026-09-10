@@ -105,7 +105,10 @@ def strip_label_decoration(s: str, relator_registry: Optional[Any] = None) -> st
         if relator_registry is not None:
             if hasattr(relator_registry, "is_relator") and relator_registry.is_relator(token):
                 out = head.rstrip()
-            elif isinstance(relator_registry, (set, frozenset, list, tuple)) and token in relator_registry:
+            elif (
+                isinstance(relator_registry, (set, frozenset, list, tuple))
+                and token in relator_registry
+            ):
                 out = head.rstrip()
     return out.rstrip(".,:;/ \t\r\n")
 

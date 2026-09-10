@@ -59,13 +59,11 @@ class FintoFolder:
         source_field: str = "650",
         source_uri: Optional[str] = None,
         lang: str = "fi",
-    ) -> tuple[str, str, str, str, str]:
     ) -> tuple[str, str, str, str, str, Optional[str]]:
         """
         Reconcile a subject heading to canonical modern ontology.
 
         Returns:
-            (target_field, target_vocab, target_uri, target_pref_label, mapping_type)
             (target_field, target_vocab, target_uri, target_pref_label, mapping_type, wikidata_qid)
         """
         clean_heading = heading.strip().rstrip(".,; ")
@@ -82,7 +80,6 @@ class FintoFolder:
                 target_vocab = "slm"
             elif source_field == "382":
                 target_vocab = "seko"
-            return target_field, target_vocab, source_uri or "", clean_heading, "none"
             formatted_vocab = format_target_vocab(target_vocab, source_vocab, lang=lang)
             return target_field, formatted_vocab, source_uri or "", clean_heading, "none", None
 
@@ -94,7 +91,6 @@ class FintoFolder:
                 pref_label = clean_heading
                 if concept:
                     pref_label = (
-                        (concept.pref_label_sv if lang == "sv" else concept.pref_label_fi)
                         (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
                         or concept.pref_label_fi
                         or concept.pref_label_en
@@ -107,7 +103,6 @@ class FintoFolder:
                 target_vocab = format_target_vocab(mapping.target_vocab, source_vocab, lang=lang)
                 return (
                     target_field,
-                    mapping.target_vocab,
                     target_vocab,
                     mapping.target_uri,
                     pref_label,
@@ -119,7 +114,6 @@ class FintoFolder:
             concept = self.finto_store.find_concept_by_uri(source_uri)
             if concept:
                 pref_label = (
-                    (concept.pref_label_sv if lang == "sv" else concept.pref_label_fi)
                     (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
                     or concept.pref_label_fi
                     or concept.pref_label_en
@@ -131,7 +125,6 @@ class FintoFolder:
                 target_vocab = format_target_vocab(concept.vocabulary, source_vocab, lang=lang)
                 return (
                     target_field,
-                    concept.vocabulary,
                     target_vocab,
                     concept.uri,
                     pref_label,
@@ -139,7 +132,6 @@ class FintoFolder:
                     None,
                 )
 
-        # 2. Check legacy label in finto_mappings
         # 2. Check legacy label in finto_mappings if source_vocab is an explicit legacy thesaurus
         if norm_vocab in ("ysa", "allars", "kaunokki", "bella", "musa", "cilla"):
             mapping = self.finto_store.find_legacy_mapping_by_label(
@@ -202,7 +194,6 @@ class FintoFolder:
             pref_label = clean_heading
             if concept:
                 pref_label = (
-                    (concept.pref_label_sv if lang == "sv" else concept.pref_label_fi)
                     (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
                     or concept.pref_label_fi
                     or clean_heading
@@ -213,7 +204,6 @@ class FintoFolder:
             target_vocab = format_target_vocab(mapping.target_vocab, source_vocab, lang=lang)
             return (
                 target_field,
-                mapping.target_vocab,
                 target_vocab,
                 mapping.target_uri,
                 pref_label,
@@ -221,15 +211,13 @@ class FintoFolder:
                 None,
             )
 
-        # 3. Direct lookup in finto_concepts
-        # 4. Direct lookup in finto_concepts
+        # 5. Direct lookup in finto_concepts
         candidate_vocabs: list[str] = []
         if source_field == "655":
             candidate_vocabs = ["slm"]
         elif source_field == "382":
             candidate_vocabs = ["seko"]
         elif source_field == "651":
-            candidate_vocabs = ["yso"]
             candidate_vocabs = ["yso-paikat", "yso"]
         else:
             # 650
@@ -246,7 +234,6 @@ class FintoFolder:
             concept = self.finto_store.find_concept_by_label(clean_heading, vocabulary=v, lang=lang)
             if concept:
                 pref_label = (
-                    (concept.pref_label_sv if lang == "sv" else concept.pref_label_fi)
                     (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
                     or concept.pref_label_fi
                     or clean_heading
@@ -263,7 +250,6 @@ class FintoFolder:
                 target_vocab = format_target_vocab(concept.vocabulary, source_vocab, lang=lang)
                 return (
                     target_field,
-                    concept.vocabulary,
                     target_vocab,
                     concept.uri,
                     pref_label,
@@ -271,14 +257,12 @@ class FintoFolder:
                     None,
                 )
 
-        # 4. Fallback if not found: keep as is
-        # 5. Fallback if not found: keep as is
+        # 6. Fallback if not found: keep as is
         default_target_vocab = LEGACY_TO_MODERN_DEFAULTS.get(norm_vocab, norm_vocab)
         if source_field == "655":
             default_target_vocab = "slm"
         elif source_field == "382":
             default_target_vocab = "seko"
 
-        return source_field, default_target_vocab, source_uri or "", clean_heading, "none"
         formatted_default = format_target_vocab(default_target_vocab, source_vocab, lang=lang)
         return source_field, formatted_default, source_uri or "", clean_heading, "none", None

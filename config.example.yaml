@@ -15,11 +15,27 @@ embedding:
   batch_size: 64        # Inference batch size for dense sentence embedding
   force_template: false # When true, permits reconciliation even if template hash differs from index metadata
 
-# 3. FINTO Thesauri & Migration Ingestion
-ingest_finto:
-  input_path: "tests/fixtures/sample_finto.ttl" # Directory or file path containing SKOS / Turtle / RDF dumps
+# 3. FINTO Value Vocabularies Downloader
+download_finto:
+  api_url: "https://api.finto.fi/rest/v1"
+  output_dir: "data/finto"
   vocabularies:
     - "yso"
+    - "yso-paikat"
+    - "slm"
+    - "kauno"
+    - "muso"
+    - "seko"
+  format: "text/turtle"
+  timeout_seconds: 120.0
+  overwrite: false
+
+# 4. FINTO Thesauri & Migration Ingestion
+ingest_finto:
+  input_path: "data/finto" # Directory or file path containing SKOS / Turtle / RDF dumps
+  vocabularies:
+    - "yso"
+    - "yso-paikat"
     - "kauno"
     - "muso"
     - "slm"
@@ -30,7 +46,7 @@ ingest_finto:
     - "kaunokki"
     - "musa"
 
-# 4. Melinda Authority Ingestion
+# 5. Melinda Authority Ingestion
 ingest_melinda:
   source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
   input_path: null      # Local XML file path when source_type is "file"
@@ -43,15 +59,17 @@ ingest_melinda:
   slice_days: 30
   batch_size: 500
 
-# 5. Wikidata Authority Ingestion
+# 6. Wikidata Authority Ingestion
 ingest_wikidata:
   dump_path: "data/wikidata/latest-all.json.gz"
   batch_size: 1000
 
-# 6. Target Reconciliation & Enrichment
+# 7. Target Reconciliation & Enrichment
 reconcile:
   target_file: "tests/fixtures/sample_target.xml"
+  target_format: "auto" # "auto" | "marcxml" | "bibra"
   output_file: "data/enriched_records.xml"
+  output_format: "auto" # "auto" | "marcxml" | "bibra"
   enrich: true          # true: inject novel $0/$1 URIs; false: audit & report only
   fold_legacy: true     # true: reconcile and fold legacy subject headings against finto.db
   threshold: 0.85       # Minimum hybrid score for candidate acceptance
