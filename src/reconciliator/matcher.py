@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from reconciliator.agent_transfer import AgentAligner
 from reconciliator.config import ReconcileConfig
@@ -120,4 +119,3 @@ class ReconciliationEngine:
             selected_agent_uris=selected_uris,
             suppressed_agent_uris=suppressed_uris,
         )
-

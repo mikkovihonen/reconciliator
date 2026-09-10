@@ -18,11 +18,9 @@ from reconciliator.normalizers.agent import extract_surname, normalize_agent_nam
 from reconciliator.normalizers.identifiers import (
     normalize_isbn,
     normalize_issn,
-    normalize_melinda_id,
     normalize_urn,
 )
 from reconciliator.template import RecordTemplateEngine
-
 
 ROMAN_NUMERALS = {
     "i": 1,
@@ -39,7 +37,22 @@ ROMAN_NUMERALS = {
     "xii": 12,
 }
 
-NON_FILING_ARTICLES = {"the", "a", "an", "en", "ett", "den", "det", "de", "der", "die", "das", "le", "la", "les"}
+NON_FILING_ARTICLES = {
+    "the",
+    "a",
+    "an",
+    "en",
+    "ett",
+    "den",
+    "det",
+    "de",
+    "der",
+    "die",
+    "das",
+    "le",
+    "la",
+    "les",
+}
 
 
 def clean_title(title: str, strip_articles: bool = True) -> str:
@@ -97,17 +110,27 @@ def normalize_volume(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
 
-    pattern = r"\b(osa|nide|vol|nro|del|band|tome|v\.)\s*(\d+|[ivxlcdm]+)\b"
-    match = re.search(pattern, text, re.IGNORECASE)
-    if not match:
-        return None
+    # 1. Check keyword followed by numeral (e.g. 'osa 2', 'Vol. II', 'del 1')
+    pattern_prefix = r"\b(osa|nide|vol|nro|del|band|tome|v)\.?\s*(\d+|[ivxlcdm]+)\b"
+    match = re.search(pattern_prefix, text, re.IGNORECASE)
+    if match:
+        num_part = match.group(2).lower()
+        if num_part.isdigit():
+            return f"osa {int(num_part)}"
+        val = roman_to_int(num_part)
+        if val is not None:
+            return f"osa {val}"
 
-    num_part = match.group(2).lower()
-    if num_part.isdigit():
-        return f"osa {int(num_part)}"
-    val = roman_to_int(num_part)
-    if val is not None:
-        return f"osa {val}"
+    # 2. Check numeral followed by keyword (e.g. '1. osa', '2 osa', 'II del')
+    pattern_suffix = r"\b(\d+|[ivxlcdm]+)\.?\s*(osa|nide|del|band)\b"
+    match_suffix = re.search(pattern_suffix, text, re.IGNORECASE)
+    if match_suffix:
+        num_part = match_suffix.group(1).lower()
+        if num_part.isdigit():
+            return f"osa {int(num_part)}"
+        val = roman_to_int(num_part)
+        if val is not None:
+            return f"osa {val}"
 
     return None
 
@@ -165,9 +188,7 @@ def normalize_classifications(
     result: list[ClassificationItem] = []
     for i, item in enumerate(items):
         result.append(
-            ClassificationItem(
-                code=item.code, scheme=item.scheme, is_primary=(i == primary_idx)
-            )
+            ClassificationItem(code=item.code, scheme=item.scheme, is_primary=(i == primary_idx))
         )
     return result
 
@@ -201,9 +222,7 @@ class RecordNormalizer:
             uniform_title = re.sub(r"[\[\]]", "", str(uniform_title)).strip()
 
         variant_titles = [
-            clean_title(vt, strip_articles=False)
-            for vt in raw_data.get("variant_titles", [])
-            if vt
+            clean_title(vt, strip_articles=False) for vt in raw_data.get("variant_titles", []) if vt
         ]
 
         year = raw_data.get("publication_year")
@@ -276,9 +295,7 @@ class RecordNormalizer:
 
         other_ids = [str(oid).strip() for oid in raw_ids.get("other_ids", []) if oid]
 
-        identifiers = RecordIdentifiers(
-            isbn=isbns, issn=issns, urn=urns, other_ids=other_ids
-        )
+        identifiers = RecordIdentifiers(isbn=isbns, issn=issns, urn=urns, other_ids=other_ids)
 
         # Agents
         agents: list[Agent] = []
@@ -292,6 +309,8 @@ class RecordNormalizer:
                         name=norm_name,
                         surname=surname,
                         role=raw_agent.get("role"),
+                        field_tag=raw_agent.get("field_tag"),
+                        is_personal=is_personal,
                         uri_subfield_0=list(raw_agent.get("uri_subfield_0", [])),
                         uri_subfield_1=list(raw_agent.get("uri_subfield_1", [])),
                     )
@@ -302,7 +321,7 @@ class RecordNormalizer:
             names_245c = parse_245c_agents(raw_data["statement_of_responsibility"])
             for n in names_245c:
                 s_name = extract_surname(n)
-                agents.append(Agent(name=n, surname=s_name, role="aut"))
+                agents.append(Agent(name=n, surname=s_name, role="aut", field_tag="245"))
 
         # Subjects folding via FintoFolder
         raw_subjects = raw_data.get("subjects", {})
@@ -316,10 +335,20 @@ class RecordNormalizer:
             field = item.get("field", "650")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, _ = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
                 heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             )
-            sub_item = SubjectItem(uri=t_uri, pref_label=t_label, vocabulary=t_vocab)
+            sub_item = SubjectItem(
+                uri=t_uri,
+                pref_label=t_label,
+                vocabulary=t_vocab,
+                source_field=field,
+                target_field=t_field,
+                source_vocab=vocab,
+                source_uri=uri,
+                source_heading=heading,
+                mapping_type=m_type,
+            )
             if t_field == "655":
                 genre_form.append(sub_item)
             else:
@@ -327,33 +356,69 @@ class RecordNormalizer:
 
         for item in raw_subjects.get("genre_form", []):
             heading = item.get("heading") or item.get("pref_label", "")
-            field = "655"
+            field = item.get("field", "655")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            _, t_vocab, t_uri, t_label, _ = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
                 heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             )
-            genre_form.append(SubjectItem(uri=t_uri, pref_label=t_label, vocabulary=t_vocab))
+            genre_form.append(
+                SubjectItem(
+                    uri=t_uri,
+                    pref_label=t_label,
+                    vocabulary=t_vocab,
+                    source_field=field,
+                    target_field=t_field,
+                    source_vocab=vocab,
+                    source_uri=uri,
+                    source_heading=heading,
+                    mapping_type=m_type,
+                )
+            )
 
         for item in raw_subjects.get("geographic", []):
             heading = item.get("heading") or item.get("pref_label", "")
-            field = "651"
+            field = item.get("field", "651")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            _, t_vocab, t_uri, t_label, _ = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
                 heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             )
-            geographic.append(SubjectItem(uri=t_uri, pref_label=t_label, vocabulary=t_vocab))
+            geographic.append(
+                SubjectItem(
+                    uri=t_uri,
+                    pref_label=t_label,
+                    vocabulary=t_vocab,
+                    source_field=field,
+                    target_field=t_field,
+                    source_vocab=vocab,
+                    source_uri=uri,
+                    source_heading=heading,
+                    mapping_type=m_type,
+                )
+            )
 
         for item in raw_subjects.get("medium_of_performance", []):
             heading = item.get("heading") or item.get("pref_label", "")
-            field = "382"
+            field = item.get("field", "382")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            _, t_vocab, t_uri, t_label, _ = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type = self.finto_folder.fold_subject_heading(
                 heading=heading, source_vocab=vocab, source_field=field, source_uri=uri
             )
-            medium_of_perf.append(SubjectItem(uri=t_uri, pref_label=t_label, vocabulary=t_vocab))
+            medium_of_perf.append(
+                SubjectItem(
+                    uri=t_uri,
+                    pref_label=t_label,
+                    vocabulary=t_vocab,
+                    source_field=field,
+                    target_field=t_field,
+                    source_vocab=vocab,
+                    source_uri=uri,
+                    source_heading=heading,
+                    mapping_type=m_type,
+                )
+            )
 
         subjects = SubjectsContainer(
             topical=topical,
@@ -390,4 +455,3 @@ class RecordNormalizer:
             record.serialization = self.template_engine.render(record)
 
         return record
-

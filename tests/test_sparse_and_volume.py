@@ -31,7 +31,9 @@ def test_volume_discrimination() -> None:
     cand_match = make_record("C2", "Sinuhe", volume="osa 1")
     cand_none = make_record("C3", "Sinuhe", volume=None)
 
-    assert not reranker.check_volume_match(target.volume_designation, cand_conflict.volume_designation)
+    assert not reranker.check_volume_match(
+        target.volume_designation, cand_conflict.volume_designation
+    )
     assert reranker.check_volume_match(target.volume_designation, cand_match.volume_designation)
     assert reranker.check_volume_match(target.volume_designation, cand_none.volume_designation)
 
@@ -80,4 +82,3 @@ def test_short_circuit_with_volume_safeguard() -> None:
     m_fail = reranker.evaluate_candidate(target, cand_conflict, dense_score=0.99)
     assert not m_fail.accepted
     assert not m_fail.volume_match
-

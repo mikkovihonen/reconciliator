@@ -1,7 +1,7 @@
 """Unit tests for MARCXMLEnricher tree mutation and enrichment toggles."""
 
 from lxml import etree
-from reconciliator.finto_folding import FintoFolder
+
 from reconciliator.loaders.marcxml import _get_subfields
 from reconciliator.matcher import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord
@@ -72,4 +72,3 @@ def test_enrich_disabled_does_not_mutate() -> None:
     f100 = enriched_elem.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='100']")[0]
     u0 = _get_subfields(f100, "0")
     assert len(u0) == 0
-

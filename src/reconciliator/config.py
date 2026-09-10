@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Literal, Optional
+
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
@@ -37,9 +38,7 @@ class FintoIngestConfig(BaseModel):
     """Configuration for FINTO thesauri and migration ingestion."""
 
     input_path: Path
-    vocabularies: list[str] = Field(
-        default_factory=lambda: ["yso", "kauno", "muso", "slm", "seko"]
-    )
+    vocabularies: list[str] = Field(default_factory=lambda: ["yso", "kauno", "muso", "slm", "seko"])
     legacy_thesauri: list[str] = Field(
         default_factory=lambda: ["ysa", "allars", "kaunokki", "musa"]
     )
@@ -50,7 +49,7 @@ class MelindaIngestConfig(BaseModel):
 
     source_type: Literal["oai", "file"] = "oai"
     input_path: Optional[Path] = None
-    oai_url: Optional[str] = "https://api.melinda.kansalliskirjasto.fi/oai/request"
+    oai_url: Optional[str] = "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
     metadata_prefix: str = "marc21"
     set_spec: Optional[str] = None
     workers: int = 4
@@ -140,9 +139,7 @@ class ReconcileConfig(BaseModel):
             "WIKIDATA",
         ]
     )
-    agent_priority: list[str] = Field(
-        default_factory=lambda: ["KANTO", "ISNI", "VIAF", "WIKIDATA"]
-    )
+    agent_priority: list[str] = Field(default_factory=lambda: ["KANTO", "ISNI", "VIAF", "WIKIDATA"])
     subject_priority: list[str] = Field(
         default_factory=lambda: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO", "WIKIDATA"]
     )
@@ -219,7 +216,7 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
         config.ingest_finto.input_path = resolve_p(config.ingest_finto.input_path)  # type: ignore[assignment]
 
     if config.ingest_melinda and config.ingest_melinda.input_path:
-        config.ingest_melinda.input_path = resolve_p(config.ingest_melinda.input_path)  # type: ignore[assignment]
+        config.ingest_melinda.input_path = resolve_p(config.ingest_melinda.input_path)
 
     if config.ingest_wikidata and config.ingest_wikidata.dump_path:
         config.ingest_wikidata.dump_path = resolve_p(config.ingest_wikidata.dump_path)  # type: ignore[assignment]
@@ -259,4 +256,3 @@ def load_config(config_path: Path | str) -> AppConfig:
 
     config = AppConfig.model_validate(raw_data)
     return _resolve_config_paths(config, path.parent)
-

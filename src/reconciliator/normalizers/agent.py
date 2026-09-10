@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-
 COMMON_RELATOR_WORDS = {
     "kirjoittaja",
     "toimittaja",
@@ -62,9 +61,7 @@ def extract_surname(name: str) -> Optional[str]:
     return tokens[-1] if tokens else None
 
 
-def normalize_agent_name(
-    raw_name: str, is_personal: bool = True
-) -> tuple[str, Optional[str]]:
+def normalize_agent_name(raw_name: str, is_personal: bool = True) -> tuple[str, Optional[str]]:
     """
     Normalize agent name into canonical representation.
     For personal names: canonical inverted order "Surname, Forename".
@@ -124,4 +121,3 @@ def parse_245c_agents(statement_of_responsibility: str) -> list[str]:
             if norm_name:
                 names.append(norm_name)
     return names
-

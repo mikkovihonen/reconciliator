@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Literal, Optional
+
 import torch
 
 
@@ -44,4 +45,3 @@ def get_optimal_batch_size(base_batch_size: int, device: str) -> int:
     if device in ("cuda", "mps") and base_batch_size < 128:
         return base_batch_size
     return base_batch_size
-

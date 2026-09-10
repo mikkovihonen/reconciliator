@@ -1,6 +1,7 @@
 """Unit tests verifying pipeline enrichment mode (enrich=True vs enrich=False)."""
 
 from lxml import etree
+
 from reconciliator.loaders.marcxml import _get_subfields
 from reconciliator.matcher import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord
@@ -81,4 +82,3 @@ def test_audit_only_mode_leaves_xml_untouched() -> None:
     f100 = enriched_elem.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='100']")[0]
     u0 = _get_subfields(f100, "0")
     assert len(u0) == 0
-

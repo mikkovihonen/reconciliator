@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -56,4 +57,3 @@ class SentenceEmbedder:
         """Serialize and encode a batch of BibliographicRecord models."""
         texts = [self.serialize_record(r) for r in records]
         return self.embed_texts(texts, batch_size=batch_size)
-

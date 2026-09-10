@@ -2,6 +2,7 @@
 
 import concurrent.futures
 from pathlib import Path
+
 from reconciliator.db import get_db_connection, init_authority_db
 
 
@@ -44,4 +45,3 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
     with get_db_connection(db_path) as conn:
         total = conn.execute("SELECT COUNT(*) as cnt FROM authority_records;").fetchone()["cnt"]
         assert total == 4 * 20
-

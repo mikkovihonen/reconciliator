@@ -1,8 +1,6 @@
 """Unit tests for multithreaded OAI-PMH harvester and date partitioning."""
 
 from unittest.mock import MagicMock, patch
-from lxml import etree
-import pytest
 
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 
@@ -39,8 +37,10 @@ def test_harvest_partition_mocked() -> None:
     mock_resp.content = sample_oai_xml
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("reconciliator.harvest.oai_pmh.httpx.Client.get", return_value=mock_resp):
         records = list(harvester.harvest_partition(from_date="2021-01-01", until_date="2021-01-31"))
         assert len(records) == 1
-        assert records[0].find(".//{http://www.loc.gov/MARC21/slim}controlfield[@tag='001']").text == "000100201"
-
+        assert (
+            records[0].find(".//{http://www.loc.gov/MARC21/slim}controlfield[@tag='001']").text
+            == "000100201"
+        )

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 from typing import Optional
 
 from reconciliator.config import StorageConfig
@@ -86,9 +85,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agents_name_norm ON authority_agents(name_normalized);"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agents_surname ON authority_agents(surname);"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_surname ON authority_agents(surname);")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS wikidata_authors (
@@ -191,4 +188,3 @@ def reset_all_storage(
         reset_database_file(storage_config.progress_db)
         with get_db_connection(storage_config.progress_db) as conn:
             init_progress_db(conn)
-

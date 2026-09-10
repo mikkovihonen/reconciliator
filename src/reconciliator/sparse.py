@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+
 from rank_bm25 import BM25Okapi
 
 from reconciliator.config import SparseRerankConfig
@@ -43,16 +44,8 @@ class SparseReranker:
         if not self.config.require_surname_match:
             return True
 
-        target_surnames = {
-            a.surname.lower()
-            for a in target_record.agents
-            if a.surname
-        }
-        candidate_surnames = {
-            a.surname.lower()
-            for a in candidate_record.agents
-            if a.surname
-        }
+        target_surnames = {a.surname.lower() for a in target_record.agents if a.surname}
+        candidate_surnames = {a.surname.lower() for a in candidate_record.agents if a.surname}
 
         # If either record has no author surnames, don't penalize
         if not target_surnames or not candidate_surnames:
@@ -117,10 +110,7 @@ class SparseReranker:
         )
 
         # High-confidence dense short-circuit
-        if (
-            self.config.short_circuit.enabled
-            and dense_score >= self.config.short_circuit.threshold
-        ):
+        if self.config.short_circuit.enabled and dense_score >= self.config.short_circuit.threshold:
             # Volume match is strictly enforced even on short-circuit!
             if not vol_match:
                 return ReconciliationMatch(
@@ -149,9 +139,9 @@ class SparseReranker:
                 accepted=True,
             )
 
-        # If sparse rerank is disabled
+        # If sparse rerank is disabled, lexical reranking and hard discriminators are bypassed
         if not self.config.enabled:
-            accepted = (dense_score >= acceptance_threshold) and vol_match and surname_match and year_valid
+            accepted = dense_score >= acceptance_threshold
             return ReconciliationMatch(
                 candidate_record_id=candidate_record.source_id,
                 source=candidate_record.source,
@@ -191,4 +181,3 @@ class SparseReranker:
             year_diff=year_diff,
             accepted=accepted,
         )
-

@@ -31,6 +31,15 @@ def test_priority_fallback() -> None:
     assert selected == [kanto_uri]
     assert suppressed == [viaf_uri]
 
+    # Orthogonal $0 (KANTO, VIAF) and $1 (WIKIDATA)
+    wikidata_uri = "http://www.wikidata.org/entity/Q273115"
+    selected_ortho, suppressed_ortho = vm.select_agent_uris([kanto_uri, viaf_uri, wikidata_uri])
+    assert kanto_uri in selected_ortho
+    assert wikidata_uri in selected_ortho
+    assert viaf_uri in suppressed_ortho
+    assert len(selected_ortho) == 2
+    assert len(suppressed_ortho) == 1
+
     # Only VIAF present -> VIAF chosen
     selected_viaf, suppressed_viaf = vm.select_agent_uris([viaf_uri])
     assert selected_viaf == [viaf_uri]
@@ -49,4 +58,3 @@ def test_all_links_policy() -> None:
     selected, suppressed = vm.select_agent_uris([kanto_uri, viaf_uri])
     assert set(selected) == {kanto_uri, viaf_uri}
     assert suppressed == []
-

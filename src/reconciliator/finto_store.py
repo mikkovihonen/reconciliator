@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 from typing import Optional
 
-from reconciliator.db import configure_wal_pragmas, get_db_connection
+from reconciliator.db import get_db_connection
 from reconciliator.models import FintoConcept, FintoMapping
 
 
@@ -50,14 +50,18 @@ def init_finto_db(conn: sqlite3.Connection) -> None:
                 target_field TEXT NOT NULL
             );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mappings_legacy_uri ON finto_mappings(legacy_uri);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_uri ON finto_mappings(legacy_uri);"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_lbl_fi ON finto_mappings(legacy_vocab, lower(legacy_label_fi));"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_lbl_sv ON finto_mappings(legacy_vocab, lower(legacy_label_sv));"
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mappings_target_uri ON finto_mappings(target_uri);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mappings_target_uri ON finto_mappings(target_uri);"
+        )
 
 
 class FintoStore:
@@ -188,7 +192,9 @@ class FintoStore:
     def find_legacy_mapping_by_uri(self, uri: str) -> Optional[FintoMapping]:
         """Look up migration mapping by legacy URI."""
         with self.get_connection() as conn:
-            row = conn.execute("SELECT * FROM finto_mappings WHERE legacy_uri = ? LIMIT 1;", (uri,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM finto_mappings WHERE legacy_uri = ? LIMIT 1;", (uri,)
+            ).fetchone()
             if not row:
                 return None
             return FintoMapping(
@@ -228,4 +234,3 @@ class FintoStore:
                 mapping_type=row["mapping_type"],
                 target_field=row["target_field"],
             )
-

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 from typing import Any, Optional
+
 import numpy as np
 
 from reconciliator.db import get_db_connection, init_authority_db
@@ -93,7 +94,8 @@ class AuthorityStore:
                     id_rows.append((rec_id, "urn", urn))
                 for oid in record.identifiers.other_ids:
                     id_rows.append((rec_id, "other", oid))
-                id_rows.append((rec_id, record.source, record.source_id))
+                id_type = "wikidata_qid" if record.source == "wikidata" else record.source
+                id_rows.append((rec_id, id_type, record.source_id))
 
                 conn.executemany(
                     "INSERT INTO authority_identifiers (record_id, id_type, id_value) VALUES (?, ?, ?);",
@@ -103,15 +105,17 @@ class AuthorityStore:
                 # Insert agents
                 agent_rows = []
                 for a in record.agents:
-                    agent_rows.append((
-                        rec_id,
-                        a.name,
-                        a.name.lower(),
-                        a.surname,
-                        a.role,
-                        json.dumps(a.uri_subfield_0, ensure_ascii=False),
-                        json.dumps(a.uri_subfield_1, ensure_ascii=False),
-                    ))
+                    agent_rows.append(
+                        (
+                            rec_id,
+                            a.name,
+                            a.name.lower(),
+                            a.surname,
+                            a.role,
+                            json.dumps(a.uri_subfield_0, ensure_ascii=False),
+                            json.dumps(a.uri_subfield_1, ensure_ascii=False),
+                        )
+                    )
                 conn.executemany(
                     """
                     INSERT INTO authority_agents (
@@ -123,7 +127,13 @@ class AuthorityStore:
 
                 # Insert FTS
                 agent_names_str = " ".join(a.name for a in record.agents)
-                subj_terms = " ".join(s.pref_label for s in record.subjects.topical + record.subjects.genre_form)
+                all_subjs = (
+                    record.subjects.topical
+                    + record.subjects.genre_form
+                    + record.subjects.geographic
+                    + record.subjects.medium_of_performance
+                )
+                subj_terms = " ".join(s.pref_label for s in all_subjs if s.pref_label)
                 conn.execute(
                     """
                     INSERT INTO authority_fts (record_id, title, uniform_title, author_names, publisher, subjects)
@@ -248,3 +258,54 @@ class AuthorityStore:
         """Persist FAISS index to disk with metadata."""
         self.indexer.save(metadata=metadata)
 
+    def insert_wikidata_authors(self, authors: list[dict[str, Any]]) -> None:
+        """Persist author entity metadata into wikidata_authors table."""
+        if not authors:
+            return
+        rows = [
+            (
+                a["qid"],
+                a.get("name", ""),
+                a.get("family_name"),
+                a.get("asteri_id"),
+                a.get("isni"),
+                a.get("viaf"),
+            )
+            for a in authors
+            if a.get("qid")
+        ]
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO wikidata_authors (qid, name, family_name, asteri_id, isni, viaf)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(qid) DO UPDATE SET
+                    name = excluded.name,
+                    family_name = excluded.family_name,
+                    asteri_id = excluded.asteri_id,
+                    isni = excluded.isni,
+                    viaf = excluded.viaf;
+                """,
+                rows,
+            )
+
+    def get_wikidata_authors_batch(self, qids: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch cached author entities from wikidata_authors by QIDs."""
+        if not qids:
+            return {}
+        results: dict[str, dict[str, Any]] = {}
+        with self.get_connection() as conn:
+            placeholders = ",".join("?" for _ in qids)
+            rows = conn.execute(
+                f"SELECT qid, name, family_name, asteri_id, isni, viaf FROM wikidata_authors WHERE qid IN ({placeholders});",
+                qids,
+            ).fetchall()
+            for r in rows:
+                results[r["qid"]] = {
+                    "name": r["name"],
+                    "family_name": r["family_name"],
+                    "asteri_id": r["asteri_id"],
+                    "isni": r["isni"],
+                    "viaf": r["viaf"],
+                }
+        return results

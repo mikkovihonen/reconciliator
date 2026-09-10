@@ -21,4 +21,3 @@ def test_configure_execution_threads() -> None:
 def test_get_optimal_batch_size() -> None:
     assert get_optimal_batch_size(32, "cpu") == 32
     assert get_optimal_batch_size(64, "cuda") == 64
-

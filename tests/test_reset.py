@@ -1,6 +1,7 @@
 """Unit tests for reset mechanics and schema reinitialization."""
 
 from pathlib import Path
+
 from reconciliator.config import StorageConfig
 from reconciliator.db import get_db_connection, init_authority_db, reset_all_storage
 
@@ -32,4 +33,3 @@ def test_reset_all_storage(tmp_path: Path) -> None:
     with get_db_connection(storage.authority_db) as conn:
         row = conn.execute("SELECT * FROM db_metadata WHERE key = 'test';").fetchone()
         assert row is None
-

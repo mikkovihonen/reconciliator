@@ -1,6 +1,7 @@
 """Unit tests for RecordTemplateEngine and custom bibliographic Jinja2 filters."""
 
 from pathlib import Path
+
 import pytest
 
 from reconciliator.models import (
@@ -45,10 +46,16 @@ def sample_record() -> BibliographicRecord:
         ],
         subjects=SubjectsContainer(
             topical=[
-                SubjectItem(uri="http://www.yso.fi/onto/yso/p2591", pref_label="lääkärit", vocabulary="yso"),
+                SubjectItem(
+                    uri="http://www.yso.fi/onto/yso/p2591", pref_label="lääkärit", vocabulary="yso"
+                ),
             ],
             genre_form=[
-                SubjectItem(uri="http://urn.fi/URN:NBN:fi:au:slm:s123", pref_label="historialliset romaanit", vocabulary="slm"),
+                SubjectItem(
+                    uri="http://urn.fi/URN:NBN:fi:au:slm:s123",
+                    pref_label="historialliset romaanit",
+                    vocabulary="slm",
+                ),
             ],
         ),
     )
@@ -116,4 +123,3 @@ def test_custom_filters() -> None:
     assert primary_code(classes) == "82-3"
     assert join_classifications(classes, scheme="ykl") == "84.2"
     assert collapse_ws("  Hello   \n\t world!  ") == "Hello world!"
-

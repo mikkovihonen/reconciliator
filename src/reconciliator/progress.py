@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import sqlite3
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from rich.table import Table
 
-from reconciliator.db import configure_wal_pragmas, get_db_connection
+from reconciliator.db import get_db_connection
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
 
 
@@ -135,13 +135,19 @@ class ProgressTracker:
         stage: Optional[str] = None,
         items_processed: Optional[int] = None,
         items_increment: int = 0,
+        items_total: Optional[int] = None,
         bytes_processed: Optional[int] = None,
+        bytes_total: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
         force: bool = False,
     ) -> None:
         """Update metrics and emit heartbeat if interval elapsed or forced."""
         if stage:
             self._current_stage = stage
+        if items_total is not None:
+            self._items_total = items_total
+        if bytes_total is not None:
+            self._bytes_total = bytes_total
         if items_processed is not None:
             self._items_processed = items_processed
         else:
@@ -289,7 +295,9 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
     table.add_column("Last Heartbeat", style="dim")
 
     for t in tasks:
-        status_style = "green" if t.status == "completed" else "yellow" if t.status == "running" else "red"
+        status_style = (
+            "green" if t.status == "completed" else "yellow" if t.status == "running" else "red"
+        )
         status_text = f"[{status_style}]{t.status.upper()}[/{status_style}]"
 
         total_str = f"{t.items_total:,}" if t.items_total is not None else "?"
@@ -313,4 +321,3 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
 def render_status_json(tasks: list[TaskProgress]) -> str:
     """Render task progress list as structured JSON."""
     return json.dumps([t.model_dump() for t in tasks], indent=2, ensure_ascii=False)
-

@@ -107,4 +107,3 @@ def normalize_melinda_id(raw_id: str) -> Optional[str]:
     if digits:
         return f"(FI-MELINDA){digits.zfill(9)}"
     return raw_id.strip()
-

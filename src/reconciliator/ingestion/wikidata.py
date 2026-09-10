@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import gzip
 import os
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Iterator, Optional
+
 import orjson
 
 from reconciliator.config import WikidataIngestConfig
@@ -15,7 +16,6 @@ from reconciliator.models import BibliographicRecord
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import AuthorityStore
-
 
 WIKIDATA_LANG_MAP = {
     "Q1412": "fin",
@@ -92,12 +92,17 @@ def parse_wikidata_entity(
         viaf = get_claim_snak_value(claims, "P214")
 
         author_cache[qid] = {
+            "qid": qid,
             "name": name_val,
             "family_name": fam_name,
             "asteri_id": asteri_id,
             "isni": isni,
             "viaf": viaf,
         }
+
+    # Human entities are authors, never bibliographic book records
+    if is_human:
+        return None
 
     # Check if bibliographic work / book
     instance_of = get_claim_qids(claims, "P31")
@@ -131,6 +136,29 @@ def parse_wikidata_entity(
     elif isinstance(p1680_val, str):
         subtitle = p1680_val
 
+    # Uniform Title
+    uniform_title = None
+    p1448_val = get_claim_snak_value(claims, "P1448")
+    if isinstance(p1448_val, dict):
+        uniform_title = p1448_val.get("text")
+    elif isinstance(p1448_val, str):
+        uniform_title = p1448_val
+    if not uniform_title:
+        p1705_val = get_claim_snak_value(claims, "P1705")
+        if isinstance(p1705_val, dict):
+            uniform_title = p1705_val.get("text")
+        elif isinstance(p1705_val, str):
+            uniform_title = p1705_val
+
+    # Variant Titles from aliases
+    variant_titles: list[str] = []
+    aliases = entity.get("aliases", {})
+    for lang in ("fi", "sv", "en"):
+        for alias_item in aliases.get(lang, []):
+            val = alias_item.get("value")
+            if val and val not in variant_titles and val != title:
+                variant_titles.append(val)
+
     # Publication Year
     year_str = None
     pub_time = get_claim_snak_value(claims, "P577")
@@ -149,13 +177,81 @@ def parse_wikidata_entity(
     publisher = None
     pub_qids = get_claim_qids(claims, "P123")
     if pub_qids:
-        publisher = pub_qids[0]  # Or label if cached
+        publisher = pub_qids[0]
 
-    # Language
+    # Publication Place
+    publication_place = None
+    place_qids = get_claim_qids(claims, "P291")
+    if place_qids:
+        publication_place = place_qids[0]
+
+    # Language & Original Language
     language = None
     lang_qids = get_claim_qids(claims, "P407")
     if lang_qids and lang_qids[0] in WIKIDATA_LANG_MAP:
         language = WIKIDATA_LANG_MAP[lang_qids[0]]
+
+    original_language = None
+    orig_lang_qids = get_claim_qids(claims, "P364")
+    if orig_lang_qids and orig_lang_qids[0] in WIKIDATA_LANG_MAP:
+        original_language = WIKIDATA_LANG_MAP[orig_lang_qids[0]]
+
+    # Edition
+    edition_val = None
+    p393 = get_claim_snak_value(claims, "P393")
+    if p393:
+        m = re.search(r"(\d+)", str(p393))
+        if m:
+            edition_val = int(m.group(1))
+
+    # Extent / Page Count
+    extent_val = None
+    p1104 = get_claim_snak_value(claims, "P1104")
+    if p1104:
+        if isinstance(p1104, dict) and "amount" in p1104:
+            m = re.search(r"(\d+)", str(p1104["amount"]))
+            if m:
+                extent_val = int(m.group(1))
+        elif isinstance(p1104, (int, str)):
+            m = re.search(r"(\d+)", str(p1104))
+            if m:
+                extent_val = int(m.group(1))
+
+    # Series & Series Numbering
+    series_title = None
+    series_numbering = None
+    series_qids = get_claim_qids(claims, "P179")
+    if series_qids:
+        series_title = series_qids[0]
+        p179_stmts = claims.get("P179", [])
+        if p179_stmts:
+            quals = p179_stmts[0].get("qualifiers", {})
+            p1545 = quals.get("P1545", [])
+            if p1545:
+                series_numbering = str(p1545[0].get("datavalue", {}).get("value", ""))
+
+    # Volume Designation
+    volume_str = None
+    p478 = get_claim_snak_value(claims, "P478")
+    if p478:
+        volume_str = str(p478)
+    elif series_numbering:
+        volume_str = series_numbering
+
+    # Classifications
+    classifications: list[dict[str, Any]] = []
+    for prop, scheme in (("P1190", "udc"), ("P1036", "ddc"), ("P1149", "lcc")):
+        for stmt in claims.get(prop, []):
+            code_val = stmt.get("mainsnak", {}).get("datavalue", {}).get("value")
+            if code_val:
+                is_pref = stmt.get("rank") == "preferred" or len(classifications) == 0
+                classifications.append(
+                    {
+                        "code": str(code_val),
+                        "scheme": scheme,
+                        "is_primary": is_pref,
+                    }
+                )
 
     # Identifiers
     isbns: list[str] = []
@@ -200,13 +296,15 @@ def parse_wikidata_entity(
 
             u1 = [f"http://www.wikidata.org/entity/{a_qid}"]
 
-            agents.append({
-                "name": name,
-                "is_personal": True,
-                "role": role,
-                "uri_subfield_0": u0,
-                "uri_subfield_1": u1,
-            })
+            agents.append(
+                {
+                    "name": name,
+                    "is_personal": True,
+                    "role": role,
+                    "uri_subfield_0": u0,
+                    "uri_subfield_1": u1,
+                }
+            )
 
     # Subjects
     subjects: dict[str, list[dict[str, Any]]] = {
@@ -216,18 +314,40 @@ def parse_wikidata_entity(
         "medium_of_performance": [],
     }
     for s_qid in get_claim_qids(claims, "P921"):
-        subjects["topical"].append({"heading": s_qid, "field": "650", "vocabulary": "yso", "uri": None})
+        subjects["topical"].append(
+            {"heading": s_qid, "field": "650", "vocabulary": "yso", "uri": None}
+        )
     for g_qid in get_claim_qids(claims, "P136"):
-        subjects["genre_form"].append({"heading": g_qid, "field": "655", "vocabulary": "slm", "uri": None})
+        subjects["genre_form"].append(
+            {"heading": g_qid, "field": "655", "vocabulary": "slm", "uri": None}
+        )
+    for geo_qid in get_claim_qids(claims, "P840"):
+        subjects["geographic"].append(
+            {"heading": geo_qid, "field": "651", "vocabulary": "yso", "uri": None}
+        )
+    for mus_qid in get_claim_qids(claims, "P870"):
+        subjects["medium_of_performance"].append(
+            {"heading": mus_qid, "field": "382", "vocabulary": "seko", "uri": None}
+        )
 
     return {
         "source_id": qid,
         "source": "wikidata",
         "title": title,
         "subtitle": subtitle,
+        "uniform_title": uniform_title,
+        "variant_titles": variant_titles,
         "publication_year": year_str,
         "publisher": publisher,
+        "publication_place": publication_place,
         "language": language,
+        "original_language": original_language,
+        "edition": edition_val,
+        "extent": extent_val,
+        "series_title": series_title,
+        "series_numbering": series_numbering,
+        "volume_designation": volume_str,
+        "classifications": classifications,
         "identifiers": {
             "isbn": isbns,
             "issn": issns,
@@ -241,9 +361,10 @@ def parse_wikidata_entity(
 
 def stream_wikidata_dump(
     dump_path: Path | str,
+    store: Optional[AuthorityStore] = None,
     tracker: Optional[ProgressTracker] = None,
 ) -> Iterator[dict[str, Any]]:
-    """Stream Wikidata gzipped JSON dump line by line in constant memory."""
+    """Stream Wikidata gzipped JSON dump line by line in constant memory with SQLite author persistence."""
     path = Path(dump_path)
     if not path.exists():
         raise FileNotFoundError(f"Wikidata dump not found: {path}")
@@ -253,6 +374,7 @@ def stream_wikidata_dump(
         tracker.start_task(stage="streaming_wikidata", bytes_total=total_bytes)
 
     author_cache: dict[str, dict[str, Any]] = {}
+    author_batch: list[dict[str, Any]] = []
 
     with gzip.open(path, "rb") as f:
         for line in f:
@@ -269,16 +391,31 @@ def stream_wikidata_dump(
             except Exception:
                 continue
 
+            qid = entity.get("id", "")
+            prev_cache_len = len(author_cache)
             parsed = parse_wikidata_entity(entity, author_cache)
+
+            # Check if an author was cached
+            if len(author_cache) > prev_cache_len and qid in author_cache:
+                author_batch.append(author_cache[qid])
+                if len(author_batch) >= 500:
+                    if store is not None:
+                        store.insert_wikidata_authors(author_batch)
+                    author_batch.clear()
+
             if parsed:
                 yield parsed
 
-            if tracker and hasattr(f, "fileobj") and f.fileobj:
-                curr_bytes = f.fileobj.tell()
+            if tracker and hasattr(f, "fileobj") and f.fileobj and hasattr(f.fileobj, "tell"):
+                curr_bytes = int(getattr(f.fileobj, "tell")())
                 tracker.update_progress(
                     bytes_processed=curr_bytes,
                     items_increment=1,
                 )
+
+        if author_batch and store is not None:
+            store.insert_wikidata_authors(author_batch)
+            author_batch.clear()
 
 
 def ingest_wikidata_pipeline(
@@ -292,7 +429,7 @@ def ingest_wikidata_pipeline(
     batch: list[BibliographicRecord] = []
     total_ingested = 0
 
-    for raw_data in stream_wikidata_dump(config.dump_path, tracker=tracker):
+    for raw_data in stream_wikidata_dump(config.dump_path, store=store, tracker=tracker):
         record = normalizer.normalize(raw_data)
         batch.append(record)
 
@@ -323,4 +460,3 @@ def ingest_wikidata_pipeline(
         tracker.complete_task(metadata={"records_ingested": total_ingested})
 
     return total_ingested
-

@@ -1,6 +1,7 @@
 """Unit tests for FintoFolder legacy thesauri folding rules and modern ontology mapping."""
 
 from pathlib import Path
+
 import pytest
 
 from reconciliator.finto_folding import FintoFolder
@@ -110,3 +111,28 @@ def test_fold_musa_to_seko(populated_finto_store: FintoStore) -> None:
     assert t_vocab == "seko"
     assert t_uri == "http://urn.fi/URN:NBN:fi:au:seko:s789"
 
+
+def test_fold_sample_legacy_thesauri_fixture(populated_finto_store: FintoStore) -> None:
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import parse_marc_record_elem
+    from reconciliator.normalizers.record import RecordNormalizer
+
+    fixture_path = Path(__file__).parent / "fixtures" / "sample_legacy_thesauri.xml"
+    assert fixture_path.exists()
+
+    tree = etree.parse(str(fixture_path))
+    root = tree.getroot()
+    records = root.findall(".//record") or root.findall(".//{http://www.loc.gov/MARC21/slim}record")
+    assert len(records) == 2
+
+    folder = FintoFolder(populated_finto_store)
+    normalizer = RecordNormalizer(finto_folder=folder)
+
+    # Record 1: has ysa lääkärit and kaunokki historialliset romaanit
+    raw1 = parse_marc_record_elem(records[0], source="target")
+    norm1 = normalizer.normalize(raw1)
+    topical_uris = [s.uri for s in norm1.subjects.topical]
+    assert "http://www.yso.fi/onto/yso/p2591" in topical_uris
+    genre_uris = [s.uri for s in norm1.subjects.genre_form]
+    assert "http://urn.fi/URN:NBN:fi:au:slm:s123" in genre_uris

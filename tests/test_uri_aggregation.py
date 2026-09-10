@@ -58,4 +58,3 @@ def test_multi_candidate_uri_aggregation() -> None:
     assert isni_uri in uri_strings
     assert wikidata_uri in uri_strings
     assert len(agent_uris) == 3
-

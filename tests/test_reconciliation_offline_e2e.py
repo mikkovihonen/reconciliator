@@ -2,11 +2,11 @@
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from lxml import etree
+
 import numpy as np
+from lxml import etree
 
 from reconciliator.cli import ingest_finto_cmd, ingest_melinda_cmd, reconcile_cmd, reset_cmd
-from reconciliator.config import load_config
 from reconciliator.loaders.marcxml import _get_subfields
 
 
@@ -119,7 +119,9 @@ telemetry:
 
     # Record 1 (TARGET-001) checks:
     rec1 = records[0]
-    f100 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='100']") or rec1.findall(".//datafield[@tag='100']")
+    f100 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='100']") or rec1.findall(
+        ".//datafield[@tag='100']"
+    )
     assert len(f100) > 0
     u0_list = _get_subfields(f100[0], "0")
     # Asteri KANTO URN injected
@@ -127,14 +129,18 @@ telemetry:
 
     # Subject checks for Rec 1:
     # 650 lääkärit folded to YSO
-    f650 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']") or rec1.findall(".//datafield[@tag='650']")
+    f650 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']") or rec1.findall(
+        ".//datafield[@tag='650']"
+    )
     f650_uris = []
     for f in f650:
         f650_uris.extend(_get_subfields(f, "0"))
     assert "http://www.yso.fi/onto/yso/p2591" in f650_uris
 
     # 650 kaunokki 'historialliset romaanit' folded to 655 SLM
-    f655 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='655']") or rec1.findall(".//datafield[@tag='655']")
+    f655 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='655']") or rec1.findall(
+        ".//datafield[@tag='655']"
+    )
     assert len(f655) > 0
     f655_uris = _get_subfields(f655[0], "0")
     assert "http://urn.fi/URN:NBN:fi:au:slm:s123" in f655_uris
@@ -152,5 +158,6 @@ telemetry:
 
     agent_lines = agent_detailed_tsv.read_text(encoding="utf-8").splitlines()
     assert len(agent_lines) >= 2  # Header + rows
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in agent_detailed_tsv.read_text(encoding="utf-8")
-
+    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in agent_detailed_tsv.read_text(
+        encoding="utf-8"
+    )

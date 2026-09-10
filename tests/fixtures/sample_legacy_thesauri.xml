@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+  <record>
+    <controlfield tag="001">LEGACY-001</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Virtanen, Matti</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Lääkärin tarina</subfield>
+    </datafield>
+    <datafield tag="260" ind1=" " ind2=" ">
+      <subfield code="a">Helsinki</subfield>
+      <subfield code="c">1950</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2=" ">
+      <subfield code="a">lääkärit</subfield>
+      <subfield code="2">ysa</subfield>
+      <subfield code="0">http://www.yso.fi/onto/ysa/Y1002</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2=" ">
+      <subfield code="a">historialliset romaanit</subfield>
+      <subfield code="2">kaunokki</subfield>
+      <subfield code="0">http://urn.fi/URN:NBN:fi:au:kaunokki:k99</subfield>
+    </datafield>
+  </record>
+  <record>
+    <controlfield tag="001">LEGACY-002</controlfield>
+    <datafield tag="100" ind1="1" ind2=" ">
+      <subfield code="a">Lindqvist, Johan</subfield>
+    </datafield>
+    <datafield tag="245" ind1="1" ind2="0">
+      <subfield code="a">Violin och musik</subfield>
+    </datafield>
+    <datafield tag="260" ind1=" " ind2=" ">
+      <subfield code="a">Helsingfors</subfield>
+      <subfield code="c">1965</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2=" ">
+      <subfield code="a">viulu</subfield>
+      <subfield code="2">musa</subfield>
+      <subfield code="0">http://www.yso.fi/onto/musa/m100</subfield>
+    </datafield>
+    <datafield tag="650" ind1=" " ind2=" ">
+      <subfield code="a">läkare</subfield>
+      <subfield code="2">allars</subfield>
+    </datafield>
+  </record>
+</collection>

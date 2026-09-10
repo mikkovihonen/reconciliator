@@ -34,7 +34,7 @@ ingest_finto:
 ingest_melinda:
   source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
   input_path: null      # Local XML file path when source_type is "file"
-  oai_url: "https://api.melinda.kansalliskirjasto.fi/oai/request"
+  oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
   metadata_prefix: "marc21"
   set_spec: null
   workers: 4

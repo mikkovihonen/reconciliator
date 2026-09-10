@@ -1,7 +1,9 @@
 """Unit tests for configuration loading and Pydantic validation."""
 
 from pathlib import Path
+
 import pytest
+
 from reconciliator.config import (
     AppConfig,
     EmbeddingConfig,
@@ -49,4 +51,3 @@ def test_short_circuit_threshold_range() -> None:
 def test_embedding_batch_size_positive() -> None:
     with pytest.raises(ValueError, match="batch_size must be a positive integer"):
         EmbeddingConfig(batch_size=0)
-

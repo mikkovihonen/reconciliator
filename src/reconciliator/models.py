@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from typing import Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ClassificationItem(BaseModel):
@@ -26,11 +27,13 @@ class RecordIdentifiers(BaseModel):
 
 
 class Agent(BaseModel):
-    """Bibliographic agent (person or organization) associated with a record."""
+    """Normalized personal or corporate agent."""
 
     name: str
     surname: Optional[str] = None
     role: Optional[str] = None  # e.g. "aut", "edt", "trl"
+    field_tag: Optional[str] = None  # e.g. "100", "700", "110", "710", "111", "711"
+    is_personal: bool = True
     uri_subfield_0: list[str] = Field(default_factory=list)  # KANTO / ISNI / VIAF
     uri_subfield_1: list[str] = Field(default_factory=list)  # Wikidata QID
 
@@ -41,6 +44,12 @@ class SubjectItem(BaseModel):
     uri: str
     pref_label: str
     vocabulary: str  # e.g. "yso", "kauno", "muso", "slm", "seko"
+    source_field: Optional[str] = None
+    target_field: Optional[str] = None
+    source_vocab: Optional[str] = None
+    source_uri: Optional[str] = None
+    source_heading: Optional[str] = None
+    mapping_type: Optional[str] = None
 
 
 class SubjectsContainer(BaseModel):
@@ -57,7 +66,7 @@ class BibliographicRecord(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    source_id: str = Field(..., alias="external_id")
+    source_id: str = Field(..., validation_alias=AliasChoices("source_id", "external_id"))
     source: Literal["melinda", "wikidata", "target"]
     title: str
     subtitle: Optional[str] = None
@@ -88,6 +97,7 @@ class AgentURI(BaseModel):
     subfield_code: str  # "0" or "1"
     source_record_id: str
     source: str
+    alignment_score: float = 100.0
 
 
 class FintoConcept(BaseModel):
@@ -154,4 +164,3 @@ class TaskProgress(BaseModel):
     last_heartbeat: str = ""
     error_message: Optional[str] = None
     metadata_json: Optional[str] = None
-

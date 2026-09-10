@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader, Template
@@ -35,9 +35,9 @@ def join_surnames(agents: list[Agent | dict[str, Any]], delimiter: str = ", ") -
             if val:
                 surnames.append(val)
         elif isinstance(a, dict):
-            val = a.get("surname") or a.get("name")
-            if val:
-                surnames.append(str(val))
+            dict_val = a.get("surname") or a.get("name")
+            if dict_val:
+                surnames.append(str(dict_val))
     return delimiter.join(surnames)
 
 
@@ -103,7 +103,13 @@ class RecordTemplateEngine:
         self.template_path = Path(template_path)
 
         if not self.template_path.exists():
-            raise FileNotFoundError(f"Template file not found at: {self.template_path}")
+            pkg_default = Path(__file__).parent / "templates" / self.template_path.name
+            if pkg_default.exists():
+                self.template_path = pkg_default
+            elif (Path(__file__).parent.parent / self.template_path).exists():
+                self.template_path = Path(__file__).parent.parent / self.template_path
+            else:
+                raise FileNotFoundError(f"Template file not found at: {self.template_path}")
 
         self._template_content = self.template_path.read_text(encoding="utf-8")
         self.template_hash = hashlib.sha256(self._template_content.encode("utf-8")).hexdigest()
@@ -139,4 +145,3 @@ class RecordTemplateEngine:
 
         rendered = self._template.render(**context)
         return collapse_ws(rendered)
-

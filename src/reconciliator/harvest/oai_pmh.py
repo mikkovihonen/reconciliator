@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Iterator, Optional
+from typing import Iterator, Optional
+
 from lxml import etree
 
 try:
-    import httpx2 as httpx  # type: ignore[import-untyped]
+    import httpx2 as httpx
 except ImportError:
     import httpx  # type: ignore[no-redef]
 
 from reconciliator.progress import ProgressTracker
-
 
 OAI_NS = {
     "oai": "http://www.openarchives.org/OAI/2.0/",
@@ -50,7 +50,7 @@ class OAIPMHHarvester:
 
     def __init__(
         self,
-        endpoint_url: str = "https://api.melinda.kansalliskirjasto.fi/oai/request",
+        endpoint_url: str = "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib",
         metadata_prefix: str = "marc21",
         set_spec: Optional[str] = None,
         timeout: float = 60.0,
@@ -124,4 +124,3 @@ class OAIPMHHarvester:
                     break
         finally:
             client.close()
-

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
 from rapidfuzz import fuzz
 
 from reconciliator.models import Agent, AgentURI, BibliographicRecord
@@ -48,6 +47,7 @@ class AgentAligner:
                                         subfield_code="0",
                                         source_record_id=cand_rec.source_id,
                                         source=cand_rec.source,
+                                        alignment_score=float(score),
                                     )
                                 )
 
@@ -63,8 +63,8 @@ class AgentAligner:
                                         subfield_code="1",
                                         source_record_id=cand_rec.source_id,
                                         source=cand_rec.source,
+                                        alignment_score=float(score),
                                     )
                                 )
 
         return discovered
-

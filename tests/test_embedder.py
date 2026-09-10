@@ -1,6 +1,7 @@
 """Unit tests for SentenceEmbedder with dynamic dimension discovery and metadata verification."""
 
 from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
 
@@ -18,7 +19,9 @@ def mock_sentence_transformer() -> MagicMock:
 
 
 def test_embedder_dimension_discovery(mock_sentence_transformer: MagicMock) -> None:
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer):
+    with patch(
+        "reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer
+    ):
         config = EmbeddingConfig(device="cpu")
         embedder = SentenceEmbedder(config)
 
@@ -37,10 +40,11 @@ def test_embedder_dimension_discovery(mock_sentence_transformer: MagicMock) -> N
 
 
 def test_embedder_empty_list(mock_sentence_transformer: MagicMock) -> None:
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer):
+    with patch(
+        "reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer
+    ):
         config = EmbeddingConfig(device="cpu")
         embedder = SentenceEmbedder(config)
 
         res = embedder.embed_texts([])
         assert res.shape == (0, 384)
-

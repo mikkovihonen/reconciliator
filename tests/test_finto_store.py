@@ -1,6 +1,7 @@
 """Unit tests for FintoStore and SQLite indexed queries."""
 
 from pathlib import Path
+
 import pytest
 
 from reconciliator.finto_store import FintoStore
@@ -66,4 +67,3 @@ def test_insert_and_query_mappings(finto_store: FintoStore) -> None:
     res_lbl = finto_store.find_legacy_mapping_by_label("lääkärit", legacy_vocab="ysa", lang="fi")
     assert res_lbl is not None
     assert res_lbl.target_vocab == "yso"
-

@@ -1,6 +1,7 @@
 """Unit tests for dual decoupled TSV report generators and TSV hygiene."""
 
 from pathlib import Path
+
 from reconciliator.config import AppConfig
 from reconciliator.reports import (
     AGENT_TSV_COLUMNS,
@@ -67,10 +68,29 @@ def test_agent_reports(tmp_path: Path) -> None:
     sum_lines = sum_path.read_text(encoding="utf-8").splitlines()
     assert sum_lines[0].split("\t") == SUMMARY_COLUMNS
 
+    sections_found = set()
+    for line in sum_lines[1:]:
+        parts = line.split("\t")
+        assert len(parts) == 5
+        sections_found.add(parts[0])
+
+    expected_agent_sections = {
+        "execution",
+        "records",
+        "fields",
+        "uris",
+        "tiers",
+        "vocabularies",
+        "sources",
+        "quality",
+    }
+    assert expected_agent_sections.issubset(sections_found)
+
 
 def test_subject_reports(tmp_path: Path) -> None:
     cfg = AppConfig()
     reporter = ReportGenerator(cfg)
+    reporter.total_records = 1
 
     reporter.add_subject_row(
         SubjectReportRow(
@@ -106,3 +126,19 @@ def test_subject_reports(tmp_path: Path) -> None:
     sum_lines = sum_path.read_text(encoding="utf-8").splitlines()
     assert sum_lines[0].split("\t") == SUMMARY_COLUMNS
 
+    sections_found = set()
+    for line in sum_lines[1:]:
+        parts = line.split("\t")
+        assert len(parts) == 5
+        sections_found.add(parts[0])
+
+    expected_subject_sections = {
+        "execution",
+        "records",
+        "headings",
+        "mapping_types",
+        "source_thesauri",
+        "target_ontologies",
+        "tag_migrations",
+    }
+    assert expected_subject_sections.issubset(sections_found)

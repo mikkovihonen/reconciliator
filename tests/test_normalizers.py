@@ -1,19 +1,16 @@
 """Unit tests for identifier, agent, and full record normalizers."""
 
-from reconciliator.normalizers.agent import extract_surname, normalize_agent_name, strip_agent_dates
+from reconciliator.normalizers.agent import normalize_agent_name
 from reconciliator.normalizers.identifiers import (
     isbn_10_to_13,
     normalize_isbn,
     normalize_issn,
     normalize_melinda_id,
     normalize_urn,
-    validate_isbn_13,
 )
 from reconciliator.normalizers.record import (
     clean_publisher,
     clean_title,
-    extract_edition,
-    extract_extent,
     extract_year,
     normalize_classifications,
     normalize_volume,
@@ -91,4 +88,3 @@ def test_classifications_normalization() -> None:
     assert classes[0].code == "82-3" and not classes[0].is_primary
     assert classes[1].code == "84.2" and classes[1].is_primary
     assert classes[2].code == "839.73" and not classes[2].is_primary
-

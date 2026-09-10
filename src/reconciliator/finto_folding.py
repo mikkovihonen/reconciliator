@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Optional
 
 from reconciliator.finto_store import FintoStore
-from reconciliator.models import FintoConcept, FintoMapping, SubjectItem
-
 
 LEGACY_TO_MODERN_DEFAULTS = {
     "ysa": "yso",
@@ -69,7 +67,13 @@ class FintoFolder:
                 # Enforce: 655 is SLM
                 if target_field == "655" and mapping.target_vocab == "kauno":
                     mapping.target_vocab = "slm"
-                return target_field, mapping.target_vocab, mapping.target_uri, pref_label, mapping.mapping_type
+                return (
+                    target_field,
+                    mapping.target_vocab,
+                    mapping.target_uri,
+                    pref_label,
+                    mapping.mapping_type,
+                )
 
         # 2. Check legacy label in finto_mappings
         mapping = self.finto_store.find_legacy_mapping_by_label(
@@ -87,7 +91,13 @@ class FintoFolder:
             target_field = mapping.target_field or source_field
             if target_field == "655" and mapping.target_vocab == "kauno":
                 mapping.target_vocab = "slm"
-            return target_field, mapping.target_vocab, mapping.target_uri, pref_label, mapping.mapping_type
+            return (
+                target_field,
+                mapping.target_vocab,
+                mapping.target_uri,
+                pref_label,
+                mapping.mapping_type,
+            )
 
         # 3. Direct lookup in finto_concepts
         candidate_vocabs: list[str] = []
@@ -125,7 +135,13 @@ class FintoFolder:
                 elif concept.vocabulary == "seko":
                     target_field = "382"
 
-                return target_field, concept.vocabulary, concept.uri, pref_label, "pref_label_lookup"
+                return (
+                    target_field,
+                    concept.vocabulary,
+                    concept.uri,
+                    pref_label,
+                    "pref_label_lookup",
+                )
 
         # 4. Fallback if not found: keep as is
         default_target_vocab = LEGACY_TO_MODERN_DEFAULTS.get(norm_vocab, norm_vocab)
@@ -135,4 +151,3 @@ class FintoFolder:
             default_target_vocab = "seko"
 
         return source_field, default_target_vocab, source_uri or "", clean_heading, "none"
-

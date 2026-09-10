@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Iterator, Optional
-from lxml import etree
 
+from lxml import etree
 
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}
 
@@ -35,7 +35,7 @@ def _get_datafields(record: etree._Element, tag: str) -> list[etree._Element]:
     fields = record.findall(f"marc:datafield[@tag='{tag}']", MARC_NS)
     if not fields:
         fields = record.findall(f"datafield[@tag='{tag}']")
-    return fields
+    return list(fields)
 
 
 def _get_controlfield(record: etree._Element, tag: str) -> Optional[str]:
@@ -184,12 +184,12 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
     other_ids: list[str] = []
     for f in _get_datafields(record_elem, "024"):
         ind2 = _get_subfield(f, "2") or ""
-        val = _get_subfield(f, "a")
-        if val:
-            if ind2.lower() == "urn" or val.lower().startswith("urn:"):
-                urns.append(val)
+        val_024 = _get_subfield(f, "a")
+        if val_024:
+            if ind2.lower() == "urn" or val_024.lower().startswith("urn:"):
+                urns.append(val_024)
             else:
-                other_ids.append(val)
+                other_ids.append(val_024)
 
     for f in _get_datafields(record_elem, "856"):
         u = _get_subfield(f, "u")
@@ -197,11 +197,11 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
             urns.append(u)
 
     for f in _get_datafields(record_elem, "035"):
-        val = _get_subfield(f, "a")
-        if val:
-            other_ids.append(val)
+        val_035 = _get_subfield(f, "a")
+        if val_035:
+            other_ids.append(val_035)
             if not source_id:
-                source_id = val
+                source_id = val_035
 
     # Agents
     agents: list[dict[str, Any]] = []
@@ -212,13 +212,16 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
                 role = _get_subfield(f, "4") or _get_subfield(f, "e")
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
-                agents.append({
-                    "name": name,
-                    "is_personal": True,
-                    "role": role,
-                    "uri_subfield_0": u0,
-                    "uri_subfield_1": u1,
-                })
+                agents.append(
+                    {
+                        "field_tag": tag,
+                        "name": name,
+                        "is_personal": True,
+                        "role": role,
+                        "uri_subfield_0": u0,
+                        "uri_subfield_1": u1,
+                    }
+                )
 
     for tag in ("110", "710", "111", "711"):
         for f in _get_datafields(record_elem, tag):
@@ -227,13 +230,16 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
                 role = _get_subfield(f, "4") or _get_subfield(f, "e")
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
-                agents.append({
-                    "name": name,
-                    "is_personal": False,
-                    "role": role,
-                    "uri_subfield_0": u0,
-                    "uri_subfield_1": u1,
-                })
+                agents.append(
+                    {
+                        "field_tag": tag,
+                        "name": name,
+                        "is_personal": False,
+                        "role": role,
+                        "uri_subfield_0": u0,
+                        "uri_subfield_1": u1,
+                    }
+                )
 
     # Subjects
     subjects: dict[str, list[dict[str, Any]]] = {
@@ -248,48 +254,56 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
         if heading:
             vocab = _get_subfield(f, "2")
             uri = _get_subfield(f, "0")
-            subjects["topical"].append({
-                "heading": heading,
-                "field": "650",
-                "vocabulary": vocab,
-                "uri": uri,
-            })
+            subjects["topical"].append(
+                {
+                    "heading": heading,
+                    "field": "650",
+                    "vocabulary": vocab,
+                    "uri": uri,
+                }
+            )
 
     for f in _get_datafields(record_elem, "655"):
         heading = _get_subfield(f, "a")
         if heading:
             vocab = _get_subfield(f, "2")
             uri = _get_subfield(f, "0")
-            subjects["genre_form"].append({
-                "heading": heading,
-                "field": "655",
-                "vocabulary": vocab,
-                "uri": uri,
-            })
+            subjects["genre_form"].append(
+                {
+                    "heading": heading,
+                    "field": "655",
+                    "vocabulary": vocab,
+                    "uri": uri,
+                }
+            )
 
     for f in _get_datafields(record_elem, "651"):
         heading = _get_subfield(f, "a")
         if heading:
             vocab = _get_subfield(f, "2")
             uri = _get_subfield(f, "0")
-            subjects["geographic"].append({
-                "heading": heading,
-                "field": "651",
-                "vocabulary": vocab,
-                "uri": uri,
-            })
+            subjects["geographic"].append(
+                {
+                    "heading": heading,
+                    "field": "651",
+                    "vocabulary": vocab,
+                    "uri": uri,
+                }
+            )
 
     for f in _get_datafields(record_elem, "382"):
         heading = _get_subfield(f, "a")
         if heading:
             vocab = _get_subfield(f, "2")
             uri = _get_subfield(f, "0")
-            subjects["medium_of_performance"].append({
-                "heading": heading,
-                "field": "382",
-                "vocabulary": vocab,
-                "uri": uri,
-            })
+            subjects["medium_of_performance"].append(
+                {
+                    "heading": heading,
+                    "field": "382",
+                    "vocabulary": vocab,
+                    "uri": uri,
+                }
+            )
 
     vol_desig = " ".join(vol_designations) if vol_designations else None
 
@@ -346,4 +360,3 @@ def iter_marcxml_records(file_path: Path | str, source: str = "target") -> Itera
         while elem.getprevious() is not None:
             del elem.getparent()[0]
     del context
-

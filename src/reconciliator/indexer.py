@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Optional
+
 import faiss
 import numpy as np
 
@@ -27,7 +28,7 @@ class FAISSIndexManager:
         if self.index_path.exists():
             self.load()
         else:
-            self.index: faiss.IndexFlatIP = faiss.IndexFlatIP(dimension)
+            self.index: faiss.Index = faiss.IndexFlatIP(dimension)
 
     @property
     def total_vectors(self) -> int:
@@ -52,9 +53,7 @@ class FAISSIndexManager:
         self.index.add(vectors)
         return list(range(start_id, self.index.ntotal))
 
-    def search(
-        self, query_vectors: np.ndarray, top_k: int = 50
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def search(self, query_vectors: np.ndarray, top_k: int = 50) -> tuple[np.ndarray, np.ndarray]:
         """Search top-k nearest neighbors for query vectors."""
         if query_vectors.ndim == 1:
             query_vectors = np.expand_dims(query_vectors, axis=0)
@@ -123,4 +122,3 @@ class FAISSIndexManager:
                     f"current template has '{expected_template_hash[:8]}...'. "
                     f"Set embedding.force_template = true to override."
                 )
-

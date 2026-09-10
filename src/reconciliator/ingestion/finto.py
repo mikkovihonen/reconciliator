@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Optional
 
 from reconciliator.finto_store import FintoStore
@@ -29,15 +29,33 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
             body = blocks[i + 1]
 
             # Detect vocabulary from URI
-            vocab = "yso"
-            if "/kauno/" in uri:
-                vocab = "kauno"
-            elif "/muso/" in uri:
-                vocab = "muso"
-            elif ":slm:" in uri or "/slm/" in uri:
-                vocab = "slm"
-            elif ":seko:" in uri or "/seko/" in uri:
-                vocab = "seko"
+            def _detect_finto_vocab(u: str) -> str:
+                lu = u.lower()
+                if "/kauno/" in lu or ":kauno:" in lu:
+                    return "kauno"
+                if "/kaunokki/" in lu or ":kaunokki:" in lu:
+                    return "kaunokki"
+                if "/muso/" in lu or ":muso:" in lu:
+                    return "muso"
+                if "/musa/" in lu or ":musa:" in lu:
+                    return "musa"
+                if "/slm/" in lu or ":slm:" in lu:
+                    return "slm"
+                if "/seko/" in lu or ":seko:" in lu:
+                    return "seko"
+                if "/ysa/" in lu or ":ysa:" in lu:
+                    return "ysa"
+                if "/allars/" in lu or ":allars:" in lu:
+                    return "allars"
+                if "/cilla/" in lu or ":cilla:" in lu:
+                    return "cilla"
+                if "/bella/" in lu or ":bella:" in lu:
+                    return "bella"
+                if "/yso/" in lu or ":yso:" in lu:
+                    return "yso"
+                return "yso"
+
+            vocab = _detect_finto_vocab(uri)
 
             pref_fi = None
             pref_sv = None
@@ -75,17 +93,9 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
 
             # Check mappings
             # skos:exactMatch <http://www.yso.fi/onto/yso/p1234>
-            matches = re.findall(r'(?:skos:exactMatch|dct:isReplacedBy)\s+<([^>]+)>', body)
+            matches = re.findall(r"(?:skos:exactMatch|dct:isReplacedBy)\s+<([^>]+)>", body)
             for target_uri in matches:
-                target_v = "yso"
-                if "/kauno/" in target_uri:
-                    target_v = "kauno"
-                elif "/muso/" in target_uri:
-                    target_v = "muso"
-                elif ":slm:" in target_uri or "/slm/" in target_uri:
-                    target_v = "slm"
-                elif ":seko:" in target_uri or "/seko/" in target_uri:
-                    target_v = "seko"
+                target_v = _detect_finto_vocab(target_uri)
 
                 t_field = "650"
                 if target_v == "slm":
@@ -140,4 +150,3 @@ def ingest_finto_file(
         )
 
     return len(concepts), len(mappings)
-

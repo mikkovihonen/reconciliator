@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+
 import pytest
 
 from reconciliator.progress import (
@@ -68,4 +69,3 @@ def test_table_and_json_rendering(progress_db: Path) -> None:
     assert len(data) == 1
     assert data[0]["task_id"] == "task-2"
     assert data[0]["items_processed"] == 250
-

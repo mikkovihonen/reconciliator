@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Optional
+
+import typer
 from lxml import etree
 from rich.console import Console
-import typer
 
 from reconciliator.config import load_config
 from reconciliator.db import reset_all_storage
@@ -20,7 +20,7 @@ from reconciliator.ingestion.melinda import ingest_melinda_pipeline
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
 from reconciliator.loaders.marcxml import MARC_NS, parse_marc_record_elem
 from reconciliator.matcher import ReconciliationEngine
-from reconciliator.normalizers.agent import normalize_agent_name
+from reconciliator.models import TaskProgress
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import (
     ProgressTracker,
@@ -34,15 +34,20 @@ from reconciliator.repository import AuthorityStore
 from reconciliator.vocabularies import detect_vocabulary
 from reconciliator.xml_enricher import MARCXMLEnricher
 
-
-app = typer.Typer(help="Reconciliator: High-Performance Finnish Bibliographic Authority Reconciliation Engine")
+app = typer.Typer(
+    help="Reconciliator: High-Performance Finnish Bibliographic Authority Reconciliation Engine"
+)
 console = Console()
 
 
 @app.command("reset")
 def reset_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
-    authority: bool = typer.Option(False, "--authority", help="Reset authority.db and FAISS index only"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    authority: bool = typer.Option(
+        False, "--authority", help="Reset authority.db and FAISS index only"
+    ),
     finto: bool = typer.Option(False, "--finto", help="Reset finto.db only"),
     progress: bool = typer.Option(False, "--progress", help="Reset progress.db only"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
@@ -77,17 +82,23 @@ def reset_cmd(
 
 @app.command("status")
 def status_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
-    task_id: Optional[str] = typer.Option(None, "--task-id", help="Query status of a specific task ID"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    task_id: Optional[str] = typer.Option(
+        None, "--task-id", help="Query status of a specific task ID"
+    ),
     watch: bool = typer.Option(False, "--watch", "-w", help="Continuous live watch monitor"),
-    interval: float = typer.Option(1.0, "--interval", "-i", help="Watch polling interval in seconds"),
+    interval: float = typer.Option(
+        1.0, "--interval", "-i", help="Watch polling interval in seconds"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit output as JSON"),
 ) -> None:
     """Query real-time task progress and telemetry from progress.db."""
     cfg = load_config(config)
     progress_db = cfg.storage.progress_db
 
-    def fetch_tasks():
+    def fetch_tasks() -> list[TaskProgress]:
         if task_id:
             t = get_task_progress(progress_db, task_id)
             return [t] if t else []
@@ -121,7 +132,9 @@ def status_cmd(
 
 @app.command("ingest-finto")
 def ingest_finto_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
 ) -> None:
     """Ingest FINTO ontologies and legacy migration tables into dedicated finto.db."""
     cfg = load_config(config)
@@ -139,12 +152,16 @@ def ingest_finto_cmd(
 
     console.print(f"[cyan]Ingesting FINTO from {cfg.ingest_finto.input_path}...[/cyan]")
     c_count, m_count = ingest_finto_file(cfg.ingest_finto.input_path, finto_store, tracker=tracker)
-    console.print(f"[green]Successfully ingested {c_count} concepts and {m_count} mappings.[/green]")
+    console.print(
+        f"[green]Successfully ingested {c_count} concepts and {m_count} mappings.[/green]"
+    )
 
 
 @app.command("ingest-melinda")
 def ingest_melinda_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
 ) -> None:
     """Harvest or read Melinda authority records, embed, and index into authority.db and FAISS."""
     cfg = load_config(config)
@@ -155,8 +172,12 @@ def ingest_melinda_cmd(
     finto_store = FintoStore(cfg.storage.finto_db)
     finto_folder = FintoFolder(finto_store)
     embedder = SentenceEmbedder(cfg.embedding)
-    normalizer = RecordNormalizer(finto_folder=finto_folder, template_engine=embedder.template_engine)
-    store = AuthorityStore(cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension)
+    normalizer = RecordNormalizer(
+        finto_folder=finto_folder, template_engine=embedder.template_engine
+    )
+    store = AuthorityStore(
+        cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
+    )
 
     tracker = ProgressTracker(
         db_path=cfg.storage.progress_db,
@@ -166,13 +187,17 @@ def ingest_melinda_cmd(
     )
 
     console.print("[cyan]Ingesting Melinda authority records...[/cyan]")
-    total = ingest_melinda_pipeline(cfg.ingest_melinda, store, normalizer, embedder, tracker=tracker)
+    total = ingest_melinda_pipeline(
+        cfg.ingest_melinda, store, normalizer, embedder, tracker=tracker
+    )
     console.print(f"[green]Successfully ingested {total} records from Melinda.[/green]")
 
 
 @app.command("ingest-wikidata")
 def ingest_wikidata_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
 ) -> None:
     """Stream gzipped Wikidata dump, extract entities, embed, and index."""
     cfg = load_config(config)
@@ -183,8 +208,12 @@ def ingest_wikidata_cmd(
     finto_store = FintoStore(cfg.storage.finto_db)
     finto_folder = FintoFolder(finto_store)
     embedder = SentenceEmbedder(cfg.embedding)
-    normalizer = RecordNormalizer(finto_folder=finto_folder, template_engine=embedder.template_engine)
-    store = AuthorityStore(cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension)
+    normalizer = RecordNormalizer(
+        finto_folder=finto_folder, template_engine=embedder.template_engine
+    )
+    store = AuthorityStore(
+        cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
+    )
 
     tracker = ProgressTracker(
         db_path=cfg.storage.progress_db,
@@ -194,13 +223,17 @@ def ingest_wikidata_cmd(
     )
 
     console.print("[cyan]Streaming Wikidata entities from compressed dump...[/cyan]")
-    total = ingest_wikidata_pipeline(cfg.ingest_wikidata, store, normalizer, embedder, tracker=tracker)
+    total = ingest_wikidata_pipeline(
+        cfg.ingest_wikidata, store, normalizer, embedder, tracker=tracker
+    )
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
 
 
 @app.command("reconcile")
 def reconcile_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
 ) -> None:
     """Reconcile target MARCXML records offline, enrich URIs, and write dual TSV reports."""
     cfg = load_config(config)
@@ -216,8 +249,12 @@ def reconcile_cmd(
     finto_store = FintoStore(cfg.storage.finto_db)
     finto_folder = FintoFolder(finto_store)
     embedder = SentenceEmbedder(cfg.embedding)
-    normalizer = RecordNormalizer(finto_folder=finto_folder, template_engine=embedder.template_engine)
-    store = AuthorityStore(cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension)
+    normalizer = RecordNormalizer(
+        finto_folder=finto_folder, template_engine=embedder.template_engine
+    )
+    store = AuthorityStore(
+        cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
+    )
 
     # Verify index metadata compatibility
     if store.indexer.total_vectors > 0:
@@ -274,21 +311,46 @@ def reconcile_cmd(
             selected = res.selected_agent_uris.get(idx, [])
             suppressed = res.suppressed_agent_uris.get(idx, [])
             existing = set(agent.uri_subfield_0 + agent.uri_subfield_1)
+            discovered_map = {u.uri: u for u in res.discovered_agent_uris.get(idx, [])}
+
+            # Field tag determination: use recorded field_tag, or fallback by is_personal / position
+            field_tag = agent.field_tag
+            if not field_tag:
+                if agent.is_personal:
+                    field_tag = "100" if idx == 0 else "700"
+                else:
+                    field_tag = "110" if idx == 0 else "710"
 
             for uri in selected:
                 is_novel = uri not in existing
-                action = "injected" if (r_cfg.enrich and is_novel) else ("existing" if not is_novel else "proposed")
+                action = (
+                    "injected"
+                    if (r_cfg.enrich and is_novel)
+                    else ("existing" if not is_novel else "proposed")
+                )
                 subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
-                cand_source_id = res.accepted_candidates[0].source_id if res.accepted_candidates else ""
-                cand_source = res.accepted_candidates[0].source if res.accepted_candidates else ""
+                disc_uri = discovered_map.get(uri)
+                cand_source_id = (
+                    disc_uri.source_record_id
+                    if disc_uri
+                    else (res.accepted_candidates[0].source_id if res.accepted_candidates else "")
+                )
+                cand_source = (
+                    disc_uri.source
+                    if disc_uri
+                    else (res.accepted_candidates[0].source if res.accepted_candidates else "")
+                )
+                agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
 
                 reporter.add_agent_row(
                     AgentReportRow(
                         target_record_id=target_record.source_id,
                         target_title=target_record.title,
                         target_year=target_record.publication_year,
-                        target_isbn=target_record.identifiers.isbn[0] if target_record.identifiers.isbn else None,
-                        field_tag="100" if idx == 0 else "700",
+                        target_isbn=target_record.identifiers.isbn[0]
+                        if target_record.identifiers.isbn
+                        else None,
+                        field_tag=field_tag,
                         field_occurrence=idx + 1,
                         subfield_code=subfield_code,
                         target_heading=agent.name,
@@ -302,7 +364,7 @@ def reconcile_cmd(
                         match_score=match_score,
                         dense_score=dense_score,
                         sparse_score=sparse_score,
-                        agent_name_score=100.0,
+                        agent_name_score=agent_name_score,
                         action=action,
                         is_novel=is_novel,
                     )
@@ -310,13 +372,28 @@ def reconcile_cmd(
 
             for uri in suppressed:
                 subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
+                disc_uri = discovered_map.get(uri)
+                cand_source_id = (
+                    disc_uri.source_record_id
+                    if disc_uri
+                    else (res.accepted_candidates[0].source_id if res.accepted_candidates else "")
+                )
+                cand_source = (
+                    disc_uri.source
+                    if disc_uri
+                    else (res.accepted_candidates[0].source if res.accepted_candidates else "")
+                )
+                agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
+
                 reporter.add_agent_row(
                     AgentReportRow(
                         target_record_id=target_record.source_id,
                         target_title=target_record.title,
                         target_year=target_record.publication_year,
-                        target_isbn=target_record.identifiers.isbn[0] if target_record.identifiers.isbn else None,
-                        field_tag="100" if idx == 0 else "700",
+                        target_isbn=target_record.identifiers.isbn[0]
+                        if target_record.identifiers.isbn
+                        else None,
+                        field_tag=field_tag,
                         field_occurrence=idx + 1,
                         subfield_code=subfield_code,
                         target_heading=agent.name,
@@ -324,13 +401,13 @@ def reconcile_cmd(
                         uri=uri,
                         vocabulary=detect_vocabulary(uri) or "OTHER",
                         authority_label=agent.name,
-                        authority_record_id=res.accepted_candidates[0].source_id if res.accepted_candidates else "",
-                        authority_source=res.accepted_candidates[0].source if res.accepted_candidates else "",
+                        authority_record_id=cand_source_id,
+                        authority_source=cand_source,
                         match_tier=match_tier,
                         match_score=match_score,
                         dense_score=dense_score,
                         sparse_score=sparse_score,
-                        agent_name_score=100.0,
+                        agent_name_score=agent_name_score,
                         action="suppressed_by_priority",
                         is_novel=True,
                     )
@@ -343,25 +420,48 @@ def reconcile_cmd(
             + [("651", s) for s in target_record.subjects.geographic]
             + [("382", s) for s in target_record.subjects.medium_of_performance]
         )
-        for s_idx, (tag, sub_item) in enumerate(all_subjects):
+        for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
+            s_tag = sub_item.source_field or default_tag
+            t_tag = sub_item.target_field or default_tag
+            s_vocab = sub_item.source_vocab or ""
+            s_uri = sub_item.source_uri or ""
+            t_vocab = sub_item.vocabulary or ""
+            t_uri = sub_item.uri or ""
+            s_heading = sub_item.source_heading or sub_item.pref_label
+            m_type = sub_item.mapping_type or "pref_label_lookup"
+            tag_changed = s_tag != t_tag
+
+            if not t_uri:
+                action = "unmapped"
+                is_novel = False
+            elif s_uri and s_uri == t_uri:
+                action = "existing"
+                is_novel = False
+            elif r_cfg.enrich:
+                action = "injected"
+                is_novel = True
+            else:
+                action = "proposed"
+                is_novel = True
+
             reporter.add_subject_row(
                 SubjectReportRow(
                     target_record_id=target_record.source_id,
                     target_title=target_record.title,
-                    source_field_tag=tag,
+                    source_field_tag=s_tag,
                     field_occurrence=s_idx + 1,
-                    source_heading=sub_item.pref_label,
-                    source_vocab=sub_item.vocabulary,
-                    source_uri=sub_item.uri,
+                    source_heading=s_heading,
+                    source_vocab=s_vocab,
+                    source_uri=s_uri,
                     language=target_record.language or "fi",
-                    target_field_tag=tag,
-                    target_vocab=sub_item.vocabulary,
-                    target_uri=sub_item.uri,
+                    target_field_tag=t_tag,
+                    target_vocab=t_vocab,
+                    target_uri=t_uri,
                     target_pref_label=sub_item.pref_label,
-                    mapping_type="pref_label_lookup",
-                    action="injected" if r_cfg.enrich else "proposed",
-                    is_novel=True,
-                    tag_changed=False,
+                    mapping_type=m_type,
+                    action=action,
+                    is_novel=is_novel,
+                    tag_changed=tag_changed,
                 )
             )
 
@@ -379,7 +479,9 @@ def reconcile_cmd(
     # Write output XML
     if r_cfg.output_file:
         r_cfg.output_file.parent.mkdir(parents=True, exist_ok=True)
-        tree.write(str(r_cfg.output_file), encoding="utf-8", xml_declaration=True, pretty_print=True)
+        tree.write(
+            str(r_cfg.output_file), encoding="utf-8", xml_declaration=True, pretty_print=True
+        )
         console.print(f"[green]Wrote output MARCXML to {r_cfg.output_file}[/green]")
 
     # Write TSV Reports
@@ -400,7 +502,9 @@ def reconcile_cmd(
 
 @app.command("run")
 def run_cmd(
-    config: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
 ) -> None:
     """Execute end-to-end pipeline configured in YAML."""
     cfg = load_config(config)
@@ -421,4 +525,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

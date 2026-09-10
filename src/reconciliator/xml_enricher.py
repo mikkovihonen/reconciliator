@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Optional
+
 from lxml import etree
 
 from reconciliator.finto_folding import FintoFolder
@@ -29,7 +30,6 @@ class MARCXMLEnricher:
             return record_elem
 
         # Determine XML namespace prefix if used
-        ns_prefix = ""
         if record_elem.tag.startswith("{"):
             ns = record_elem.tag.split("}")[0] + "}"
             subfield_tag = f"{ns}subfield"
@@ -41,17 +41,23 @@ class MARCXMLEnricher:
             for tag in ("650", "651", "655", "382"):
                 for field in _get_datafields(record_elem, tag):
                     # Get $a
-                    a_elems = field.findall(f"marc:subfield[@code='a']", MARC_NS) or field.findall("subfield[@code='a']")
+                    a_elems = field.findall("marc:subfield[@code='a']", MARC_NS) or field.findall(
+                        "subfield[@code='a']"
+                    )
                     heading = a_elems[0].text.strip() if a_elems and a_elems[0].text else ""
                     if not heading:
                         continue
 
                     # Get $2
-                    f2_elems = field.findall(f"marc:subfield[@code='2']", MARC_NS) or field.findall("subfield[@code='2']")
+                    f2_elems = field.findall("marc:subfield[@code='2']", MARC_NS) or field.findall(
+                        "subfield[@code='2']"
+                    )
                     vocab = f2_elems[0].text.strip() if f2_elems and f2_elems[0].text else None
 
                     # Get $0
-                    f0_elems = field.findall(f"marc:subfield[@code='0']", MARC_NS) or field.findall("subfield[@code='0']")
+                    f0_elems = field.findall("marc:subfield[@code='0']", MARC_NS) or field.findall(
+                        "subfield[@code='0']"
+                    )
                     existing_uris = [e.text.strip() for e in f0_elems if e.text]
                     source_uri = existing_uris[0] if existing_uris else None
 
@@ -127,4 +133,3 @@ class MARCXMLEnricher:
                                 existing_u0.add(uri)
 
         return record_elem
-
