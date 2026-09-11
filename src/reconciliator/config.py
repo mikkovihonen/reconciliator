@@ -216,12 +216,15 @@ class VocabIngestConfig(BaseModel):
 
 
 class OAIIngestConfig(BaseModel):
-    """Configuration for an individual OAI-PMH or MARCXML authority source."""
+    """Configuration for an individual OAI-PMH, ResourceSync, or file authority source."""
 
     enabled: bool = True
-    source_type: Literal["oai", "file"] = "oai"
+    source_type: Literal["oai", "file", "resourcesync"] = "oai"
+    format: Literal["marcxml", "bibframe"] = "marcxml"
+    schema_profile: Optional[str] = None
     input_path: Optional[Path] = None
     oai_url: Optional[str] = None
+    resourcesync_url: Optional[str] = None
     metadata_prefix: str = "marc21"
     set_spec: Optional[str] = None
     id_source: Literal["marc_001", "oai_identifier", "auto"] = "marc_001"
@@ -295,9 +298,9 @@ class ReconcileConfig(BaseModel):
     """Offline reconciliation and enrichment configuration."""
 
     target_file: Path
-    target_format: Literal["auto", "marcxml", "bibra"] = "auto"
+    format: Literal["auto", "marcxml", "bibra", "bibframe"] = "auto"
+    schema_profile: Optional[str] = None
     output_file: Optional[Path] = None
-    output_format: Literal["auto", "marcxml", "bibra"] = "auto"
     agent_reports: ReportSetPathsConfig
     subject_reports: ReportSetPathsConfig
     enrich: bool = True
@@ -323,6 +326,14 @@ class ReconcileConfig(BaseModel):
         default_factory=lambda: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO", "WIKIDATA"]
     )
     normalization: Optional[RecordNormalizationConfig] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_format_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "target_format" in data and "format" not in data:
+                data["format"] = data["target_format"]
+        return data
 
     @model_validator(mode="after")
     def validate_threshold(self) -> ReconcileConfig:

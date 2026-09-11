@@ -8,7 +8,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-from lxml import etree
 
 from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.loaders.bibra import (
@@ -230,7 +229,6 @@ def test_offline_reconciliation_bibra_e2e(tmp_path: Path) -> None:
     sample_finto = Path(__file__).parent / "fixtures" / "sample_finto.ttl"
     sample_melinda = Path(__file__).parent / "fixtures" / "sample_melinda.xml"
     bibra_input = tmp_path / "bibra_input.jsonl"
-    enriched_xml = tmp_path / "enriched_from_bibra.xml"
     enriched_json = tmp_path / "enriched_from_bibra.jsonl"
 
     # Write realistic BIBRA JSONL records matching test fixture Melinda records
@@ -287,9 +285,8 @@ ingest_oai:
 
 reconcile:
   target_file: "{bibra_input}"
-  target_format: "bibra"
-  output_file: "{enriched_xml}"
-  output_format: "marcxml"
+  format: "bibra"
+  output_file: "{enriched_json}"
   enrich: true
   fold_legacy: true
   threshold: 0.85
@@ -342,37 +339,7 @@ telemetry:
         ingest_vocab_cmd(config=config_file)
         ingest_oai_cmd(config=config_file)
 
-        # 1. Run reconciliation producing MARCXML
-        reconcile_cmd(config=config_file)
-
-    assert enriched_xml.exists()
-    tree = etree.parse(str(enriched_xml))
-    root = tree.getroot()
-    records = root.findall(".//{http://www.loc.gov/MARC21/slim}record") or root.findall(".//record")
-    assert len(records) == 2
-
-    # Check that Waltari got Asteri KANTO URN injected into synthesized MARCXML
-    rec1 = records[0]
-    f100 = rec1.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='100']") or rec1.findall(
-        ".//datafield[@tag='100']"
-    )
-    assert len(f100) > 0
-    u0_list = _get_subfields(f100[0], "0")
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in u0_list
-
-    # Check TSV reports exist
-    agent_detailed = reports_dir / "agent_uris.tsv"
-    assert agent_detailed.exists()
-    content = agent_detailed.read_text(encoding="utf-8")
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in content
-
-    # 2. Now test JSON output format
-    config_json_out = config_yaml.replace(
-        f'output_file: "{enriched_xml}"', f'output_file: "{enriched_json}"'
-    ).replace('output_format: "marcxml"', 'output_format: "bibra"')
-    config_file.write_text(config_json_out, encoding="utf-8")
-
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+        # Run reconciliation producing native enriched BIBRA JSON
         reconcile_cmd(config=config_file)
 
     assert enriched_json.exists()
@@ -388,3 +355,9 @@ telemetry:
         json_lines[0]["reconciliation"]["agents"][0]["kanto_uri"]
         == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
     )
+
+    # Check TSV reports exist
+    agent_detailed = reports_dir / "agent_uris.tsv"
+    assert agent_detailed.exists()
+    content = agent_detailed.read_text(encoding="utf-8")
+    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in content

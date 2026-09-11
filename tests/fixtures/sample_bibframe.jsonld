@@ -1,0 +1,52 @@
+{
+  "@context": {
+    "bf": "http://id.loc.gov/ontologies/bibframe/",
+    "bflc": "http://id.loc.gov/ontologies/bflc/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  },
+  "@graph": [
+    {
+      "@id": "http://example.org/instance/123",
+      "@type": "bf:Instance",
+      "rdfs:label": "Tuntematon sotilas",
+      "bf:instanceOf": {
+        "@id": "http://example.org/work/123"
+      },
+      "bf:title": {
+        "@type": "bf:Title",
+        "bf:mainTitle": "Tuntematon sotilas"
+      },
+      "bf:identifiedBy": {
+        "@type": "bf:Isbn",
+        "rdf:value": "978-951-0-12345-6"
+      },
+      "bf:provisionActivity": {
+        "@type": "bf:Publication",
+        "bf:date": "1954",
+        "bf:agent": {
+          "rdfs:label": "WSOY"
+        }
+      }
+    },
+    {
+      "@id": "http://example.org/work/123",
+      "@type": "bf:Work",
+      "bf:contribution": {
+        "@type": "bf:Contribution",
+        "bf:role": "http://id.loc.gov/vocabulary/relators/aut",
+        "bf:agent": {
+          "@id": "http://example.org/agent/linna",
+          "@type": "bf:Person",
+          "rdfs:label": "Linna, Väinö"
+        }
+      },
+      "bf:subject": {
+        "@type": "bf:Topic",
+        "rdfs:label": "jatkosota",
+        "bf:source": "yso"
+      }
+    }
+  ]
+}
+

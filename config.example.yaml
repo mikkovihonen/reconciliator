@@ -54,10 +54,10 @@ ingest_wikidata:
 # 7. Target Reconciliation & Enrichment
 reconcile:
   target_file: "tests/fixtures/sample_target.xml"
-  target_format: "auto" # "auto" | "marcxml" | "bibra"
-  output_file: "data/enriched_records.xml"
-  output_format: "auto" # "auto" | "marcxml" | "bibra"
-  enrich: true          # true: inject novel $0/$1 URIs; false: audit & report only
+  format: "auto"        # "auto" | "marcxml" | "bibra" | "bibframe"
+  schema_profile: null  # Optional profile override: "bffi_1" | "bibframe_3" | "bibframe_2" | path to custom yaml
+  output_file: "data/enriched_records.xml" # Enriched in the same native format as target_file
+  enrich: true          # true: inject novel $0/$1 URIs or owl:sameAs; false: audit & report only
   fold_legacy: true     # true: reconcile and fold legacy subject headings against vocab.db
   threshold: 0.85       # Minimum hybrid score for candidate acceptance
 

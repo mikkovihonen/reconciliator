@@ -1083,15 +1083,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pymarc"
-version = "5.4.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/19/77/f0e5774845a3c60b26da5dab344e391e9941eeb811a1685fb2ff01ae90c7/pymarc-5.4.0.tar.gz", hash = "sha256:b2016b1674d1956636c99b9bf95b31840c5cb8f22645672a660e66326371b2f3", size = 76224964, upload-time = "2026-07-02T12:12:51.002Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f9/41/ed8ad9925859d66fe7135f64690ecb5c766e2969e9a52c23d1123df9eaf5/pymarc-5.4.0-py3-none-any.whl", hash = "sha256:10549ce513c191f77b081e5e505c02aca76f6b9f1164c47a326bb635b24a77eb", size = 161390, upload-time = "2026-07-02T12:12:55.949Z" },
-]
-
-[[package]]
 name = "pymdown-extensions"
 version = "11.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1102,6 +1093,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ad/17/2db4b414de89659144488e0d9c6c0bf0c8395841dc12d81d0532cc6ef310/pymdown_extensions-11.0.2.tar.gz", hash = "sha256:9506fcbe66fa355a775b768084334238dd6805020ac4b92bea0c0dda6f8f223d", size = 855419, upload-time = "2026-08-22T19:28:47.236Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a6/43/9f45ec4d14e596efc32c925a78104934790438b0c0628b70d741016734ad/pymdown_extensions-11.0.2-py3-none-any.whl", hash = "sha256:259910762019732caa1dfd76f3faa62c59f191d46573e80bcb1d13c0f675bbe5", size = 269929, upload-time = "2026-08-22T19:28:45.389Z" },
+]
+
+[[package]]
+name = "pyparsing"
+version = "3.3.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
 ]
 
 [[package]]
@@ -1231,6 +1231,18 @@ wheels = [
 ]
 
 [[package]]
+name = "rdflib"
+version = "7.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/98/f5/18bb77b7af9526add0c727a3b2048959847dc5fb030913e2918bf384fec3/rdflib-7.6.0.tar.gz", hash = "sha256:6c831288d5e4a5a7ece85d0ccde9877d512a3d0f02d7c06455d00d6d0ea379df", size = 4943826, upload-time = "2026-02-13T07:15:55.938Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/c2/6604a71269e0c1bd75656d5a001432d16f2cc5b8c057140ec797155c295e/rdflib-7.6.0-py3-none-any.whl", hash = "sha256:30c0a3ebf4c0e09215f066be7246794b6492e054e782d7ac2a34c9f70a15e0dd", size = 615416, upload-time = "2026-02-13T07:15:46.487Z" },
+]
+
+[[package]]
 name = "reconciliator"
 version = "0.1.0"
 source = { editable = "." }
@@ -1241,11 +1253,12 @@ dependencies = [
     { name = "lxml" },
     { name = "orjson" },
     { name = "pydantic" },
-    { name = "pymarc" },
     { name = "pyyaml" },
     { name = "rank-bm25" },
     { name = "rapidfuzz" },
+    { name = "rdflib" },
     { name = "rich" },
+    { name = "safetensors" },
     { name = "sentence-transformers" },
     { name = "torch" },
     { name = "typer" },
@@ -1268,11 +1281,12 @@ requires-dist = [
     { name = "lxml", specifier = ">=5.2.0" },
     { name = "orjson", specifier = ">=3.10.0" },
     { name = "pydantic", specifier = ">=2.7.0" },
-    { name = "pymarc", specifier = ">=5.1.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "rapidfuzz", specifier = ">=3.9.0" },
+    { name = "rdflib", specifier = ">=7.0.0" },
     { name = "rich", specifier = ">=13.7.0" },
+    { name = "safetensors", specifier = ">=0.4.0" },
     { name = "sentence-transformers", specifier = ">=3.0.0" },
     { name = "torch", specifier = ">=2.2.0" },
     { name = "typer", specifier = ">=0.12.0" },

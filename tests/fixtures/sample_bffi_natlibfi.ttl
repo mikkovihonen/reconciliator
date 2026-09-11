@@ -1,0 +1,56 @@
+@prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<http://urn.fi/URN:NBN:fi:bib:instance:9912345678> a bffi:Manifestation ;
+    rdfs:label "Sinuhe egyptiläinen" ;
+    bffi:expressionManifested <http://urn.fi/URN:NBN:fi:bib:expression:9912345678> ;
+    bffi:identifiedBy [
+        a bffi:Identifier ;
+        bffi:source "isbn" ;
+        rdf:value "978-951-0-00001-0"
+    ] ;
+    bffi:provisionActivity [
+        a bffi:Publication ;
+        bffi:date "1945" ;
+        bffi:agent [
+            a bffi:Agent ;
+            rdfs:label "WSOY"
+        ] ;
+        bffi:place [
+            a bffi:Place ;
+            rdfs:label "Helsinki"
+        ]
+    ] .
+
+<http://urn.fi/URN:NBN:fi:bib:expression:9912345678> a bffi:Expression ;
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:work:9912345678> ;
+    bffi:title [
+        a bffi:Title ;
+        bffi:mainTitle "Sinuhe egyptiläinen" ;
+        bffi:subtitle "viisitoista kirjaa lääkäri Sinuhen elämästä"
+    ] ;
+    bffi:languageOfExpression "fin" .
+
+<http://urn.fi/URN:NBN:fi:bib:work:9912345678> a bffi:Work ;
+    bffi:contribution [
+        a bffi:Contribution ;
+        bffi:marcKey "1001 $aWaltari, Mika,$d1908-1979,$ewriter" ;
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m16> ;
+        bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000123456>
+    ] ;
+    bffi:subject <http://www.yso.fi/onto/yso/p1234> .
+
+<http://urn.fi/URN:NBN:fi:au:pn:000123456> a bffi:Person ;
+    rdfs:label "Waltari, Mika" .
+
+<http://www.yso.fi/onto/yso/p1234> a bffi:Topic ;
+    rdfs:label "lääkärit" ;
+    bffi:source [
+        a bffi:Source ;
+        rdfs:label "yso"
+    ] .
+
+<http://urn.fi/URN:NBN:fi:au:mts:m16> a bffi:Role ;
+    rdfs:label "kirjoittaja" .

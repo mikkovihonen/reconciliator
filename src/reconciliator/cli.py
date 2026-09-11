@@ -9,6 +9,7 @@ from typing import IO, Any, Iterator, Optional
 
 import typer
 from lxml import etree
+from rdflib import Graph
 from rich.console import Console
 from rich.table import Table
 
@@ -19,8 +20,15 @@ from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
+from reconciliator.loaders.bibframe import (
+    BIBFRAMESchemaProfile,
+    enrich_bibframe_graph,
+    enrich_bibframe_jsonld,
+    get_profile,
+    iter_bibframe_records,
+    iter_jsonld_bibframe_records,
+)
 from reconciliator.loaders.bibra import (
-    bibra_to_marcxml_elem,
     enrich_bibra_json,
     iter_bibra_records,
 )
@@ -678,50 +686,87 @@ def reconcile_cmd(
     console.print(f"[cyan]Reconciling {r_cfg.target_file}...[/cyan]")
 
     # Format detection
-    is_bibra = False
-    if r_cfg.target_format == "bibra":
-        is_bibra = True
-    elif r_cfg.target_format == "auto":
+    target_format = r_cfg.format
+    if target_format == "auto":
         suffix = r_cfg.target_file.suffix.lower()
-        if suffix in (".json", ".jsonl", ".ndjson"):
-            is_bibra = True
-
-    is_json_output = False
-    if r_cfg.output_file:
-        if r_cfg.output_format == "bibra":
-            is_json_output = True
-        elif r_cfg.output_format == "marcxml":
-            is_json_output = False
+        if suffix in (".ttl", ".turtle", ".nt", ".n3", ".jsonld"):
+            target_format = "bibframe"
+        elif suffix in (".json", ".jsonl", ".ndjson"):
+            try:
+                with open(r_cfg.target_file, "rb") as probe_f:
+                    sample = probe_f.read(2048).decode("utf-8", errors="replace")
+                if "@context" in sample or "@graph" in sample or "http://id.loc.gov" in sample or "bffi" in sample:
+                    target_format = "bibframe"
+                else:
+                    target_format = "bibra"
+            except Exception:
+                target_format = "bibra"
+        elif suffix in (".rdf",):
+            target_format = "bibframe"
+        elif suffix in (".xml",):
+            try:
+                with open(r_cfg.target_file, "rb") as probe_f:
+                    sample = probe_f.read(2048).decode("utf-8", errors="replace")
+                if "RDF" in sample or "bibframe" in sample:
+                    target_format = "bibframe"
+                else:
+                    target_format = "marcxml"
+            except Exception:
+                target_format = "marcxml"
         else:
-            if r_cfg.output_file.suffix.lower() in (".json", ".jsonl", ".ndjson"):
-                is_json_output = True
-            else:
-                is_json_output = False
+            target_format = "marcxml"
+
+    bf_profile: Optional[BIBFRAMESchemaProfile] = (
+        get_profile(r_cfg.schema_profile) if r_cfg.schema_profile else None
+    )
+
+    is_stream_json = target_format == "bibra" or (
+        target_format == "bibframe"
+        and r_cfg.target_file.suffix.lower() in (".json", ".jsonl", ".ndjson", ".jsonld")
+    )
+    is_marcxml = target_format == "marcxml"
 
     out_f: Optional[IO[bytes]] = None
     if r_cfg.output_file:
         r_cfg.output_file.parent.mkdir(parents=True, exist_ok=True)
-        out_f = open(r_cfg.output_file, "wb")
-        if not is_json_output:
-            out_f.write(
-                b'<?xml version="1.0" encoding="UTF-8"?>\n'
-                b'<collection xmlns="http://www.loc.gov/MARC21/slim">\n'
-            )
+        if is_stream_json or is_marcxml:
+            out_f = open(r_cfg.output_file, "wb")
+            if is_marcxml:
+                out_f.write(
+                    b'<?xml version="1.0" encoding="UTF-8"?>\n'
+                    b'<collection xmlns="http://www.loc.gov/MARC21/slim">\n'
+                )
+
+    active_graph: Optional[Graph] = None
 
     def _iter_records() -> Iterator[
-        tuple[Optional[etree._Element], dict[str, Any], int, Optional[dict[str, Any]]]
+        tuple[str, Any, dict[str, Any], int]
     ]:
-        if is_bibra:
+        nonlocal active_graph
+        if target_format == "bibra":
             for raw_rec_item, b_offset, bib_item in iter_bibra_records(r_cfg.target_file):
-                yield None, raw_rec_item, b_offset, bib_item
+                yield "bibra", bib_item, raw_rec_item, b_offset
+        elif target_format == "bibframe":
+            suffix = r_cfg.target_file.suffix.lower()
+            if suffix in (".json", ".jsonl", ".ndjson", ".jsonld"):
+                for raw_rec_item, b_offset, doc_item in iter_jsonld_bibframe_records(
+                    r_cfg.target_file, profile=bf_profile, source="target"
+                ):
+                    yield "bibframe_jsonld", doc_item, raw_rec_item, b_offset
+            else:
+                for raw_rec_item, b_offset, (g, nodes) in iter_bibframe_records(
+                    r_cfg.target_file, profile=bf_profile, source="target"
+                ):
+                    active_graph = g
+                    yield "bibframe_rdf", (g, nodes), raw_rec_item, b_offset
         else:
             for r_elem, b_offset in iter_marc_record_elements(r_cfg.target_file):
                 raw_rec_item = parse_marc_record_elem(r_elem, source="target")
-                yield r_elem, raw_rec_item, b_offset, None
+                yield "marcxml", r_elem, raw_rec_item, b_offset
 
     total_records = 0
     try:
-        for rec_elem, raw_rec, byte_offset, bibra_item in _iter_records():
+        for rec_fmt, orig_payload, raw_rec, byte_offset in _iter_records():
             total_records += 1
             target_record = normalizer.normalize(raw_rec)
 
@@ -900,31 +945,41 @@ def reconcile_cmd(
 
             # Mutate / serialize and stream write if output_file requested
             if out_f is not None:
-                if is_json_output:
-                    orig_dict = (
-                        bibra_item
-                        if bibra_item is not None
-                        else target_record.model_dump(by_alias=True)
-                    )
-                    enriched_json = enrich_bibra_json(orig_dict, res, target_record=target_record)
+                if rec_fmt == "bibra":
+                    enriched_json = enrich_bibra_json(orig_payload, res, target_record=target_record)
                     out_f.write(json.dumps(enriched_json, ensure_ascii=False).encode("utf-8"))
                     out_f.write(b"\n")
-                else:
-                    if rec_elem is not None:
-                        enricher.enrich_record_tree(
-                            rec_elem,
-                            res,
-                            enrich=r_cfg.enrich,
-                            fold_legacy=r_cfg.fold_legacy,
-                        )
-                        out_f.write(etree.tostring(rec_elem, encoding="utf-8", pretty_print=True))
-                        out_f.write(b"\n")
-                    elif bibra_item is not None:
-                        synth_elem = bibra_to_marcxml_elem(
-                            bibra_item, res, target_record=target_record
-                        )
-                        out_f.write(etree.tostring(synth_elem, encoding="utf-8", pretty_print=True))
-                        out_f.write(b"\n")
+                elif rec_fmt == "bibframe_jsonld":
+                    enriched_doc = enrich_bibframe_jsonld(
+                        orig_payload,
+                        res,
+                        profile=bf_profile,
+                        target_record=target_record,
+                        enrich=r_cfg.enrich,
+                        fold_legacy=r_cfg.fold_legacy,
+                    )
+                    out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
+                    out_f.write(b"\n")
+                elif rec_fmt == "marcxml":
+                    enricher.enrich_record_tree(
+                        orig_payload,
+                        res,
+                        enrich=r_cfg.enrich,
+                        fold_legacy=r_cfg.fold_legacy,
+                    )
+                    out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
+                    out_f.write(b"\n")
+            elif rec_fmt == "bibframe_rdf":
+                g, nodes = orig_payload
+                enrich_bibframe_graph(
+                    g,
+                    nodes,
+                    res,
+                    profile=bf_profile,
+                    target_record=target_record,
+                    enrich=r_cfg.enrich,
+                    fold_legacy=r_cfg.fold_legacy,
+                )
 
             tracker.update_progress(
                 items_increment=1,
@@ -932,9 +987,22 @@ def reconcile_cmd(
             )
     finally:
         if out_f is not None:
-            if not is_json_output:
+            if is_marcxml:
                 out_f.write(b"</collection>\n")
             out_f.close()
+            console.print(f"[green]Wrote output to {r_cfg.output_file}[/green]")
+        elif r_cfg.output_file and active_graph is not None:
+            fmt = "turtle"
+            suffix = r_cfg.output_file.suffix.lower()
+            if suffix in (".ttl", ".turtle"):
+                fmt = "turtle"
+            elif suffix in (".rdf", ".xml"):
+                fmt = "xml"
+            elif suffix in (".nt", ".ntriples"):
+                fmt = "nt"
+            elif suffix in (".jsonld", ".json"):
+                fmt = "json-ld"
+            active_graph.serialize(destination=str(r_cfg.output_file), format=fmt)
             console.print(f"[green]Wrote output to {r_cfg.output_file}[/green]")
 
     reporter.total_records = total_records

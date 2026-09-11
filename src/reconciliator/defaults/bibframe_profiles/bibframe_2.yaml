@@ -1,0 +1,68 @@
+name: "bibframe_2"
+description: "Library of Congress BIBFRAME 2.0 / 2.x baseline standard"
+version: "2.0.0"
+namespaces:
+  bf: "http://id.loc.gov/ontologies/bibframe/"
+  bflc: "http://id.loc.gov/ontologies/bflc/"
+  rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  rdfs: "http://www.w3.org/2000/01/rdf-schema#"
+  skos: "http://www.w3.org/2004/02/skos/core#"
+  dcterms: "http://purl.org/dc/terms/"
+
+work_classes:
+  - "bf:Work"
+  - "bf:Hub"
+
+expression_classes: []
+
+instance_classes:
+  - "bf:Instance"
+
+instance_to_expression_predicates: []
+
+expression_to_work_predicates: []
+
+instance_to_work_predicates:
+  - "bf:instanceOf"
+
+title_predicates:
+  - "bf:title"
+
+main_title_predicates:
+  - "bf:mainTitle"
+  - "rdfs:label"
+
+subtitle_predicates:
+  - "bf:subtitle"
+
+part_name_predicates:
+  - "bf:partName"
+
+part_number_predicates:
+  - "bf:partNumber"
+
+contribution_predicates:
+  - "bf:contribution"
+
+agent_predicates:
+  - "bf:agent"
+
+role_predicates:
+  - "bf:role"
+
+identifier_predicates:
+  - "bf:identifiedBy"
+
+subject_predicates:
+  - "bf:subject"
+
+provision_activity_predicates:
+  - "bf:provisionActivity"
+
+language_predicates:
+  - "bf:language"
+
+music_performance_predicates: []
+
+provenance_predicate: null
+

@@ -1,0 +1,53 @@
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+@prefix bflc: <http://id.loc.gov/ontologies/bflc/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<http://id.loc.gov/resources/instances/c0284759> a bf:Instance ;
+    rdfs:label "Symphony No. 5 in E-flat major, op. 82" ;
+    bf:instanceOf <http://id.loc.gov/resources/works/c0284759> ;
+    bf:title [
+        a bf:Title ;
+        bf:mainTitle "Symphony No. 5 in E-flat major, op. 82"
+    ] ;
+    bf:identifiedBy [
+        a bf:Isbn ;
+        rdf:value "978-0-19-385012-3"
+    ] ;
+    bf:provisionActivity [
+        a bf:Publication ;
+        bf:date "1919" ;
+        bf:agent [
+            a bf:Agent ;
+            rdfs:label "Hansen"
+        ] ;
+        bf:place [
+            a bf:Place ;
+            rdfs:label "Copenhagen"
+        ]
+    ] .
+
+<http://id.loc.gov/resources/works/c0284759> a bf:Work ;
+    bf:contribution [
+        a bf:Contribution ;
+        bf:role <http://id.loc.gov/vocabulary/relators/cmp> ;
+        bf:agent [
+            a bf:Person ;
+            rdfs:label "Sibelius, Jean" ;
+            bflc:name00MatchKey "Sibelius, Jean"
+        ]
+    ] ;
+    bf:subject [
+        a bf:Topic ;
+        rdfs:label "sinfoniat" ;
+        bf:source [
+            a bf:Source ;
+            rdfs:label "yso"
+        ]
+    ] ;
+    bf:mediumOfPerformance [
+        a bf:MusicMedium ;
+        rdfs:label "orkesteri"
+    ] .
+

@@ -1,0 +1,100 @@
+name: "bffi_1"
+description: "Finnish National Library (Kansalliskirjasto) LKD Linked Library Data profile (BFFI v1.0.0, https://schema.finto.fi/bffi/1-0-0/lkd.rdf)"
+version: "1.0.0"
+namespaces:
+  bffi: "http://urn.fi/URN:NBN:fi:schema:bffi:"
+  bffi-meta: "http://urn.fi/URN:NBN:fi:schema:bffi-meta:"
+  bf: "http://id.loc.gov/ontologies/bibframe/"
+  bflc: "http://id.loc.gov/ontologies/bflc/"
+  rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  rdfs: "http://www.w3.org/2000/01/rdf-schema#"
+  skos: "http://www.w3.org/2004/02/skos/core#"
+  owl: "http://www.w3.org/2002/07/owl#"
+  dct: "http://purl.org/dc/terms/"
+  madsrdf: "http://www.loc.gov/mads/rdf/v1#"
+
+work_classes:
+  - "bffi:Work"
+  - "bffi:MonographWork"
+  - "bffi:SerialWork"
+  - "bffi:MusicWork"
+  - "bffi:BibframeWork"
+  - "bffi:CollectionWork"
+  - "bffi:AggregatingWork"
+  - "bffi:MovingImageWork"
+  - "bffi:CartographyWork"
+  - "bffi:NonMusicAudioWork"
+
+expression_classes:
+  - "bffi:Expression"
+  - "bffi:MonographExpression"
+  - "bffi:SerialExpression"
+  - "bffi:SeriesExpression"
+  - "bffi:MusicAudioExpression"
+  - "bffi:CollectionExpression"
+  - "bffi:AggregatingExpression"
+  - "bffi:MovingImageExpression"
+  - "bffi:CartographyExpression"
+  - "bffi:NonMusicAudioExpression"
+
+instance_classes:
+  - "bffi:Manifestation"
+  - "bffi:CollectionManifestation"
+
+instance_to_expression_predicates:
+  - "bffi:expressionManifested"
+
+expression_to_work_predicates:
+  - "bffi:expressionOf"
+
+instance_to_work_predicates:
+  - "bffi:workManifested"
+  - "bffi:manifestationOfWork"
+
+title_predicates:
+  - "bffi:title"
+
+main_title_predicates:
+  - "bffi:mainTitle"
+  - "rdfs:label"
+
+subtitle_predicates:
+  - "bffi:subtitle"
+
+part_name_predicates:
+  - "bffi:partName"
+
+part_number_predicates:
+  - "bffi:partNumber"
+
+contribution_predicates:
+  - "bffi:contribution"
+  - "bffi:PrimaryContribution"
+
+agent_predicates:
+  - "bffi:agent"
+  - "bffi:simpleAgent"
+
+role_predicates:
+  - "bffi:role"
+
+identifier_predicates:
+  - "bffi:identifiedBy"
+
+subject_predicates:
+  - "bffi:subject"
+  - "bffi:genreForm"
+
+provision_activity_predicates:
+  - "bffi:provisionActivity"
+
+language_predicates:
+  - "bffi:languageOfExpression"
+  - "bffi:languageOfRepresentativeExpression"
+  - "bffi:language"
+
+music_performance_predicates:
+  - "bffi:musicMedium"
+  - "bffi:musicMediumOfRepresentativeExpression"
+
+provenance_predicate: "bffi:marcKey"
