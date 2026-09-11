@@ -1,6 +1,6 @@
 # Architecture & Implementation Plan: Work and Expression Linking Engine
 
-**Document Version:** 1.8.0  
+**Document Version:** 1.9.0  
 **Target System:** Reconciliator  
 **Scope:** Greenfield WEMI (Work, Expression, Manifestation) Linking, External Authority Reconciliation, Intra-Corpus Co-Reference Resolution, and comprehensive domain support across all 42 major bibliographic, archival, physical, audiovisual, and digital material and aggregate types — including Monographs, Serials/Continuing Resources, Multi-Part Series, Recorded Sound, Notated Music, Article/Serial Components, Audiobooks/Spoken Word, Moving Image, Anthologies, Conference Proceedings, Theses/Dissertations, Cartographic Materials, Graphic Novels/Comics/Manga, Datasets/Digital Resources, Standards/Technical Reports, Government Publications/Grey Literature, 3D Objects/Realia, Archival Collections & Manuscripts, Still Images & Ephemera, Legal Statutes & Case Law, Patents & IP, Video Games & Interactive Media, Integrating Resources/Loose-Leaf, Board Games/Tabletop Games, Early Printed Books & Incunabula (C15–C18), Tactile & Accessible Media (Braille/DAISY), Software Source Code & Trained AI Models, Dramatic Works & Choreography, Broadcast Podcasts & Episodic Webcasts, Bound-With / Sammelbände Composite Volumes, Web Archives & Harvested Web Crawls, Oral Histories & Ethnographic Fieldwork, Broadcast Television & Radio Program Flow, Parallel Multilingual Editions & Polyglot Texts, Preservation Surrogates & Microform Facsimiles, Medieval Manuscript Fragments & Codicological Reconstructions (Fragmenta Membranea), Ephemera & Job Printing (Pienpainatteet), Exhibition Catalogues & Curated Display Aggregates, Scholarly Critical Editions & Textual Apparatus (Variorum Editions), Spatial Vector/Raster Geodata & GIS Web Services, Numismatics, Philately & Historical Seals, and 3D Cultural Heritage Digital Twins & XR Reconstructions — in MARCXML and BIBFRAME sources.
 
@@ -1871,6 +1871,7 @@ CREATE TABLE works (
         'exhibition', 'critical_edition', 'geodata_service', 'numismatic', 'heritage_model'
     )),
     subjects_json TEXT NOT NULL DEFAULT '[]',    -- Array of canonical YSO/SLM URIs
+    serialized_text TEXT,                        -- Pre-rendered output of work_serialization.j2
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_works_uri ON works(work_uri);
@@ -1900,7 +1901,9 @@ CREATE TABLE expressions (
         'numismatic_object', 'three_dimensional_model'
     )),
     title TEXT,                                  -- Expression-specific title
-    edition_designation TEXT,                    -- '2. korj. p.', 'Full Score', 'v2.1.0', 'PS5 Build', 'Nordic Edition'
+    version_designation TEXT,                    -- '2. korj. p.', 'Full Score', 'v2.1.0', 'PS5 Build', 'Nordic Edition'
+    arrangement_note TEXT,                       -- 'Sovitus puhallinorkesterille', 'arr. for 2 pianos'
+    serialized_text TEXT,                        -- Pre-rendered output of expression_serialization.j2
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_expressions_work_id ON expressions(work_id);
@@ -1911,7 +1914,7 @@ CREATE INDEX idx_expressions_lookup ON expressions(work_id, language, content_ty
 -- 4. Manifestations Table (Physical/Digital Publications & Container/Component Hierarchy)
 CREATE TABLE manifestations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+    work_id INTEGER REFERENCES works(id) ON DELETE SET NULL, -- Primary Work (nullable for multi-work anthologies/compilations)
     container_id INTEGER REFERENCES manifestations(id) ON DELETE CASCADE, -- Host Journal/Album/Atlas/Series/Archive/BigBox/Podcast
     is_component BOOLEAN NOT NULL DEFAULT 0,     -- 1 for Articles, Chapters, CD Tracks, Map Sheets, Archival Items, Episodes
     component_type TEXT CHECK(component_type IN (
@@ -1930,19 +1933,24 @@ CREATE TABLE manifestations (
     publication_year INTEGER,
     publisher TEXT,
     publication_place TEXT,
-    edition INTEGER,
+    edition_statement TEXT,                      -- Preserves textual designation: '2. uud. p.', 'Facsimile reprint'
+    edition_number INTEGER,                      -- Normalized integer if extractable, else NULL
+    series_title TEXT,                           -- MARC 490/830 series title
+    series_numbering TEXT,                       -- MARC 490/830 series numbering / volume
     volume_designation TEXT,                     -- '1. osa', 'Vol. 127', 'No. 2', 'Kotelo 12'
     issue_enumeration TEXT,                      -- 'No. 2', 'Heinäkuu 2023', 'Lisälehti 34'
     pagination TEXT,                             -- 'p. 180-205', 'xii, 450 s.', '1 karttalehti'
     extent TEXT,
     carrier_type TEXT,                           -- 'volume', 'audio disc', 'sheet', 'online resource', 'object', 'computer disc', 'braille', 'warc', 'microfilm', 'microfiche'
     host_title TEXT,                             -- Preserved Journal/Collection/Series/Fonds title
+    serialized_text TEXT,                        -- Pre-rendered output of manifestation_serialization.j2
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_manifestations_work_id ON manifestations(work_id);
 CREATE INDEX idx_manifestations_container ON manifestations(container_id);
 CREATE INDEX idx_manifestations_component ON manifestations(is_component, component_type);
 CREATE INDEX idx_manifestations_year ON manifestations(publication_year);
+CREATE INDEX idx_manifestations_series ON manifestations(series_title);
 CREATE INDEX idx_manifestations_source_id ON manifestations(source, source_id);
 
 
@@ -2042,29 +2050,49 @@ CREATE TABLE work_medium_of_performance (
 );
 
 
--- 10. Dual-Tier Vector Search Index Mappings
-CREATE TABLE vector_mappings (
-    vector_id INTEGER PRIMARY KEY,
-    entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'manifestation')),
-    entity_id INTEGER NOT NULL
+-- 10. Tripartite Vector Search Index Mappings (Work, Expression & Manifestation Tiers)
+CREATE TABLE work_vectors (
+    vector_id INTEGER PRIMARY KEY,               -- Positional row index in FAISS / PyTorch work.index
+    work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_vector_entity ON vector_mappings(entity_type, entity_id);
+CREATE INDEX idx_work_vectors_work_id ON work_vectors(work_id);
+
+CREATE TABLE expression_vectors (
+    vector_id INTEGER PRIMARY KEY,               -- Positional row index in FAISS / PyTorch expression.index
+    expression_id INTEGER NOT NULL REFERENCES expressions(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_expression_vectors_exp_id ON expression_vectors(expression_id);
+
+CREATE TABLE manifestation_vectors (
+    vector_id INTEGER PRIMARY KEY,               -- Positional row index in FAISS / PyTorch manifestation.index
+    manifestation_id INTEGER NOT NULL REFERENCES manifestations(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_manifestation_vectors_manif_id ON manifestation_vectors(manifestation_id);
 
 
--- 11. FTS5 Lexical Search Tables
+-- 11. Tripartite FTS5 Lexical BM25 Virtual Tables
 CREATE VIRTUAL TABLE works_fts USING fts5(
     work_id UNINDEXED,
-    title,
-    uniform_title,
-    primary_author,
-    subjects
+    serialized_text,
+    content='works',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE VIRTUAL TABLE expressions_fts USING fts5(
+    expression_id UNINDEXED,
+    serialized_text,
+    content='expressions',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE VIRTUAL TABLE manifestations_fts USING fts5(
     manifestation_id UNINDEXED,
-    title,
-    publisher,
-    volume_designation
+    serialized_text,
+    content='manifestations',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 2'
 );
 ```
 
@@ -2112,6 +2140,9 @@ CREATE TABLE target_records (
     volume_designation TEXT,
     is_component BOOLEAN NOT NULL DEFAULT 0,
     host_citation_key TEXT,                      -- For articles: ISSN + Year + StartPage + Author
+    serialized_work TEXT,                        -- Pre-rendered work_serialization.j2 for Tier 2 embedding
+    serialized_expression TEXT,                  -- Pre-rendered expression_serialization.j2 for Tier 3 reranking
+    serialized_manifestation TEXT,               -- Pre-rendered manifestation_serialization.j2 for duplicate clustering
     raw_payload BLOB NOT NULL
 );
 CREATE INDEX idx_target_work_block ON target_records(work_blocking_key);
@@ -2139,7 +2170,20 @@ CREATE INDEX idx_target_heritage_block ON target_records(heritage_model_key);
 CREATE INDEX idx_target_citation ON target_records(host_citation_key);
 
 
--- 2. Discovered Work Clusters
+-- 2. Discovered Manifestation Duplicate Clusters (Carrier-Level Deduplication)
+CREATE TABLE corpus_manifestation_clusters (
+    cluster_id TEXT PRIMARY KEY,                 -- 'urn:reconciliator:manif:<sha256>'
+    canonical_record_id TEXT NOT NULL REFERENCES target_records(record_id),
+    publisher TEXT,
+    publication_year INTEGER,
+    edition_statement TEXT,
+    extent TEXT,
+    carrier_type TEXT,
+    member_record_count INTEGER NOT NULL DEFAULT 1
+);
+
+
+-- 3. Discovered Work Clusters
 CREATE TABLE corpus_work_clusters (
     cluster_id TEXT PRIMARY KEY,                 -- 'urn:reconciliator:work:<sha256>'
     work_type TEXT NOT NULL DEFAULT 'text',
@@ -2150,23 +2194,24 @@ CREATE TABLE corpus_work_clusters (
 );
 
 
--- 3. Discovered Expression Clusters
+-- 4. Discovered Expression Clusters
 CREATE TABLE corpus_expression_clusters (
     cluster_id TEXT PRIMARY KEY,                 -- 'urn:reconciliator:exp:<sha256>'
     work_cluster_id TEXT NOT NULL REFERENCES corpus_work_clusters(cluster_id),
     canonical_expression_uri TEXT,               -- Hoisted external URI if matched, else cluster_id
     content_type TEXT NOT NULL DEFAULT 'text',
     language TEXT NOT NULL,
-    edition_designation TEXT,                    -- e.g. 'Full Score', 'v2.1.0', 'Unabridged'
+    version_designation TEXT,                    -- e.g. 'Full Score', 'v2.1.0', 'Unabridged'
     translators_json TEXT NOT NULL DEFAULT '[]',
     performers_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX idx_exp_cluster_work ON corpus_expression_clusters(work_cluster_id);
 
 
--- 4. Final Record-to-Cluster Resolution
+-- 5. Final Record-to-Cluster Resolution
 CREATE TABLE corpus_linkages (
     record_id TEXT PRIMARY KEY REFERENCES target_records(record_id),
+    manifestation_cluster_id TEXT REFERENCES corpus_manifestation_clusters(cluster_id),
     work_cluster_id TEXT NOT NULL REFERENCES corpus_work_clusters(cluster_id),
     expression_cluster_id TEXT NOT NULL REFERENCES corpus_expression_clusters(cluster_id),
     final_work_uri TEXT NOT NULL,
@@ -3108,6 +3153,221 @@ Within each Work Cluster, partition records into Expression Clusters based on th
   - Mint a deterministic cluster URN:
     `urn:reconciliator:work:<sha256(canonical_signature)>`
     `urn:reconciliator:exp:<sha256(canonical_signature)>`
+
+---
+
+#### 5.3 Work-Centric Vector Indexing & The WEMI Serialization Triad Architecture
+
+In a greenfield WEMI reconciliation engine, entity serialization and search operate across three distinct functional tiers:
+1. **Work Level (Conceptual Identity)**: Dense vector search (`work.index`) and conceptual FTS (`works_fts`) for high-recall discovery of the abstract intellectual creation (Tier 2 Semantic Fallback).
+2. **Expression Level (Realization Identity)**: Realization FTS (`expressions_fts`) and BM25 / Cross-Encoder reranking to disambiguate translations, audiobooks, and musical arrangements (Tier 3 Expression Alignment).
+3. **Manifestation Level (Carrier Identity)**: Deterministic identifier lookups, carrier FTS (`manifestations_fts`), and intra-corpus connected-components clustering to deduplicate physical publication runs.
+
+```
+       ┌────────────────────────────────────────────────────────────────────────┐
+       │                       THE WEMI SERIALIZATION TRIAD                     │
+       └───────────────────────────────────┬────────────────────────────────────┘
+                                           │
+         ┌─────────────────────────────────┼─────────────────────────────────┐
+         ▼                                 ▼                                 ▼
+[work_serialization.j2]        [expression_serialization.j2]    [manifestation_serialization.j2]
+- Preferred & uniform title    - Expression & parent work title - Title as published & subtitle
+- Primary creators (aut, cmp)  - Language of realization (fin)  - Publisher & place of publication
+- Work type & original lang    - Translators, narrators, perfs  - Publication year & edition stmt
+- Subjects (YSO) & classes     - Content type & version note    - Series title & numbering, extent
+         │                                 │                                 │
+         ▼                                 ▼                                 ▼
+   works.serialized_text        expressions.serialized_text      manifestations.serialized_text
+         │                                 │                                 │
+   ┌─────┴──────────────┐                  ▼                                 ▼
+   ▼                    ▼           expressions_fts                  manifestations_fts
+SentenceEmbedder    works_fts      (SQLite BM25 Lexical)            (Carrier Deduplication FTS)
+   │               (SQLite BM25)           │                                 │
+   ▼                                       ▼                                 ▼
+data/work.index                  Tier 3 Translation Align        Intra-Corpus Duplicate Cluster
+```
+
+#### 5.3.1 Eliminating Carrier Noise from Semantic Search
+In legacy single-tier systems, records were serialized with publisher, year, edition, and format tokens:
+```jinja2
+Nimeke: {{ title }} | Tekijät: {{ agents }} | Julkaisija: {{ publisher }} | Vuosi: {{ publication_year }} | Painos: {{ edition }} ...
+```
+In WEMI, this carrier noise actively harms matching:
+- A 2018 paperback reprint of *Sinuhe egyptiläinen* (published by Otava in Helsinki) would be pulled in cosine space away from the 1945 original authority work (published by WSOY in Porvoo).
+- An audiobook reading or Braille transcription would be pulled away from the printed monograph.
+
+By stripping out all carrier properties, the **Work Serialization Template** projects every manifestation, edition, translation, and adaptation of a creative work into the **exact same tight semantic cluster** in vector space.
+
+#### 5.3.2 The Greenfield WEMI Serialization Triad
+
+##### A. Work Serialization Template (`reconciliator/templates/work_serialization.j2`)
+Serializes pure conceptual metadata for dense embedding and work-level retrieval:
+```jinja2
+Nimeke: {{ preferred_title }}{% if uniform_title and uniform_title != preferred_title %} [Yhtenäistetty: {{ uniform_title }}]{% endif %}{% if original_title and original_title != preferred_title %} [Alkukielinen: {{ original_title }}]{% endif %} | Tekijät: {{ authors | map(attribute='name') | join(', ') }} | Tyyppi: {{ work_type }} | Kieli: {{ original_language }} | Aiheet: {{ subjects | map(attribute='pref_label') | join(', ') }} | Luokitus: {{ classifications | map(attribute='code') | join(', ') }}
+```
+
+##### B. Expression Serialization Template (`reconciliator/templates/expression_serialization.j2`)
+Serializes realization and contributor metadata for Tier 3 translation alignment and reranking:
+```jinja2
+Teos: {{ work_title }} | Ilmiasu: {{ expression_title | default(work_title, true) }}{% if language %} [Kieli: {{ language }}]{% endif %} | Muoto: {{ content_type | default('teksti', true) }}{% if translators %} | Kääntäjä: {{ translators | map(attribute='name') | join(', ') }}{% endif %}{% if performers %} | Esittäjät: {{ performers | map(attribute='name') | join(', ') }}{% endif %}{% if narrators %} | Lukija: {{ narrators | map(attribute='name') | join(', ') }}{% endif %}{% if version_designation %} | Versio: {{ version_designation }}{% endif %}{% if arrangement_note %} | Sovitus: {{ arrangement_note }}{% endif %}
+```
+
+##### C. Manifestation Serialization Template (`reconciliator/templates/manifestation_serialization.j2`)
+Serializes publication carrier details for intra-corpus duplicate deduplication and audit diffs:
+```jinja2
+Nimeke: {{ title }}{% if subtitle %} : {{ subtitle }}{% endif %} | Julkaisija: {{ publisher }}{% if publication_place %} ({{ publication_place }}){% endif %} | Vuosi: {{ publication_year | default('', true) }}{% if edition_statement %} | Painos: {{ edition_statement }}{% endif %}{% if carrier_type %} | Muoto: {{ carrier_type }}{% endif %}{% if extent %} | Laajuus: {{ extent }}{% endif %}{% if series_title %} | Sarja: {{ series_title }}{% if series_numbering %} {{ series_numbering }}{% endif %}{% endif %}
+```
+
+#### 5.3.3 Materialized Serialization Columns & Tripartite FTS5 BM25 Engine
+To eliminate CPU-heavy Jinja2 template rendering during bulk query execution:
+1. Every entity row computes its `serialized_text` string **once** during ingestion/harvesting.
+2. Three SQLite FTS5 virtual tables (`works_fts`, `expressions_fts`, `manifestations_fts`) index `serialized_text` using `unicode61 remove_diacritics 2`.
+3. Ingesting target records into `reconcile_corpus.db` pre-renders `serialized_work`, `serialized_expression`, and `serialized_manifestation`, allowing instant zero-copy access during all reconciliation phases.
+
+#### 5.3.4 Tripartite Vector Spaces & Relational Storage Mapping
+The engine builds and queries three distinct vector spaces, each isolated to its proper FRBR/LRM level of abstraction:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ 1. Work Vector Space (v_W)       Conceptual Invariance                          │
+│ File: data/work.index            - Invariant to language, translator, year, format│
+│ Table: authority.db:work_vectors - Neighborhood: "Hamlet" English ≈ Finnish text│
+└────────────────────────┬────────────────────────────────────────────────────────┘
+                         │ 1:N expresses
+┌────────────────────────▼────────────────────────────────────────────────────────┐
+│ 2. Expression Vector Space (v_E) Realization Invariance                         │
+│ File: data/expression.index      - Invariant to publisher, print run, binding   │
+│ Table: authority.db:expression_vectors - Separates: Cajander suom. ≠ Saarikoski  │
+└────────────────────────┬────────────────────────────────────────────────────────┘
+                         │ 1:N embodies
+┌────────────────────────▼────────────────────────────────────────────────────────┐
+│ 3. Manifestation Vector Space (v_M) Carrier & Imprint Identity                  │
+│ File: data/manifestation.index   - Invariant to cataloging variations / typos   │
+│ Table: authority.db:manifestation_vectors - Separates: 2021 Otava ≠ 1945 WSOY    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+The database maps the zero-indexed integer rows of each FAISS / PyTorch index directly to the primary keys of the respective SQLite entity tables:
+```sql
+CREATE TABLE work_vectors (
+    vector_id INTEGER PRIMARY KEY,               -- Positional row in data/work.index
+    work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_work_vectors_work_id ON work_vectors(work_id);
+
+CREATE TABLE expression_vectors (
+    vector_id INTEGER PRIMARY KEY,               -- Positional row in data/expression.index
+    expression_id INTEGER NOT NULL REFERENCES expressions(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_expression_vectors_exp_id ON expression_vectors(expression_id);
+
+CREATE TABLE manifestation_vectors (
+    vector_id INTEGER PRIMARY KEY,               -- Positional row in data/manifestation.index
+    manifestation_id INTEGER NOT NULL REFERENCES manifestations(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_manifestation_vectors_manif_id ON manifestation_vectors(manifestation_id);
+```
+
+##### Memory & Compute Optimization:
+- **`work.index` (Always Hot in RAM/GPU)**: Compact conceptual space (~500k works in Finnish national bibliography). Serves as the high-throughput first-stage funnel.
+- **`expression.index` & `manifestation.index` (Targeted Subspace Search)**: Queried specifically for candidate entities shortlisted by `work.index` or deterministic blocking keys, eliminating full-table scans over millions of manifestation rows.
+
+---
+
+#### 5.3.5 Hierarchical Multi-Vector Matching & Late Fusion Scoring
+Reconciliation leverages all three vector spaces via a **Coarse-to-Fine Funnel** and **Cross-Layer Late Fusion**:
+
+```
+                  Incoming Target Record (e.g. Monograph)
+                                    │
+                                    ▼
+       ┌────────────────────────────────────────────────────────┐
+       │ Step 1: Deterministic Fast-Path (ISBN, URN, DOI, etc.) │
+       └────────────────────────────┬───────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+             [Exact Match Found]             [No Exact Match]
+                    │                               │
+                    ▼                               ▼
+       Retrieve Manifestation           Read pre-rendered serialized_work
+       Hydrate Work & Expression                    │
+       (Vector search skipped: 0ms)                 ▼
+                                        SentenceEmbedder.embed_texts()
+                                                    │
+                                                    ▼
+                                        Query Work Vector Index: v_W (top-50)
+                                                    │
+                                                    ▼
+                                        Expression Alignment: v_E
+                                        - Query candidate expressions in v_E
+                                        - Disambiguate translation / narrator
+                                                    │
+                                                    ▼
+                                        Carrier Verification: v_M
+                                        - Query candidate manifestations in v_M
+                                        - Identify duplicate printings vs new ed.
+```
+
+##### Late Fusion Composite Scoring:
+When evaluating candidate matches across ambiguous records (e.g. generic titles such as *"Valitut teokset"* or *"Johdatus fysiikkaan"*), the engine computes a weighted composite similarity score:
+$$S_{\text{total}}(A, B) = \alpha \cdot \cos(\mathbf{v}_W^A, \mathbf{v}_W^B) + \beta \cdot \cos(\mathbf{v}_E^A, \mathbf{v}_E^B) + \gamma \cdot \cos(\mathbf{v}_M^A, \mathbf{v}_M^B)$$
+
+The layer weights $\alpha, \beta, \gamma$ are dynamically calibrated based on the specific linking objective:
+| Linking Objective | $\alpha$ (Work) | $\beta$ (Expression) | $\gamma$ (Manifestation) | Rationale |
+| :--- | :---: | :---: | :---: | :--- |
+| **Work Authority (MARC 758 Work / bf:instanceOf)** | **0.75** | 0.20 | 0.05 | Conceptual work similarity dominates; carrier details are ignored. |
+| **Expression Authority (MARC 758 Expression)** | 0.35 | **0.55** | 0.10 | Realization language, translator, and content type dominate. |
+| **Duplicate Manifestation Merging** | 0.15 | 0.25 | **0.60** | Publisher, year, pagination, and edition statement dominate. |
+
+##### Orthogonal Title Disambiguation:
+If two distinct authors publish books with the identical title *"Kootut runot"*:
+- Carrier similarity $\cos(\mathbf{v}_M^A, \mathbf{v}_M^B)$ may be moderately high due to common Finnish library cataloging syntax.
+- BUT Work vector similarity $\cos(\mathbf{v}_W^A, \mathbf{v}_W^B) \approx 0.10$ because author surnames and YSO topical subjects diverge completely.
+- The low Work score immediately pulls $S_{\text{total}}$ below the reconciliation threshold ($\ge 0.85$), preventing catastrophic false-positive mergers.
+
+---
+
+#### 5.3.6 3-Layer Multiplex Graph Clustering
+
+When reconciling an entire library corpus (intra-corpus clustering), the three vector indexes interact across a **3-Layer Multiplex Graph**:
+
+```
+[Layer 3: Work Graph G_W]          (Threshold tau_W = 0.85 on v_W)
+  (E1: English) ◄────────────────► (E2: Finnish) ◄────────────────► (E3: Audio)
+        │                                │                                │
+        ▼                                ▼                                ▼
+[Layer 2: Expression Graph G_E]    (Threshold tau_E = 0.88 on v_E)
+  (M1: 1968 Cajander) ◄──────────► (M2: 1985 Cajander)            (M3: 2019 Saarikoski)
+        │                                │                                │
+        ▼                                ▼                                ▼
+[Layer 1: Manifestation Graph G_M] (Threshold tau_M = 0.92 on v_M)
+  (Rec A: Otava CIP) ◄───────────► (Rec B: Otava Final)           (Rec C: WSOY)
+```
+
+1. **Layer 1: Manifestation Graph ($G_M$)**:
+   - Edges formed between target records where $\cos(\mathbf{v}_M^i, \mathbf{v}_M^j) \ge 0.92$ (and publisher/year blocking keys align).
+   - **Output**: Populates `corpus_manifestation_clusters`, collapsing duplicate catalog records for the exact same publication run into a single canonical target entity.
+2. **Layer 2: Expression Graph ($G_E$)**:
+   - Edges formed where $\cos(\mathbf{v}_E^i, \mathbf{v}_E^j) \ge 0.88$ (and language/content-type align).
+   - **Output**: Populates `corpus_expression_clusters`, grouping all reprints and physical editions of a specific translation or realization.
+3. **Layer 3: Work Graph ($G_W$)**:
+   - Edges formed where $\cos(\mathbf{v}_W^i, \mathbf{v}_W^j) \ge 0.85$ (and author/uniform title keys align).
+   - **Output**: Populates `corpus_work_clusters`, assembling all expressions into a unified Work family and identifying or synthesizing the `bf:Hub` centroid.
+
+##### Inter-Layer Message Passing:
+- **Upward Enrichment (Sparse Record Recovery)**:
+  - If record $R_1$ has sparse metadata (e.g. truncated title, missing author) but shares high carrier similarity in $G_M$ with fully cataloged record $R_2$, $R_1$ **inherits** the Expression and Work vectors from $R_2$.
+  - This allows sparse records to be correctly placed in $G_E$ and $G_W$ without manual cataloger intervention.
+- **Downward Constraint Propagation (Preventing Mega-Clusters)**:
+  - Connected components in $G_M$ and $G_E$ are strictly partitioned by the connected components of $G_W$. Two records cannot be clustered together in $G_M$ or $G_E$ if their Work vectors $\mathbf{v}_W$ belong to separate Work clusters.
+
+---
+
+#### 5.3.7 Preservation of Existing Infrastructure
+The core underlying classes remain intact and are directly leveraged:
+- **`RecordTemplateEngine` (`template.py`)**: Generalizes to load any of `work_serialization.j2`, `expression_serialization.j2`, or `manifestation_serialization.j2` via configuration.
+- **`SentenceEmbedder` (`embedder.py`)**: Reused as-is, retaining hardware acceleration (Apple Silicon MPS, NVIDIA CUDA, CPU fallback), dynamic dimension discovery, and FP16 inference.
+- **`VectorIndex` (`indexer/base.py`, `faiss_engine.py`, `torch_engine.py`)**: Reused as-is for high-performance dense vector math and persistence (`.index` binary files), referencing `work_vectors`, `expression_vectors`, or `manifestation_vectors`.
 
 ---
 
@@ -4114,5 +4374,304 @@ Phase 4: Intra-Corpus Graph Clusterer ───────────┘
   - Link `bf:hasSeries`, `bf:precededBy`, `bf:succeededBy`, `bf:hasPart`, `bf:supplement`, `bf:reproductionOf`, `bf:derivativeOf`, and multi-instance `bf:itemOf` composite bindings.
 - Extend TSV reporting in `src/reconciliator/reports.py` with `work_reports` and `expression_reports`, including complete material type breakdown across all 42 domains.
 - Build end-to-end integration tests using real Finnish National Library fixtures (`sample_melinda.xml`, `sample_bffi_natlibfi.ttl`) covering monographs, notated music scores, serials, academic theses, board games, rare books, braille/accessible media, web archives, oral histories, broadcast media, parallel texts, legal/archival records, medieval manuscript fragments, ephemera, exhibition catalogues, critical editions, geodata/GIS layers, numismatics, and 3D heritage digital twins.
+
+---
+
+## 8. Configuration Surface Impact & Specification
+
+With the mandate of **zero backward-compatibility constraints**, the configuration surface is designed as a pure, uncluttered greenfield architecture. All legacy single-tier compromises, dual template fallbacks, and aliasing layers are discarded.
+
+### 8.1 Pure Greenfield Configuration Architecture
+1. **Native WEMI First**: The configuration maps directly to the 4-tier conceptual model. Vector search is explicitly configured for **abstract Works**, and clustering is configured for **intra-corpus co-reference resolution**.
+2. **Minimal & Explicit**: No redundant aliases (e.g. `index_path` vs `work_index_path`). Every parameter has an unambiguous, single purpose.
+3. **Pydantic Validation**: All fields enforce strict typing, path validation, and range bounds.
+
+---
+
+### 8.2 Streamlined Pydantic Schemas (`src/reconciliator/config.py`)
+
+```
+AppConfig
+ ├── storage: StorageConfig (authority_db, vocab_db, progress_db, corpus_db, work_index)
+ ├── embedding: EmbeddingConfig (model_name, template_path -> work_serialization.j2)
+ ├── download_skosmos: dict[str, SkosmosDownloadConfig]
+ ├── ingest_vocab: VocabIngestConfig
+ ├── ingest_oai: dict[str, OAIIngestConfig] (target_database, slice_days)
+ ├── ingest_wikidata: WikidataIngestConfig (pass1_only, extract_works)
+ ├── reconcile: ReconcileConfig (work_reports, expression_reports, cluster, enrichment)
+ ├── telemetry: TelemetryConfig
+ └── normalization: NormalizationConfig
+```
+
+#### Detailed Model Definitions:
+
+##### 1. `StorageConfig`
+```python
+class StorageConfig(BaseModel):
+    authority_db: Path = Path("data/authority.db")              # Canonical WEMI Authority SQLite DB
+    vocab_db: Path = Path("data/vocab.db")                      # Value Vocabularies SQLite DB
+    progress_db: Path = Path("data/progress.db")                # Task tracking & progress state
+    corpus_db: Path = Path("data/reconcile_corpus.db")          # Ephemeral Target Corpus Staging & Clustering DB
+    work_index: Path = Path("data/work.index")                  # Work Vector Index (Conceptual Tier)
+    expression_index: Optional[Path] = Path("data/expression.index") # Expression Vector Index (Realization Tier)
+    manifestation_index: Optional[Path] = Path("data/manifestation.index") # Manifestation Vector Index (Carrier Tier)
+    vector_engine: VectorEngineConfig = Field(default_factory=VectorEngineConfig)
+```
+
+##### 2. `EmbeddingConfig`
+```python
+class EmbeddingConfig(BaseModel):
+    model_name: str = "TurkuNLP/sbert-cased-finnish-paraphrase"
+    template_path: Path = Path("reconciliator/templates/work_serialization.j2") # Pure Work template
+    device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
+    batch_size: int = 64
+    force_template: bool = False
+```
+
+##### 3. `OAIIngestConfig`
+```python
+class OAIIngestConfig(BaseModel):
+    enabled: bool = True
+    source_type: Literal["oai", "file", "resourcesync"] = "oai"
+    format: Literal["marcxml", "bibframe"] = "marcxml"
+    schema_profile: Optional[str] = None                        # "bffi_1" | "bibframe_3" | "bibframe_2"
+    input_path: Optional[Path] = None
+    oai_url: Optional[str] = None
+    resourcesync_url: Optional[str] = None
+    metadata_prefix: str = "marc21"
+    set_spec: Optional[str] = None
+    target_database: Literal["authority", "corpus"] = "authority" # Direct routing: authority.db vs reconcile_corpus.db
+    workers: int = 4
+    from_date: Optional[str] = None
+    until_date: Optional[str] = None
+    slice_days: int = 30                                         # Temporal partition chunk for parallel harvesting
+    batch_size: int = 500
+    request_delay: float = 0.1
+    timeout: float = 60.0
+    normalization: Optional[RecordNormalizationConfig] = None
+```
+
+##### 4. `WikidataIngestConfig`
+```python
+class WikidataIngestConfig(BaseModel):
+    dump_path: Path = Path("data/wikidata/latest-all.json.gz")
+    batch_size: int = 1000
+    pass1_only: bool = False                                     # If true, terminates after agent pre-scan
+    extract_works: bool = True                                   # If true, runs Pass 2 WEMI decomposition & P629 linking
+    normalization: Optional[RecordNormalizationConfig] = None
+```
+
+##### 5. `ReconcileConfig`
+```python
+class TemplateSetPathsConfig(BaseModel):
+    """Paths to the WEMI Serialization Triad templates."""
+    model_config = ConfigDict(extra="forbid")
+    work: Path = Path("reconciliator/templates/work_serialization.j2")
+    expression: Path = Path("reconciliator/templates/expression_serialization.j2")
+    manifestation: Path = Path("reconciliator/templates/manifestation_serialization.j2")
+
+class MultiplexClusterThresholds(BaseModel):
+    """Thresholds for the 3-layer multiplex graph clustering."""
+    work: float = 0.85
+    expression: float = 0.88
+    manifestation: float = 0.92
+
+class ClusterConfig(BaseModel):
+    """Configuration for intra-corpus 3-layer multiplex graph clustering."""
+    enabled: bool = True
+    similarity_threshold: float = 0.85
+    max_cluster_size: int = 2000
+    blocking_families: Union[list[str], Literal["all"]] = "all"  # Enable all 35 blocking families or subset
+    thresholds: MultiplexClusterThresholds = Field(default_factory=MultiplexClusterThresholds)
+    message_passing: bool = True                                 # Enable upward enrichment & downward constraints
+
+class EnrichmentTogglesConfig(BaseModel):
+    """Fine-grained toggles for native format tree mutation."""
+    inject_work_links: bool = True          # MARC 758 / bffi:workManifested / bf:instanceOf
+    inject_expression_links: bool = True    # MARC 758 / bffi:expressionManifested
+    inject_hub_links: bool = True           # LC bflc:hasHub
+    inject_same_as: bool = True             # owl:sameAs for Wikidata QIDs / Asteri URNs
+    inject_component_links: bool = True     # Analytical 700 $t / 773 host item links
+
+class ReconcileConfig(BaseModel):
+    target_file: Path
+    format: Literal["auto", "marcxml", "bibra", "bibframe"] = "auto"
+    schema_profile: Optional[str] = None
+    output_file: Optional[Path] = None
+    enrich: bool = True
+    fold_legacy: bool = True
+    threshold: float = 0.85
+    
+    # WEMI Serialization Triad Templates
+    templates: TemplateSetPathsConfig = Field(default_factory=TemplateSetPathsConfig)
+
+    # Reports across all 4 dimensions
+    work_reports: ReportSetPathsConfig = Field(
+        default_factory=lambda: ReportSetPathsConfig(
+            detailed_file=Path("data/reports/work_reconciliation_uris.tsv"),
+            summary_file=Path("data/reports/work_reconciliation_summary.tsv")
+        )
+    )
+    expression_reports: ReportSetPathsConfig = Field(
+        default_factory=lambda: ReportSetPathsConfig(
+            detailed_file=Path("data/reports/expression_reconciliation_uris.tsv"),
+            summary_file=Path("data/reports/expression_reconciliation_summary.tsv")
+        )
+    )
+    agent_reports: ReportSetPathsConfig
+    subject_reports: ReportSetPathsConfig
+
+    cluster: ClusterConfig = Field(default_factory=ClusterConfig)
+    enrichment: EnrichmentTogglesConfig = Field(default_factory=EnrichmentTogglesConfig)
+    rerank: RerankConfig = Field(default_factory=RerankConfig)
+    link_policy: Literal["priority_fallback", "all"] = "priority_fallback"
+    vocabularies: list[str] = Field(
+        default_factory=lambda: ["KANTO", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
+    )
+    agent_priority: list[str] = Field(
+        default_factory=lambda: ["KANTO", "ISNI", "VIAF", "WIKIDATA"]
+    )
+    subject_priority: list[str] = Field(
+        default_factory=lambda: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO", "WIKIDATA"]
+    )
+```
+
+---
+
+### 8.3 Canonical Greenfield `config.yaml` Reference
+
+```yaml
+# config.yaml - Greenfield Configuration for Reconciliator WEMI Engine
+
+# 1. Storage & Database Endpoints
+storage:
+  authority_db: "data/authority.db"               # Greenfield WEMI Authority DB (works, expressions, manifestations)
+  vocab_db: "data/vocab.db"                       # Value Vocabularies DB (YSO, KAUNO, SLM, etc.)
+  progress_db: "data/progress.db"                 # Ingestion & task state
+  corpus_db: "data/reconcile_corpus.db"           # Target Corpus Staging & Clustering DB
+  work_index: "data/work.index"                   # Work Vector Index (Conceptual Tier)
+  expression_index: "data/expression.index"       # Expression Vector Index (Realization Tier)
+  manifestation_index: "data/manifestation.index" # Manifestation Vector Index (Carrier Tier)
+  vector_engine:
+    backend: "auto"       # "auto" | "faiss" | "torch"
+    device: "auto"        # "auto" | "mps" | "cuda" | "cpu"
+    threads: null
+
+# 2. Embedding Model & Work-Level Serialization Template
+embedding:
+  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
+  template_path: "reconciliator/templates/work_serialization.j2" # Pure Work template (author + title + subjects)
+  device: "auto"        # "auto" | "cuda" | "mps" | "cpu"
+  batch_size: 64
+  force_template: false
+
+# 3. Skosmos Value Vocabularies Downloader
+download_skosmos:
+  finto: "sources/skosmos/finto.example.yaml"
+
+# 4. Value Vocabularies & Migration Ingestion
+ingest_vocab:
+  input_path: "data/vocabularies"
+  vocabularies: ["yso", "yso-paikat", "kauno", "muso", "slm", "seko"]
+  legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
+
+# 5. OAI-PMH & MARCXML Authority Sources Ingestion
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "oai"
+    format: "marcxml"
+    oai_url: "https://oai.melinda.kansalliskirjasto.fi/oai"
+    metadata_prefix: "marc21"
+    target_database: "authority"                  # "authority" -> authority.db, "corpus" -> reconcile_corpus.db
+    workers: 4
+    slice_days: 30                                # Temporal date slicing for parallel harvesting
+    batch_size: 500
+
+# 6. Wikidata Authority Ingestion (Two-Pass Streaming)
+ingest_wikidata:
+  dump_path: "data/wikidata/latest-all.json.gz"
+  batch_size: 1000
+  pass1_only: false                               # Set true to run only Pass 1 (Creator/Agent pre-scan)
+  extract_works: true                             # Enable Pass 2 WEMI decomposition & P629 edition linking
+
+# 7. Target Reconciliation, Clustering & Enrichment
+reconcile:
+  target_file: "tests/fixtures/sample_target.xml"
+  format: "auto"        # "auto" | "marcxml" | "bibra" | "bibframe"
+  schema_profile: null  # "bffi_1" | "bibframe_3" | "bibframe_2" | path to custom yaml
+  output_file: "data/enriched_records.xml"
+  enrich: true
+  fold_legacy: true
+  threshold: 0.85
+
+  # WEMI Serialization Triad Templates
+  templates:
+    work: "reconciliator/templates/work_serialization.j2"
+    expression: "reconciliator/templates/expression_serialization.j2"
+    manifestation: "reconciliator/templates/manifestation_serialization.j2"
+
+  # Intra-Corpus 3-Layer Multiplex Graph Clustering
+  cluster:
+    enabled: true                                 # Enable intra-corpus 3-layer multiplex clustering
+    similarity_threshold: 0.85                    # Base fallback threshold
+    max_cluster_size: 2000                        # Guard against anomalous mega-clusters
+    blocking_families: "all"                      # "all" or specific list of blocking families to execute
+    thresholds:
+      work: 0.85                                  # Layer 3 Work family cluster threshold
+      expression: 0.88                            # Layer 2 Realization cluster threshold
+      manifestation: 0.92                         # Layer 1 Carrier duplicate threshold
+    message_passing: true                         # Enable upward enrichment & downward constraint propagation
+
+  # Format Mutation & Enrichment Toggles
+  enrichment:
+    inject_work_links: true                       # MARC 758 / bffi:workManifested / bf:instanceOf
+    inject_expression_links: true                 # MARC 758 / bffi:expressionManifested
+    inject_hub_links: true                        # LC bflc:hasHub
+    inject_same_as: true                          # owl:sameAs for Wikidata QIDs / Asteri URNs
+    inject_component_links: true                  # Analytical 700 $t / 773 host item links
+
+  # Complete 4-Dimension TSV Reporting Suite
+  work_reports:
+    detailed_file: "data/reports/work_reconciliation_uris.tsv"
+    summary_file: "data/reports/work_reconciliation_summary.tsv"
+  expression_reports:
+    detailed_file: "data/reports/expression_reconciliation_uris.tsv"
+    summary_file: "data/reports/expression_reconciliation_summary.tsv"
+  agent_reports:
+    detailed_file: "data/reports/agent_reconciliation_uris.tsv"
+    summary_file: "data/reports/agent_reconciliation_summary.tsv"
+  subject_reports:
+    detailed_file: "data/reports/subject_reconciliation_uris.tsv"
+    summary_file: "data/reports/subject_reconciliation_summary.tsv"
+
+  # Pluggable Reranker & Matching Discriminators
+  rerank:
+    enabled: true
+    engine: "bm25"                                # "bm25" | "cross_encoder" | "fuzzy" | "noop"
+    dense_weight: 0.6
+    rerank_weight: 0.4
+    top_k: 50
+    short_circuit:
+      enabled: true
+      threshold: 0.98
+    require_volume_match: true
+    require_surname_match: true
+    max_year_difference: 5
+    year_penalty_threshold: 1
+
+  link_policy: "priority_fallback"
+  vocabularies: ["KANTO", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
+  agent_priority: ["KANTO", "ISNI", "VIAF", "WIKIDATA"]
+  subject_priority: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO", "WIKIDATA"]
+
+# 8. Telemetry & Progress Monitoring
+telemetry:
+  heartbeat_interval_seconds: 1.0
+  watch_interval_seconds: 1.0
+
+# 9. Global Normalization Rules
+normalization: "sources/global/global.example.yaml"
+```
 
 
