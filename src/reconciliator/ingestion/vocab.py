@@ -1,4 +1,4 @@
-"""FINTO ontology and migration tables ingestion pipeline into dedicated finto.db."""
+"""Controlled vocabulary and migration tables ingestion pipeline into dedicated vocab.db."""
 
 from __future__ import annotations
 
@@ -6,21 +6,21 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from reconciliator.finto_store import FintoStore
-from reconciliator.models import FintoConcept, FintoMapping
+from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
+from reconciliator.vocab_store import VocabStore
 
 
-def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMapping]]:
+def parse_turtle_simple(content: str) -> tuple[list[VocabConcept], list[ConceptMapping]]:
     """
     Fast regex-based parser for SKOS Turtle (.ttl) concepts and mappings.
     Extracts skos:Concept, prefLabels, altLabels, exactMatch, and isReplacedBy.
     Supports both full URIs (<...>) and prefixed IRIs (@prefix ...).
     """
-    concepts: list[FintoConcept] = []
-    mappings: list[FintoMapping] = []
+    concepts: list[VocabConcept] = []
+    mappings: list[ConceptMapping] = []
 
     # Extract prefix declarations
     prefixes: dict[str, str] = {}
@@ -39,20 +39,17 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
         return raw
 
     # Block split by concept definition
-    # e.g. <http://www.yso.fi/onto/yso/p1234> a skos:Concept ; ... .
-    # or yso:p1234 a skos:Concept ; ... .
     blocks = re.split(
         r"(?:^|\n)\s*(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+skos:Concept\b",
         content,
     )
     if len(blocks) > 1:
-        # blocks[0] is header/prefixes, then alternating (raw_subject, body)
         for i in range(1, len(blocks), 2):
             uri = _resolve_uri(blocks[i])
             body = blocks[i + 1]
 
             # Detect vocabulary from URI
-            def _detect_finto_vocab(u: str) -> str:
+            def _detect_vocab(u: str) -> str:
                 lu = u.lower()
                 if "/yso-paikat/" in lu or ":yso-paikat:" in lu:
                     return "yso-paikat"
@@ -80,9 +77,14 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
                     return "mts"
                 if "/yso/" in lu or ":yso:" in lu:
                     return "yso"
-                return "yso"
+                # If custom or unknown, extract namespace segment
+                for seg in reversed(u.rstrip("/").split("/")):
+                    clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
+                    if clean_seg and not clean_seg.isdigit() and len(clean_seg) > 2:
+                        return clean_seg.lower()
+                return "vocab"
 
-            vocab = _detect_finto_vocab(uri)
+            vocab = _detect_vocab(uri)
 
             pref_fi = None
             pref_sv = None
@@ -112,7 +114,7 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
             elif vocab == "yso-paikat":
                 target_field = "651"
 
-            concept = FintoConcept(
+            concept = VocabConcept(
                 uri=uri,
                 vocabulary=vocab,
                 pref_label_fi=pref_fi,
@@ -126,14 +128,13 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
             concepts.append(concept)
 
             # Check mappings
-            # skos:exactMatch <http://www.yso.fi/onto/yso/p1234> or prefixed
             matches = re.findall(
                 r"(?:skos:exactMatch|dct:isReplacedBy)\s+(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)",
                 body,
             )
             for raw_match in matches:
                 target_uri = _resolve_uri(raw_match)
-                target_v = _detect_finto_vocab(target_uri)
+                target_v = _detect_vocab(target_uri)
 
                 t_field = "650"
                 if target_v == "slm":
@@ -143,7 +144,7 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
                 elif target_v == "yso-paikat":
                     t_field = "651"
 
-                mapping = FintoMapping(
+                mapping = ConceptMapping(
                     legacy_uri=uri,
                     legacy_vocab=vocab,
                     legacy_label_fi=pref_fi,
@@ -158,13 +159,13 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
     return concepts, mappings
 
 
-def ingest_bridge_files(finto_store: FintoStore, extra_bridge_dir: Optional[Path] = None) -> int:
-    """Ingest bundled and optional custom bridge files into finto_mappings and finto_aliases."""
+def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path] = None) -> int:
+    """Ingest bundled and optional custom bridge files into concept_mappings and concept_aliases."""
     bridge_files = get_bundled_bridge_files()
     if extra_bridge_dir and extra_bridge_dir.is_dir():
         bridge_files.extend(sorted(extra_bridge_dir.glob("*.ttl")))
 
-    total_bridge_mappings: list[FintoMapping] = []
+    total_bridge_mappings: list[ConceptMapping] = []
     total_bridge_aliases: list[dict[str, Any]] = []
 
     for bf in bridge_files:
@@ -182,7 +183,7 @@ def ingest_bridge_files(finto_store: FintoStore, extra_bridge_dir: Optional[Path
             notation = b.get("notation")
 
             total_bridge_mappings.append(
-                FintoMapping(
+                ConceptMapping(
                     legacy_uri=source_uri,
                     legacy_vocab=stem,
                     legacy_label_fi=pref_fi,
@@ -228,25 +229,25 @@ def ingest_bridge_files(finto_store: FintoStore, extra_bridge_dir: Optional[Path
                 )
 
     if total_bridge_mappings:
-        finto_store.insert_mappings(total_bridge_mappings)
+        vocab_store.insert_mappings(total_bridge_mappings)
     if total_bridge_aliases:
-        finto_store.insert_aliases(total_bridge_aliases)
+        vocab_store.insert_aliases(total_bridge_aliases)
 
     return len(total_bridge_mappings)
 
 
-def ingest_finto_file(
+def ingest_vocab_file(
     input_path: Path | str,
-    finto_store: FintoStore,
+    vocab_store: VocabStore,
     tracker: Optional[ProgressTracker] = None,
 ) -> tuple[int, int]:
-    """Ingest FINTO Turtle or mapping file(s) into finto.db.
+    """Ingest SKOS Turtle or mapping file(s) into vocab.db.
 
     Supports either a single file (.ttl) or a directory containing multiple .ttl files.
     """
     path = Path(input_path)
     if not path.exists():
-        raise FileNotFoundError(f"FINTO input path not found: {path}")
+        raise FileNotFoundError(f"Vocabulary input path not found: {path}")
 
     files: list[Path] = []
     if path.is_dir():
@@ -259,10 +260,10 @@ def ingest_finto_file(
         files = [path]
 
     if tracker:
-        tracker.start_task(stage="parsing_finto")
+        tracker.start_task(stage="parsing_vocab")
 
-    total_concepts: list[FintoConcept] = []
-    total_mappings: list[FintoMapping] = []
+    total_concepts: list[VocabConcept] = []
+    total_mappings: list[ConceptMapping] = []
 
     for file_path in files:
         content = file_path.read_text(encoding="utf-8")
@@ -277,8 +278,8 @@ def ingest_finto_file(
             force=True,
         )
 
-    finto_store.insert_concepts(total_concepts)
-    finto_store.insert_mappings(total_mappings)
+    vocab_store.insert_concepts(total_concepts)
+    vocab_store.insert_mappings(total_mappings)
 
     # Ingest MTS contributor roles into relator_terms
     mts_roles: list[dict[str, Any]] = []
@@ -296,13 +297,13 @@ def ingest_finto_file(
                             {"folded_term": folded, "raw_term": lbl, "lang": lang, "uri": c.uri}
                         )
     if mts_roles:
-        finto_store.insert_relators(mts_roles)
+        vocab_store.insert_relators(mts_roles)
 
     # Ingest bundled bridge vocabularies
-    ingest_bridge_files(finto_store)
+    ingest_bridge_files(vocab_store)
 
     # Rebuild normalized aliases index
-    finto_store.rebuild_aliases_from_concepts()
+    vocab_store.rebuild_aliases_from_concepts()
 
     if tracker:
         tracker.complete_task(
@@ -314,3 +315,4 @@ def ingest_finto_file(
         )
 
     return len(total_concepts), len(total_mappings)
+

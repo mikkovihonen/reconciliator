@@ -137,7 +137,7 @@ def test_cli_status_watch_tui(tmp_path: Path) -> None:
         f"""
 storage:
   authority_db: "{tmp_path}/auth.db"
-  finto_db: "{tmp_path}/finto.db"
+  vocab_db: "{tmp_path}/vocab.db"
   progress_db: "{tmp_path}/prog.db"
   index_path: "{tmp_path}/auth.faiss"
 telemetry:
@@ -172,7 +172,7 @@ def test_cli_status_watch_json(tmp_path: Path) -> None:
         f"""
 storage:
   authority_db: "{tmp_path}/auth.db"
-  finto_db: "{tmp_path}/finto.db"
+  vocab_db: "{tmp_path}/vocab.db"
   progress_db: "{tmp_path}/prog.db"
   index_path: "{tmp_path}/auth.faiss"
 telemetry:
@@ -330,7 +330,7 @@ def test_cli_prune_commands(tmp_path: Path) -> None:
         f"""
 storage:
   authority_db: "{tmp_path}/auth.db"
-  finto_db: "{tmp_path}/finto.db"
+  vocab_db: "{tmp_path}/vocab.db"
   progress_db: "{prog_db}"
   index_path: "{tmp_path}/auth.faiss"
 """,

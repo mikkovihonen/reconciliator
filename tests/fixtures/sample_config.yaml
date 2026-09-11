@@ -1,7 +1,7 @@
 # Test configuration fixture
 storage:
   authority_db: "test_authority.db"
-  finto_db: "test_finto.db"
+  vocab_db: "test_vocab.db"
   progress_db: "test_progress.db"
   index_path: "test_authority.faiss"
 
@@ -12,7 +12,7 @@ embedding:
   batch_size: 16
   force_template: false
 
-ingest_finto:
+ingest_vocab:
   input_path: "sample_finto.ttl"
   vocabularies:
     - "yso"

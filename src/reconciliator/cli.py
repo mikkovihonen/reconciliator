@@ -12,14 +12,12 @@ from lxml import etree
 from rich.console import Console
 from rich.table import Table
 
-from reconciliator.config import AppConfig, FintoDownloadConfig, OAIIngestConfig, load_config
+from reconciliator.config import AppConfig, OAIIngestConfig, SkosmosDownloadConfig, load_config
 from reconciliator.db import reset_all_storage
 from reconciliator.embedder import SentenceEmbedder
-from reconciliator.finto_folding import FintoFolder
-from reconciliator.finto_store import FintoStore
-from reconciliator.ingestion.finto import ingest_finto_file
-from reconciliator.ingestion.finto_downloader import FintoDownloader
 from reconciliator.ingestion.oai import ingest_oai_pipeline
+from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
+from reconciliator.ingestion.vocab import ingest_vocab_file
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
 from reconciliator.loaders.bibra import (
     bibra_to_marcxml_elem,
@@ -45,6 +43,8 @@ from reconciliator.progress import (
 )
 from reconciliator.reports import AgentReportRow, ReportGenerator, SubjectReportRow
 from reconciliator.repository import AuthorityStore
+from reconciliator.vocab_folding import VocabFolder
+from reconciliator.vocab_store import VocabStore
 from reconciliator.vocabularies import detect_vocabulary
 from reconciliator.xml_enricher import MARCXMLEnricher
 
@@ -63,12 +63,12 @@ def reset_cmd(
         False,
         "--all",
         "-a",
-        help="Reset all storage (authority.db, finto.db, progress.db, FAISS index)",
+        help="Reset all storage (authority.db, vocab.db, progress.db, FAISS index)",
     ),
     authority: bool = typer.Option(
         False, "--authority", help="Reset authority.db and FAISS index only"
     ),
-    finto: bool = typer.Option(False, "--finto", help="Reset finto.db only"),
+    vocab: bool = typer.Option(False, "--vocab", help="Reset vocab.db only"),
     progress: bool = typer.Option(False, "--progress", help="Reset progress.db only"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
@@ -76,13 +76,13 @@ def reset_cmd(
     cfg = load_config(config)
 
     # Determine which components to reset
-    if all_components or not (authority or finto or progress):
+    if all_components or not (authority or vocab or progress):
         reset_auth = True
-        reset_fin = True
+        reset_voc = True
         reset_prog = True
     else:
         reset_auth = authority
-        reset_fin = finto
+        reset_voc = vocab
         reset_prog = progress
 
     if not yes:
@@ -94,7 +94,7 @@ def reset_cmd(
     reset_all_storage(
         storage_config=cfg.storage,
         reset_authority=reset_auth,
-        reset_finto=reset_fin,
+        reset_vocab=reset_voc,
         reset_progress=reset_prog,
     )
     console.print("[green]Successfully reset specified storage.[/green]")
@@ -267,57 +267,25 @@ def prune_telemetry_cmd(
     )
 
 
-@app.command("download-finto")
-def download_finto_cmd(
-    config: Path = typer.Option(
-        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
-    ),
-    vocab: Optional[list[str]] = typer.Option(
-        None,
-        "--vocab",
-        "-v",
-        help="Specific vocabulary ID to download (repeatable, e.g. -v yso -v slm)",
-    ),
-    output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", "-o", help="Target directory for downloaded .ttl files"
-    ),
-    all_vocabs: bool = typer.Option(
-        False, "--all", help="Discover and download all vocabularies available on Finto"
-    ),
-    list_vocabs: bool = typer.Option(
-        False, "--list", help="List all vocabularies available on Finto and exit"
-    ),
-    force: bool = typer.Option(
-        False, "--force", help="Force re-download even if file already exists"
-    ),
-    ingest: bool = typer.Option(
-        False, "--ingest", help="Automatically ingest downloaded vocabularies into finto.db"
-    ),
+def _download_single_skosmos_source(
+    cfg: AppConfig,
+    src_name: str,
+    dl_cfg: SkosmosDownloadConfig,
+    vocab: Optional[list[str]] = None,
+    output_dir: Optional[Path] = None,
+    api_url: Optional[str] = None,
+    all_vocabs: bool = False,
+    force: bool = False,
+    ingest: bool = False,
 ) -> None:
-    """Download FINTO value vocabularies in SKOS Turtle format for offline use."""
-    cfg = load_config(config) if config.exists() else AppConfig()
-    dl_cfg = cfg.download_finto or FintoDownloadConfig()
-
-    api_url = dl_cfg.api_url
+    target_api_url = api_url or dl_cfg.api_url
     target_dir = output_dir or dl_cfg.output_dir
     overwrite = force or dl_cfg.overwrite
 
-    downloader = FintoDownloader(api_url=api_url, timeout_seconds=dl_cfg.timeout_seconds)
-
-    if list_vocabs:
-        console.print(f"[cyan]Fetching available vocabularies from {api_url}...[/cyan]")
-        vocabs = downloader.list_vocabularies()
-        table = Table(title="FINTO Vocabularies")
-        table.add_column("ID", style="bold green")
-        table.add_column("Title")
-        table.add_column("URI")
-        for v in vocabs:
-            table.add_row(str(v.get("id", "")), str(v.get("title", "")), str(v.get("uri", "")))
-        console.print(table)
-        return
+    downloader = SkosmosDownloader(api_url=target_api_url, timeout_seconds=dl_cfg.timeout_seconds)
 
     if all_vocabs:
-        console.print(f"[cyan]Discovering all vocabularies from {api_url}...[/cyan]")
+        console.print(f"[cyan]Discovering all vocabularies from {target_api_url}...[/cyan]")
         vocabs = downloader.list_vocabularies()
         vocab_ids = [str(v["id"]) for v in vocabs if "id" in v]
     elif vocab:
@@ -326,17 +294,21 @@ def download_finto_cmd(
         vocab_ids = dl_cfg.vocabularies
 
     if not vocab_ids:
-        console.print("[yellow]No vocabularies specified or discovered to download.[/yellow]")
+        console.print(
+            f"[yellow]No vocabularies specified or discovered for Skosmos source '{src_name}'.[/yellow]"
+        )
         return
 
     tracker = ProgressTracker(
         db_path=cfg.storage.progress_db,
-        task_id=f"finto-download-{int(time.time())}",
-        task_type="finto_ingest",
+        task_id=f"skosmos-download-{src_name}-{int(time.time())}",
+        task_type="vocab_ingest",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
 
-    console.print(f"[cyan]Downloading {len(vocab_ids)} vocabularies to {target_dir}...[/cyan]")
+    console.print(
+        f"[cyan][{src_name}] Downloading {len(vocab_ids)} vocabularies from {target_api_url} to {target_dir}...[/cyan]"
+    )
 
     def _progress_cb(v_id: str, idx: int, total: int) -> None:
         console.print(f"  [{idx}/{total}] Downloading [bold green]{v_id}[/bold green]...")
@@ -350,48 +322,173 @@ def download_finto_cmd(
         on_progress=_progress_cb,
     )
     console.print(
-        f"[green]Successfully downloaded {len(downloaded)} vocabularies to {target_dir}.[/green]"
+        f"[green][{src_name}] Successfully downloaded {len(downloaded)} vocabularies to {target_dir}.[/green]"
     )
 
     if ingest:
         console.print(
-            f"[cyan]Ingesting downloaded vocabularies into finto.db ({cfg.storage.finto_db})...[/cyan]"
+            f"[cyan][{src_name}] Ingesting downloaded vocabularies into vocab.db ({cfg.storage.vocab_db})...[/cyan]"
         )
-        finto_store = FintoStore(cfg.storage.finto_db)
+        vocab_store = VocabStore(cfg.storage.vocab_db)
         ingest_tracker = ProgressTracker(
             db_path=cfg.storage.progress_db,
-            task_id=f"finto-ingest-{int(time.time())}",
-            task_type="finto_ingest",
+            task_id=f"vocab-ingest-{src_name}-{int(time.time())}",
+            task_type="vocab_ingest",
             heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
         )
-        c_count, m_count = ingest_finto_file(target_dir, finto_store, tracker=ingest_tracker)
+        c_count, m_count = ingest_vocab_file(target_dir, vocab_store, tracker=ingest_tracker)
         console.print(
-            f"[green]Successfully ingested {c_count} concepts and {m_count} mappings into {cfg.storage.finto_db}.[/green]"
+            f"[green][{src_name}] Successfully ingested {c_count} concepts and {m_count} mappings into {cfg.storage.vocab_db}.[/green]"
         )
 
 
-@app.command("ingest-finto")
-def ingest_finto_cmd(
+@app.command("download-skosmos")
+def download_skosmos_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    source: Optional[str] = typer.Option(
+        None,
+        "--source",
+        "-s",
+        help="Name of configured Skosmos source to download (defaults to 'finto')",
+    ),
+    all_sources: bool = typer.Option(
+        False, "--all", "-a", help="Download vocabularies for all enabled Skosmos sources"
+    ),
+    vocab: Optional[list[str]] = typer.Option(
+        None,
+        "--vocab",
+        "-v",
+        help="Specific vocabulary ID to download (repeatable, e.g. -v yso -v slm)",
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None, "--output-dir", "-o", help="Target directory for downloaded .ttl files"
+    ),
+    api_url: Optional[str] = typer.Option(
+        None, "--api-url", help="Override Skosmos REST API URL (e.g. https://api.finto.fi/rest/v1)"
+    ),
+    all_vocabs: bool = typer.Option(
+        False,
+        "--all-vocabs",
+        help="Discover and download all vocabularies available on the Skosmos instance",
+    ),
+    list_vocabs: bool = typer.Option(
+        False, "--list", help="List all vocabularies available on the Skosmos instance and exit"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Force re-download even if file already exists"
+    ),
+    ingest: bool = typer.Option(
+        False, "--ingest", help="Automatically ingest downloaded vocabularies into vocab.db"
+    ),
+) -> None:
+    """Download value vocabularies in SKOS Turtle format from Skosmos instances for offline use."""
+    cfg = load_config(config) if config.exists() else AppConfig()
+
+    if list_vocabs:
+        effective_api_url = api_url
+        if not effective_api_url:
+            if source and source in cfg.download_skosmos:
+                effective_api_url = cfg.download_skosmos[source].api_url
+            elif "finto" in cfg.download_skosmos:
+                effective_api_url = cfg.download_skosmos["finto"].api_url
+            elif cfg.download_skosmos:
+                effective_api_url = next(iter(cfg.download_skosmos.values())).api_url
+            else:
+                effective_api_url = "https://api.finto.fi/rest/v1"
+
+        downloader = SkosmosDownloader(api_url=effective_api_url)
+        console.print(f"[cyan]Fetching available vocabularies from {effective_api_url}...[/cyan]")
+        vocabs = downloader.list_vocabularies()
+        table = Table(title=f"Skosmos Vocabularies ({effective_api_url})")
+        table.add_column("ID", style="bold green")
+        table.add_column("Title")
+        table.add_column("URI")
+        for v in vocabs:
+            table.add_row(str(v.get("id", "")), str(v.get("title", "")), str(v.get("uri", "")))
+        console.print(table)
+        return
+
+    if all_sources:
+        if not cfg.download_skosmos:
+            console.print("[yellow]No Skosmos sources configured under 'download_skosmos'.[/yellow]")
+            return
+        enabled_sources = {k: v for k, v in cfg.download_skosmos.items() if v.enabled}
+        if not enabled_sources:
+            console.print("[yellow]No Skosmos sources are currently enabled under 'download_skosmos'.[/yellow]")
+            return
+        for name, dl_cfg in enabled_sources.items():
+            _download_single_skosmos_source(
+                cfg=cfg,
+                src_name=name,
+                dl_cfg=dl_cfg,
+                vocab=vocab,
+                output_dir=output_dir,
+                api_url=api_url,
+                all_vocabs=all_vocabs,
+                force=force,
+                ingest=ingest,
+            )
+        return
+
+    # Single source selection
+    if source:
+        if source not in cfg.download_skosmos:
+            console.print(
+                f"[red]Error: Source '{source}' not found in configuration 'download_skosmos'.[/red]"
+            )
+            console.print(f"Available sources: {', '.join(cfg.download_skosmos.keys()) or 'None'}")
+            raise typer.Exit(code=1)
+        src_name = source
+        dl_cfg = cfg.download_skosmos[source]
+    else:
+        if "finto" in cfg.download_skosmos:
+            src_name = "finto"
+            dl_cfg = cfg.download_skosmos["finto"]
+        elif cfg.download_skosmos:
+            src_name = next(iter(cfg.download_skosmos.keys()))
+            dl_cfg = cfg.download_skosmos[src_name]
+        else:
+            # Default fallback when no config exists or download_skosmos is unconfigured
+            src_name = "finto"
+            dl_cfg = SkosmosDownloadConfig()
+
+    _download_single_skosmos_source(
+        cfg=cfg,
+        src_name=src_name,
+        dl_cfg=dl_cfg,
+        vocab=vocab,
+        output_dir=output_dir,
+        api_url=api_url,
+        all_vocabs=all_vocabs,
+        force=force,
+        ingest=ingest,
+    )
+
+
+@app.command("ingest-vocab")
+def ingest_vocab_cmd(
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
 ) -> None:
-    """Ingest FINTO ontologies and legacy migration tables into dedicated finto.db."""
+    """Ingest ontologies and legacy migration tables into dedicated vocab.db."""
     cfg = load_config(config)
-    if not cfg.ingest_finto:
-        console.print("[red]No ingest_finto section found in configuration.[/red]")
+    if not cfg.ingest_vocab:
+        console.print("[red]No ingest_vocab section found in configuration.[/red]")
         raise typer.Exit(code=1)
 
-    finto_store = FintoStore(cfg.storage.finto_db)
+    vocab_store = VocabStore(cfg.storage.vocab_db)
     tracker = ProgressTracker(
         db_path=cfg.storage.progress_db,
-        task_id=f"finto-ingest-{int(time.time())}",
-        task_type="finto_ingest",
+        task_id=f"vocab-ingest-{int(time.time())}",
+        task_type="vocab_ingest",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
 
-    console.print(f"[cyan]Ingesting FINTO from {cfg.ingest_finto.input_path}...[/cyan]")
-    c_count, m_count = ingest_finto_file(cfg.ingest_finto.input_path, finto_store, tracker=tracker)
+    console.print(f"[cyan]Ingesting vocabularies from {cfg.ingest_vocab.input_path}...[/cyan]")
+    c_count, m_count = ingest_vocab_file(cfg.ingest_vocab.input_path, vocab_store, tracker=tracker)
     console.print(
         f"[green]Successfully ingested {c_count} concepts and {m_count} mappings.[/green]"
     )
@@ -447,11 +544,11 @@ def ingest_oai_cmd(
         )
         raise typer.Exit(code=1)
 
-    finto_store = FintoStore(cfg.storage.finto_db)
-    finto_folder = FintoFolder(finto_store)
+    vocab_store = VocabStore(cfg.storage.vocab_db)
+    vocab_folder = VocabFolder(vocab_store)
     embedder = SentenceEmbedder(cfg.embedding)
     normalizer = RecordNormalizer(
-        finto_folder=finto_folder, template_engine=embedder.template_engine
+        vocab_folder=vocab_folder, template_engine=embedder.template_engine
     )
     store = AuthorityStore(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
@@ -496,11 +593,11 @@ def ingest_wikidata_cmd(
         console.print("[red]No ingest_wikidata section found in configuration.[/red]")
         raise typer.Exit(code=1)
 
-    finto_store = FintoStore(cfg.storage.finto_db)
-    finto_folder = FintoFolder(finto_store)
+    vocab_store = VocabStore(cfg.storage.vocab_db)
+    vocab_folder = VocabFolder(vocab_store)
     embedder = SentenceEmbedder(cfg.embedding)
     normalizer = RecordNormalizer(
-        finto_folder=finto_folder, template_engine=embedder.template_engine
+        vocab_folder=vocab_folder, template_engine=embedder.template_engine
     )
     store = AuthorityStore(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
@@ -537,11 +634,11 @@ def reconcile_cmd(
         console.print(f"[red]Target MARCXML file not found: {r_cfg.target_file}[/red]")
         raise typer.Exit(code=1)
 
-    finto_store = FintoStore(cfg.storage.finto_db)
-    finto_folder = FintoFolder(finto_store)
+    vocab_store = VocabStore(cfg.storage.vocab_db)
+    vocab_folder = VocabFolder(vocab_store)
     embedder = SentenceEmbedder(cfg.embedding)
     normalizer = RecordNormalizer(
-        finto_folder=finto_folder, template_engine=embedder.template_engine
+        vocab_folder=vocab_folder, template_engine=embedder.template_engine
     )
     store = AuthorityStore(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
@@ -557,7 +654,7 @@ def reconcile_cmd(
         )
 
     engine = ReconciliationEngine(authority_store=store, embedder=embedder, config=r_cfg)
-    enricher = MARCXMLEnricher(finto_folder=finto_folder)
+    enricher = MARCXMLEnricher(vocab_folder=vocab_folder)
     reporter = ReportGenerator(config=cfg)
 
     tracker = ProgressTracker(
@@ -863,8 +960,8 @@ def run_cmd(
 ) -> None:
     """Execute end-to-end pipeline configured in YAML."""
     cfg = load_config(config)
-    if cfg.ingest_finto:
-        ingest_finto_cmd(config=config)
+    if cfg.ingest_vocab:
+        ingest_vocab_cmd(config=config)
     if cfg.ingest_oai:
         ingest_oai_cmd(config=config, all_sources=True)
     if cfg.ingest_wikidata:

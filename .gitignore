@@ -101,6 +101,11 @@ ehthumbs.db
 *.sublime-workspace
 *.sublime-project
 
+*.gz
+*.tar.gz
+*.gz.aria2
+*.tar.gz.aria2
+
 # .pi-container
 .pi-container/agent/bin
 .pi-container/agent/sessions

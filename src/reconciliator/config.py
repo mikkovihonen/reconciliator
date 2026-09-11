@@ -13,7 +13,7 @@ class StorageConfig(BaseModel):
     """File paths for databases and vector indices."""
 
     authority_db: Path = Path("data/authority.db")
-    finto_db: Path = Path("data/finto.db")
+    vocab_db: Path = Path("data/vocab.db")
     progress_db: Path = Path("data/progress.db")
     index_path: Path = Path("data/authority.faiss")
 
@@ -34,9 +34,10 @@ class EmbeddingConfig(BaseModel):
         return self
 
 
-class FintoDownloadConfig(BaseModel):
-    """Configuration for downloading FINTO value vocabularies."""
+class SkosmosDownloadConfig(BaseModel):
+    """Configuration for downloading value vocabularies from a Skosmos REST instance."""
 
+    enabled: bool = True
     api_url: str = "https://api.finto.fi/rest/v1"
     output_dir: Path = Path("data/finto")
     vocabularies: list[str] = Field(
@@ -47,8 +48,8 @@ class FintoDownloadConfig(BaseModel):
     overwrite: bool = False
 
 
-class FintoIngestConfig(BaseModel):
-    """Configuration for FINTO thesauri and migration ingestion."""
+class VocabIngestConfig(BaseModel):
+    """Configuration for value vocabulary and migration thesauri ingestion."""
 
     input_path: Path = Path("data/finto")
     vocabularies: list[str] = Field(
@@ -184,8 +185,8 @@ class AppConfig(BaseModel):
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
-    download_finto: Optional[FintoDownloadConfig] = None
-    ingest_finto: Optional[FintoIngestConfig] = None
+    download_skosmos: dict[str, SkosmosDownloadConfig] = Field(default_factory=dict)
+    ingest_vocab: Optional[VocabIngestConfig] = None
     ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
     ingest_wikidata: Optional[WikidataIngestConfig] = None
     reconcile: Optional[ReconcileConfig] = None
@@ -213,7 +214,7 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
 
     # Storage paths
     config.storage.authority_db = resolve_p(config.storage.authority_db)  # type: ignore[assignment]
-    config.storage.finto_db = resolve_p(config.storage.finto_db)  # type: ignore[assignment]
+    config.storage.vocab_db = resolve_p(config.storage.vocab_db)  # type: ignore[assignment]
     config.storage.progress_db = resolve_p(config.storage.progress_db)  # type: ignore[assignment]
     config.storage.index_path = resolve_p(config.storage.index_path)  # type: ignore[assignment]
 
@@ -234,12 +235,13 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
                     config.embedding.template_path = candidate
 
     # Download configs
-    if config.download_finto and config.download_finto.output_dir:
-        config.download_finto.output_dir = resolve_p(config.download_finto.output_dir)  # type: ignore[assignment]
+    for skos_cfg in config.download_skosmos.values():
+        if skos_cfg.output_dir:
+            skos_cfg.output_dir = resolve_p(skos_cfg.output_dir)  # type: ignore[assignment]
 
     # Ingestion configs
-    if config.ingest_finto and config.ingest_finto.input_path:
-        config.ingest_finto.input_path = resolve_p(config.ingest_finto.input_path)  # type: ignore[assignment]
+    if config.ingest_vocab and config.ingest_vocab.input_path:
+        config.ingest_vocab.input_path = resolve_p(config.ingest_vocab.input_path)  # type: ignore[assignment]
 
     for oai_cfg in config.ingest_oai.values():
         if oai_cfg.input_path:

@@ -1,4 +1,4 @@
-"""Unit and integration tests for FINTO value vocabularies downloader and directory ingestion."""
+"""Unit and integration tests for Skosmos value vocabularies downloader and multi-source CLI."""
 
 from __future__ import annotations
 
@@ -8,29 +8,33 @@ from unittest.mock import MagicMock, patch
 
 import httpx2
 import pytest
+import typer
 
-from reconciliator.cli import download_finto_cmd
-from reconciliator.finto_store import FintoStore
-from reconciliator.ingestion.finto import ingest_finto_file, parse_turtle_simple
-from reconciliator.ingestion.finto_downloader import FintoDownloader
+from reconciliator.cli import download_skosmos_cmd
+from reconciliator.ingestion.skosmos_downloader import (
+    FINTO_CANONICAL_DUMP_URLS,
+    SkosmosDownloader,
+)
+from reconciliator.ingestion.vocab import ingest_vocab_file, parse_turtle_simple
 from reconciliator.version import get_version
+from reconciliator.vocab_store import VocabStore
 
 
-def test_finto_downloader_user_agent_from_pyproject() -> None:
+def test_skosmos_downloader_user_agent_from_pyproject() -> None:
     """Test that default user_agent resolves version from pyproject.toml."""
     ver = get_version()
     assert ver == "0.1.0"
 
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
+    downloader = SkosmosDownloader(api_url="https://api.finto.fi/rest/v1")
     assert downloader.user_agent == f"reconciliator/{ver}"
 
-    custom_dl = FintoDownloader(user_agent="custom-agent/2.0")
+    custom_dl = SkosmosDownloader(user_agent="custom-agent/2.0")
     assert custom_dl.user_agent == "custom-agent/2.0"
 
 
-def test_finto_downloader_list_vocabularies() -> None:
-    """Test listing available vocabularies from Finto REST API."""
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
+def test_skosmos_downloader_list_vocabularies() -> None:
+    """Test listing available vocabularies from Skosmos REST API."""
+    downloader = SkosmosDownloader(api_url="https://api.finto.fi/rest/v1")
     sample_response = {
         "vocabularies": [
             {
@@ -58,10 +62,14 @@ def test_finto_downloader_list_vocabularies() -> None:
         mock_get.assert_called_once()
 
 
-def test_finto_downloader_download_single(tmp_path: Path) -> None:
+def test_skosmos_downloader_download_single(tmp_path: Path) -> None:
     """Test downloading a single vocabulary with chunked streaming and atomic write."""
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
-    sample_turtle = b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n<http://www.yso.fi/onto/yso/p1> a skos:Concept .\n"
+    # Test on a non-finto URL so it uses the standard /rest/v1/{vocab_id}/data endpoint
+    downloader = SkosmosDownloader(api_url="https://skosmos.example.org/rest/v1")
+    sample_turtle = (
+        b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+        b"<http://example.org/concept/1> a skos:Concept .\n"
+    )
 
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
@@ -71,24 +79,50 @@ def test_finto_downloader_download_single(tmp_path: Path) -> None:
     mock_stream_ctx.__enter__.return_value = mock_response
     mock_stream_ctx.__exit__.return_value = None
 
-    with patch("httpx2.Client.stream", return_value=mock_stream_ctx):
+    with patch("httpx2.Client.stream", return_value=mock_stream_ctx) as mock_stream:
+        dest = downloader.download_vocabulary("custom_vocab", output_dir=tmp_path)
+        assert dest.exists()
+        assert dest.name == "custom_vocab.ttl"
+        assert dest.read_bytes() == sample_turtle
+        # Check no leftover temp file
+        assert not (tmp_path / "custom_vocab.ttl.tmp").exists()
+        # Verify call went to standard Skosmos data endpoint
+        mock_stream.assert_called_once_with(
+            "GET",
+            "https://skosmos.example.org/rest/v1/custom_vocab/data",
+            params={"format": "text/turtle"},
+        )
+
+
+def test_skosmos_downloader_finto_dump_fallback(tmp_path: Path) -> None:
+    """Test that Finto URL triggers fast static dump endpoint for known vocabularies."""
+    downloader = SkosmosDownloader(api_url="https://api.finto.fi/rest/v1")
+    sample_turtle = b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.iter_bytes.return_value = [sample_turtle]
+
+    mock_stream_ctx = MagicMock()
+    mock_stream_ctx.__enter__.return_value = mock_response
+    mock_stream_ctx.__exit__.return_value = None
+
+    with patch("httpx2.Client.stream", return_value=mock_stream_ctx) as mock_stream:
         dest = downloader.download_vocabulary("yso", output_dir=tmp_path)
         assert dest.exists()
         assert dest.name == "yso.ttl"
-        assert dest.read_bytes() == sample_turtle
-        # Check no leftover temp file
-        assert not (tmp_path / "yso.ttl.tmp").exists()
+        mock_stream.assert_called_once_with("GET", FINTO_CANONICAL_DUMP_URLS["yso"])
 
 
-def test_finto_downloader_skip_existing(tmp_path: Path) -> None:
+def test_skosmos_downloader_skip_existing(tmp_path: Path) -> None:
     """Test skipping download if file exists and overwrite=False."""
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
-    dest = tmp_path / "yso.ttl"
+    downloader = SkosmosDownloader(api_url="https://skosmos.example.org/rest/v1")
+    dest = tmp_path / "myvocab.ttl"
     dest.write_text("existing content", encoding="utf-8")
 
     with patch("httpx2.Client.stream") as mock_stream:
         # With overwrite=False, stream should NOT be called
-        res = downloader.download_vocabulary("yso", output_dir=tmp_path, overwrite=False)
+        res = downloader.download_vocabulary("myvocab", output_dir=tmp_path, overwrite=False)
         assert res == dest
         mock_stream.assert_not_called()
 
@@ -101,15 +135,15 @@ def test_finto_downloader_skip_existing(tmp_path: Path) -> None:
         mock_stream_ctx.__exit__.return_value = None
         mock_stream.return_value = mock_stream_ctx
 
-        res2 = downloader.download_vocabulary("yso", output_dir=tmp_path, overwrite=True)
+        res2 = downloader.download_vocabulary("myvocab", output_dir=tmp_path, overwrite=True)
         assert res2 == dest
         mock_stream.assert_called_once()
         assert dest.read_text(encoding="utf-8") == "new content"
 
 
-def test_finto_downloader_download_batch(tmp_path: Path) -> None:
+def test_skosmos_downloader_download_batch(tmp_path: Path) -> None:
     """Test downloading a batch of vocabularies."""
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
+    downloader = SkosmosDownloader(api_url="https://skosmos.example.org/rest/v1")
 
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
@@ -125,25 +159,25 @@ def test_finto_downloader_download_batch(tmp_path: Path) -> None:
 
     with patch("httpx2.Client.stream", return_value=mock_stream_ctx):
         downloaded = downloader.download_vocabularies(
-            ["yso", "slm", "seko"],
+            ["vocab1", "vocab2", "vocab3"],
             output_dir=tmp_path,
             on_progress=on_prog,
         )
         assert len(downloaded) == 3
-        assert (tmp_path / "yso.ttl").exists()
-        assert (tmp_path / "slm.ttl").exists()
-        assert (tmp_path / "seko.ttl").exists()
+        assert (tmp_path / "vocab1.ttl").exists()
+        assert (tmp_path / "vocab2.ttl").exists()
+        assert (tmp_path / "vocab3.ttl").exists()
         assert len(progress_records) == 3
-        assert progress_records[0] == ("yso", 1, 3)
-        assert progress_records[2] == ("seko", 3, 3)
+        assert progress_records[0] == ("vocab1", 1, 3)
+        assert progress_records[2] == ("vocab3", 3, 3)
 
 
-def test_finto_downloader_http_error(tmp_path: Path) -> None:
+def test_skosmos_downloader_http_error(tmp_path: Path) -> None:
     """Test error handling when HTTP request fails."""
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
+    downloader = SkosmosDownloader(api_url="https://skosmos.example.org/rest/v1")
 
     mock_response = MagicMock()
-    req = httpx2.Request("GET", "https://api.finto.fi/rest/v1/invalid/data")
+    req = httpx2.Request("GET", "https://skosmos.example.org/rest/v1/invalid/data")
     mock_response.raise_for_status.side_effect = httpx2.HTTPStatusError(
         "404 Not Found", request=req, response=MagicMock()
     )
@@ -194,8 +228,8 @@ def test_parse_turtle_prefixed_and_yso_paikat() -> None:
     assert c1.target_field == "651"
 
 
-def test_ingest_finto_directory(tmp_path: Path) -> None:
-    """Test ingesting an entire directory containing multiple .ttl files into finto.db."""
+def test_ingest_vocab_directory(tmp_path: Path) -> None:
+    """Test ingesting an entire directory containing multiple .ttl files into vocab.db."""
     finto_dir = tmp_path / "finto_vocabularies"
     finto_dir.mkdir()
 
@@ -217,10 +251,10 @@ def test_ingest_finto_directory(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    finto_db = tmp_path / "finto.db"
-    store = FintoStore(finto_db)
+    vocab_db = tmp_path / "vocab.db"
+    store = VocabStore(vocab_db)
 
-    c_count, m_count = ingest_finto_file(finto_dir, store)
+    c_count, m_count = ingest_vocab_file(finto_dir, store)
     assert c_count == 2
     assert m_count == 0
 
@@ -234,20 +268,23 @@ def test_ingest_finto_directory(tmp_path: Path) -> None:
     assert c2.target_field == "655"
 
 
-def test_cli_download_finto_and_ingest(tmp_path: Path) -> None:
-    """Test CLI download-finto command with --vocab and --ingest flags."""
+def test_cli_download_skosmos_single_and_ingest(tmp_path: Path) -> None:
+    """Test CLI download-skosmos command for a single source with --vocab and --ingest flags."""
     config_file = tmp_path / "config.yaml"
-    finto_db = tmp_path / "finto.db"
+    vocab_db = tmp_path / "vocab.db"
     progress_db = tmp_path / "progress.db"
     out_dir = tmp_path / "finto_data"
 
     config_yaml = f"""
 storage:
-  finto_db: "{finto_db}"
+  vocab_db: "{vocab_db}"
   progress_db: "{progress_db}"
-download_finto:
-  output_dir: "{out_dir}"
-  vocabularies: ["yso"]
+download_skosmos:
+  finto:
+    enabled: true
+    api_url: "https://api.finto.fi/rest/v1"
+    output_dir: "{out_dir}"
+    vocabularies: ["yso"]
 """
     config_file.write_text(config_yaml, encoding="utf-8")
 
@@ -264,11 +301,14 @@ download_finto:
     mock_stream_ctx.__exit__.return_value = None
 
     with patch("httpx2.Client.stream", return_value=mock_stream_ctx):
-        # Run CLI with --ingest
-        download_finto_cmd(
+        # Run CLI with -s finto and --ingest
+        download_skosmos_cmd(
             config=config_file,
+            source="finto",
+            all_sources=False,
             vocab=["yso"],
             output_dir=out_dir,
+            api_url=None,
             all_vocabs=False,
             list_vocabs=False,
             force=False,
@@ -280,16 +320,70 @@ download_finto:
     assert downloaded_file.exists()
     assert downloaded_file.read_bytes() == sample_turtle
 
-    # 2. Verify concepts were ingested into finto.db
-    assert finto_db.exists()
-    store = FintoStore(finto_db)
+    # 2. Verify concepts were ingested into vocab.db
+    assert vocab_db.exists()
+    store = VocabStore(vocab_db)
     concept = store.find_concept_by_label("filosofia", vocabulary="yso")
     assert concept is not None
     assert concept.uri == "http://www.yso.fi/onto/yso/p42"
 
 
-def test_cli_download_finto_list(capsys: Any, tmp_path: Path) -> None:
-    """Test CLI download-finto command with --list flag."""
+def test_cli_download_skosmos_all_sources(tmp_path: Path) -> None:
+    """Test CLI download-skosmos command with --all across multiple Skosmos sources."""
+    config_file = tmp_path / "config.yaml"
+    out_dir_finto = tmp_path / "finto_dumps"
+    out_dir_agrovoc = tmp_path / "agrovoc_dumps"
+
+    config_yaml = f"""
+download_skosmos:
+  finto:
+    enabled: true
+    api_url: "https://api.finto.fi/rest/v1"
+    output_dir: "{out_dir_finto}"
+    vocabularies: ["yso"]
+  agrovoc:
+    enabled: true
+    api_url: "https://agrovoc.example.org/rest/v1"
+    output_dir: "{out_dir_agrovoc}"
+    vocabularies: ["agrovoc"]
+  disabled_src:
+    enabled: false
+    api_url: "https://disabled.example.org/rest/v1"
+    output_dir: "{tmp_path}/disabled"
+    vocabularies: ["disabled_vocab"]
+"""
+    config_file.write_text(config_yaml, encoding="utf-8")
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.iter_bytes.return_value = [b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"]
+    mock_stream_ctx = MagicMock()
+    mock_stream_ctx.__enter__.return_value = mock_response
+    mock_stream_ctx.__exit__.return_value = None
+
+    with patch("httpx2.Client.stream", return_value=mock_stream_ctx):
+        download_skosmos_cmd(
+            config=config_file,
+            source=None,
+            all_sources=True,
+            vocab=None,
+            output_dir=None,
+            api_url=None,
+            all_vocabs=False,
+            list_vocabs=False,
+            force=False,
+            ingest=False,
+        )
+
+    # Verify both enabled sources downloaded
+    assert (out_dir_finto / "yso.ttl").exists()
+    assert (out_dir_agrovoc / "agrovoc.ttl").exists()
+    # Verify disabled source was skipped
+    assert not (tmp_path / "disabled").exists()
+
+
+def test_cli_download_skosmos_list(capsys: Any, tmp_path: Path) -> None:
+    """Test CLI download-skosmos command with --list flag."""
     sample_response = {
         "vocabularies": [
             {
@@ -305,12 +399,45 @@ def test_cli_download_finto_list(capsys: Any, tmp_path: Path) -> None:
     mock_resp.raise_for_status.return_value = None
 
     with patch("httpx2.Client.get", return_value=mock_resp):
-        download_finto_cmd(
+        download_skosmos_cmd(
             config=tmp_path / "nonexistent.yaml",
+            source=None,
+            all_sources=False,
             vocab=None,
             output_dir=None,
+            api_url=None,
             all_vocabs=False,
             list_vocabs=True,
             force=False,
             ingest=False,
         )
+
+
+def test_cli_download_skosmos_unknown_source_error(tmp_path: Path) -> None:
+    """Test error when non-existent source is requested."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        """
+download_skosmos:
+  finto:
+    enabled: true
+    vocabularies: ["yso"]
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        download_skosmos_cmd(
+            config=config_file,
+            source="unknown_instance",
+            all_sources=False,
+            vocab=None,
+            output_dir=None,
+            api_url=None,
+            all_vocabs=False,
+            list_vocabs=False,
+            force=False,
+            ingest=False,
+        )
+    assert exc_info.value.exit_code == 1
+

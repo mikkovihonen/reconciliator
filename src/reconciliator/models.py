@@ -102,11 +102,11 @@ class AgentURI(BaseModel):
     alignment_score: float = 100.0
 
 
-class FintoConcept(BaseModel):
-    """Modern FINTO ontology concept."""
+class VocabConcept(BaseModel):
+    """Modern controlled vocabulary concept."""
 
     uri: str
-    vocabulary: str  # e.g. "yso", "kauno", "muso", "slm", "seko"
+    vocabulary: str  # e.g. "yso", "kauno", "muso", "slm", "seko", "agrovoc"
     pref_label_fi: Optional[str] = None
     pref_label_sv: Optional[str] = None
     pref_label_en: Optional[str] = None
@@ -116,7 +116,7 @@ class FintoConcept(BaseModel):
     target_field: Optional[str] = None  # e.g. "650", "655", "651", "382"
 
 
-class FintoMapping(BaseModel):
+class ConceptMapping(BaseModel):
     """Mapping relation between legacy thesauri terms/URIs and modern ontologies."""
 
     legacy_uri: Optional[str] = None
@@ -145,7 +145,7 @@ class ReconciliationMatch(BaseModel):
     accepted: bool = True
 
 
-TaskType = Literal["oai_pmh_harvest", "wikidata_ingest", "finto_ingest", "reconciliation"]
+TaskType = Literal["oai_pmh_harvest", "wikidata_ingest", "vocab_ingest", "reconciliation"]
 TaskStatus = Literal["running", "completed", "failed"]
 
 

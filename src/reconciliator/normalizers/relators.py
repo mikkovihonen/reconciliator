@@ -79,11 +79,11 @@ class RelatorRegistry:
 
     def __init__(
         self,
-        finto_store: Optional[Any] = None,
+        vocab_store: Optional[Any] = None,
         extra_terms: Optional[Iterable[str]] = None,
         custom_relators: Optional[Iterable[str]] = None,
     ) -> None:
-        self.finto_store = finto_store
+        self.vocab_store = vocab_store
         self._custom_terms: set[str] = set()
         terms_to_add = list(extra_terms or []) + list(custom_relators or [])
         for term in terms_to_add:
@@ -124,8 +124,8 @@ class RelatorRegistry:
         if clean in self._custom_terms:
             return True
 
-        if self.finto_store is not None and hasattr(self.finto_store, "is_known_relator"):
-            if self.finto_store.is_known_relator(clean):
+        if self.vocab_store is not None and hasattr(self.vocab_store, "is_known_relator"):
+            if self.vocab_store.is_known_relator(clean):
                 return True
 
         return clean in _BASELINE_RELATOR_TERMS
@@ -155,8 +155,8 @@ class RelatorRegistry:
         if not clean:
             return None
 
-        if self.finto_store is not None and hasattr(self.finto_store, "get_relator_code"):
-            code = self.finto_store.get_relator_code(clean)
+        if self.vocab_store is not None and hasattr(self.vocab_store, "get_relator_code"):
+            code = self.vocab_store.get_relator_code(clean)
             if code:
                 return str(code)
 

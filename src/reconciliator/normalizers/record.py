@@ -6,7 +6,6 @@ import re
 from typing import Any, Optional
 
 from reconciliator.constants import FICTIONAL_QUALIFIERS
-from reconciliator.finto_folding import FintoFolder
 from reconciliator.models import (
     Agent,
     BibliographicRecord,
@@ -23,6 +22,7 @@ from reconciliator.normalizers.identifiers import (
 )
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.template import RecordTemplateEngine
+from reconciliator.vocab_folding import VocabFolder
 
 ROMAN_NUMERALS = {
     "i": 1,
@@ -236,14 +236,14 @@ class RecordNormalizer:
 
     def __init__(
         self,
-        finto_folder: Optional[FintoFolder] = None,
+        vocab_folder: Optional[VocabFolder] = None,
         template_engine: Optional[RecordTemplateEngine] = None,
         relator_registry: Optional[RelatorRegistry] = None,
     ) -> None:
-        self.finto_folder = finto_folder or FintoFolder()
+        self.vocab_folder = vocab_folder or VocabFolder()
         self.template_engine = template_engine
         self.relator_registry = relator_registry or RelatorRegistry(
-            finto_store=getattr(self.finto_folder, "finto_store", None)
+            vocab_store=getattr(self.vocab_folder, "vocab_store", None)
         )
 
     def normalize(self, raw_data: dict[str, Any]) -> BibliographicRecord:
@@ -380,7 +380,7 @@ class RecordNormalizer:
                     Agent(name=n, surname=s_name, role="aut", field_tag="245", is_fictional=fict)
                 )
 
-        # Subjects folding via FintoFolder
+        # Subjects folding via VocabFolder
         raw_subjects = raw_data.get("subjects", {})
         topical: list[SubjectItem] = []
         genre_form: list[SubjectItem] = []
@@ -393,7 +393,7 @@ class RecordNormalizer:
             field = item.get("field", "650")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
                 source_field=field,
@@ -422,7 +422,7 @@ class RecordNormalizer:
             field = item.get("field", "655")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
                 source_field=field,
@@ -449,7 +449,7 @@ class RecordNormalizer:
             field = item.get("field", "651")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
                 source_field=field,
@@ -476,7 +476,7 @@ class RecordNormalizer:
             field = item.get("field", "382")
             vocab = item.get("vocabulary")
             uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.finto_folder.fold_subject_heading(
+            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
                 heading=heading,
                 source_vocab=vocab,
                 source_field=field,

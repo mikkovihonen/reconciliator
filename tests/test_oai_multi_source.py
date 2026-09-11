@@ -10,11 +10,11 @@ from typer.testing import CliRunner
 from reconciliator.cli import app
 from reconciliator.config import OAIIngestConfig
 from reconciliator.embedder import SentenceEmbedder
-from reconciliator.finto_folding import FintoFolder
-from reconciliator.finto_store import FintoStore
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.repository import AuthorityStore
+from reconciliator.vocab_folding import VocabFolder
+from reconciliator.vocab_store import VocabStore
 
 SAMPLE_OAI_SOURCE_A = b"""<?xml version="1.0" encoding="UTF-8"?>
 <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
@@ -79,8 +79,8 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
     dim = 64
 
     store = AuthorityStore(db_path, index_path, dimension=dim)
-    finto_store = FintoStore(tmp_path / "finto.db")
-    finto_folder = FintoFolder(finto_store)
+    vocab_store = VocabStore(tmp_path / "vocab.db")
+    vocab_folder = VocabFolder(vocab_store)
 
     mock_model = MagicMock()
     mock_model.get_embedding_dimension.return_value = dim
@@ -99,7 +99,7 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
         emb_cfg = EmbeddingConfig(template_path=template_path, device="cpu", batch_size=10)
         embedder = SentenceEmbedder(emb_cfg)
         normalizer = RecordNormalizer(
-            finto_folder=finto_folder, template_engine=embedder.template_engine
+            vocab_folder=vocab_folder, template_engine=embedder.template_engine
         )
 
         cfg_a = OAIIngestConfig(
@@ -164,7 +164,7 @@ def test_cli_ingest_oai_options(tmp_path: Path) -> None:
         f"""
 storage:
   authority_db: "{tmp_path}/authority.db"
-  finto_db: "{tmp_path}/finto.db"
+  vocab_db: "{tmp_path}/vocab.db"
   progress_db: "{tmp_path}/progress.db"
   index_path: "{tmp_path}/authority.faiss"
 

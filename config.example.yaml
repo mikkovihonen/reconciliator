@@ -3,7 +3,7 @@
 # 1. Storage & Persistence File Paths
 storage:
   authority_db: "data/authority.db"
-  finto_db: "data/finto.db"
+  vocab_db: "data/vocab.db"
   progress_db: "data/progress.db"
   index_path: "data/authority.faiss"
 
@@ -15,23 +15,25 @@ embedding:
   batch_size: 64        # Inference batch size for dense sentence embedding
   force_template: false # When true, permits reconciliation even if template hash differs from index metadata
 
-# 3. FINTO Value Vocabularies Downloader
-download_finto:
-  api_url: "https://api.finto.fi/rest/v1"
-  output_dir: "data/finto"
-  vocabularies:
-    - "yso"
-    - "yso-paikat"
-    - "slm"
-    - "kauno"
-    - "muso"
-    - "seko"
-  format: "text/turtle"
-  timeout_seconds: 120.0
-  overwrite: false
+# 3. Skosmos Value Vocabularies Downloader (multi-source, e.g. FINTO, AGROVOC)
+download_skosmos:
+  finto:
+    enabled: true
+    api_url: "https://api.finto.fi/rest/v1"
+    output_dir: "data/finto"
+    vocabularies:
+      - "yso"
+      - "yso-paikat"
+      - "slm"
+      - "kauno"
+      - "muso"
+      - "seko"
+    format: "text/turtle"
+    timeout_seconds: 120.0
+    overwrite: false
 
-# 4. FINTO Thesauri & Migration Ingestion
-ingest_finto:
+# 4. Value Vocabularies & Migration Ingestion
+ingest_vocab:
   input_path: "data/finto" # Directory or file path containing SKOS / Turtle / RDF dumps
   vocabularies:
     - "yso"
@@ -77,7 +79,7 @@ reconcile:
   output_file: "data/enriched_records.xml"
   output_format: "auto" # "auto" | "marcxml" | "bibra"
   enrich: true          # true: inject novel $0/$1 URIs; false: audit & report only
-  fold_legacy: true     # true: reconcile and fold legacy subject headings against finto.db
+  fold_legacy: true     # true: reconcile and fold legacy subject headings against vocab.db
   threshold: 0.85       # Minimum hybrid score for candidate acceptance
 
   # Report Set 1: Agent & Descriptive Authority Reports (Melinda/Asteri, Wikidata, ISNI, VIAF)
@@ -85,7 +87,7 @@ reconcile:
     detailed_file: "data/reports/agent_reconciliation_uris.tsv"     # Row per reconciled agent URI
     summary_file: "data/reports/agent_reconciliation_summary.tsv"   # Aggregate agent metrics
 
-  # Report Set 2: Subject Headings Reconciliation Reports (FINTO: YSO, SLM, KAUNO, MUSO, SEKO)
+  # Report Set 2: Subject Headings Reconciliation Reports (YSO, SLM, KAUNO, MUSO, SEKO)
   subject_reports:
     detailed_file: "data/reports/subject_reconciliation_uris.tsv"   # Row per reconciled subject URI
     summary_file: "data/reports/subject_reconciliation_summary.tsv" # Aggregate subject & thesauri metrics

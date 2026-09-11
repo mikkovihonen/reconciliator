@@ -15,16 +15,16 @@ This runbook provides complete operational guidance for system administrators an
 2. [Complete Configuration Surface (`config.yaml`)](#2-complete-configuration-surface-configyaml)
    - [Storage Section (`storage`)](#storage-section-storage)
    - [Embedding Section (`embedding`)](#embedding-section-embedding)
-   - [FINTO Downloader Section (`download_finto`)](#finto-downloader-section-download_finto)
-   - [FINTO Ingestion Section (`ingest_finto`)](#finto-ingestion-section-ingest_finto)
+   - [Skosmos Downloader Section (`download_skosmos`)](#skosmos-downloader-section-download_skosmos)
+   - [Value Vocabularies Ingestion Section (`ingest_vocab`)](#value-vocabularies-ingestion-section-ingest_vocab)
    - [OAI-PMH & MARCXML Ingestion Section (`ingest_oai`)](#oai-pmh--marcxml-ingestion-section-ingest_oai)
    - [Wikidata Ingestion Section (`ingest_wikidata`)](#wikidata-ingestion-section-ingest_wikidata)
    - [Reconciliation Section (`reconcile`)](#reconciliation-section-reconcile)
    - [Telemetry Section (`telemetry`)](#telemetry-section-telemetry)
    - [Production Example Configurations](#production-example-configurations)
 3. [CLI Command Reference](#3-cli-command-reference)
-   - [`reconciliator download-finto`](#reconciliator-download-finto)
-   - [`reconciliator ingest-finto`](#reconciliator-ingest-finto)
+   - [`reconciliator download-skosmos`](#reconciliator-download-skosmos)
+   - [`reconciliator ingest-vocab`](#reconciliator-ingest-vocab)
    - [`reconciliator ingest-oai`](#reconciliator-ingest-oai)
    - [`reconciliator ingest-wikidata`](#reconciliator-ingest-wikidata)
    - [`reconciliator reconcile`](#reconciliator-reconcile)
@@ -52,7 +52,7 @@ This runbook provides complete operational guidance for system administrators an
 |---|---|---|---|
 | `data/authority.db` | SQLite 3 (WAL mode) | Normalized authority records (Melinda / Asteri, KANTO, Wikidata, ISNI, VIAF), agent literals, identifiers (ISBN, ISSN, URN), and serialized prompt strings. | 500 MB – 8 GB |
 | `data/authority.faiss` | FAISS IndexFlatIP | Dense vector index storing normalized embedding vectors for semantic similarity matching. | 200 MB – 3 GB |
-| `data/finto.db` | SQLite 3 (WAL mode) | FINTO ontologies (YSO, YSO-paikat, KAUNO, MUSO, SLM, SEKO), legacy migration tables (YSA, Allars, Kaunokki, MUSA), dynamic relator terms (`relator_terms`), and multilingual / bridge aliases (`finto_aliases`). | 100 MB – 500 MB |
+| `data/vocab.db` | SQLite 3 (WAL mode) | Value vocabularies (YSO, YSO-paikat, KAUNO, MUSO, SLM, SEKO), legacy migration tables (YSA, Allars, Kaunokki, MUSA), dynamic relator terms (`relator_terms`), and multilingual / bridge aliases (`concept_aliases`). | 100 MB – 500 MB |
 | `data/progress.db` | SQLite 3 (WAL mode) | Real-time task progress, stages, processed byte/record counters, and heartbeat telemetry. | < 5 MB |
 
 ### Hardware & Acceleration
@@ -81,7 +81,7 @@ To operate the solution, the following data inputs can be provided or downloaded
   - `muso`: Music ontology
   - `seko`: Ensemble medium of performance vocabulary (maps to MARC 382)
   - Legacy thesauri: `ysa`, `allars`, `kaunokki`, `musa`
-- **Acquisition**: Can be fetched automatically via `reconciliator download-finto`.
+- **Acquisition**: Can be fetched automatically via `reconciliator download-skosmos` (from Finto or any Skosmos instance).
 
 #### 2. Melinda / Fennica Authority Records
 - **Formats**: MARCXML collections (`.xml`).
@@ -110,7 +110,7 @@ Defines file paths for persistent SQLite databases and the FAISS vector index.
 ```yaml
 storage:
   authority_db: "data/authority.db"      # Authority records and textual metadata
-  finto_db: "data/finto.db"              # FINTO concepts, migration tables, and aliases
+  vocab_db: "data/vocab.db"              # Value vocabulary concepts, migration tables, and aliases
   progress_db: "data/progress.db"        # Real-time task progress and telemetry
   index_path: "data/authority.faiss"     # FAISS IndexFlatIP dense vector index
 ```
@@ -118,7 +118,7 @@ storage:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `authority_db` | `Path` | `data/authority.db` | Path to SQLite authority database. |
-| `finto_db` | `Path` | `data/finto.db` | Path to dedicated FINTO ontologies database. |
+| `vocab_db` | `Path` | `data/vocab.db` | Path to dedicated value vocabularies database. |
 | `progress_db` | `Path` | `data/progress.db` | Path to progress and heartbeat tracking database. |
 | `index_path` | `Path` | `data/authority.faiss` | Path to serialized FAISS dense vector index. |
 
@@ -147,29 +147,32 @@ embedding:
 
 ---
 
-### FINTO Downloader Section (`download_finto`)
+### Skosmos Downloader Section (`download_skosmos`)
 
-Configures the automated download of FINTO vocabularies and ontologies.
+Configures automated multi-source downloading of value vocabularies and ontologies from Skosmos instances (e.g. Finto, AGROVOC, UNESCO).
 
 ```yaml
-download_finto:
-  api_url: "https://api.finto.fi/rest/v1"
-  output_dir: "data/finto"
-  vocabularies:
-    - "yso"
-    - "yso-paikat"
-    - "slm"
-    - "kauno"
-    - "muso"
-    - "seko"
-  format: "text/turtle"
-  timeout_seconds: 120.0
-  overwrite: false
+download_skosmos:
+  finto:
+    enabled: true
+    api_url: "https://api.finto.fi/rest/v1"
+    output_dir: "data/finto"
+    vocabularies:
+      - "yso"
+      - "yso-paikat"
+      - "slm"
+      - "kauno"
+      - "muso"
+      - "seko"
+    format: "text/turtle"
+    timeout_seconds: 120.0
+    overwrite: false
 ```
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `api_url` | `str` | `https://api.finto.fi/rest/v1` | Base URL of Finto's Skosmos REST API. |
+| `enabled` | `bool` | `true` | Whether this Skosmos source is active during batch downloads (`--all`). |
+| `api_url` | `str` | `https://api.finto.fi/rest/v1` | Base URL of the Skosmos REST API v1 endpoint. |
 | `output_dir` | `Path` | `data/finto` | Target directory where downloaded `.ttl` dumps are stored. |
 | `vocabularies` | `list[str]` | `['yso', 'yso-paikat', 'slm', 'kauno', 'muso', 'seko']` | Default list of vocabulary IDs to download. |
 | `format` | `str` | `text/turtle` | Dump format mime-type. |
@@ -178,12 +181,12 @@ download_finto:
 
 ---
 
-### FINTO Ingestion Section (`ingest_finto`)
+### Value Vocabularies Ingestion Section (`ingest_vocab`)
 
-Specifies input files or directories for parsing FINTO ontologies into `finto.db`.
+Specifies input files or directories for parsing value vocabularies into `vocab.db`.
 
 ```yaml
-ingest_finto:
+ingest_vocab:
   input_path: "data/finto"  # Single .ttl file or directory containing multiple .ttl files
   vocabularies:
     - "yso"
@@ -276,7 +279,7 @@ reconcile:
   output_file: "data/enriched_records.xml"
   output_format: "auto"        # "auto" | "marcxml" | "bibra"
   enrich: true                 # true: inject novel $0/$1 URIs; false: audit & report only
-  fold_legacy: true            # true: modernize legacy thesauri headings via finto.db
+  fold_legacy: true            # true: modernize legacy thesauri headings via vocab.db
   threshold: 0.85              # Minimum acceptance score [0.0, 1.0]
 
   agent_reports:
@@ -359,7 +362,7 @@ telemetry:
 ```yaml
 storage:
   authority_db: "/var/data/reconciliator/authority.db"
-  finto_db: "/var/data/reconciliator/finto.db"
+  vocab_db: "/var/data/reconciliator/vocab.db"
   progress_db: "/var/data/reconciliator/progress.db"
   index_path: "/var/data/reconciliator/authority.faiss"
 
@@ -368,13 +371,15 @@ embedding:
   device: "auto"
   batch_size: 128
 
-download_finto:
-  api_url: "https://api.finto.fi/rest/v1"
-  output_dir: "/var/data/reconciliator/finto"
-  vocabularies: ["yso", "yso-paikat", "slm", "kauno", "muso", "seko"]
-  overwrite: false
+download_skosmos:
+  finto:
+    enabled: true
+    api_url: "https://api.finto.fi/rest/v1"
+    output_dir: "/var/data/reconciliator/finto"
+    vocabularies: ["yso", "yso-paikat", "slm", "kauno", "muso", "seko"]
+    overwrite: false
 
-ingest_finto:
+ingest_vocab:
   input_path: "/var/data/reconciliator/finto"
   vocabularies: ["yso", "yso-paikat", "kauno", "muso", "slm", "seko"]
   legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
@@ -421,55 +426,62 @@ reconcile:
 
 All commands accept `--config / -c` pointing to the YAML configuration file. If omitted, `config.yaml` in the current working directory is loaded by default.
 
-### `reconciliator download-finto`
+### `reconciliator download-skosmos`
 
-Downloads FINTO value vocabularies and ontologies in SKOS Turtle format from Finto's Skosmos API or fast static distribution dumps.
+Downloads value vocabularies and ontologies in SKOS Turtle format from any configured Skosmos REST API instance (defaulting to Finto, with support for multi-source instances like AGROVOC, UNESCO, etc.). Automatically utilizes fast static distribution dumps for recognized Finto vocabularies.
 
 ```bash
-# 1. Discover all available vocabularies on Finto and print a table
-reconciliator download-finto --list
+# 1. Discover all available vocabularies on default/specified Skosmos instance and print a table
+reconciliator download-skosmos --list
+reconciliator download-skosmos -s finto --list
 
-# 2. Download default vocabularies defined in config.yaml to data/finto
-reconciliator download-finto -c config.yaml
+# 2. Download default vocabularies for a specific source to data/finto
+reconciliator download-skosmos -c config.yaml -s finto
 
-# 3. Download specific vocabularies (e.g. YSO, YSO-paikat, and SLM)
-reconciliator download-finto -c config.yaml -v yso -v yso-paikat -v slm
+# 3. Download all enabled Skosmos sources in sequence
+reconciliator download-skosmos -c config.yaml --all
 
-# 4. Download into a custom output directory and force overwrite existing files
-reconciliator download-finto -c config.yaml -o /tmp/finto_dumps -v seko --force
+# 4. Download specific vocabularies (e.g. YSO, YSO-paikat, and SLM)
+reconciliator download-skosmos -c config.yaml -s finto -v yso -v yso-paikat -v slm
 
-# 5. Discover and download ALL published vocabularies on Finto
-reconciliator download-finto -c config.yaml --all
+# 5. Download into a custom output directory and force overwrite existing files
+reconciliator download-skosmos -c config.yaml -o /tmp/finto_dumps -v seko --force
 
-# 6. Download and immediately chain ingestion into finto.db
-reconciliator download-finto -c config.yaml -v yso -v slm --ingest
+# 6. Discover and download ALL published vocabularies on the selected Skosmos instance
+reconciliator download-skosmos -c config.yaml -s finto --all-vocabs
+
+# 7. Download and immediately chain ingestion into vocab.db
+reconciliator download-skosmos -c config.yaml -s finto -v yso -v slm --ingest
 ```
 
 #### Options:
 - `-c, --config PATH`: Path to YAML configuration file (default: `config.yaml`).
+- `-s, --source TEXT`: Name of configured Skosmos source to download (defaults to `finto`).
+- `-a, --all`: Download vocabularies for all enabled Skosmos sources.
 - `-v, --vocab TEXT`: Specific vocabulary ID to download (repeatable).
 - `-o, --output-dir PATH`: Directory where `.ttl` files will be saved.
-- `--all`: Query the API and download every vocabulary published by Finto.
-- `--list`: Print a formatted table of all available Finto vocabularies and exit.
+- `--api-url TEXT`: Override Skosmos REST API endpoint URL.
+- `--all-vocabs`: Query the API and download every vocabulary published on the Skosmos instance.
+- `--list`: Print a formatted table of available vocabularies and exit.
 - `--force`: Overwrite existing files on disk.
-- `--ingest`: Automatically trigger `ingest-finto` on the downloaded directory upon completion.
+- `--ingest`: Automatically trigger `ingest-vocab` on the downloaded directory upon completion.
 
 ---
 
-### `reconciliator ingest-finto`
+### `reconciliator ingest-vocab`
 
-Parses SKOS Turtle dumps, extracts concepts, preferred and alternate labels, and legacy migration tables (`skos:exactMatch`, `dcterms:isReplacedBy`). Ingests bundled Library of Congress bridge files, populates `relator_terms`, and indexes `finto_aliases`.
+Parses SKOS Turtle dumps, extracts concepts, preferred and alternate labels, and legacy migration tables (`skos:exactMatch`, `dcterms:isReplacedBy`). Ingests bundled Library of Congress bridge files, populates `relator_terms`, and indexes `concept_aliases`.
 
 ```bash
-# Ingest FINTO ontologies from directory or file configured in config.yaml
-reconciliator ingest-finto -c config.yaml
+# Ingest ontologies from directory or file configured in config.yaml
+reconciliator ingest-vocab -c config.yaml
 ```
 
 #### What happens during ingestion:
 1. Parses all `.ttl` dumps in `input_path` (e.g. `yso.ttl`, `yso-paikat.ttl`, `slm.ttl`, `kauno.ttl`, `muso.ttl`, `seko.ttl`).
 2. Auto-ingests bundled bridge files from `src/reconciliator/vocab/bridges/` (mapping LoC countries, languages, and issuance modes to YSO concepts).
 3. Ingests Metatietosanasto (MTS) relator terms into `relator_terms`.
-4. Rebuilds `finto_aliases` table indexing Finnish, Swedish, and English preferred and alternate labels for bilingual resolution (e.g. `Malax` $\to$ `Maalahti`).
+4. Rebuilds `concept_aliases` table indexing Finnish, Swedish, and English preferred and alternate labels for bilingual resolution (e.g. `Malax` $\to$ `Maalahti`).
 
 ---
 
@@ -536,7 +548,7 @@ reconciliator reconcile -c config.audit.yaml
 ### `reconciliator run`
 
 Executes the entire end-to-end pipeline in sequence as configured in your YAML file:
-1. `ingest-finto` (if `ingest_finto` section is present)
+1. `ingest-vocab` (if `ingest_vocab` section is present)
 2. `ingest-oai` (if `ingest_oai` section is present)
 3. `ingest-wikidata` (if `ingest_wikidata` section is present)
 4. `reconcile` (if `reconcile` section is present)
@@ -579,7 +591,7 @@ reconciliator status -c config.yaml --prune
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Task ID                      ┃ Type           ┃ Status    ┃ Stage            ┃ Progress   ┃ Elapsed       ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ finto-download-172596950     │ finto_ingest   │ completed │ done             │ 6/6 vocabs │ 00:00:14      │
+│ vocab-download-172596950     │ vocab_ingest   │ completed │ done             │ 6/6 vocabs │ 00:00:14      │
 │ oai-ingest-melinda-172596955 │ oai_pmh_harves │ completed │ indexing         │ 100.0%     │ 00:03:42      │
 │ reconciliation-172596960     │ reconciliation │ running   │ reconciling      │ 78.4%      │ 00:01:15      │
 └──────────────────────────────┴────────────────┴───────────┴──────────────────┴────────────┴───────────────┘
@@ -652,20 +664,20 @@ reconciliator reset -c config.yaml
 # 2. Reset all storage non-interactively (ideal for test setups and scripts)
 reconciliator reset -c config.yaml --all --yes
 
-# 3. Reset authority database and FAISS index only (leaves finto.db intact)
+# 3. Reset authority database and FAISS index only (leaves vocab.db intact)
 reconciliator reset -c config.yaml --authority -y
 
-# 4. Reset finto database only
-reconciliator reset -c config.yaml --finto -y
+# 4. Reset vocab database only
+reconciliator reset -c config.yaml --vocab -y
 
 # 5. Reset progress and telemetry database only
 reconciliator reset -c config.yaml --progress -y
 ```
 
 #### Options:
-- `-a, --all`: Reset all storage components (`authority.db`, `finto.db`, `progress.db`, `authority.faiss`).
+- `-a, --all`: Reset all storage components (`authority.db`, `vocab.db`, `progress.db`, `authority.faiss`).
 - `--authority`: Reset `authority.db` and FAISS vector index only.
-- `--finto`: Reset `finto.db` only.
+- `--vocab`: Reset `vocab.db` only.
 - `--progress`: Reset `progress.db` task telemetry only.
 - `-y, --yes`: Bypass interactive confirmation prompt.
 
@@ -681,11 +693,11 @@ Follow this workflow when setting up a new production instance:
 # Step 1: Create storage directory
 mkdir -p data/finto data/reports
 
-# Step 2: Download canonical FINTO vocabularies and ingest them into finto.db
-reconciliator download-finto -c config.yaml -v yso -v yso-paikat -v slm -v kauno -v muso -v seko --ingest
+# Step 2: Download canonical FINTO vocabularies and ingest them into vocab.db
+reconciliator download-skosmos -c config.yaml -s finto --ingest
 
-# Step 3: Ingest Melinda authority records and build FAISS vector index
-reconciliator ingest-oai -c config.yaml -s melinda
+# Step 3: Ingest all configured OAI-PMH authority records and build FAISS vector index
+reconciliator ingest-oai -c config.yaml --all
 
 # Step 4: Run reconciliation on target records
 reconciliator reconcile -c config.yaml
@@ -718,7 +730,7 @@ reconciliator status -c config.yaml --watch
 In secure, offline cataloging environments where external internet access is prohibited:
 
 1. **Pre-packaging (on connected workstation)**:
-   - Run `reconciliator download-finto` to download `.ttl` dumps.
+   - Run `reconciliator download-skosmos` to download `.ttl` dumps.
    - Cache HuggingFace embedding model:
      ```python
      from sentence_transformers import SentenceTransformer
@@ -727,7 +739,7 @@ In secure, offline cataloging environments where external internet access is pro
      model.save("/path/to/local/model_dir")
      ```
 2. **Transfer to Offline Host**:
-   - Transfer `finto.db`, `authority.db`, `authority.faiss`, and `/path/to/local/model_dir`.
+   - Transfer `vocab.db`, `authority.db`, `authority.faiss`, and `/path/to/local/model_dir`.
 3. **Configuration**:
    - Set `model_name: "/path/to/local/model_dir"`.
    - Set `source_type: "file"` for configured OAI/MARCXML sources.

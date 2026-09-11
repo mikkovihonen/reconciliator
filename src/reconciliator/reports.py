@@ -588,10 +588,10 @@ class ReportGenerator:
             ),
             (
                 "execution",
-                "finto_db",
-                str(self.config.storage.finto_db),
+                "vocab_db",
+                str(self.config.storage.vocab_db),
                 "",
-                "Path to FINTO SQLite reference database",
+                "Path to vocabulary SQLite reference database",
             ),
             (
                 "execution",
@@ -668,7 +668,7 @@ class ReportGenerator:
                 "headings_unmapped",
                 str(unmapped),
                 f"{(unmapped / max(1, total_headings)) * 100:.1f}%",
-                "Headings with no matching concept in finto.db",
+                "Headings with no matching concept in vocab.db",
             ),
             (
                 "headings",

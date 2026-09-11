@@ -6,17 +6,17 @@ from typing import Optional
 
 from lxml import etree
 
-from reconciliator.finto_folding import FintoFolder
 from reconciliator.loaders.marcxml import MARC_NS, _get_datafields, _get_subfields
 from reconciliator.matcher import ReconciliationResult
 from reconciliator.normalizers.agent import normalize_agent_name
+from reconciliator.vocab_folding import VocabFolder
 
 
 class MARCXMLEnricher:
     """Mutates MARCXML trees with novel authority links and folded modern ontology terms."""
 
-    def __init__(self, finto_folder: Optional[FintoFolder] = None) -> None:
-        self.finto_folder = finto_folder or FintoFolder()
+    def __init__(self, vocab_folder: Optional[VocabFolder] = None) -> None:
+        self.vocab_folder = vocab_folder or VocabFolder()
 
     def enrich_record_tree(
         self,
@@ -59,7 +59,7 @@ class MARCXMLEnricher:
                     source_uri = existing_uris[0] if existing_uris else None
 
                     target_field, target_vocab, target_uri, target_label, mapping_type, qid = (
-                        self.finto_folder.fold_subject_heading(
+                        self.vocab_folder.fold_subject_heading(
                             heading=heading,
                             source_vocab=vocab,
                             source_field=tag,

@@ -1,4 +1,4 @@
-"""Dedicated SQLite store for modern FINTO ontologies and legacy migration mappings."""
+"""Dedicated SQLite store for controlled vocabularies, ontologies, and migration mappings."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from reconciliator.db import get_db_connection
-from reconciliator.models import FintoConcept, FintoMapping
+from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 
 
-def init_finto_db(conn: sqlite3.Connection) -> None:
-    """Initialize finto_concepts and finto_mappings tables in finto.db."""
+def init_vocab_db(conn: sqlite3.Connection) -> None:
+    """Initialize concepts, concept_mappings, relator_terms, and concept_aliases tables in vocab.db."""
     with conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS finto_concepts (
+            CREATE TABLE IF NOT EXISTS concepts (
                 uri TEXT PRIMARY KEY,
                 vocabulary TEXT NOT NULL,
                 pref_label_fi TEXT,
@@ -29,17 +29,17 @@ def init_finto_db(conn: sqlite3.Connection) -> None:
             );
         """)
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finto_concepts_fi ON finto_concepts(vocabulary, lower(pref_label_fi));"
+            "CREATE INDEX IF NOT EXISTS idx_concepts_fi ON concepts(vocabulary, lower(pref_label_fi));"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finto_concepts_sv ON finto_concepts(vocabulary, lower(pref_label_sv));"
+            "CREATE INDEX IF NOT EXISTS idx_concepts_sv ON concepts(vocabulary, lower(pref_label_sv));"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finto_concepts_en ON finto_concepts(vocabulary, lower(pref_label_en));"
+            "CREATE INDEX IF NOT EXISTS idx_concepts_en ON concepts(vocabulary, lower(pref_label_en));"
         )
 
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS finto_mappings (
+            CREATE TABLE IF NOT EXISTS concept_mappings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 legacy_uri TEXT,
                 legacy_vocab TEXT NOT NULL,
@@ -52,16 +52,16 @@ def init_finto_db(conn: sqlite3.Connection) -> None:
             );
         """)
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_uri ON finto_mappings(legacy_uri);"
+            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_uri ON concept_mappings(legacy_uri);"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_lbl_fi ON finto_mappings(legacy_vocab, lower(legacy_label_fi));"
+            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_lbl_fi ON concept_mappings(legacy_vocab, lower(legacy_label_fi));"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_lbl_sv ON finto_mappings(legacy_vocab, lower(legacy_label_sv));"
+            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_lbl_sv ON concept_mappings(legacy_vocab, lower(legacy_label_sv));"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_target_uri ON finto_mappings(target_uri);"
+            "CREATE INDEX IF NOT EXISTS idx_mappings_target_uri ON concept_mappings(target_uri);"
         )
 
         conn.execute("""
@@ -76,7 +76,7 @@ def init_finto_db(conn: sqlite3.Connection) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_relators_lang ON relator_terms(lang);")
 
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS finto_aliases (
+            CREATE TABLE IF NOT EXISTS concept_aliases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 folded_label TEXT NOT NULL,
                 raw_label TEXT NOT NULL,
@@ -90,31 +90,31 @@ def init_finto_db(conn: sqlite3.Connection) -> None:
             );
         """)
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finto_aliases_lookup ON finto_aliases(folded_label, target_field);"
+            "CREATE INDEX IF NOT EXISTS idx_concept_aliases_lookup ON concept_aliases(folded_label, target_field);"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finto_aliases_uri ON finto_aliases(concept_uri);"
+            "CREATE INDEX IF NOT EXISTS idx_concept_aliases_uri ON concept_aliases(concept_uri);"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finto_aliases_qid ON finto_aliases(wikidata_qid);"
+            "CREATE INDEX IF NOT EXISTS idx_concept_aliases_qid ON concept_aliases(wikidata_qid);"
         )
 
 
-class FintoStore:
-    """Repository handling queries and bulk ingestion into finto.db."""
+class VocabStore:
+    """Repository handling queries and bulk ingestion into vocab.db."""
 
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self.get_connection() as conn:
-            init_finto_db(conn)
+            init_vocab_db(conn)
 
     def get_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with WAL pragmas."""
         return get_db_connection(self.db_path)
 
-    def insert_concepts(self, concepts: list[FintoConcept]) -> None:
-        """Bulk insert or replace concepts in finto_concepts."""
+    def insert_concepts(self, concepts: list[VocabConcept]) -> None:
+        """Bulk insert or replace concepts in concepts table."""
         if not concepts:
             return
         rows = [
@@ -134,7 +134,7 @@ class FintoStore:
         with self.get_connection() as conn:
             conn.executemany(
                 """
-                INSERT INTO finto_concepts (
+                INSERT INTO concepts (
                     uri, vocabulary, pref_label_fi, pref_label_sv, pref_label_en,
                     alt_labels_fi, alt_labels_sv, is_deprecated, target_field
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -151,8 +151,8 @@ class FintoStore:
                 rows,
             )
 
-    def insert_mappings(self, mappings: list[FintoMapping]) -> None:
-        """Bulk insert legacy mappings into finto_mappings."""
+    def insert_mappings(self, mappings: list[ConceptMapping]) -> None:
+        """Bulk insert legacy mappings into concept_mappings."""
         if not mappings:
             return
         rows = [
@@ -171,7 +171,7 @@ class FintoStore:
         with self.get_connection() as conn:
             conn.executemany(
                 """
-                INSERT INTO finto_mappings (
+                INSERT INTO concept_mappings (
                     legacy_uri, legacy_vocab, legacy_label_fi, legacy_label_sv,
                     target_uri, target_vocab, mapping_type, target_field
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
@@ -179,13 +179,13 @@ class FintoStore:
                 rows,
             )
 
-    def find_concept_by_uri(self, uri: str) -> Optional[FintoConcept]:
+    def find_concept_by_uri(self, uri: str) -> Optional[VocabConcept]:
         """Look up concept by URI."""
         with self.get_connection() as conn:
-            row = conn.execute("SELECT * FROM finto_concepts WHERE uri = ?;", (uri,)).fetchone()
+            row = conn.execute("SELECT * FROM concepts WHERE uri = ?;", (uri,)).fetchone()
             if not row:
                 return None
-            return FintoConcept(
+            return VocabConcept(
                 uri=row["uri"],
                 vocabulary=row["vocabulary"],
                 pref_label_fi=row["pref_label_fi"],
@@ -199,21 +199,21 @@ class FintoStore:
 
     def find_concept_by_label(
         self, label: str, vocabulary: Optional[str] = None, lang: str = "fi"
-    ) -> Optional[FintoConcept]:
+    ) -> Optional[VocabConcept]:
         """Look up concept by preferred label."""
         clean_lbl = label.strip().lower()
         col = f"pref_label_{lang}" if lang in ("fi", "sv", "en") else "pref_label_fi"
         with self.get_connection() as conn:
             if vocabulary:
-                query = f"SELECT * FROM finto_concepts WHERE vocabulary = ? AND lower({col}) = ? LIMIT 1;"
+                query = f"SELECT * FROM concepts WHERE vocabulary = ? AND lower({col}) = ? LIMIT 1;"
                 row = conn.execute(query, (vocabulary, clean_lbl)).fetchone()
             else:
-                query = f"SELECT * FROM finto_concepts WHERE lower({col}) = ? LIMIT 1;"
+                query = f"SELECT * FROM concepts WHERE lower({col}) = ? LIMIT 1;"
                 row = conn.execute(query, (clean_lbl,)).fetchone()
 
             if not row:
                 return None
-            return FintoConcept(
+            return VocabConcept(
                 uri=row["uri"],
                 vocabulary=row["vocabulary"],
                 pref_label_fi=row["pref_label_fi"],
@@ -225,15 +225,15 @@ class FintoStore:
                 target_field=row["target_field"],
             )
 
-    def find_legacy_mapping_by_uri(self, uri: str) -> Optional[FintoMapping]:
+    def find_legacy_mapping_by_uri(self, uri: str) -> Optional[ConceptMapping]:
         """Look up migration mapping by legacy URI."""
         with self.get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM finto_mappings WHERE legacy_uri = ? LIMIT 1;", (uri,)
+                "SELECT * FROM concept_mappings WHERE legacy_uri = ? LIMIT 1;", (uri,)
             ).fetchone()
             if not row:
                 return None
-            return FintoMapping(
+            return ConceptMapping(
                 legacy_uri=row["legacy_uri"],
                 legacy_vocab=row["legacy_vocab"],
                 legacy_label_fi=row["legacy_label_fi"],
@@ -246,21 +246,21 @@ class FintoStore:
 
     def find_legacy_mapping_by_label(
         self, label: str, legacy_vocab: Optional[str] = None, lang: str = "fi"
-    ) -> Optional[FintoMapping]:
+    ) -> Optional[ConceptMapping]:
         """Look up migration mapping by legacy label."""
         clean_lbl = label.strip().lower()
         col = f"legacy_label_{lang}" if lang in ("fi", "sv") else "legacy_label_fi"
         with self.get_connection() as conn:
             if legacy_vocab:
-                query = f"SELECT * FROM finto_mappings WHERE legacy_vocab = ? AND lower({col}) = ? LIMIT 1;"
+                query = f"SELECT * FROM concept_mappings WHERE legacy_vocab = ? AND lower({col}) = ? LIMIT 1;"
                 row = conn.execute(query, (legacy_vocab, clean_lbl)).fetchone()
             else:
-                query = f"SELECT * FROM finto_mappings WHERE lower({col}) = ? LIMIT 1;"
+                query = f"SELECT * FROM concept_mappings WHERE lower({col}) = ? LIMIT 1;"
                 row = conn.execute(query, (clean_lbl,)).fetchone()
 
             if not row:
                 return None
-            return FintoMapping(
+            return ConceptMapping(
                 legacy_uri=row["legacy_uri"],
                 legacy_vocab=row["legacy_vocab"],
                 legacy_label_fi=row["legacy_label_fi"],
@@ -335,7 +335,7 @@ class FintoStore:
             return {r["folded_term"] for r in rows}
 
     def insert_aliases(self, aliases: list[dict[str, Any]]) -> None:
-        """Bulk insert alias records into finto_aliases."""
+        """Bulk insert alias records into concept_aliases."""
         if not aliases:
             return
         rows = [
@@ -348,14 +348,14 @@ class FintoStore:
                 a["vocabulary"],
                 a.get("target_field", "650"),
                 a.get("is_preferred", 1),
-                a.get("source", "finto"),
+                a.get("source", "vocab"),
             )
             for a in aliases
         ]
         with self.get_connection() as conn:
             conn.executemany(
                 """
-                INSERT INTO finto_aliases (
+                INSERT INTO concept_aliases (
                     folded_label, raw_label, lang, concept_uri, wikidata_qid,
                     vocabulary, target_field, is_preferred, source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -368,7 +368,7 @@ class FintoStore:
         folded_label: str,
         target_field: Optional[str] = None,
         vocabulary: Optional[str] = None,
-    ) -> tuple[Optional[FintoConcept], Optional[str]]:
+    ) -> tuple[Optional[VocabConcept], Optional[str]]:
         """Look up concept by normalized alias.
 
         Returns (concept, wikidata_qid) or (None, None).
@@ -389,7 +389,7 @@ class FintoStore:
 
             query = f"""
                 SELECT concept_uri, wikidata_qid
-                FROM finto_aliases
+                FROM concept_aliases
                 WHERE {" AND ".join(where_clauses)}
                 ORDER BY is_preferred DESC, id ASC
                 LIMIT 1;
@@ -399,7 +399,7 @@ class FintoStore:
                 # Fallback: try without target_field filter
                 fallback_query = """
                     SELECT concept_uri, wikidata_qid
-                    FROM finto_aliases
+                    FROM concept_aliases
                     WHERE folded_label = ?
                     ORDER BY is_preferred DESC, id ASC
                     LIMIT 1;
@@ -415,16 +415,16 @@ class FintoStore:
             return concept, wikidata_qid
 
     def rebuild_aliases_from_concepts(self) -> int:
-        """Rebuild finto_aliases table from finto_concepts and finto_mappings."""
+        """Rebuild concept_aliases table from concepts and concept_mappings."""
         aliases_to_insert: list[dict[str, Any]] = []
 
         with self.get_connection() as conn:
-            # Clear existing Finto-derived aliases
-            conn.execute("DELETE FROM finto_aliases WHERE source IN ('finto', 'finto_mapping');")
+            # Clear existing vocabulary-derived aliases
+            conn.execute("DELETE FROM concept_aliases WHERE source IN ('vocab', 'concept_mapping');")
 
-            # 1. From finto_concepts
+            # 1. From concepts
             legacy_vocabs = {"ysa", "allars", "kaunokki", "bella", "musa", "cilla"}
-            rows = conn.execute("SELECT * FROM finto_concepts;").fetchall()
+            rows = conn.execute("SELECT * FROM concepts;").fetchall()
             for r in rows:
                 c_uri = r["uri"]
                 c_vocab = r["vocabulary"]
@@ -451,7 +451,7 @@ class FintoStore:
                                     "vocabulary": c_vocab,
                                     "target_field": t_field,
                                     "is_preferred": 1,
-                                    "source": "finto",
+                                    "source": "vocab",
                                 }
                             )
 
@@ -474,14 +474,14 @@ class FintoStore:
                                                 "vocabulary": c_vocab,
                                                 "target_field": t_field,
                                                 "is_preferred": 0,
-                                                "source": "finto",
+                                                "source": "vocab",
                                             }
                                         )
                         except Exception:
                             pass
 
-            # 2. From finto_mappings
-            mapping_rows = conn.execute("SELECT * FROM finto_mappings;").fetchall()
+            # 2. From concept_mappings
+            mapping_rows = conn.execute("SELECT * FROM concept_mappings;").fetchall()
             for m in mapping_rows:
                 t_uri = m["target_uri"]
                 t_vocab = m["target_vocab"]
@@ -504,9 +504,10 @@ class FintoStore:
                                     "vocabulary": t_vocab,
                                     "target_field": t_field,
                                     "is_preferred": 0,
-                                    "source": "finto_mapping",
+                                    "source": "concept_mapping",
                                 }
                             )
 
         self.insert_aliases(aliases_to_insert)
         return len(aliases_to_insert)
+

@@ -1,17 +1,17 @@
-"""Unit tests for FINTO ontology ingestion pipeline."""
+"""Unit tests for vocabulary ontology ingestion pipeline."""
 
 from pathlib import Path
 
-from reconciliator.finto_store import FintoStore
-from reconciliator.ingestion.finto import ingest_finto_file
+from reconciliator.ingestion.vocab import ingest_vocab_file
+from reconciliator.vocab_store import VocabStore
 
 
-def test_ingest_finto_file(tmp_path: Path) -> None:
-    finto_db = tmp_path / "finto.db"
-    store = FintoStore(finto_db)
+def test_ingest_vocab_file(tmp_path: Path) -> None:
+    vocab_db = tmp_path / "vocab.db"
+    store = VocabStore(vocab_db)
     ttl_path = Path(__file__).parent / "fixtures" / "sample_finto.ttl"
 
-    c_count, m_count = ingest_finto_file(ttl_path, store)
+    c_count, m_count = ingest_vocab_file(ttl_path, store)
     assert c_count >= 5
     assert m_count >= 3
 

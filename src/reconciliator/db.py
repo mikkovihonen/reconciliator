@@ -161,13 +161,13 @@ def reset_database_file(db_path: Path | str) -> None:
 def reset_all_storage(
     storage_config: StorageConfig,
     reset_authority: bool = True,
-    reset_finto: bool = True,
+    reset_vocab: bool = True,
     reset_progress: bool = True,
 ) -> None:
     """Reset specified database files and FAISS index, then reinitialize clean schemas."""
     # Import locally to prevent circular dependencies
-    from reconciliator.finto_store import init_finto_db
     from reconciliator.progress import init_progress_db
+    from reconciliator.vocab_store import init_vocab_db
 
     if reset_authority:
         reset_database_file(storage_config.authority_db)
@@ -179,10 +179,10 @@ def reset_all_storage(
         with get_db_connection(storage_config.authority_db) as conn:
             init_authority_db(conn)
 
-    if reset_finto:
-        reset_database_file(storage_config.finto_db)
-        with get_db_connection(storage_config.finto_db) as conn:
-            init_finto_db(conn)
+    if reset_vocab:
+        reset_database_file(storage_config.vocab_db)
+        with get_db_connection(storage_config.vocab_db) as conn:
+            init_vocab_db(conn)
 
     if reset_progress:
         reset_database_file(storage_config.progress_db)

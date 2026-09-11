@@ -1,15 +1,15 @@
-"""Comprehensive tests for features adopted from finto-reconciliation.
+"""Comprehensive tests for features adopted from vocabulary reconciliation.
 
 Covers:
 1. Native diacritic folding (preserving åäöÅÄÖ while folding foreign Latin diacritics)
 2. Biographical dates stripping and fictional qualifier preservation
-3. Dynamic RelatorRegistry backed by FintoStore and configuration
+3. Dynamic RelatorRegistry backed by VocabStore and configuration
 4. Fictional character safeguard preventing human authority file transfer
 5. Dynamic bilingual alias resolution without hardcoded municipality lists
 6. Bundled bridge vocabularies ingestion (LoC -> YSO exactMatch)
 7. Wikidata P2347 alias ingestion and dual $0/$1 XML enrichment
 8. MARC $2 language suffix formatting rules
-9. FintoDownloader canonical dump URL prioritization
+9. SkosmosDownloader canonical dump URL prioritization for Finto
 """
 
 from pathlib import Path
@@ -18,14 +18,12 @@ from unittest.mock import MagicMock, patch
 from lxml import etree
 
 from reconciliator.agent_transfer import AgentAligner
-from reconciliator.finto_folding import FintoFolder, format_target_vocab
-from reconciliator.finto_store import FintoStore
-from reconciliator.ingestion.finto import ingest_bridge_files
-from reconciliator.ingestion.finto_downloader import CANONICAL_DUMP_URLS, FintoDownloader
+from reconciliator.ingestion.skosmos_downloader import FINTO_CANONICAL_DUMP_URLS, SkosmosDownloader
+from reconciliator.ingestion.vocab import ingest_bridge_files
 from reconciliator.ingestion.wikidata import extract_wikidata_yso_aliases
 from reconciliator.loaders.marcxml import parse_marc_record_elem
 from reconciliator.matcher import ReconciliationResult
-from reconciliator.models import Agent, BibliographicRecord, FintoConcept
+from reconciliator.models import Agent, BibliographicRecord, VocabConcept
 from reconciliator.normalizers.agent import (
     strip_agent_dates,
 )
@@ -36,6 +34,8 @@ from reconciliator.normalizers.linguistic import (
 )
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
+from reconciliator.vocab_folding import VocabFolder, format_target_vocab
+from reconciliator.vocab_store import VocabStore
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def test_strip_biographical_dates() -> None:
 
 
 def test_relator_registry_dynamic_stripping(tmp_path: Path) -> None:
-    store = FintoStore(tmp_path / "finto.db")
+    store = VocabStore(tmp_path / "vocab.db")
     # Dynamically insert Finnish, Swedish, and English relators
     store.insert_relators(
         [
@@ -106,7 +106,7 @@ def test_relator_registry_dynamic_stripping(tmp_path: Path) -> None:
         ]
     )
 
-    registry = RelatorRegistry(finto_store=store, custom_relators=["toimittaja"])
+    registry = RelatorRegistry(vocab_store=store, custom_relators=["toimittaja"])
 
     assert registry.is_relator("kirjoittaja")
     assert registry.is_relator("säveltäjä")
@@ -208,8 +208,8 @@ def test_agent_aligner_safeguard_blocks_human_authority_transfer() -> None:
 
 
 def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
-    store = FintoStore(tmp_path / "finto.db")
-    concept = FintoConcept(
+    store = VocabStore(tmp_path / "vocab.db")
+    concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso-paikat/p105994",
         vocabulary="yso-paikat",
         pref_label_fi="Maalahti",
@@ -226,7 +226,7 @@ def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
     assert found.pref_label_fi == "Maalahti"
     assert found.pref_label_sv == "Malax"
 
-    folder = FintoFolder(store)
+    folder = VocabFolder(store)
     t_field, t_vocab, t_uri, t_label, m_type, _ = folder.fold_subject_heading(
         heading="Malax",
         source_field="651",
@@ -245,7 +245,7 @@ def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
 
 
 def test_bundled_bridge_vocabularies_ingestion(tmp_path: Path) -> None:
-    store = FintoStore(tmp_path / "finto.db")
+    store = VocabStore(tmp_path / "vocab.db")
     # Verify bundled bridge files exist
     bridge_files = get_bundled_bridge_files()
     assert len(bridge_files) >= 3
@@ -279,9 +279,9 @@ def test_bundled_bridge_vocabularies_ingestion(tmp_path: Path) -> None:
 
 
 def test_wikidata_p2347_alias_extraction_and_dual_enrichment(tmp_path: Path) -> None:
-    store = FintoStore(tmp_path / "finto.db")
-    # Concept in Finto: YSO p105436 (Suomi)
-    concept = FintoConcept(
+    store = VocabStore(tmp_path / "vocab.db")
+    # Concept in VocabStore: YSO p105436 (Suomi)
+    concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p105436",
         vocabulary="yso",
         pref_label_fi="Suomi",
@@ -339,8 +339,8 @@ def test_wikidata_p2347_alias_extraction_and_dual_enrichment(tmp_path: Path) -> 
     </record>"""
     elem = etree.fromstring(xml.encode("utf-8"))
 
-    folder = FintoFolder(store)
-    enricher = MARCXMLEnricher(finto_folder=folder)
+    folder = VocabFolder(store)
+    enricher = MARCXMLEnricher(vocab_folder=folder)
 
     mock_rec = BibliographicRecord(
         source_id="TEST-001",
@@ -407,13 +407,13 @@ def test_format_target_vocab_language_suffixes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. FintoDownloader Canonical Dump Prioritization
+# 9. SkosmosDownloader Canonical Dump Prioritization for Finto
 # ---------------------------------------------------------------------------
 
 
-def test_finto_downloader_canonical_dump_prioritized(tmp_path: Path) -> None:
-    downloader = FintoDownloader(api_url="https://api.finto.fi/rest/v1")
-    expected_dump = CANONICAL_DUMP_URLS["yso"]
+def test_skosmos_downloader_canonical_dump_prioritized(tmp_path: Path) -> None:
+    downloader = SkosmosDownloader(api_url="https://api.finto.fi/rest/v1")
+    expected_dump = FINTO_CANONICAL_DUMP_URLS["yso"]
     assert expected_dump == "https://api.finto.fi/download/yso/yso-skos.ttl"
 
     mock_resp = MagicMock()

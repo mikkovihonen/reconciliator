@@ -1,4 +1,4 @@
-"""Downloader for FINTO value vocabularies and ontologies via Skosmos REST API using httpx2."""
+"""Downloader for SKOS value vocabularies and ontologies via Skosmos REST API using httpx2."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import httpx2
 from reconciliator.progress import ProgressTracker
 from reconciliator.version import get_default_user_agent
 
-CANONICAL_DUMP_URLS: dict[str, str] = {
+FINTO_CANONICAL_DUMP_URLS: dict[str, str] = {
     "yso": "https://api.finto.fi/download/yso/yso-skos.ttl",
     "yso-paikat": "https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl",
     "yso-aika": "https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl",
@@ -28,8 +28,8 @@ CANONICAL_DUMP_URLS: dict[str, str] = {
 }
 
 
-class FintoDownloader:
-    """Client for discovering and downloading SKOS vocabularies from Finto's Skosmos REST API."""
+class SkosmosDownloader:
+    """Client for discovering and downloading SKOS vocabularies from Skosmos REST APIs."""
 
     def __init__(
         self,
@@ -43,7 +43,7 @@ class FintoDownloader:
 
     def list_vocabularies(self, lang: str = "fi") -> list[dict[str, Any]]:
         """
-        Query Finto REST API to list all available vocabularies.
+        Query Skosmos REST API to list all available vocabularies.
 
         Returns a list of vocabulary metadata dictionaries (e.g., id, title, uri, languages).
         """
@@ -73,7 +73,7 @@ class FintoDownloader:
         Download a single vocabulary in SKOS format (default: Turtle) to output_dir.
 
         Uses atomic file replacement to avoid leaving corrupt or partial files.
-        Prioritizes static pre-built dump endpoints before falling back to REST API.
+        Prioritizes static pre-built dump endpoints when connecting to Finto.
         """
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
@@ -85,15 +85,15 @@ class FintoDownloader:
             return dest_file
 
         tmp_file = out_path / f"{vocab_id}{ext}.tmp"
-        url = f"{self.api_url}/{vocab_id}/data"
         headers = {
             "User-Agent": self.user_agent,
             "Accept": f"{format}, application/x-turtle, text/n3;q=0.9, */*;q=0.1",
         }
 
-        # Try fast static dump if available and requesting Turtle
-        if "turtle" in format and vocab_id in CANONICAL_DUMP_URLS:
-            dump_url = CANONICAL_DUMP_URLS[vocab_id]
+        # Try fast static dump if connecting to Finto and requesting Turtle
+        is_finto = "finto.fi" in self.api_url
+        if is_finto and "turtle" in format and vocab_id in FINTO_CANONICAL_DUMP_URLS:
+            dump_url = FINTO_CANONICAL_DUMP_URLS[vocab_id]
             try:
                 with httpx2.Client(
                     timeout=self.timeout_seconds, headers=headers, follow_redirects=True
@@ -109,7 +109,7 @@ class FintoDownloader:
                 if tmp_file.exists():
                     tmp_file.unlink(missing_ok=True)
 
-        # Fallback to Skosmos REST API
+        # Fallback to standard Skosmos REST API data endpoint
         url = f"{self.api_url}/{vocab_id}/data"
 
         try:
@@ -146,7 +146,7 @@ class FintoDownloader:
         total = len(vocab_ids)
 
         if tracker:
-            tracker.start_task(stage="downloading_finto")
+            tracker.start_task(stage="downloading_skosmos")
             tracker.update_progress(items_total=total, force=True)
 
         for idx, v_id in enumerate(vocab_ids, start=1):
@@ -166,3 +166,4 @@ class FintoDownloader:
             )
 
         return downloaded
+
