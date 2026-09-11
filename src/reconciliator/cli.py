@@ -39,6 +39,7 @@ from reconciliator.progress import (
     get_task_progress,
     list_tasks,
     render_status_json,
+    run_telemetry_tui,
 )
 from reconciliator.reports import AgentReportRow, ReportGenerator, SubjectReportRow
 from reconciliator.repository import AuthorityStore
@@ -106,14 +107,15 @@ def status_cmd(
         None, "--task-id", help="Query status of a specific task ID"
     ),
     watch: bool = typer.Option(False, "--watch", "-w", help="Continuous live watch monitor"),
-    interval: float = typer.Option(
-        1.0, "--interval", "-i", help="Watch polling interval in seconds"
+    interval: Optional[float] = typer.Option(
+        None, "--interval", "-i", help="Watch polling interval in seconds"
     ),
     json_output: bool = typer.Option(False, "--json", help="Emit output as JSON"),
 ) -> None:
     """Query real-time task progress and telemetry from progress.db."""
     cfg = load_config(config)
     progress_db = cfg.storage.progress_db
+    poll_interval = interval if interval is not None else cfg.telemetry.watch_interval_seconds
 
     def fetch_tasks() -> list[TaskProgress]:
         if task_id:
@@ -122,22 +124,23 @@ def status_cmd(
         return list_tasks(progress_db)
 
     if watch:
-        try:
-            while True:
-                tasks = fetch_tasks()
-                if json_output:
+        if json_output:
+            try:
+                while True:
+                    tasks = fetch_tasks()
                     console.print(render_status_json(tasks))
-                else:
-                    console.clear()
-                    table = format_task_table(tasks)
-                    console.print(table)
-
-                # If all tasks are completed or failed, stop watch mode
-                if tasks and all(t.status in ("completed", "failed") for t in tasks):
-                    break
-                time.sleep(interval)
-        except KeyboardInterrupt:
-            pass
+                    if tasks and all(t.status in ("completed", "failed") for t in tasks):
+                        break
+                    time.sleep(poll_interval)
+            except KeyboardInterrupt:
+                pass
+        else:
+            run_telemetry_tui(
+                fetch_tasks=fetch_tasks,
+                db_path=progress_db,
+                interval=poll_interval,
+                console=console,
+            )
     else:
         tasks = fetch_tasks()
         if json_output:

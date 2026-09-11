@@ -84,6 +84,7 @@ telemetry:
 
     # Mock SentenceTransformer to run deterministic offline tests without downloading 400MB models
     mock_model = MagicMock()
+    mock_model.get_embedding_dimension.return_value = 128
     mock_model.get_sentence_embedding_dimension.return_value = 128
 
     def mock_encode(texts: list[str], **kwargs: Any) -> np.ndarray[Any, Any]:

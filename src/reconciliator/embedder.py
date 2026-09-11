@@ -26,7 +26,22 @@ class SentenceEmbedder:
         self.template_hash = self.template_engine.compute_template_hash()
 
         self.model = SentenceTransformer(config.model_name, device=self.device)
-        dim = self.model.get_sentence_embedding_dimension()
+        get_dim_fn = getattr(self.model, "get_embedding_dimension", None)
+        dim: Optional[int] = None
+        if get_dim_fn is not None:
+            try:
+                res = get_dim_fn()
+                if isinstance(res, (int, float)):
+                    dim = int(res)
+            except Exception:
+                pass
+        if dim is None and hasattr(self.model, "get_sentence_embedding_dimension"):
+            try:
+                res = self.model.get_sentence_embedding_dimension()
+                if isinstance(res, (int, float)):
+                    dim = int(res)
+            except Exception:
+                pass
         if dim is None:
             # Fallback encode test
             test_emb = self.model.encode(["test"], convert_to_numpy=True)

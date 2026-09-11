@@ -13,6 +13,7 @@ from reconciliator.models import BibliographicRecord
 @pytest.fixture
 def mock_sentence_transformer() -> MagicMock:
     mock = MagicMock()
+    mock.get_embedding_dimension.return_value = 384
     mock.get_sentence_embedding_dimension.return_value = 384
     mock.encode.side_effect = lambda texts, **kwargs: np.ones((len(texts), 384), dtype=np.float32)
     return mock

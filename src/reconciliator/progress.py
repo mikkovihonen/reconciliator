@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from rich.console import Console, Group, RenderableType
+from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from reconciliator.db import get_db_connection
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
@@ -321,3 +326,148 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
 def render_status_json(tasks: list[TaskProgress]) -> str:
     """Render task progress list as structured JSON."""
     return json.dumps([t.model_dump() for t in tasks], indent=2, ensure_ascii=False)
+
+
+def render_telemetry_tui(
+    tasks: list[TaskProgress],
+    db_path: Path | str = "progress.db",
+    interval: float = 1.0,
+) -> Group:
+    """Compose a full rich TUI view for live task telemetry."""
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    path_name = Path(db_path).name
+
+    running_count = sum(1 for t in tasks if t.status == "running")
+    completed_count = sum(1 for t in tasks if t.status == "completed")
+    failed_count = sum(1 for t in tasks if t.status == "failed")
+    total_rate = sum(t.rate_per_sec for t in tasks if t.status == "running")
+
+    header_text = Text()
+    header_text.append("RECONCILIATOR ", style="bold cyan")
+    header_text.append("TASK TELEMETRY MONITOR", style="bold white")
+
+    header = Panel(
+        header_text,
+        subtitle=f"[dim]DB:[/] [yellow]{path_name}[/]  [dim]Interval:[/] [green]{interval:.1f}s[/]  [dim]Time:[/] [blue]{now_utc}[/]",
+        style="bright_blue",
+    )
+
+    if tasks:
+        table = Table(title="Task Queue & Pipeline Execution", expand=True, show_lines=True)
+        table.add_column("Task ID", style="cyan", no_wrap=True)
+        table.add_column("Type", style="magenta")
+        table.add_column("Status", justify="center")
+        table.add_column("Stage", style="blue")
+        table.add_column("Progress", justify="right")
+        table.add_column("Items / Bytes", justify="right")
+        table.add_column("Throughput", justify="right")
+        table.add_column("Last Heartbeat", style="dim", justify="right")
+
+        for t in tasks:
+            if t.status == "completed":
+                status_badge = "[bold green]✔ COMPLETED[/]"
+            elif t.status == "running":
+                status_badge = "[bold yellow]● RUNNING[/]"
+            elif t.status == "failed":
+                status_badge = "[bold red]✖ FAILED[/]"
+            else:
+                status_badge = f"[dim]{t.status.upper()}[/]"
+
+            pct_str = f"[bold green]{t.percentage:.1f}%[/]" if t.percentage > 0 else "0.0%"
+
+            if t.items_total is not None or t.items_processed > 0:
+                tot_str = f"{t.items_total:,}" if t.items_total is not None else "?"
+                counts_str = f"{t.items_processed:,} / {tot_str}"
+            elif t.bytes_total is not None or t.bytes_processed > 0:
+                mb_processed = t.bytes_processed / (1024 * 1024)
+                if t.bytes_total:
+                    mb_total = t.bytes_total / (1024 * 1024)
+                    counts_str = f"{mb_processed:.1f} MB / {mb_total:.1f} MB"
+                else:
+                    counts_str = f"{mb_processed:.1f} MB"
+            else:
+                counts_str = "-"
+
+            rate_str = f"{t.rate_per_sec:,.1f} items/s" if t.rate_per_sec > 0 else "-"
+            hb_str = t.last_heartbeat[:19].replace("T", " ") if t.last_heartbeat else "-"
+
+            table.add_row(
+                t.task_id,
+                t.task_type,
+                status_badge,
+                t.current_stage,
+                pct_str,
+                counts_str,
+                rate_str,
+                hb_str,
+            )
+        task_view: RenderableType = table
+    else:
+        task_view = Panel(
+            Text(
+                "No active or past tasks found in progress.db.\nWaiting for pipeline tasks to initiate...",
+                justify="center",
+                style="italic dim",
+            ),
+            title="Task Queue",
+            style="dim",
+            padding=(1, 2),
+        )
+
+    summary_text = Text()
+    summary_text.append(
+        f"Running: {running_count}  ", style="bold yellow" if running_count > 0 else "dim"
+    )
+    summary_text.append(
+        f"Completed: {completed_count}  ", style="bold green" if completed_count > 0 else "dim"
+    )
+    summary_text.append(
+        f"Failed: {failed_count}  ", style="bold red" if failed_count > 0 else "dim"
+    )
+    summary_text.append(f"| Total Tasks: {len(tasks)}  ", style="dim")
+    summary_text.append(f"| Aggregate Throughput: {total_rate:,.1f} items/s", style="bold cyan")
+
+    summary = Panel(summary_text, title="Telemetry Summary", style="dim")
+
+    elements: list[RenderableType] = [header, task_view, summary]
+
+    failed_tasks = [t for t in tasks if t.status == "failed" and t.error_message]
+    if failed_tasks:
+        error_lines = Text()
+        for ft in failed_tasks:
+            error_lines.append(f"Task {ft.task_id} ({ft.task_type}) failed: ", style="bold red")
+            error_lines.append(f"{ft.error_message}\n", style="white")
+        elements.append(Panel(error_lines, title="[bold red]Task Error Details[/]", style="red"))
+
+    footer = Text(
+        "Press Ctrl+C to exit live telemetry monitor", style="dim italic", justify="center"
+    )
+    elements.append(footer)
+
+    return Group(*elements)
+
+
+def run_telemetry_tui(
+    fetch_tasks: Callable[[], list[TaskProgress]],
+    db_path: Path | str,
+    interval: float = 1.0,
+    console: Optional[Console] = None,
+) -> None:
+    """Run interactive full-screen Live TUI monitor."""
+    c = console or Console()
+    initial_tasks = fetch_tasks()
+    with Live(
+        render_telemetry_tui(initial_tasks, db_path=db_path, interval=interval),
+        console=c,
+        screen=c.is_terminal,
+        refresh_per_second=max(1.0 / max(interval, 0.1), 1.0),
+    ) as live:
+        try:
+            while True:
+                tasks = fetch_tasks()
+                live.update(render_telemetry_tui(tasks, db_path=db_path, interval=interval))
+                if tasks and all(t.status in ("completed", "failed") for t in tasks):
+                    break
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            pass
