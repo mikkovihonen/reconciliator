@@ -866,7 +866,7 @@ Follow this workflow when setting up a new production instance:
 mkdir -p data/finto data/reports
 
 # Step 2: Download canonical FINTO vocabularies and ingest them into vocab.db
-reconciliator download-skosmos -c config.yaml -s finto --ingest
+reconciliator download-skosmos -c config.yaml --all --ingest
 
 # Step 3: Ingest all configured OAI-PMH authority records and build FAISS vector index
 reconciliator ingest-oai -c config.yaml --all
