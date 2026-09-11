@@ -1417,62 +1417,76 @@ Package          │ glTF / USDZ / WebXR Manifestation Package                �
 
 #### 2.2.3 The Agent Role Boundary
 
-To prevent false matches across all 42 domains, agent roles must strictly govern the entity level:
-- **Work-Level Creators**:
+To prevent false matches across all 42 domains, agent roles must strictly govern the entity level across all four tiers of the IFLA LRM hierarchy (Work, Expression, Manifestation, Item):
+- **Work-Level Creators (LRM-E2 / bf:Work)**:
   - Text & Articles: `aut` (Author), `lyr` (Lyricist).
-  - Music & Scores: `cmp` (Composer).
-  - Moving Image: `aus` (Screenwriter), `cre` (Creator).
+  - Music & Scores: `cmp` (Composer), `pro` (Music producer / beatmaker).
+  - Moving Image & Broadcast: `drt` (Film director - *RDA 19.2.1.1 Work creator*), `aus` (Screenwriter), `cre` (Creator), `anm` (Lead animator).
   - Dramatic Works & Choreography: `aut` (Playwright), `lbt` (Librettist), `chr` (Choreographer).
-  - Comics & Manga: `aut` (Writer), `art` (Artist / Concept creator).
-  - Visual Arts & Ephemera: `art` (Artist), `pht` (Photographer), `ltg` (Lithographer), `egr` (Engraver).
-  - Theses & Dissertations: `aut` (Author), `ths` (Thesis advisor / supervisor).
-  - Cartography & Geodata: `ctg` (Cartographer), `gis` (Geographic information specialist).
-  - Patents: `inv` (Inventor).
-  - Video Games & Software: `dsr` (Game designer), `cre` (Game studio/developer), `prg` (Software author).
-  - Machine Learning & AI: `mlm` (Model developer / trainer).
+  - Comics & Manga: `aut` (Writer), `art` (Artist / Penciller / Concept creator).
+  - Visual Arts & Ephemera: `art` (Artist), `pht` (Photographer), `scl` (Sculptor), `ltg` (Lithographer), `egr` (Engraver).
+  - Architecture & 3D Heritage: `arc` (Architect), `mod` (3D modeler / digital reconstructor), `lsa` (Landscape architect).
+  - Theses & Dissertations: `aut` (Author), `ths` (Thesis supervisor / Custos), `opn` (Opponent / Reviewer).
+  - Cartography & Geodata: `ctg` (Cartographer), `gis` (Geographic information specialist), `srv` (Surveyor).
+  - Patents & Inventions: `inv` (Inventor).
+  - Video Games & Software: `dsr` (Game designer), `cre` (Game studio / developer), `prg` (Software author).
+  - Machine Learning & Scientific Data: `mlm` (Model developer / trainer), `dtc` (Data creator / compiler).
   - Board Games: `dsr` (Game designer / author of mechanics), `cre` (Game creator).
-  - Podcasts & Broadcast: `hst` (Podcast host / show creator), `brd` (Broadcasting organization).
+  - Podcasts & Broadcast: `hst` (Podcast show creator / primary host), `brd` (Broadcasting organization).
   - Early Printed Books: `aut` (Author), `prt` (Early printer / typographer when acting as editor-publisher).
-  - Oral Histories & Fieldwork: `col` (Collector / Fieldworker), `ivr` (Interviewer).
+  - Oral Histories & Fieldwork: `col` (Collector / Fieldworker), `ivr` (Interviewer), `ive` (Interviewee / primary speaker).
   - Medieval Manuscripts & Codicology: `scr` (Scribe), `pal` (Paleographer / Manuscript reconstructor).
   - Scholarly Critical Editions: `edt` (Critical editor), `cwt` (Commentator for written text).
-  - Curated Exhibitions & Heritage: `cur` (Exhibition curator), `mod` (3D modeler / digital reconstructor).
-  - Numismatics & Philately: `egr` (Engraver of dies/plates), `110` (Issuing sovereign/mint).
+  - Curated Exhibitions & Heritage: `cur` (Exhibition curator).
+  - Numismatics & Philately: `egr` (Engraver of dies/plates), `dsr` (Designer of coins/stamps), `110` (Issuing sovereign/mint).
+  - Legal & Judicial: `pra` (Presiding judge / Chief Justice), `jud` (Judge / Court tribunal), `leg` / `enact` (Legislative body / Parliament).
   - Corporate & Official: `110`/`710` institutional authors (Committees, Ministries, Standards bodies, Research groups, Trade corporations).
   - Conferences: `111`/`711` meeting/conference entities.
   - Archival Collections: `cre` (Creator of fonds), `col` (Collector).
-- **Expression-Level Realizers**:
-  - Translations & Adaptations: `trl` (Translator / Rules translator), `arr` (Musical Arranger), `ill` (Illustrator / Board game artist).
-  - Tactile & Accessibility: `brl` (Braille transcriber/embosser).
-  - Music Performance: `prf` (Performer), `cnd` (Conductor), `itr` (Instrumentalist), `sng` (Singer).
-  - Spoken Word & Audiobooks: `nrt` (Narrator), `spk` (Speaker), `rce` (Recording engineer).
-  - Oral Histories: `ive` (Interviewee / Informant), `trc` (Transcriber).
-  - Theater & Staging: `drt` (Stage director), `std` (Stage/set designer), `cst` (Costume designer), `act` (Actor / Dancer).
-  - Moving Image & Broadcast: `drt` (Film director / broadcast director), `act` (Actor), `pro` (Producer).
-  - Podcasts: `hst` (Host of specific episode), `ive` (Interviewee / Guest speaker).
-  - Software & Games: `prg` (Lead programmer), `cmp` (Game/film soundtrack composer).
+- **Expression-Level Realizers (LRM-E3 / bf:Expression)**:
+  - Translations & Adaptations: `trl` (Translator / Rules translator), `arr` (Musical arranger), `orr` (Orchestrator), `ill` (Illustrator / Board game artist), `adp` (Adapter), `abr` (Abridger).
+  - Added Commentary & Prefaces: `wpr` (Writer of preface / foreword / introduction), `wat` (Writer of added text), `wal` (Writer of added commentary), `anm` (Annotator).
+  - Tactile & Accessibility: `brl` (Braille transcriber/embosser), `aud` (Audio describer for visually impaired), `sng` (Sign language interpreter / signer).
+  - Music Performance: `prf` (Performer), `cnd` (Conductor), `itr` (Instrumentalist), `sng` (Singer / Vocalist), `mus` (Musician), `cht` (Choir director / Chorus master), `voc` (Vocalist).
+  - Spoken Word & Audiobooks: `nrt` (Narrator), `spk` (Speaker), `rce` (Recording engineer), `sds` (Sound designer).
+  - Oral Histories: `ive` (Interviewee / Informant when expression-specific take), `trc` (Transcriber).
+  - Theater & Staging: `drt` (Theatrical stage director), `std` (Stage/set designer), `cst` (Costume designer), `act` (Actor), `dnc` (Dancer), `lgd` (Lighting designer).
+  - Moving Image & Broadcast: `act` (Actor), `pro` (Producer), `tlv` (Subtitler), `dub` (Dubbing actor / director), `cng` (Cinematographer / Director of photography).
+  - Comics & Manga Realization: `clr` (Colorist), `ink` (Inker), `ltr` (Letterer).
+  - Podcasts: `hst` (Host of specific episode), `ive` (Guest speaker / Interviewee), `pan` (Panelist).
+  - Software & Games: `prg` (Lead programmer / Engine developer), `cmp` (Soundtrack composer).
   - Spatial Geodata: `dtm` (Data manager), `prg` (API developer).
   - Archival Processing: `cur` (Curator), `anm` (Annotator).
-- **Manifestation-Level Agents**:
-  - Aggregates & Compilations: `edt` (Editor of anthology / proceedings / journal), `com` (Compiler), `red` (Editorial director).
-  - Production & Distribution: `pbl` (Publisher), `prt` (Printer / Typographer / Mint master), `dst` (Distributor), `mfp` (Manufacturer / Board game maker, e.g. Tactic, Lautapelit.fi), `dgg` (Degree granting institution).
+- **Manifestation-Level Agents (LRM-E4 / bf:Instance)**:
+  - Aggregates & Compilations: `edt` (Editor of anthology / proceedings / journal), `com` (Compiler), `red` (Editorial director / Editor-in-chief).
+  - Publication & Typography: `pbl` (Publisher), `prt` (Printer / Typographer / Mint master), `dst` (Distributor), `mfp` (Manufacturer / Board game maker, e.g. Tactic, Lautapelit.fi), `dgg` (Degree granting institution).
+  - Design & Physical Embodiment: `bsk` (Book designer / Cover artist), `bnd` (Binder / Bookbinder), `fac` (Facsimilist).
+  - Legal, Sponsorship & Funding: `cph` (Copyright holder), `asn` (Patent assignee / applicant), `spn` (Sponsor), `fnd` (Funding body / Research council, e.g. Suomen Akatemia, EU Horizon), `iss` (Issuing corporate body).
   - Museum & Exhibition: `his` (Host institution / Sponsoring gallery).
   - Web Archiving: Crawler operator, Harvesting institution (`Kansalliskirjasto`, `Internet Archive`).
-  - Patents & IP: `asn` (Patent assignee / applicant).
+- **Item-Level Exemplar & Provenance Agents (LRM-E5 / bf:Item)**:
+  - Provenance & Custody: `fmo` (Former owner / Ex-libris bookplate entity), `cur` (Curator / Custodian).
+  - Inscriptions & Dedications: `sgn` (Signer / Autographer), `ins` (Inscriber of gift/dedication), `dnr` (Donor of physical exemplar).
+  - Archival Custody: `rcp` (Recipient of letter / archival correspondence), `col` (Collector of private item holding).
+  - Copy-Specific Modifications: `ann` (Annotator of handwritten marginalia), `bnd` (Binder of post-publication sammelband), `res` (Restorer / Conservator of codex).
 
 #### 2.2.4 Unified `content_type` and `work_type` Enumerations
 
-The internal schema uses controlled vocabularies for type disambiguation across all 42 domains:
+The internal schema uses controlled vocabularies for type disambiguation across all 42 domains, establishing complete symmetry across the WEMI layers (Work `work_type`, Expression `content_type`, and Manifestation `carrier_type`):
+
+##### 1. `work_type` Enumeration (Conceptual Creation Level)
 
 | `work_type` (on `works`) | Description | MARC Leader/06-07 Values |
 | :--- | :--- | :--- |
-| `text` | Textual monograph, article, chapter, thesis | `a`, `t` (Leader/07=`m`, `a`, `b`) |
-| `serial` | Continuing resource, periodical, journal | `a` (Leader/07=`s`) |
+| `text` | Textual monograph, article, chapter, report | `a`, `t` (Leader/07=`m`, `a`, `b`) |
+| `thesis` | Academic dissertation, doctoral thesis, master's thesis | `a`, `t` (Leader/07=`m`, with `502` dissertation note) |
+| `manuscript` | Unpublished literary manuscript, draft, correspondence letter | `t`, `d` (Leader/06=`t` manuscript text, `d` manuscript music) |
+| `serial` | Continuing resource, periodical, journal, newspaper | `a` (Leader/07=`s`) |
 | `integrating` | Integrating resource, loose-leaf publication | `a` (Leader/07=`i`) |
 | `music` | Musical composition (notated or recorded) | `c`, `d`, `j` |
 | `moving_image` | Film, video, television broadcast | `g` |
 | `cartography` | Map, atlas, globe, remote sensing data | `e`, `f` |
-| `audio_nonmusic` | Spoken word, audiobook, sound effects | `i` |
+| `audio_nonmusic` | Spoken word, audiobook, audio interview | `i` |
 | `comic` | Graphic novel, comic strip, manga | `a` (with Form/Genre `yso/slm:sarjakuvat`) |
 | `still_image` | Photograph, poster, print, art reproduction | `k` |
 | `dataset` | Research dataset, digital database, computer data | `m` (with `516` dataset note) |
@@ -1501,33 +1515,82 @@ The internal schema uses controlled vocabularies for type disambiguation across 
 | `geodata_service` | Dynamic spatial geodata layer or OGC web service | `m`, `e` (with EPSG `084 $2 epsg` / WFS/WMS) |
 | `numismatic` | Coin, commemorative medal, banknote, postage stamp | `r`, `k` (with Michel/Scott/KM no) |
 | `heritage_model` | 3D cultural heritage digital twin, photogrammetry model | `m` (with `347 $2 gltf` / `digital_twin_of`) |
+| `multimedia` | Interactive mixed-media package, educational software kit | `m`, `o` (with mixed carrier/content) |
 
-| `content_type` (on `expressions`) | Description | RDA Content Type |
+##### 2. `content_type` Enumeration (Realization Level / RDA 6.9 & MARC 336)
+
+| `content_type` (on `expressions`) | Description | RDA Content Type Term & Code |
 | :--- | :--- | :--- |
-| `text` | Written text (monograph, article, thesis) | `txt` (text) |
-| `notated_music` | Printed musical score | `ntm` (notated music) |
-| `audio_music` | Audio recording of music | `prm` (performed music) |
-| `spoken_word` | Audio recording of speech / audiobook / podcast | `spw` (spoken word) |
-| `moving_image` | Video, motion picture | `tdi` (two-dimensional moving image) |
-| `still_image` | Two-dimensional static graphic or photograph | `sti` (still image) |
-| `cartographic_image` | Visual representation of geospatial data | `cri` (cartographic image) |
-| `cartographic_dataset` | Digital vector / raster spatial data | `crd` (cartographic dataset) |
-| `dataset` | Digital computer dataset | `dat` (computer dataset) |
-| `computer_program` | Interactive software, game executable | `cop` (computer program) |
-| `three_dimensional` | Tactile or 3D object representation | `tdf` (three-dimensional form) |
-| `tactile_text` | Embossed braille text (Grade 1 / 2) | `tcm` (tactile text) |
-| `tactile_graphic` | Raised-line tactile diagram or map | `tcg` (tactile image) |
-| `software_code` | Source code files, repository trees, packages | `cop` (computer program) |
-| `model_weights` | Trained machine learning model tensor weights | `dat` (computer dataset) |
-| `choreographic_movement` | Notated dance movement (Laban / Benesh) | `ntm` / `mov` (movement notation) |
-| `web_archive_snapshot` | Temporal snapshot of website crawl at timestamp | `cop` / `dat` (computer dataset) |
-| `interview_audio` | Spoken fieldwork recording of informant interview | `spw` (spoken word) |
-| `broadcast_stream` | Off-air linear broadcast stream recording | `tdi` / `prm` / `spw` |
-| `manuscript_fragment` | Medieval handwritten parchment text with neumes | `txt` / `ntm` |
-| `spatial_vector` | Geospatial vector features (Shapefile, GeoPackage) | `crd` (cartographic dataset) |
-| `spatial_raster` | Geospatial raster grid / satellite imagery (GeoTIFF) | `cri` / `crd` |
-| `numismatic_object` | Engraved die, minted coin, philatelic stamp specimen | `tdf` (three-dimensional form) |
-| `three_dimensional_model` | Digital 3D mesh, point cloud, photogrammetric asset | `tdf` / `cop` |
+| `text` | Written text (monograph, article, thesis) | text (`txt`) |
+| `notated_music` | Printed musical score | notated music (`ntm`) |
+| `audio_music` | Audio recording of music | performed music (`prm`) |
+| `spoken_word` | Audio recording of speech / audiobook / podcast | spoken word (`spw`) |
+| `sounds` | Environmental sounds, bioacoustics, sound effects | sounds (`snd`) |
+| `moving_image` | Two-dimensional video, motion picture, television broadcast | two-dimensional moving image (`tdi`) |
+| `three_dimensional_moving_image` | Stereoscopic 3D film, VR 360-degree moving image video | three-dimensional moving image (`tdm`) |
+| `still_image` | Two-dimensional static graphic or photograph | still image (`sti`) |
+| `cartographic_image` | Visual representation of geospatial data | cartographic image (`cri`) |
+| `cartographic_dataset` | Digital vector / raster spatial data | cartographic dataset (`crd`) |
+| `tactile_cartographic` | Raised-relief tactile map, tactile globe | cartographic tactile image (`crt` / `crn`) |
+| `dataset` | Digital computer dataset | computer dataset (`dat`) |
+| `computer_program` | Interactive software, game executable | computer program (`cop`) |
+| `three_dimensional` | Tactile or physical 3D object representation | three-dimensional form (`tdf`) |
+| `tactile_text` | Embossed braille text (Grade 1 / 2) | tactile text (`tct`) |
+| `tactile_graphic` | Raised-line tactile diagram or embossed drawing | tactile image (`tcg`) |
+| `tactile_notated_music` | Embossed braille music notation score | tactile notated music (`tcn`) |
+| `software_code` | Source code files, repository trees, packages | computer program (`cop`) |
+| `model_weights` | Trained machine learning model tensor weights | computer dataset (`dat`) |
+| `choreographic_movement` | Notated dance movement (Laban / Benesh) | notated movement (`ntv`) |
+| `web_archive_snapshot` | Temporal snapshot of website crawl at timestamp | computer dataset (`dat`) |
+| `interview_audio` | Spoken fieldwork recording of informant interview | spoken word (`spw`) |
+| `broadcast_stream` | Off-air linear broadcast stream recording | performed music / spoken word / moving image |
+| `manuscript_fragment` | Medieval handwritten parchment text with neumes | text (`txt`) / notated music (`ntm`) |
+| `spatial_vector` | Geospatial vector features (Shapefile, GeoPackage) | cartographic dataset (`crd`) |
+| `spatial_raster` | Geospatial raster grid / satellite imagery (GeoTIFF) | cartographic image / dataset (`cri` / `crd`) |
+| `numismatic_object` | Engraved die, minted coin, philatelic stamp specimen | three-dimensional form (`tdf`) |
+| `three_dimensional_model` | Digital 3D mesh, point cloud, photogrammetric asset | three-dimensional form (`tdf`) / computer program (`cop`) |
+
+##### 3. `carrier_type` Enumeration (Physical / Digital Carrier Level / RDA 3.3 & MARC 338)
+
+| `carrier_type` (on `manifestations`) | Description | RDA Carrier Type Term & Code |
+| :--- | :--- | :--- |
+| `volume` | Bound printed codex, paperback, pamphlet, printed dissertation | volume (`nc`) |
+| `sheet` | Flat single sheet, folded map sheet, broadside, poster | sheet (`nb`) |
+| `audio_disc` | Optical / vinyl sound disc (CD, vinyl LP, SACD) | audio disc (`sd`) |
+| `audiocassette` | Magnetic audio tape cassette, microcassette | audiocassette (`ss`) |
+| `videodisc` | Optical video disc (DVD-Video, Blu-ray, 4K UHD Blu-ray) | videodisc (`vd`) |
+| `videocassette` | Magnetic videotape cassette (VHS, U-matic, Betacam) | videocassette (`vf`) |
+| `computer_disc` | Optical data disc (CD-ROM, DVD-ROM) | computer disc (`cd`) |
+| `online_resource` | Digital network resource, PDF download, WARC web crawl, streaming media | online resource (`cr`) |
+| `memory_card` | Solid-state flash memory card, game cartridge (Switch, SD card) | memory card (`cb`) |
+| `microfilm_reel` | 16mm or 35mm micrographic roll film | microfilm reel (`hd`) |
+| `microfiche` | Flat micrographic sheet with grid of micro-images | microfiche (`he`) |
+| `braille_volume` | Embossed braille volume, thermoform relief binding | volume / tactile (`nc` / `t`) |
+| `object` | Three-dimensional artifact, board game box, coin, specimen, physical kit | object (`nr`) |
+
+---
+
+#### 2.2.5 The Item Entity Boundary & Harvesting Scope: Why OAI-PMH Harvester Excludes Items
+
+In IFLA LRM and RDA, the **Item** (`items`, `bffi:Item`, `bf:Item`) represents a single physical exemplar or concrete digital file instance of a Manifestation (e.g. a specific copy sitting on a shelf with a specific barcode, binding, or donor inscription).
+
+A foundational architectural principle of the Reconciliator engine is the **strict separation of the core WEMI reconciliation pipeline from Item-level inventory tracking**:
+
+##### 1. Bibliographic Records vs. Holding/Inventory Data Streams
+- **Union Catalogs Exclusively Serve Bibliographic Records**: National and international union catalogs (such as the National Library of Finland's **Melinda** OAI-PMH service at `https://oai-pmh.kansalliskirjasto.fi/`) publish standard bibliographic records (`marc21` or `bibframe` format).
+- **What Bibliographic Records Represent**: A bibliographic record models the **Manifestation** (the published edition, publisher, year, ISBN, pagination) and carries intellectual metadata identifying the **Work** (uniform title, primary author, classification) and **Expression** (language, translation, content type, relators).
+- **Where Item Records Reside**: Item-level data—such as copy barcodes (`852 $p`), shelf location (`852 $c/$h`), circulation availability (checked out, in transit, lost), and physical copy condition—is maintained in the local Integrated Library Systems (ILS / LSP: Alma, Koha, Sierra) of individual universities and municipal library systems. Union catalogs intentionally strip or omit local holding records from general bibliographic OAI-PMH feeds to prevent payload bloat and avoid disseminating volatile, real-time circulation states.
+
+##### 2. The Core Pipeline Operates on the W-E-M Triad
+The automated core of the Reconciliator—including OAI-PMH date-sliced harvesting, ResourceSync, two-pass streaming Wikidata parsing, the WEMI serialization triad, tripartite vector indexing (`work.index`, `expression.index`, `manifestation.index`), late fusion composite scoring ($S_{\text{total}}$), and 3-layer multiplex graph clustering ($G_M \subset G_E \subset G_W$)—operates exclusively on the **W-E-M** triad:
+$$\text{Work} \iff \text{Expression} \iff \text{Manifestation}$$
+**No Item entities are harvested, expected, or generated from OAI-PMH feeds.**
+
+##### 3. When and Where the `items` Table Is Utilized
+The `items` table in `authority.db` and the polymorphic `'item'` entity types in `contributions` and `identifiers` exist to provide **ontological superset completeness** and to support specialized, non-OAI workflows:
+1. **Special Collections & Rare Book Provenance**: When ingesting specialized historical XML/TEI dumps (e.g. *Fragmenta Membranea* medieval parchment fragments, or incunabula databases like Material Evidence in Incunabula - MEI) where former owners (`fmo`), autographs/dedications (`sgn`), donor notes (`dnr`), and copy-specific marginalia (`ann`) attach to an individual physical copy.
+2. **Local Direct ILS Dumps / "Bound-With" (*Sammelbände*) Processing**: When local libraries provide direct database exports containing `852` holding tables (`source_type: file`), or when resolving physical composite volumes where two separate bibliographic records share the same physical barcode (`target_records.sammelband_item_id`).
+3. **Preservation Digital Surrogates**: When linking high-resolution archival master scans (e.g. Digi.kansalliskirjasto.fi) directly to the specific damaged or annotated physical copy that was scanned.
 
 ---
 
@@ -1609,122 +1672,621 @@ The engine accommodates ontological and profile differences across international
                  │ expressionManifested           │ (1:N)                            │ bf:translationOf
        ┌─────────┴──────────┐            ┌────────┴────────┐                         │
        │ bffi:Manifestation │◄──────────►│ manifestations  │◄────────────────────────┼──────────────────┐
-       └────────────────────┘            └─────────────────┘                         │                  │
-                                                                           ┌─────────▼────────┐ ┌───────▼────────┐
-                                                                           │   bf:Instance    │ │    bf:Item     │
-                                                                           └──────────────────┘ └────────────────┘
+       └─────────▲──────────┘            └────────▲────────┘                         │                  │
+                 │ bffi:                          │ manifestation_id                 │                  │
+                 │ itemOf                         │ (1:N)                            │                  │
+       ┌─────────┴──────────┐            ┌────────┴────────┐               ┌─────────▼────────┐ ┌───────▼────────┐
+       │     bffi:Item      │◄──────────►│      items      │◄──────────────┤   bf:Instance    │ │    bf:Item     │
+       └────────────────────┘            └─────────────────┘               └──────────────────┘ └────────────────┘
 ```
 
 ---
 
-### 3.2.1 Multi-Profile Dialects & Ontological Foundations
+### 3.2.1 Tri-Dialect Ontological Foundations & Profile Architecture
 
-The Reconciliator engine natively supports three primary BIBFRAME profiles through configurable profile descriptors (`src/reconciliator/defaults/bibframe_profiles/`):
+The Reconciliator engine natively handles three primary BIBFRAME profile dialects through declarative configuration descriptors located in `src/reconciliator/defaults/bibframe_profiles/` (`bffi_1.yaml`, `bibframe_2.yaml`, `bibframe_3.yaml`):
 
-#### 1. Finnish National Library BFFI 1.0 (LKD Profile)
-- **Standard Reference**: Kansalliskirjasto Linked Library Data profile (`https://schema.finto.fi/bffi/1-0-0/lkd.rdf`).
-- **WEMI Architecture**: Strict 4-tier IFLA LRM / RDA compliance with clean ontological separation between Work, Expression, Manifestation, and Item.
-- **Key Classes**:
-  - `bffi:Work`, `bffi:MonographWork`, `bffi:SerialWork`, `bffi:MusicWork`, `bffi:MovingImageWork`, `bffi:CartographyWork`, `bffi:NonMusicAudioWork`, `bffi:CollectionWork`, `bffi:AggregatingWork`.
-  - `bffi:Expression`, `bffi:MonographExpression`, `bffi:SerialExpression`, `bffi:SeriesExpression`, `bffi:MusicAudioExpression`, `bffi:MovingImageExpression`, `bffi:CartographyExpression`, `bffi:NonMusicAudioExpression`.
-  - `bffi:Manifestation`, `bffi:CollectionManifestation`.
-  - `bffi:Item`.
-- **Key Predicates**:
-  - Work–Expression link: `bffi:expressionOf` (domain `bffi:Expression`, range `bffi:Work`).
-  - Expression–Manifestation link: `bffi:expressionManifested` (domain `bffi:Manifestation`, range `bffi:Expression`).
-  - Shortcut Manifestation–Work link: `bffi:workManifested`, `bffi:manifestationOfWork`.
-  - Contributions: `bffi:contribution`, `bffi:PrimaryContribution`, `bffi:agent`, `bffi:simpleAgent`, `bffi:role`.
-  - Language: `bffi:languageOfExpression`, `bffi:languageOfRepresentativeExpression`, `bffi:language`.
-  - Music Medium: `bffi:musicMedium`, `bffi:musicMediumOfRepresentativeExpression`.
-  - Legacy Provenance: `bffi:marcKey` (e.g. `bffi:marcKey "24510$aSinuhe egyptiläinen"`).
-- **Mapping Alignment**: 1:1 direct isomorphism with the Reconciliator internal WEMI tables (`works`, `expressions`, `manifestations`).
-
-#### 2. Library of Congress BIBFRAME 2.0 (3-Tier)
-- **Standard Reference**: Library of Congress BIBFRAME 2.0 Vocabulary (`http://id.loc.gov/ontologies/bibframe/`).
-- **WEMI Architecture**: 3-tier structure consisting of `bf:Work`, `bf:Instance`, and `bf:Item`.
-- **Ontological Conflation**: LC BF 2.0 does not define an explicit `bf:Expression` class. A single `bf:Work` entity conflates the abstract conceptual work with its linguistic, musical, or physical expression characteristics.
-- **Key Classes & Predicates**:
-  - `bf:Work`, `bf:Instance`, `bf:Item`.
-  - `bf:instanceOf` (links `bf:Instance` to `bf:Work`), `bf:hasInstance`.
-  - `bf:hasExpression`, `bf:expressionOf`, `bf:translationOf` (used when distinct work nodes are minted for translations).
-  - `bflc:name00MatchKey`, `bflc:primaryContributorName00MatchKey`.
-- **Mapping Alignment**: Requires automated decomposition into separate `works` and `expressions` rows using the disambiguation algorithm in §3.2.2.
-
-#### 3. Library of Congress BIBFRAME 3.0 & Performed Music Ontology (PMO)
-- **Standard Reference**: LC BIBFRAME 3.0 Draft & Music Library Association Performed Music Ontology (`http://performedmusicontology.org/ontology/`).
-- **WEMI Architecture**: Introduces `bf:Hub` as an abstract Work cluster centroid and integrates PMO classes for granular audio/music modeling.
-- **Key Classes & Predicates**:
-  - `bf:Hub`: Resource representing the abstract Work or uniform title centroid (e.g. Beethoven's Symphony No. 5 or Waltari's *Sinuhe egyptiläinen*).
-  - `bf:Work`: Represents a specific version or expression of the Work, or an audio recording realization.
-  - `pmo:Performance`: Event resource representing the live or studio realization of a musical work.
-  - `pmo:MediumOfPerformance`: Explicit instrumentation and vocal scoring.
-  - `pmo:recordedIn`: Links a performance expression to an audio carrier instance (`bf:Instance`, `bf:Audio`).
-  - Relators: `pmo:performer`, `pmo:conductor`, `pmo:recordingEngineer`, `pmo:chorusMaster`.
+| Ontological Dimension | Finnish National Library BFFI 1.0 (`bffi_1`) | Library of Congress BIBFRAME 2.0 (`bibframe_2`) | LC BIBFRAME 3.0 & PMO (`bibframe_3`) | Reconciliator Greenfield Internal Pivot |
+| :--- | :--- | :--- | :--- | :--- |
+| **Standard Reference** | Kansalliskirjasto LKD (`https://schema.finto.fi/bffi/1-0-0/lkd.rdf`) | LC BIBFRAME 2.0 (`http://id.loc.gov/ontologies/bibframe/`) | LC BF 3.0 Draft + Performed Music Ontology (`http://performedmusicontology.org/`) | Unified 4-tier IFLA LRM / RDA relational graph |
+| **WEMI Depth** | **Strict 4-Tier** (`Work`, `Expression`, `Manifestation`, `Item`) | **3-Tier Conflated** (`Work`, `Instance`, `Item`) | **3-Tier + Hub + Performance Event** | **Strict 4-Tier + Item Provenance** |
+| **Work Entity** | `bffi:Work` (+ 9 typed subclasses) | `bf:Work` (conflates work & expression) | `bf:Hub` (centroid) / `bf:Work` (version) | `works` (`work_id`, `work_type`, preferred title) |
+| **Expression Entity** | `bffi:Expression` (+ 10 typed subclasses) | *None* (implicit attributes on `bf:Work`) | `bf:Work` / `pmo:Performance` | `expressions` (`expression_id`, `content_type`, language) |
+| **Manifestation / Instance** | `bffi:Manifestation`, `bffi:CollectionManifestation` | `bf:Instance` | `bf:Instance` | `manifestations` (`carrier_type`, imprint, ISBN/ISSN) |
+| **Item Entity** | `bffi:Item` | `bf:Item` | `bf:Item` | `items` (holding org, shelfmark, barcode, provenance) |
+| **Work–Expression Link** | `bffi:expressionOf` (inverse: `bffi:hasExpression`) | *N/A* (conflated) or `bf:hasExpression` | `bf:expressionOf` / `pmo:performedWork` | Foreign key `expressions.work_id REFERENCES works(id)` |
+| **Expression–Instance Link** | `bffi:expressionManifested` | *N/A* (direct `bf:instanceOf`) | `pmo:recordedIn` / implicit via work | `manifestation_expressions(manifestation_id, expression_id)` |
+| **Manifestation–Work Shortcut** | `bffi:workManifested`, `bffi:manifestationOfWork` | `bf:instanceOf` (points directly to `bf:Work`) | `bf:instanceOf` (points to `bf:Work` or `bf:Hub`) | `manifestations.work_id` (nullable shortcut foreign key) |
+| **Agent Provenance Bridge** | `bffi:marcKey` (e.g. `1001 $aWaltari, Mika,$d1908-1979,$ewriter`) | `bflc:name00MatchKey`, `bflc:primaryContributorName00MatchKey` | `bflc:authorizedAccessPoint`, `bflc:name00MatchKey` | `agents`, `contributions(entity_type, role, field_tag)` |
+| **Vocabulary Authority Schemes** | Asteri (`wa`, `pn`, `cn`, `mts`, `slm`), Finto YSO | LCNAF, LCSH, LC Genre/Form (LCGFT), MARC relators | LCNAF, LCSH, PMO medium terms, MARC relators | Multi-authority resolver with canonical URI folding |
 
 ---
 
-### 3.2.2 The 3-Tier vs. 4-Tier Semantic Gap & Algorithmic Work-Expression Disambiguation
+### 3.2.2 The Comprehensive WEMI-BFFI-BIBFRAME Master Mapping Matrix
 
-Because Library of Congress BIBFRAME 2.0/3.0 conflates Work and Expression within `bf:Work`, while Finnish BFFI and IFLA LRM strictly separate them, the Reconciliator implements a deterministic graph decomposition pipeline during BIBFRAME ingestion:
+The tables below define the exact, property-by-property crosswalk between the Reconciliator database columns and incoming RDF triples across BFFI 1.0 and LC BIBFRAME dialects, anchored to corresponding MARC 21 source fields.
+
+#### Table 1: Work Tier Mapping Matrix (`authority.db: works`)
+
+| Reconciliator Column / Field | BFFI 1.0 (Finnish LKD Profile) | LC BIBFRAME 2.0 | LC BIBFRAME 3.0 & PMO | MARC 21 Origin Bridge | Ingestion & Disambiguation Semantics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`work_uri`** (URI PK) | Subject IRI of `bffi:Work` or Asteri URI in `bffi:identifiedBy` | Subject IRI of `bf:Work` | Subject IRI of `bf:Hub` (or parent `bf:Work`) | `758 $0` or `130`/`240 $0` | Canonical URI. If blank node, mints `urn:reconciliator:work:<hash>`. Resolves Asteri `urn.fi/URN:NBN:fi:au:wa:...` to primary authority. |
+| **`title`** (Preferred Title) | `bffi:title / bffi:Title / bffi:mainTitle` or `rdfs:label` | `bf:title / bf:Title / bf:mainTitle` or `rdfs:label` | `bf:title / bf:Title / bf:mainTitle` on `bf:Hub` | `130 $a` / `240 $a` (or `245 $a` if original) | Uniform preferred title of the abstract work. Strips non-filing characters and leading articles for normalization. |
+| **`title_normalized`** | Transformed from `bffi:mainTitle` | Transformed from `bf:mainTitle` | Transformed from `bf:mainTitle` | `130 $a` / `240 $a` | Lowercase, whitespace folded, NFC normalized, diacritics stripped. |
+| **`original_language`** | `bffi:languageOfRepresentativeExpression` or `bffi:language` | `bflc:language` on `bf:Hub` (or parsed from `bf:Work`) | `bflc:language` on `bf:Hub` | `041 $h` or `240 $l` (inverse) | ISO 639-2/B 3-letter code (e.g. `fin`, `swe`, `eng`). Identifies the creation language of the conceptual work. |
+| **`primary_agent_id`** | `bffi:contribution [ a bffi:PrimaryContribution ; bffi:agent ?agent ]` | `bf:contribution [ a bflc:PrimaryContribution ; bf:agent ?agent ]` | `bf:contribution [ a bflc:PrimaryContribution ; bf:agent ?agent ]` | `100 $0` / `110 $0` / `111 $0` | Links to `agents` table. Falls back to first creator relator (`aut`, `cmp`, `drt`, `art`, `cre`, `inv`). |
+| **`ykl_class`** | `bffi:classification [ a bffi:Classification ; bffi:source "ykl" ; rdf:value ?val ]` | `bf:classification [ a bf:Classification ; bf:source "ykl" ; rdf:value ?val ]` | `bf:classification [ a bf:Classification ; bf:source "ykl" ; rdf:value ?val ]` | `084 $a` (`$2 ykl`) | Finnish Public Library Classification notation (e.g. `84.2`, `78.1`, `59.11`). |
+| **`work_type`** (38 Types) | Inferred from `rdf:type`: `bffi:MonographWork` $\rightarrow$ `text`, `bffi:MusicWork` $\rightarrow$ `music`, `bffi:SerialWork` $\rightarrow$ `serial`, etc. | Inferred from `rdf:type` (`bf:Text`, `bf:Audio`, `bf:MovingImage`) + `bf:genreForm` | Inferred from `bf:Hub` types + PMO types (`pmo:MusicalWork`) | `Leader/06-07`, `655 #7` (`$2 slm`/`yso`) | Mapped into the unified 38-value `work_type` enumeration (§2.2.4 Table 1). |
+| **`subjects_json`** | Array of URIs from `bffi:subject` (Finto YSO `http://www.yso.fi/onto/yso/p...`) | Array of URIs from `bf:subject` (LCSH, FAST, YSO) | Array of URIs from `bf:subject` | `650 #7 $0` (`$2 yso`), `650 #0` (LCSH) | JSON array of folded canonical subject URIs. Strips literal-only nodes if URI is present. |
+| **`serialized_text`** | Generated by `work_serialization.j2` | Generated by `work_serialization.j2` | Generated by `work_serialization.j2` | N/A | Materialized text string for Tripartite Work Indexing (`work.index`) and FTS5 (`works_fts`). |
+
+---
+
+#### Table 2: Expression Tier Mapping Matrix (`authority.db: expressions`)
+
+| Reconciliator Column / Field | BFFI 1.0 (Finnish LKD Profile) | LC BIBFRAME 2.0 (Decomposed) | LC BIBFRAME 3.0 & PMO | MARC 21 Origin Bridge | Ingestion & Disambiguation Semantics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`expression_uri`** (URI PK) | Subject IRI of `bffi:Expression` | Decomposed URI: `<WorkURI>#expr-<hash>` or `bf:hasExpression` IRI | Subject IRI of `pmo:Performance` or variant `bf:Work` | `758 $0` (with `ind1='2'`) | Canonical Expression IRI. Guaranteed unique per realization. |
+| **`work_id`** (FK $\rightarrow$ `works`) | Target IRI of `bffi:expressionOf` | Subject IRI of parent `bf:Work` or target of `bf:translationOf` | Target IRI of `bf:expressionOf` or `pmo:performedWork` | `758 $0` (with `ind1='1'`) | Foreign key binding Expression to parent conceptual Work. |
+| **`expression_title`** | `bffi:title / bffi:Title / bffi:mainTitle` on `bffi:Expression` | `bf:title / bf:Title / bf:mainTitle` on variant `bf:Work` | `bf:title` on `bf:Work` or label on `pmo:Performance` | `245 $a`, `$b` (or `242 $a` translation title) | Title as realized in this expression (e.g. translated title *Sinouhé l'Égyptien*). |
+| **`content_type`** (28 Types) | Subclass of `bffi:Expression` (`bffi:MonographExpression` $\rightarrow$ `text`, `bffi:MusicAudioExpression` $\rightarrow$ `audio_music`) | Inferred from `bf:content` URI (e.g. `http://id.loc.gov/vocabulary/contentTypes/txt`) | `bf:content` or `pmo:Performance` $\rightarrow$ `performed_music` | `336 $b` (`txt`, `prm`, `spw`, `tdi`, `sti`) | Mapped into the unified 28-value `content_type` enumeration (§2.2.4 Table 2). |
+| **`language`** | `bffi:languageOfExpression` (e.g. `"fin"`, `"swe"`, `"fra"`) or `bffi:language` | `bf:language` (e.g. `http://id.loc.gov/vocabulary/languages/fre`) | `bf:language` | `041 $a`, `546 $a` | ISO 639-2/B 3-letter language code of this expression. |
+| **`version_designation`** | `bffi:versionDesignation` or `bffi:editionStatement` on Expression | `bf:version` or parsed from `bflc:versionMatchKey` | `bf:version` | `250 $a` (when intellectual version, e.g. "Kriittinen laitos") | Distinguishes revisions, critical versions, director's cuts, or abridgments. |
+| **`arrangement_note`** | `bffi:arrangementOf` or `bffi:note` | `bf:arrangement` / `bf:arrangementOf` | `bf:arrangementOf` | `240 $o` ("arranged", "sovittaen") | Musical score or performance arrangement statement (e.g. "arranged for solo piano"). |
+| **`medium_of_performance`** | `bffi:musicMedium` / `bffi:MusicMedium` | `bf:mediumOfPerformance` / `bf:MusicMedium` | `pmo:MediumOfPerformance` / `pmo:declaredMedium` | `382 $a` (`$2 lcmpt`), `240 $m` | Canonical medium of performance (instrumentation, choir, orchestra). |
+| **`serialized_text`** | Generated by `expression_serialization.j2` | Generated by `expression_serialization.j2` | Generated by `expression_serialization.j2` | N/A | Materialized text string for Expression Indexing (`expression.index`) and FTS5 (`expressions_fts`). |
+
+---
+
+#### Table 3: Manifestation Tier Mapping Matrix (`authority.db: manifestations`)
+
+| Reconciliator Column / Field | BFFI 1.0 (Finnish LKD Profile) | LC BIBFRAME 2.0 | LC BIBFRAME 3.0 & PMO | MARC 21 Origin Bridge | Ingestion & Disambiguation Semantics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`manifestation_uri`** (PK) | Subject IRI of `bffi:Manifestation` | Subject IRI of `bf:Instance` | Subject IRI of `bf:Instance` | `001` control number or `024 7 $0` | Unique IRI of the publication / carrier instance. |
+| **`carrier_type`** (13 Types) | `bffi:carrier` URI (e.g. `http://id.loc.gov/vocabulary/carriers/nc`) | `bf:carrier` URI (e.g. `http://id.loc.gov/vocabulary/carriers/cr`) | `bf:carrier` URI (e.g. `http://id.loc.gov/vocabulary/carriers/sd`) | `338 $b` (`nc`, `cr`, `sd`, `vd`, `nb`) | Mapped into the unified 13-value `carrier_type` enumeration (§2.2.4 Table 3). |
+| **`edition_statement`** | `bffi:editionStatement` | `bf:editionStatement` | `bf:editionStatement` | `250 $a` | Physical edition statement (e.g. "2. painos", "1st paperback ed."). |
+| **`publication_year`** | `bffi:provisionActivity / bffi:Publication / bffi:date` | `bf:provisionActivity / bf:Publication / bf:date` | `bf:provisionActivity / bf:Publication / bf:date` | `264 #1 $c` or `008/07-10` | 4-digit normalized calendar year. |
+| **`publisher`** | `bffi:provisionActivity / bffi:Publication / bffi:agent / rdfs:label` | `bf:provisionActivity / bf:Publication / bf:agent / rdfs:label` | `bf:provisionActivity / bf:Publication / bf:agent / rdfs:label` | `264 #1 $b` | Imprint publishing organization name. |
+| **`publication_place`** | `bffi:provisionActivity / bffi:Publication / bffi:place / rdfs:label` | `bf:provisionActivity / bf:Publication / bf:place / rdfs:label` | `bf:provisionActivity / bf:Publication / bf:place / rdfs:label` | `264 #1 $a` | City/town of publication. |
+| **`series_title`** | `bffi:seriesStatement` | `bf:seriesStatement` | `bf:seriesStatement` | `490 $a` / `830 $a` | Collective title of parent monographic series. |
+| **`series_numbering`** | `bffi:seriesEnumeration` | `bf:seriesEnumeration` | `bf:seriesEnumeration` | `490 $v` / `830 $v` | Volume/issue number within series (e.g. "Osa 14", "vol. 5"). |
+| **`extent`** | `bffi:extent / bffi:Extent / rdfs:label` | `bf:extent / bf:Extent / rdfs:label` | `bf:extent / bf:Extent / rdfs:label` | `300 $a` | Physical extent (e.g. "456 s.", "1 CD-äänilevy (54 min)"). |
+| **`dimensions`** | `bffi:dimensions` | `bf:dimensions` | `bf:dimensions` | `300 $c` | Physical dimensions (e.g. "21 cm", "12 in."). |
+| **`work_id`** (Nullable FK) | Target IRI of `bffi:workManifested` or `bffi:manifestationOfWork` | Target IRI of `bf:instanceOf` (when targeting `bf:Work`) | Target IRI of `bf:instanceOf` (when targeting `bf:Hub`) | `758 $0` (with `ind1='1'`) | Shortcut pointer to Work entity. In BFFI, populated from direct shortcut link. |
+| **`serialized_text`** | Generated by `manifestation_serialization.j2` | Generated by `manifestation_serialization.j2` | Generated by `manifestation_serialization.j2` | N/A | Materialized carrier text string for Manifestation Indexing (`manifestation.index`) and FTS5. |
+
+---
+
+#### Table 4: Item Tier Mapping Matrix (`authority.db: items`)
+
+| Reconciliator Column / Field | BFFI 1.0 (Finnish LKD Profile) | LC BIBFRAME 2.0 | LC BIBFRAME 3.0 & PMO | MARC 21 Origin Bridge | Ingestion & Disambiguation Semantics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`item_uri`** (PK) | Subject IRI of `bffi:Item` | Subject IRI of `bf:Item` | Subject IRI of `bf:Item` | `852 $p` (barcode) or local copy ID | Unique exemplar IRI. |
+| **`manifestation_id`** (FK) | Target IRI of `bffi:itemOf` | Target IRI of `bf:itemOf` | Target IRI of `bf:itemOf` | `001` parent manifestation ID | Foreign key binding exemplar to physical/digital manifestation. |
+| **`holding_organization`** | `bffi:heldBy` (ISIL or Finna code, e.g. `FI-Hul`) | `bf:heldBy` (ISIL or MARC org code) | `bf:heldBy` | `852 $a`, `$b` | Repository or holding library system identifier. |
+| **`shelf_mark`** | `bffi:shelfMark` / `bffi:callNumber` | `bf:shelfMark` / `bf:callNumber` | `bf:shelfMark` / `bf:callNumber` | `852 $h`, `$i` | Call number / classification shelf location. |
+| **`barcode`** | `bffi:identifiedBy [ a bf:Barcode ; rdf:value ?val ]` | `bf:identifiedBy [ a bf:Barcode ; rdf:value ?val ]` | `bf:identifiedBy [ a bf:Barcode ; rdf:value ?val ]` | `852 $p` | Physical barcode scanned on circulation item. |
+| **`custodial_history`** | `bffi:custodialHistory` or `bffi:note` | `bf:custodialHistory` or `bf:immediateAcquisition` | `bf:custodialHistory` | `561 $a`, `541 $a` | Provenance notes, former owners, donor records. |
+| **`item_condition`** | `bffi:itemCondition` | `bf:itemCondition` | `bf:itemCondition` | `583 $a` | Physical preservation state, damage, binding condition. |
+
+---
+
+#### Table 5: Structural Linkages & Inter-Entity Predicates
+
+| Linkage Semantics | BFFI 1.0 Predicate | LC BIBFRAME 2.0 Predicate | LC BIBFRAME 3.0 & PMO Predicate | Target Internal Table & FK |
+| :--- | :--- | :--- | :--- | :--- |
+| **Work $\leftarrow$ Expression** | `bffi:expressionOf` | *Implicit* (decomposed from `bf:Work`) | `bf:expressionOf` / `pmo:performedWork` | `expressions.work_id REFERENCES works(id)` |
+| **Expression $\leftarrow$ Manifestation** | `bffi:expressionManifested` | *Implicit* (via `bf:instanceOf`) | *Implicit* (via `pmo:recordedIn`) | `manifestation_expressions(manifestation_id, expression_id)` |
+| **Work $\leftarrow$ Manifestation (Shortcut)** | `bffi:workManifested`, `bffi:manifestationOfWork` | `bf:instanceOf` | `bf:instanceOf` (to `bf:Hub`) | `manifestations.work_id REFERENCES works(id)` |
+| **Manifestation $\leftarrow$ Item** | `bffi:itemOf` (inv: `bffi:hasItem`) | `bf:itemOf` (inv: `bf:hasItem`) | `bf:itemOf` (inv: `bf:hasItem`) | `items.manifestation_id REFERENCES manifestations(id)` |
+| **Work $\rightarrow$ Derivative Work** | `bffi:derivativeOf` (inv: `bffi:hasDerivative`) | `bf:derivativeOf` (inv: `bf:hasDerivative`) | `bf:derivativeOf` | `work_relationships(relationship_type='derivative_of')` |
+| **Work $\rightarrow$ Parent Super-Work** | `bffi:partOf` (inv: `bffi:hasPart`) | `bf:partOf` (inv: `bf:hasPart`) | `bf:partOf` | `work_relationships(relationship_type='part_of')` |
+| **Work $\rightarrow$ Preceding Work (Lineage)** | `bffi:precededBy` (inv: `bffi:succeededBy`) | `bf:precededBy` (inv: `bf:succeededBy`) | `bf:precededBy` | `work_relationships(relationship_type='preceded_by')` |
+| **Work $\rightarrow$ Central Hub** | *N/A* (BFFI uses `bffi:Work` directly) | *N/A* | `bflc:hasHub` | Centroid linkage in clustering graph |
+| **Expression $\rightarrow$ Translation Source** | `bffi:translationOf` | `bf:translationOf` | `bf:translationOf` | `expressions.work_id` + `relationship_type='translation_of'` |
+
+---
+
+### 3.2.3 Finnish National Library (Kansalliskirjasto) BFFI 1.0 Cataloging Semantics
+
+The National Library of Finland's Linked Data infrastructure (Melinda / Fennica / Viola / Asteri) operates under the **BFFI 1.0 (LKD)** specification (`https://schema.finto.fi/bffi/1-0-0/lkd.rdf`). Catalogers and ingest pipelines must account for seven distinctive Finnish architectural practices:
+
+#### 1. Typed WEMI Class Specializations
+Rather than using generic `bffi:Work` and `bffi:Expression` nodes everywhere, Finnish cataloging mints typed subclasses that encode domain-specific cataloging rules:
+- **Work Subclasses**: `bffi:MonographWork`, `bffi:SerialWork`, `bffi:MusicWork`, `bffi:MovingImageWork`, `bffi:CartographyWork`, `bffi:NonMusicAudioWork`, `bffi:CollectionWork`, `bffi:AggregatingWork`.
+- **Expression Subclasses**: `bffi:MonographExpression`, `bffi:SerialExpression`, `bffi:SeriesExpression`, `bffi:MusicAudioExpression`, `bffi:MovingImageExpression`, `bffi:CartographyExpression`, `bffi:NonMusicAudioExpression`, `bffi:CollectionExpression`, `bffi:AggregatingExpression`.
+- **Manifestation Subclasses**: `bffi:Manifestation`, `bffi:CollectionManifestation`.
+- **Item Subclasses**: `bffi:Item`.
+
+#### 2. The `bffi:marcKey` Provenance Engine
+Finnish BIBFRAME records embed the exact raw MARC 21 field that generated the RDF resource using `bffi:marcKey`. This enables lossless round-trip extraction of MARC indicators and subfields:
+```turtle
+# Agent contribution with bffi:marcKey
+bffi:contribution [
+    a bffi:Contribution ;
+    bffi:marcKey "1001 $aWaltari, Mika,$d1908-1979,$ewriter" ;
+    bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m16> ; # kirjoittaja
+    bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000123456>
+] .
+```
+The Reconciliator parser applies a compiled regex (`^(\d{3})([0-9\s]{2})(.*)$`) to `bffi:marcKey`:
+1. Group 1: Field Tag (`100` $\rightarrow$ stored in `contributions.field_tag`).
+2. Group 2: Indicators (`1 ` $\rightarrow$ personal name, single surname).
+3. Group 3: Subfields (`$aWaltari, Mika,$d1908-1979,$ewriter`).
+If an agent has no authority URI, the parser extracts `$a` and `$d` to create an unlinked agent node.
+
+#### 3. Asteri Authority URN Resolvers
+Finnish national authority records in Asteri are identified by deterministic URN patterns under `urn.fi/URN:NBN:fi:au:`:
+- **Work Authority (`wa`)**: `http://urn.fi/URN:NBN:fi:au:wa:000123456` $\rightarrow$ Mapped to `works.work_uri` or stored in `identifiers(scheme='asteri_work')`.
+- **Personal Name Authority (`pn`)**: `http://urn.fi/URN:NBN:fi:au:pn:000123456` $\rightarrow$ Mapped to `agents.agent_uri`.
+- **Corporate Name Authority (`cn`)**: `http://urn.fi/URN:NBN:fi:au:cn:000123456` $\rightarrow$ Mapped to corporate `agents.agent_uri`.
+- **Meeting / Conference Authority (`mn`)**: `http://urn.fi/URN:NBN:fi:au:mn:000123456` $\rightarrow$ Mapped to event `agents.agent_uri`.
+- **Role / Relator Vocabulary (`mts`)**: `http://urn.fi/URN:NBN:fi:au:mts:m16` $\rightarrow$ Mapped to RDA relator code (e.g. `m16` = `kirjoittaja` $\rightarrow$ `aut`; `m42` = `kääntäjä` $\rightarrow$ `trl`).
+- **Form / Genre Vocabulary (SLM)**: `http://urn.fi/URN:NBN:fi:au:slm:s123` $\rightarrow$ Stored in `works.subjects_json` under vocabulary `slm`.
+
+#### 4. Literal Agent Fallback via `bffi:simpleAgent`
+When cataloging unestablished authors, local contributors, or school publications where no Asteri authority record has been minted, BFFI 1.0 supplies `bffi:simpleAgent`:
+```turtle
+bffi:contribution [
+    a bffi:Contribution ;
+    bffi:simpleAgent "Virtanen, Matti" ;
+    bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m16>
+] .
+```
+The Reconciliator synthesizes an unlinked agent with `agent_uri='urn:reconciliator:agent:virtanen_matti'` and `is_personal=1`.
+
+#### 5. Representative Expression vs. Realized Expression Properties
+In alignment with IFLA LRM, BFFI 1.0 distinguishes between representative attributes inherent to the conceptual Work and realization attributes specific to an Expression:
+- **Representative Language (on `bffi:Work`)**: `bffi:languageOfRepresentativeExpression` records the original language in which the work was initially conceived (LRM-E2-A2).
+- **Realized Language (on `bffi:Expression`)**: `bffi:languageOfExpression` records the actual language of the specific translation or text expression.
+- **Representative Music Medium (on `bffi:MusicWork`)**: `bffi:musicMediumOfRepresentativeExpression` records the original instrumentation intended by the composer.
+- **Realized Music Medium (on `bffi:MusicAudioExpression`)**: `bffi:musicMedium` records the instrumentation utilized in a particular performance or score arrangement.
+
+#### 6. Dual-Path Graph Traversal (Canonical vs. Shortcut)
+BFFI 1.0 manifests both the canonical 4-tier traversal and a fast shortcut link:
+```
+Canonical Path:     Manifestation ──[expressionManifested]──► Expression ──[expressionOf]──► Work
+Shortcut Path:      Manifestation ───────────────────[workManifested]─────────────────────► Work
+```
+When ingesting BFFI 1.0 graphs:
+- If both `expressionManifested` and `workManifested` are present, the engine validates consistency: `workManifested` must match `expressionManifested -> expressionOf`.
+- If only `workManifested` is present (a rare legacy migration artifact), the engine auto-synthesizes an intermediate `expressions` row so that downstream vector scoring ($S_{\text{total}}$) always finds an Expression node.
+
+#### 7. Fennica National Bibliography Numbers
+National bibliography records contain national deposit numbers in `bffi:identifiedBy`:
+```turtle
+bffi:identifiedBy [
+    a bffi:Identifier ;
+    bffi:source "fennica" ;
+    rdf:value "urn:nbn:fi:bib:me:194500123"
+] .
+```
+These are indexed into `identifiers(scheme='fennica', value='194500123')` and provide deterministic matching across library systems.
+
+---
+
+### 3.2.4 The 3-Tier vs. 4-Tier Semantic Gap & Algorithmic Disambiguation Engine
+
+Because Library of Congress BIBFRAME 2.0 conflates Work and Expression into `bf:Work`, while Finnish BFFI 1.0 strictly separates them, the ingestion engine employs a deterministic graph decomposition pipeline:
 
 ```
-                  Incoming LC BIBFRAME 2.0/3.0 Graph
-                  ───────────────────────────────────
-                                 bf:Work
+                            Incoming RDF Graph
                                     │
            ┌────────────────────────┴────────────────────────┐
            ▼                                                 ▼
-[Abstract Work Attributes]                       [Expression Attributes]
-- bf:title (mainTitle)                           - bf:language
-- bf:contribution (role=aut, cmp, drt)           - bf:content (e.g. txt, spw)
-- bf:subject, bf:genreForm                       - bf:contribution (role=trl, nrt, cnd)
-- bf:historyOfWork, bf:temporalCoverage          - bf:translationOf, bf:expressionOf
-- bf:originDate (creation year)                  - bf:summary, bf:notation
+   [Profile: bffi_1]                                 [Profile: bibframe_2 / bibframe_3]
+   Strict 4-Tier LRM                                 3-Tier Conflated (or Hub Centroid)
            │                                                 │
-           ▼                                                 ▼
-   authority.db: works                             authority.db: expressions
-   (work_id, preferred_title, ...)                 (expression_id, work_id, language, ...)
-           ▲                                                 ▲
+   Direct 1:1 Extraction                             Graph Decomposition Algorithm
+   - bffi:Work ──► works                             (Inspect Hubs, Translations,
+   - bffi:Expression ──► expressions                  Relators & Linguistic Properties)
+   - bffi:Manifestation ──► manifestations                   │
+           │                                                 ▼
+           │                                         Partition Triples:
+           │                                         Work vs. Expression Partitions
            │                                                 │
            └────────────────────────┬────────────────────────┘
-                                    │
-                             bf:instanceOf
-                                    │
                                     ▼
-                           bf:Instance / Manifestation
-                           authority.db: manifestations
+                     Target Reconciliator Database
+                     ┌─────────────────────────────┐
+                     │ authority.db                │
+                     │ - works                     │
+                     │ - expressions               │
+                     │ - manifestations            │
+                     │ - items                     │
+                     │ - contributions             │
+                     │ - identifiers               │
+                     └─────────────────────────────┘
 ```
 
-#### Step-by-Step Disambiguation Algorithm (`decompose_bibframe_work`):
-1. **Identify Work Centroid (`bf:Hub` or Abstract Work)**:
-   - Check if the target node is explicitly typed as `bf:Hub` or referenced via `bflc:hasHub`. If present, the URI and properties of `bf:Hub` are mapped directly to `works`.
-   - If no `bf:Hub` is present, evaluate whether the `bf:Work` is an original work or a derivative/translation.
-2. **Detect Translation and Derivative Links**:
-   - Inspect triples for `bf:translationOf`, `bf:expressionOf`, or `bflc:relation [ bflc:relation [ rdfs:label "Translation of" ] ; bf:associatedResource <URI> ]`.
-   - If `bf:translationOf <OriginalWorkURI>` is found:
-     - `<OriginalWorkURI>` is registered as the parent `works` entry.
-     - The current `bf:Work` node is treated as an Expression and mapped to `expressions`, setting `work_id` to `<OriginalWorkURI>` and `relationship_type` to `translation_of`.
-3. **Partition Predicates between Work and Expression**:
-   - **Work Partition**:
-     - Titles: `bf:title` with `bf:Title` (excluding variant translated titles).
-     - Creators: `bf:contribution` where `bf:role` matches creator relators (`aut`, `cmp`, `drt`, `art`, `cre`, `inv`, `dsr`).
-     - Classification & Subjects: `bf:subject`, `bf:genreForm`, `bf:classification`, `bf:geographicCoverage`.
-     - Creation/Inception Date: `bf:originDate`, `bf:temporalCoverage`.
-   - **Expression Partition**:
-     - Language: `bf:language` (e.g. `<http://id.loc.gov/vocabulary/languages/fin>`).
-     - Content Type: `bf:content` (e.g. `http://id.loc.gov/vocabulary/contentTypes/txt`).
-     - Secondary Contributors: `bf:contribution` where `bf:role` matches expression relators (`trl`, `edt`, `ill`, `nrt`, `cnd`, `prf`, `cwt`, `arr`).
-     - Performance Medium: `bf:mediumOfPerformance`, `pmo:MediumOfPerformance`.
-     - Summaries & Notes: `bf:summary`, `bf:supplementaryContent`.
-4. **Synthesize Expression Entity**:
-   - If the `bf:Work` contains no translation links and represents an original realization, the engine generates:
-     - A row in `works` with `work_id = hash(work_uri or title+creator)`.
-     - A companion row in `expressions` with `expression_id = hash(work_id + language + content_type + primary_expression_agents)`.
-   - The referencing `bf:Instance` is mapped to `manifestations` and bound to the synthesized `expression_id` via `manifestation_expressions`.
+#### The Graph Decomposition Decision Matrix
+
+The engine evaluates incoming resource nodes against the following deterministic decision matrix:
+
+| Condition # | Profile | Graph Topology / Triples Present | Decomposition Action | Emitted Target Records |
+| :--- | :--- | :--- | :--- | :--- |
+| **C-1** | `bffi_1` | `?m a bffi:Manifestation ; bffi:expressionManifested ?e . ?e a bffi:Expression ; bffi:expressionOf ?w . ?w a bffi:Work .` | **Direct 1:1 Extraction**: Extract Work, Expression, Manifestation with their declared IRIs and relationships. | `works` (`work_uri=?w`), `expressions` (`expression_uri=?e`, `work_id=?w`), `manifestations` (`manifestation_uri=?m`) |
+| **C-2** | `bffi_1` | `?m a bffi:Manifestation ; bffi:workManifested ?w .` (No `bffi:Expression` node present) | **Synthesize Default Expression**: Create Work from `?w`, Manifestation from `?m`, and synthesize a companion original expression `?w#expr-orig`. | `works`, synthesized `expressions`, `manifestations` |
+| **C-3** | `bibframe_3` | `?i a bf:Instance ; bf:instanceOf ?w . ?w bflc:hasHub ?h .` | **Hub Hoisting**: Hoist `?h` as canonical `works` entry (`work_type='hub'`). Treat `?w` as `expressions` row (`work_id=?h`). Bind `?i` to `manifestations`. | `works` (`work_uri=?h`), `expressions` (`expression_uri=?w`, `work_id=?h`), `manifestations` (`manifestation_uri=?i`) |
+| **C-4** | `bibframe_2` / `bibframe_3` | `?i a bf:Instance ; bf:instanceOf ?w . ?w bf:translationOf ?orig .` | **Translation Expression Decomposition**: Register `?orig` as parent `works` entry. Register `?w` as `expressions` entry with `relationship_type='translation_of'`. Bind `?i` to `manifestations`. | `works` (`work_uri=?orig`), `expressions` (`expression_uri=?w`, `work_id=?orig`), `manifestations` (`manifestation_uri=?i`) |
+| **C-5** | `bibframe_3` (PMO) | `?i a bf:Instance . ?p a pmo:Performance ; pmo:recordedIn ?i ; pmo:performedWork ?w .` | **Music Performance Realization**: Register `?w` as `works` (`work_type='music'`). Register `?p` as `expressions` (`content_type='audio_music'`). Bind `?i` to `manifestations`. | `works` (`work_uri=?w`), `expressions` (`expression_uri=?p`, `work_id=?w`), `manifestations` (`manifestation_uri=?i`) |
+| **C-6** | `bibframe_2` | `?i a bf:Instance ; bf:instanceOf ?w .` (Single `bf:Work`, no translation/hub links) | **Single-Work Partitioning**: Split `?w` attributes into Work partition (title, creator, subjects) and Expression partition (language, content type, secondary contributors). Synthesize companion expression ID. | `works` (`work_uri=?w`), `expressions` (`expression_uri=?w#expr-1`, `work_id=?w`), `manifestations` (`manifestation_uri=?i`) |
+
+#### Attribute Partitioning Rules for LC BIBFRAME Decomposition:
+When Condition **C-6** triggers, the engine deterministically segregates triples on `bf:Work`:
+- **Work Partition** $\rightarrow$ Inserted into `works`:
+  - Uniform Titles: `bf:title / bf:Title` (excluding translated titles).
+  - Creators: `bf:contribution` where `bf:role` matches creator relators (`aut`, `cmp`, `drt`, `art`, `cre`, `inv`).
+  - Subjects & Genres: `bf:subject`, `bf:genreForm`, `bf:classification`.
+  - Date & History: `bf:originDate`, `bf:historyOfWork`, `bf:temporalCoverage`.
+- **Expression Partition** $\rightarrow$ Inserted into `expressions`:
+  - Linguistic Medium: `bf:language`.
+  - Content Representation: `bf:content`.
+  - Secondary Realizers: `bf:contribution` where `bf:role` matches expression relators (`trl`, `edt`, `ill`, `nrt`, `cnd`, `prf`, `arr`, `cwt`).
+  - Performance Medium: `bf:mediumOfPerformance`, `pmo:MediumOfPerformance`.
+  - Summaries & Notes: `bf:summary`, `bf:supplementaryContent`, `bf:notation`.
 
 ---
 
-### 3.2.3 BIBFRAME Hub Architecture (`bf:Hub`)
+### 3.2.5 Concrete Worked Examples: BFFI 1.0, LC BIBFRAME, and Internal Database Projections
+
+To demonstrate how the mapping matrices operate in practice, this section provides two complete, worked scenarios: a translated monograph and a performed musical work.
+
+#### Scenario 1: Translated Monograph (*Sinuhe egyptiläinen* by Mika Waltari)
+- **Conceptual Work**: *Sinuhe egyptiläinen* (novel written by Mika Waltari in Finnish, 1945).
+- **Expression**: French translation *Sinouhé l'Égyptien* (translated by Jean-Pierre Minaudier, text content).
+- **Manifestation**: French paperback edition published by Perrin in Paris, 2020 (ISBN: `978-2-262-08554-4`).
+
+##### A. Finnish BFFI 1.0 RDF Turtle Representation:
+```turtle
+@prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# 1. Abstract Conceptual Work (BFFI Work)
+<http://urn.fi/URN:NBN:fi:bib:me:W00100200> a bffi:MonographWork , bffi:Work ;
+    bffi:title [
+        a bffi:Title ;
+        bffi:mainTitle "Sinuhe egyptiläinen"
+    ] ;
+    bffi:languageOfRepresentativeExpression "fin" ;
+    bffi:originDate "1945" ;
+    bffi:contribution [
+        a bffi:PrimaryContribution ;
+        bffi:marcKey "1001 $aWaltari, Mika,$d1908-1979,$ewriter" ;
+        bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000123456> ;
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m16> # kirjoittaja
+    ] ;
+    bffi:subject <http://www.yso.fi/onto/yso/p1234> ; # lääkärit
+    bffi:genreForm <http://urn.fi/URN:NBN:fi:au:slm:s120> . # historialliset romaanit
+
+# 2. French Realization (BFFI Expression)
+<http://urn.fi/URN:NBN:fi:bib:me:E00100200-fre> a bffi:MonographExpression , bffi:Expression ;
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:me:W00100200> ;
+    bffi:title [
+        a bffi:Title ;
+        bffi:mainTitle "Sinouhé l'Égyptien" ;
+        bffi:subtitle "quinze livres de la vie du médecin Sinouhé"
+    ] ;
+    bffi:languageOfExpression "fre" ;
+    bffi:contribution [
+        a bffi:Contribution ;
+        bffi:marcKey "7001 $aMinaudier, Jean-Pierre,$d1961-,$etranslator" ;
+        bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000654321> ;
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m42> # kääntäjä
+    ] .
+
+# 3. Physical French Publication (BFFI Manifestation)
+<http://urn.fi/URN:NBN:fi:bib:me:M00100200-2020> a bffi:Manifestation ;
+    bffi:expressionManifested <http://urn.fi/URN:NBN:fi:bib:me:E00100200-fre> ;
+    bffi:workManifested <http://urn.fi/URN:NBN:fi:bib:me:W00100200> ; # Shortcut link
+    bffi:identifiedBy [
+        a bffi:Identifier ;
+        bffi:source "isbn" ;
+        rdf:value "978-2-262-08554-4"
+    ] ;
+    bffi:carrier <http://id.loc.gov/vocabulary/carriers/nc> ; # volume
+    bffi:editionStatement "Nouvelle édition" ;
+    bffi:provisionActivity [
+        a bffi:Publication ;
+        bffi:date "2020" ;
+        bffi:agent [ a bffi:Agent ; rdfs:label "Perrin" ] ;
+        bffi:place [ a bffi:Place ; rdfs:label "Paris" ]
+    ] ;
+    bffi:extent [ a bffi:Extent ; rdfs:label "654 p." ] ;
+    bffi:dimensions "18 cm" .
+```
+
+##### B. Library of Congress BIBFRAME 2.0 RDF Turtle Representation:
+```turtle
+@prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+@prefix bflc: <http://id.loc.gov/ontologies/bflc/> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# LC BIBFRAME 2.0 Translation Work Node
+<http://id.loc.gov/resources/works/w9876543> a bf:Work , bf:Text ;
+    bf:title [
+        a bf:Title ;
+        bf:mainTitle "Sinouhé l'Égyptien"
+    ] ;
+    bf:language <http://id.loc.gov/vocabulary/languages/fre> ;
+    bf:translationOf <http://id.loc.gov/resources/works/w1234567> ; # Original Finnish Work
+    bf:contribution [
+        a bflc:PrimaryContribution ;
+        bf:agent <http://id.loc.gov/authorities/names/n79040000> ; # Waltari, Mika
+        bf:role <http://id.loc.gov/vocabulary/relators/aut>
+    ] ;
+    bf:contribution [
+        a bf:Contribution ;
+        bf:agent <http://id.loc.gov/authorities/names/n20020000> ; # Minaudier, Jean-Pierre
+        bf:role <http://id.loc.gov/vocabulary/relators/trl>
+    ] ;
+    bf:subject <http://id.loc.gov/authorities/subjects/sh85101234> ; # Physicians
+    bf:hasInstance <http://id.loc.gov/resources/instances/i9876543> .
+
+# LC BIBFRAME 2.0 Instance Node
+<http://id.loc.gov/resources/instances/i9876543> a bf:Instance ;
+    bf:instanceOf <http://id.loc.gov/resources/works/w9876543> ;
+    bf:carrier <http://id.loc.gov/vocabulary/carriers/nc> ;
+    bf:identifiedBy [
+        a bf:Isbn ;
+        rdf:value "978-2-262-08554-4"
+    ] ;
+    bf:provisionActivity [
+        a bf:Publication ;
+        bf:date "2020" ;
+        bf:agent [ a bf:Agent ; rdfs:label "Perrin" ] ;
+        bf:place [ a bf:Place ; rdfs:label "Paris" ]
+    ] .
+```
+
+##### C. Internal SQLite Database Rows Produced by Reconciliator Ingestion:
+
+```sql
+-- 1. works row (Abstract Conceptual Work)
+INSERT INTO works (id, work_uri, source, source_id, title, title_normalized, original_language, primary_agent_id, work_type, subjects_json, serialized_text)
+VALUES (
+    1,
+    'http://urn.fi/URN:NBN:fi:bib:me:W00100200',
+    'melinda',
+    'W00100200',
+    'Sinuhe egyptiläinen',
+    'sinuhe egyptilainen',
+    'fin',
+    101, -- Waltari, Mika
+    'text',
+    '["http://www.yso.fi/onto/yso/p1234"]',
+    'TEOS: Sinuhe egyptiläinen | TEKIJÄ: Waltari, Mika | KIELI: fin | TYYPPI: text | AIHEET: lääkärit'
+);
+
+-- 2. expressions row (French Realization)
+INSERT INTO expressions (id, expression_uri, work_id, source, source_id, expression_title, content_type, language, version_designation, serialized_text)
+VALUES (
+    501,
+    'http://urn.fi/URN:NBN:fi:bib:me:E00100200-fre',
+    1,
+    'melinda',
+    'E00100200-fre',
+    'Sinouhé l''Égyptien',
+    'text',
+    'fre',
+    'Nouvelle édition',
+    'EKSPRESSIO: Sinouhé l''Égyptien | EMO-TEOS: Sinuhe egyptiläinen | TEKIJÄ: Waltari, Mika | KIELI: fre | SISÄLTÖ: text | KÄÄNTÄJÄ: Minaudier, Jean-Pierre'
+);
+
+-- 3. manifestations row (Perrin 2020 Paperback)
+INSERT INTO manifestations (id, manifestation_uri, source, source_id, work_id, carrier_type, edition_statement, publication_year, publisher, publication_place, extent, dimensions, serialized_text)
+VALUES (
+    9001,
+    'http://urn.fi/URN:NBN:fi:bib:me:M00100200-2020',
+    'melinda',
+    'M00100200-2020',
+    1, -- Shortcut pointer to Work 1
+    'volume',
+    'Nouvelle édition',
+    '2020',
+    'Perrin',
+    'Paris',
+    '654 p.',
+    '18 cm',
+    'MANIFESTAATIO: Sinouhé l''Égyptien | JULKAISIJA: Perrin | VUOSI: 2020 | PAIKKA: Paris | MUOTO: volume | ISBN: 978-2-262-08554-4'
+);
+
+-- 4. manifestation_expressions binding
+INSERT INTO manifestation_expressions (manifestation_id, expression_id)
+VALUES (9001, 501);
+
+-- 5. identifiers row
+INSERT INTO identifiers (id, entity_type, entity_id, scheme, value, value_normalized)
+VALUES (701, 'manifestation', 9001, 'isbn', '978-2-262-08554-4', '9782262085544');
+
+-- 6. contributions rows
+INSERT INTO contributions (id, entity_type, entity_id, agent_id, role, is_primary, field_tag)
+VALUES
+    (801, 'work', 1, 101, 'aut', 1, '100'),           -- Waltari as author on Work
+    (802, 'expression', 501, 202, 'trl', 0, '700');     -- Minaudier as translator on Expression
+```
+
+---
+
+#### Scenario 2: Performed Music Work (*Sibelius Symphony No. 5*)
+- **Conceptual Work**: *Symphony No. 5 in E-flat major, Op. 82* (composed by Jean Sibelius, 1915, rev. 1919).
+- **Expression**: Audio studio recording performed by Berliner Philharmoniker, conducted by Herbert von Karajan (recorded October 1968, Jesus-Christus-Kirche, Berlin).
+- **Manifestation**: Vinyl LP release issued by Deutsche Grammophon in 1968 (Catalog No. `SLPM 138 973`).
+
+##### A. Finnish BFFI 1.0 Music RDF Turtle Representation:
+```turtle
+@prefix bffi: <http://urn.fi/URN:NBN:fi:schema:bffi:> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# 1. Musical Composition Work
+<http://urn.fi/URN:NBN:fi:bib:me:W_SIBELIUS_SYM5> a bffi:MusicWork , bffi:Work ;
+    bffi:title [
+        a bffi:Title ;
+        bffi:mainTitle "Sinfonia nro 5 es-duuri op. 82"
+    ] ;
+    bffi:originDate "1915/1919" ;
+    bffi:musicMediumOfRepresentativeExpression [
+        a bffi:MusicMedium ;
+        rdfs:label "orkesteri"
+    ] ;
+    bffi:contribution [
+        a bffi:PrimaryContribution ;
+        bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000079040> ; # Sibelius, Jean
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m24> # säveltäjä (cmp)
+    ] .
+
+# 2. Recorded Audio Performance Expression
+<http://urn.fi/URN:NBN:fi:bib:me:E_SIBELIUS_SYM5_KARAJAN1968> a bffi:MusicAudioExpression , bffi:Expression ;
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:me:W_SIBELIUS_SYM5> ;
+    bffi:musicMedium [
+        a bffi:MusicMedium ;
+        rdfs:label "sinfoniaorkesteri"
+    ] ;
+    bffi:contribution [
+        a bffi:Contribution ;
+        bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000079041> ; # Karajan, Herbert von
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m31> # kapellimestari (cnd)
+    ] ;
+    bffi:contribution [
+        a bffi:Contribution ;
+        bffi:agent <http://urn.fi/URN:NBN:fi:au:cn:000081000> ; # Berliner Philharmoniker
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m32> # esittäjä (prf)
+    ] .
+
+# 3. Vinyl Audio Disc Manifestation
+<http://urn.fi/URN:NBN:fi:bib:me:M_DGLP_138973> a bffi:Manifestation ;
+    bffi:expressionManifested <http://urn.fi/URN:NBN:fi:bib:me:E_SIBELIUS_SYM5_KARAJAN1968> ;
+    bffi:carrier <http://id.loc.gov/vocabulary/carriers/sd> ; # audio disc
+    bffi:identifiedBy [
+        a bffi:Identifier ;
+        bffi:source "issue_number" ;
+        rdf:value "SLPM 138 973"
+    ] ;
+    bffi:provisionActivity [
+        a bffi:Publication ;
+        bffi:date "1968" ;
+        bffi:agent [ a bffi:Agent ; rdfs:label "Deutsche Grammophon" ] ;
+        bffi:place [ a bffi:Place ; rdfs:label "Hannover" ]
+    ] .
+```
+
+##### B. LC BIBFRAME 3.0 & Performed Music Ontology (PMO) Representation:
+```turtle
+@prefix bf:   <http://id.loc.gov/ontologies/bibframe/> .
+@prefix bflc: <http://id.loc.gov/ontologies/bflc/> .
+@prefix pmo:  <http://performedmusicontology.org/ontology/> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Abstract Work Centroid (bf:Hub)
+<http://id.loc.gov/resources/hubs/h8912345> a bf:Hub ;
+    bf:title [
+        a bf:Title ;
+        bf:mainTitle "Symphony no. 5, op. 82, E-flat major"
+    ] ;
+    bf:contribution [
+        a bflc:PrimaryContribution ;
+        bf:agent <http://id.loc.gov/authorities/names/n79040000> ; # Sibelius, Jean
+        bf:role <http://id.loc.gov/vocabulary/relators/cmp>
+    ] .
+
+# Studio Performance Event (pmo:Performance Expression)
+<http://example.org/pmo/perf_karajan_1968> a pmo:Performance ;
+    pmo:performedWork <http://id.loc.gov/resources/hubs/h8912345> ;
+    pmo:recordedIn <http://example.org/instances/dg_138973> ;
+    pmo:conductor <http://id.loc.gov/authorities/names/n79040001> ; # Karajan, Herbert von
+    pmo:performer <http://id.loc.gov/authorities/names/n81000001> ; # Berliner Philharmoniker
+    pmo:declaredMedium [
+        a pmo:MediumOfPerformance ;
+        rdfs:label "orchestra"
+    ] .
+
+# Audio Carrier Instance
+<http://example.org/instances/dg_138973> a bf:Instance , bf:Audio ;
+    bf:title [
+        a bf:Title ;
+        bf:mainTitle "Sibelius: Symphonie Nr. 5 / Tapiola"
+    ] ;
+    bf:carrier <http://id.loc.gov/vocabulary/carriers/sd> ;
+    bf:identifiedBy [
+        a bf:AudioIssueNumber ;
+        rdf:value "SLPM 138 973"
+    ] ;
+    bf:provisionActivity [
+        a bf:Publication ;
+        bf:date "1968" ;
+        bf:agent [ a bf:Agent ; rdfs:label "Deutsche Grammophon" ]
+    ] .
+```
+
+##### C. Internal SQLite Database Rows Produced by Reconciliator Ingestion:
+```sql
+-- 1. works row (Musical Composition)
+INSERT INTO works (id, work_uri, source, source_id, title, title_normalized, work_type, primary_agent_id, serialized_text)
+VALUES (
+    2,
+    'http://urn.fi/URN:NBN:fi:bib:me:W_SIBELIUS_SYM5',
+    'melinda',
+    'W_SIBELIUS_SYM5',
+    'Sinfonia nro 5 es-duuri op. 82',
+    'sinfonia nro 5 es-duuri op. 82',
+    'music',
+    102, -- Sibelius, Jean
+    'TEOS: Sinfonia nro 5 es-duuri op. 82 | TEKIJÄ: Sibelius, Jean | TYYPPI: music | SOITIN: orkesteri'
+);
+
+-- 2. expressions row (Audio Recording Performance)
+INSERT INTO expressions (id, expression_uri, work_id, source, source_id, expression_title, content_type, language, medium_of_performance, serialized_text)
+VALUES (
+    502,
+    'http://urn.fi/URN:NBN:fi:bib:me:E_SIBELIUS_SYM5_KARAJAN1968',
+    2,
+    'melinda',
+    'E_SIBELIUS_SYM5_KARAJAN1968',
+    'Sinfonia nro 5 es-duuri op. 82 (Karajan / Berliner Philharmoniker 1968)',
+    'audio_music',
+    NULL,
+    'sinfoniaorkesteri',
+    'EKSPRESSIO: Sinfonia nro 5 | EMO-TEOS: Sinfonia nro 5 es-duuri op. 82 | ESITTÄJÄT: Karajan, Herbert von (cnd), Berliner Philharmoniker (prf) | TYYPPI: audio_music'
+);
+
+-- 3. manifestations row (Vinyl LP)
+INSERT INTO manifestations (id, manifestation_uri, source, source_id, work_id, carrier_type, publication_year, publisher, publication_place, serialized_text)
+VALUES (
+    9002,
+    'http://urn.fi/URN:NBN:fi:bib:me:M_DGLP_138973',
+    'melinda',
+    'M_DGLP_138973',
+    2,
+    'audio_disc',
+    '1968',
+    'Deutsche Grammophon',
+    'Hannover',
+    'MANIFESTAATIO: Sibelius: Symphonie Nr. 5 | JULKAISIJA: Deutsche Grammophon | VUOSI: 1968 | MUOTO: audio_disc | LEVYNUMERO: SLPM 138 973'
+);
+
+-- 4. manifestation_expressions binding
+INSERT INTO manifestation_expressions (manifestation_id, expression_id)
+VALUES (9002, 502);
+
+-- 5. identifiers row
+INSERT INTO identifiers (id, entity_type, entity_id, scheme, value, value_normalized)
+VALUES (702, 'manifestation', 9002, 'issue_number', 'SLPM 138 973', 'SLPM138973');
+
+-- 6. contributions rows
+INSERT INTO contributions (id, entity_type, entity_id, agent_id, role, is_primary, field_tag)
+VALUES
+    (803, 'work', 2, 102, 'cmp', 1, '100'),         -- Sibelius as composer on Work
+    (804, 'expression', 502, 301, 'cnd', 0, '700'),   -- Karajan as conductor on Expression
+    (805, 'expression', 502, 302, 'prf', 0, '710');   -- Berliner Philharmoniker as performer on Expression
+```
+
+---
+
+### 3.2.6 BIBFRAME Hub Architecture (`bf:Hub`)
 
 In Library of Congress cataloging practice, `bf:Hub` solves the problem of connecting multiple `bf:Work` instances that represent different translations, arrangements, or versions of the same conceptual work without creating circular or fragile peer-to-peer links.
 
@@ -1738,7 +2300,7 @@ In Library of Congress cataloging practice, `bf:Hub` solves the problem of conne
 
 ---
 
-### 3.2.4 Performed Music Ontology (PMO) Specification
+### 3.2.7 Performed Music Ontology (PMO) Specification
 
 For recorded sound and notated music, standard BIBFRAME is insufficient to capture the distinction between a musical composition Work, a specific recorded performance Expression, and the audio release Manifestation. The engine models PMO data structures as follows:
 
@@ -1775,13 +2337,13 @@ For recorded sound and notated music, standard BIBFRAME is insufficient to captu
 ```
 
 - **Engine Ingestion Logic**:
-  - `bf:Hub` / `performedWork` $\rightarrow$ `works` (`work_type='musical_work'`).
-  - `pmo:Performance` $\rightarrow$ `expressions` (`content_type='performed_music'`, with `conductor` and `performer` relators).
+  - `bf:Hub` / `performedWork` $\rightarrow$ `works` (`work_type='music'`).
+  - `pmo:Performance` $\rightarrow$ `expressions` (`content_type='audio_music'`, with `conductor` and `performer` relators).
   - `bf:Instance` $\rightarrow$ `manifestations` (`carrier_type='audio_disc'`, issue number $\rightarrow$ `identifiers(scheme='audio_issue_number')`).
 
 ---
 
-### 3.2.5 High-Performance Streaming Graph Processing Architecture ($O(1)$ RAM)
+### 3.2.8 High-Performance Streaming Graph Processing Architecture ($O(1)$ RAM)
 
 Standard RDF parsing libraries (including RDFLib's in-memory `Graph`) load the entire parsed RDF triple store into memory. For large institutional repositories, national library dumps, or multi-gigabyte files (e.g. 5–50 GB `.ttl`, `.nt`, or `.jsonld` containing tens of millions of triples), this causes out-of-memory (OOM) failures by requiring 15–20 bytes of Python heap per triple (exceeding 64 GB RAM).
 
@@ -1863,12 +2425,13 @@ CREATE TABLE works (
     primary_agent_id INTEGER REFERENCES agents(id) ON DELETE SET NULL,
     ykl_class TEXT,                              -- Finnish library classification ('84.2', '78.1')
     work_type TEXT NOT NULL DEFAULT 'text' CHECK(work_type IN (
-        'text', 'serial', 'integrating', 'music', 'moving_image', 'cartography',
+        'text', 'thesis', 'manuscript', 'serial', 'integrating', 'music', 'moving_image', 'cartography',
         'audio_nonmusic', 'comic', 'still_image', 'dataset', 'interactive_game',
         'board_game', 'standard', 'legal', 'patent', 'archive_fonds', 'event', 'realia',
         'early_print', 'tactile', 'software', 'ai_model', 'drama', 'choreography', 'podcast',
         'web_harvest', 'oral_history', 'broadcast_program', 'codex_fragment', 'ephemera',
-        'exhibition', 'critical_edition', 'geodata_service', 'numismatic', 'heritage_model'
+        'exhibition', 'critical_edition', 'geodata_service', 'numismatic', 'heritage_model',
+        'multimedia'
     )),
     subjects_json TEXT NOT NULL DEFAULT '[]',    -- Array of canonical YSO/SLM URIs
     serialized_text TEXT,                        -- Pre-rendered output of work_serialization.j2
@@ -1892,13 +2455,13 @@ CREATE TABLE expressions (
     wikidata_qid TEXT,
     language TEXT NOT NULL,                      -- ISO 639-2 ('fin', 'eng', 'swe', 'zxx')
     content_type TEXT NOT NULL DEFAULT 'text' CHECK(content_type IN (
-        'text', 'notated_music', 'audio_music', 'spoken_word', 'moving_image',
-        'still_image', 'cartographic_image', 'cartographic_dataset', 'dataset',
-        'computer_program', 'three_dimensional', 'tactile_text', 'tactile_graphic',
-        'software_code', 'model_weights', 'choreographic_movement',
-        'web_archive_snapshot', 'interview_audio', 'broadcast_stream',
-        'manuscript_fragment', 'spatial_vector', 'spatial_raster',
-        'numismatic_object', 'three_dimensional_model'
+        'text', 'notated_music', 'audio_music', 'spoken_word', 'sounds', 'moving_image',
+        'three_dimensional_moving_image', 'still_image', 'cartographic_image', 'cartographic_dataset',
+        'tactile_cartographic', 'dataset', 'computer_program', 'three_dimensional',
+        'tactile_text', 'tactile_graphic', 'tactile_notated_music', 'software_code', 'model_weights',
+        'choreographic_movement', 'web_archive_snapshot', 'interview_audio', 'broadcast_stream',
+        'manuscript_fragment', 'spatial_vector', 'spatial_raster', 'numismatic_object',
+        'three_dimensional_model'
     )),
     title TEXT,                                  -- Expression-specific title
     version_designation TEXT,                    -- '2. korj. p.', 'Full Score', 'v2.1.0', 'PS5 Build', 'Nordic Edition'
@@ -1941,7 +2504,11 @@ CREATE TABLE manifestations (
     issue_enumeration TEXT,                      -- 'No. 2', 'Heinäkuu 2023', 'Lisälehti 34'
     pagination TEXT,                             -- 'p. 180-205', 'xii, 450 s.', '1 karttalehti'
     extent TEXT,
-    carrier_type TEXT,                           -- 'volume', 'audio disc', 'sheet', 'online resource', 'object', 'computer disc', 'braille', 'warc', 'microfilm', 'microfiche'
+    carrier_type TEXT NOT NULL DEFAULT 'volume' CHECK(carrier_type IN (
+        'volume', 'sheet', 'audio_disc', 'audiocassette', 'videodisc', 'videocassette',
+        'computer_disc', 'online_resource', 'memory_card', 'microfilm_reel', 'microfiche',
+        'braille_volume', 'object'
+    )),
     host_title TEXT,                             -- Preserved Journal/Collection/Series/Fonds title
     serialized_text TEXT,                        -- Pre-rendered output of manifestation_serialization.j2
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1967,10 +2534,31 @@ CREATE TABLE manifestation_expressions (
 CREATE INDEX idx_manif_exp_track ON manifestation_expressions(manifestation_id, track_number);
 
 
+-- 5b. Items Table (Physical Exemplars, Copy Provenance & Sammelbände)
+-- NOTE: Populated ONLY from specialized local ILS dumps (source_type='file') or rare book provenance files.
+-- NEVER harvested from standard union catalog OAI-PMH feeds (which exclusively publish W-E-M bibliographic records).
+CREATE TABLE items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manifestation_id INTEGER NOT NULL REFERENCES manifestations(id) ON DELETE CASCADE,
+    item_uri TEXT UNIQUE,                        -- 'http://urn.fi/URN:NBN:fi:bib:item:12345678'
+    source TEXT NOT NULL,                        -- 'local_ils', 'fragmenta', 'mei'
+    source_id TEXT NOT NULL,                     -- Local barcode or inventory ID
+    holding_organization TEXT NOT NULL,          -- ISIL / FINNA code (e.g. 'FI-Hul', 'FI-Vaski')
+    shelf_mark TEXT,                             -- 'Fennica 84.2 WAL', 'Kotelo 12'
+    barcode TEXT,                                -- Scanned physical barcode (MARC 852 $p)
+    custodial_history TEXT,                      -- Provenance notes (MARC 561)
+    item_condition TEXT,                         -- Physical condition notes (MARC 583)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_items_manif_id ON items(manifestation_id);
+CREATE INDEX idx_items_barcode ON items(barcode);
+CREATE INDEX idx_items_org ON items(holding_organization);
+
+
 -- 6. Universal Polymorphic Identifiers
 CREATE TABLE identifiers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation', 'agent')),
+    entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation', 'item', 'agent')),
     entity_id INTEGER NOT NULL,
     scheme TEXT NOT NULL,                        -- 'isbn', 'issn', 'issn_l', 'urn', 'doi', 'issue_number', 'plate_number', 'isrc', 'ismn', 'strn', 'handle', 'patent_number', 'eli', 'sdk', 'ecli', 'celex', 'platform_sku', 'bgg', 'ean', 'qid', 'asteri', 'fingerprint', 'istc', 'gw', 'swhid', 'huggingface', 'guid_rss', 'eidr', 'isan', 'warc_id', 'memento_uri', 'fragmenta', 'michel', 'scott', 'km', 'epsg', 'gltf_hash'
     value TEXT NOT NULL,                         -- Raw value
@@ -1983,10 +2571,10 @@ CREATE INDEX idx_identifiers_entity ON identifiers(entity_type, entity_id);
 -- 7. Agent Contributions with Relator Roles
 CREATE TABLE contributions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation')),
+    entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation', 'item')),
     entity_id INTEGER NOT NULL,
     agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    role TEXT NOT NULL,                          -- MARC relators: 'aut', 'cmp', 'trl', 'prf', 'cnd', 'edt', 'ill', 'ths', 'ctg', 'drt', 'inv', 'asn', 'art', 'pht', 'dsr', 'prg', 'brl', 'chr', 'lbt', 'mlm', 'hst', 'ive', 'ivr', 'col', 'trc', 'brd', 'std', 'cst', 'scr', 'pal', 'gis', 'egr', 'cur', 'mod', 'cwt', etc.
+    role TEXT NOT NULL,                          -- MARC relators: 'aut', 'cmp', 'trl', 'prf', 'cnd', 'edt', 'ill', 'ths', 'ctg', 'drt', 'inv', 'asn', 'art', 'pht', 'dsr', 'prg', 'brl', 'chr', 'lbt', 'mlm', 'hst', 'ive', 'ivr', 'col', 'trc', 'brd', 'std', 'cst', 'scr', 'pal', 'gis', 'egr', 'cur', 'mod', 'cwt', 'arc', 'opn', 'pra', 'jud', 'dtc', 'anm', 'scl', 'aud', 'sng', 'tlv', 'dub', 'ink', 'clr', 'ltr', 'wpr', 'wat', 'adp', 'abr', 'orr', 'bsk', 'cph', 'spn', 'fnd', 'iss', 'fac', 'fmo', 'sgn', 'ins', 'dnr', 'rcp', 'ann', 'res', etc.
     is_primary BOOLEAN NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_contributions_entity ON contributions(entity_type, entity_id);
@@ -2496,6 +3084,9 @@ Each harvested OAI `<record>` element is deconstructed into:
      - **MARCXML**: Parsed using streaming SAX / `lxml.etree.iterparse` (`parse_marc_record_elem`).
      - **BIBFRAME**: Parsed using `rdflib.Graph` or streaming JSON-LD/Turtle loaders (`parse_bibframe_graph`).
      - **Dublin Core / MODS**: Transformed via normalization crosswalks into standard internal entity dictionaries.
+
+> [!IMPORTANT]
+> **Harvesting Scope Constraint**: OAI-PMH feeds provide bibliographic records describing Manifestations, Expressions, and Works. They **never** supply Item-level holding inventories (which are maintained strictly in local ILS/LSP systems). Therefore, the OAI-PMH harvesting pipeline lands data solely into `works`, `expressions`, and `manifestations` (in `authority.db`) or `target_records` (in `reconcile_corpus.db`). The `items` table is never targeted by OAI-PMH.
 
 ---
 
