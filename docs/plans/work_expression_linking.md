@@ -1570,27 +1570,29 @@ The internal schema uses controlled vocabularies for type disambiguation across 
 
 ---
 
-#### 2.2.5 The Item Entity Boundary & Harvesting Scope: Why OAI-PMH Harvester Excludes Items
+#### 2.2.5 The Item Entity Boundary & Configurable Ingestion Scope (`include_items`)
 
-In IFLA LRM and RDA, the **Item** (`items`, `bffi:Item`, `bf:Item`) represents a single physical exemplar or concrete digital file instance of a Manifestation (e.g. a specific copy sitting on a shelf with a specific barcode, binding, or donor inscription).
+In IFLA LRM and RDA, the **Item** (`items`, `bffi:Item`, `bf:Item`) represents a single physical exemplar or concrete digital file instance of a Manifestation (e.g. a specific copy sitting on a shelf with a specific barcode, shelfmark, binding, or donor inscription).
 
-A foundational architectural principle of the Reconciliator engine is the **strict separation of the core WEMI reconciliation pipeline from Item-level inventory tracking**:
+While OAI-PMH feeds and bibliographic dumps *can* supply Item and holding data (e.g. embedded MARC `852`/`9xx` holdings tags, OAI-PMH holding sets, or BIBFRAME `bf:hasItem` triples), the Reconciliator separates the core W-E-M pipeline from Item-level inventory tracking via a dedicated configuration surface (`include_items: bool = False`).
 
-##### 1. Bibliographic Records vs. Holding/Inventory Data Streams
-- **Union Catalogs Exclusively Serve Bibliographic Records**: National and international union catalogs (such as the National Library of Finland's **Melinda** OAI-PMH service at `https://oai-pmh.kansalliskirjasto.fi/`) publish standard bibliographic records (`marc21` or `bibframe` format).
-- **What Bibliographic Records Represent**: A bibliographic record models the **Manifestation** (the published edition, publisher, year, ISBN, pagination) and carries intellectual metadata identifying the **Work** (uniform title, primary author, classification) and **Expression** (language, translation, content type, relators).
-- **Where Item Records Reside**: Item-level data—such as copy barcodes (`852 $p`), shelf location (`852 $c/$h`), circulation availability (checked out, in transit, lost), and physical copy condition—is maintained in the local Integrated Library Systems (ILS / LSP: Alma, Koha, Sierra) of individual universities and municipal library systems. Union catalogs intentionally strip or omit local holding records from general bibliographic OAI-PMH feeds to prevent payload bloat and avoid disseminating volatile, real-time circulation states.
+##### 1. Why Item Ingestion is Opt-In by Default
+- **Storage & Payload Multiplication**: In an academic consortium or municipal library network (such as Finna/Melinda), a single widely-held Manifestation (e.g. an introductory textbook or popular novel) often has dozens or hundreds of physical item copies distributed across branch libraries. Ingesting item records by default would multiply the database row count and disk storage footprint by an order of magnitude ($10\times$ to $50\times$), the vast majority of which is routine inventory data irrelevant to intellectual Work and Expression reconciliation.
+- **Volatile Circulation vs. Persistent Intellectual Identity**: Work and Expression reconciliation operates on persistent intellectual and editorial properties (authors, titles, languages, subjects, edition statements). In contrast, item data (current shelf location, barcodes, circulation status) is volatile and frequently mutated in local Integrated Library Systems (ILS / LSP: Alma, Koha, Sierra).
+- **Core Pipeline Efficiency**: By default (`include_items = False`), the harvesting pipeline extracts and resolves only the core **W-E-M** triad:
+  $$\text{Work} \iff \text{Expression} \iff \text{Manifestation}$$
+  Item holding elements are cleanly ignored during ingestion, ensuring high throughput, compact FAISS/FTS indices, and low memory consumption.
 
-##### 2. The Core Pipeline Operates on the W-E-M Triad
-The automated core of the Reconciliator—including OAI-PMH date-sliced harvesting, ResourceSync, two-pass streaming Wikidata parsing, the WEMI serialization triad, tripartite vector indexing (`work.index`, `expression.index`, `manifestation.index`), late fusion composite scoring ($S_{\text{total}}$), and 3-layer multiplex graph clustering ($G_M \subset G_E \subset G_W$)—operates exclusively on the **W-E-M** triad:
-$$\text{Work} \iff \text{Expression} \iff \text{Manifestation}$$
-**No Item entities are harvested, expected, or generated from OAI-PMH feeds.**
+##### 2. When to Enable Item Support (`include_items = True`, `reconcile_items = True`)
+Item ingestion and reconciliation can be selectively enabled for specialized, high-value cataloging scenarios:
+1. **Special Collections & Rare Book Provenance**: Ingesting historical feeds or dumps (e.g. *Fragmenta Membranea* medieval parchment fragments, or incunabula databases like Material Evidence in Incunabula - MEI) where copy-specific attributes attach to an individual physical exemplar: former owners (`fmo`), autographs/signatures (`sgn`), donor notes (`dnr`), inscribers (`ins`), and marginalia annotators (`ann`).
+2. **Multi-ILS Union Holding Deduplication & Barcode Alignment**: Merging disparate branch library dumps or municipal union holding records where physical items must be deduplicated across consortium members.
+3. **Composite Volumes & "Bound-With" (*Sammelbände*) Processing**: Resolving physical composite volumes where multiple distinct bibliographic Manifestations share the same physical binding and barcode (`target_records.sammelband_item_id`).
+4. **Preservation Digital Surrogates**: Explicitly linking digital preservation master files (e.g. Digi.kansalliskirjasto.fi) to the specific damaged, unicum, or annotated physical exemplar from which the surrogate was scanned.
 
-##### 3. When and Where the `items` Table Is Utilized
-The `items` table in `authority.db` and the polymorphic `'item'` entity types in `contributions` and `identifiers` exist to provide **ontological superset completeness** and to support specialized, non-OAI workflows:
-1. **Special Collections & Rare Book Provenance**: When ingesting specialized historical XML/TEI dumps (e.g. *Fragmenta Membranea* medieval parchment fragments, or incunabula databases like Material Evidence in Incunabula - MEI) where former owners (`fmo`), autographs/dedications (`sgn`), donor notes (`dnr`), and copy-specific marginalia (`ann`) attach to an individual physical copy.
-2. **Local Direct ILS Dumps / "Bound-With" (*Sammelbände*) Processing**: When local libraries provide direct database exports containing `852` holding tables (`source_type: file`), or when resolving physical composite volumes where two separate bibliographic records share the same physical barcode (`target_records.sammelband_item_id`).
-3. **Preservation Digital Surrogates**: When linking high-resolution archival master scans (e.g. Digi.kansalliskirjasto.fi) directly to the specific damaged or annotated physical copy that was scanned.
+##### 3. Configuration Surface Integration
+- **`OAIIngestConfig.include_items` (default `False`)**: When `True`, parsers extract `852`/`9xx` holdings and `bf:Item` subgraphs into the `items` table, copy-specific relators into `contributions (entity_type='item')`, and copy barcodes into `identifiers (entity_type='item')`.
+- **`ClusterConfig.reconcile_items` (default `False`)**: When `True`, activates an optional 4th clustering tier ($G_I$ beneath $G_M$) to group duplicate physical holding entries and detect sammelbände bindings.
 
 ---
 
@@ -1656,28 +1658,55 @@ The `items` table in `authority.db` and the polymorphic `'item'` entity types in
 
 The engine accommodates ontological and profile differences across international bibliographic networks by using the internal WEMI schema as a superset pivot:
 
-```
-       BFFI 1.0 (Finnish LKD)            Our Internal Schema               LC BIBFRAME 2.0 / 3.0
-       ──────────────────────            ───────────────────               ─────────────────────
+```mermaid
+flowchart TD
+    subgraph BFFI["BFFI 1.0 (Finnish LKD)"]
+        direction TB
+        B_W["bffi:Work"]
+        B_E["bffi:Expression"]
+        B_M["bffi:Manifestation"]
+        B_I["bffi:Item"]
 
-       ┌────────────────────┐            ┌─────────────────┐               ┌────────────────────┐
-       │     bffi:Work      │◄──────────►│      works      │◄─────────────┤      bf:Hub        │
-       └─────────▲──────────┘            └────────▲────────┘               │   (or bf:Work)     │
-                 │ bffi:                          │ work_id                └─────────┬──────────┘
-                 │ expressionOf                   │ (1:N)                            │
-       ┌─────────┴──────────┐            ┌────────┴────────┐                         │
-       │  bffi:Expression   │◄──────────►│   expressions   │◄────[Decomposed]────────┤ bf:language
-       └─────────▲──────────┘            └────────▲────────┘     from Work           │ bf:contribution(trl)
-                 │ bffi:                          │ expression_id                    │ bf:content
-                 │ expressionManifested           │ (1:N)                            │ bf:translationOf
-       ┌─────────┴──────────┐            ┌────────┴────────┐                         │
-       │ bffi:Manifestation │◄──────────►│ manifestations  │◄────────────────────────┼──────────────────┐
-       └─────────▲──────────┘            └────────▲────────┘                         │                  │
-                 │ bffi:                          │ manifestation_id                 │                  │
-                 │ itemOf                         │ (1:N)                            │                  │
-       ┌─────────┴──────────┐            ┌────────┴────────┐               ┌─────────▼────────┐ ┌───────▼────────┐
-       │     bffi:Item      │◄──────────►│      items      │◄──────────────┤   bf:Instance    │ │    bf:Item     │
-       └────────────────────┘            └─────────────────┘               └──────────────────┘ └────────────────┘
+        B_E -->|"bffi:expressionOf"| B_W
+        B_M -->|"bffi:expressionManifested"| B_E
+        B_I -->|"bffi:itemOf"| B_M
+    end
+
+    subgraph Internal["Our Internal Schema (Superset Pivot)"]
+        direction TB
+        I_W[("works")]
+        I_E[("expressions")]
+        I_M[("manifestations")]
+        I_I[("items")]
+
+        I_W -->|"work_id (1:N)"| I_E
+        I_E -->|"expression_id (1:N)"| I_M
+        I_M -->|"manifestation_id (1:N)"| I_I
+    end
+
+    subgraph LC["LC BIBFRAME 2.0 / 3.0"]
+        direction TB
+        LC_Hub["bf:Hub (or bf:Work)"]
+        LC_Decomp["Decomposed from Work: bf:language, bf:contribution(trl), bf:content, bf:translationOf"]
+        LC_Inst["bf:Instance"]
+        LC_Item["bf:Item"]
+
+        LC_Hub -.->|"Decomposes to"| LC_Decomp
+        LC_Hub -->|"bf:hasInstance"| LC_Inst
+        LC_Inst -->|"bf:hasItem"| LC_Item
+    end
+
+    B_W <--> I_W
+    I_W <--> LC_Hub
+
+    B_E <--> I_E
+    I_E <--> LC_Decomp
+
+    B_M <--> I_M
+    I_M <--> LC_Inst
+
+    B_I <--> I_I
+    I_I <--> LC_Item
 ```
 
 ---
@@ -2349,26 +2378,44 @@ Standard RDF parsing libraries (including RDFLib's in-memory `Graph`) load the e
 
 The Reconciliator implements a **streaming micro-graph architecture** to guarantee constant $O(1)$ memory consumption regardless of input file size:
 
-```
-  Large BIBFRAME Input File (JSON-LD / Turtle / N-Triples / RDF-XML)
-  ─────────────────────────────────────────────────────────────────
-                                 │
-                     [Streaming Tokenizer / Splitter]
-                                 │
-           ┌─────────────────────┼─────────────────────┐
-           ▼                     ▼                     ▼
-     [Chunk 1: 1k recs]    [Chunk 2: 1k recs]    [Chunk 3: 1k recs]
-           │                     │                     │
-           ▼                     ▼                     ▼
-     Ephemeral Graph       Ephemeral Graph       Ephemeral Graph
-     (Parse & Extract)     (Parse & Extract)     (Parse & Extract)
-           │                     │                     │
-           ▼                     ▼                     ▼
-     SQLite Batch Insert   SQLite Batch Insert   SQLite Batch Insert
-     (authority.db)        (authority.db)        (authority.db)
-           │                     │                     │
-           ▼                     ▼                     ▼
-     [Free RAM / GC]       [Free RAM / GC]       [Free RAM / GC]
+```mermaid
+flowchart TD
+    Input["Large BIBFRAME Input Stream (JSON-LD / N-Triples / Turtle / RDF-XML: 5-50 GB)"]
+
+    subgraph Splitter["Streaming Format Decomposer (O(1) Resident Memory)"]
+        direction TB
+        JSONLD["Streaming JSON-LD: ijson iterative @graph parser"]
+        NT["Streaming N-Triples: Subject-transition micro-buffer"]
+        RDFXML["Streaming RDF/XML: lxml.etree.iterparse on bf:Instance / bffi:Manifestation"]
+    end
+
+    Input --> JSONLD
+    Input --> NT
+    Input --> RDFXML
+
+    subgraph Pipeline["Iterative Micro-Graph Processing Loop (Batch: 1,000 Records)"]
+        direction TB
+        MicroGraph["1. Construct Ephemeral Micro-Graph (rdflib.Graph)"]
+        ExtractWEMI["2. Decompose Triples into WEMI Entities (Work, Expression, Manifestation, Item, Agent)"]
+        BatchTx["3. SQLite Batch Transaction Commit (WAL Mode)"]
+        FreeRAM["4. Free Ephemeral Graph & Reclaim Memory (Resident RAM <= 50 MB)"]
+
+        MicroGraph --> ExtractWEMI --> BatchTx --> FreeRAM
+        FreeRAM -.->|Loop for Next Chunk| MicroGraph
+    end
+
+    JSONLD --> MicroGraph
+    NT --> MicroGraph
+    RDFXML --> MicroGraph
+
+    subgraph Storage["Target Database Routing (OAIIngestConfig.target_database)"]
+        direction LR
+        AuthDB[("authority.db: External Authority Hub (works, expressions, manifestations, items, agents)")]
+        CorpusDB[("reconcile_corpus.db: Target Corpus Staging (target_records)")]
+    end
+
+    BatchTx --> AuthDB
+    BatchTx --> CorpusDB
 ```
 
 #### Streaming Pipelines per Serialization Format:
@@ -2534,9 +2581,10 @@ CREATE TABLE manifestation_expressions (
 CREATE INDEX idx_manif_exp_track ON manifestation_expressions(manifestation_id, track_number);
 
 
--- 5b. Items Table (Physical Exemplars, Copy Provenance & Sammelbände)
--- NOTE: Populated ONLY from specialized local ILS dumps (source_type='file') or rare book provenance files.
--- NEVER harvested from standard union catalog OAI-PMH feeds (which exclusively publish W-E-M bibliographic records).
+-- 6. Items Table (Physical Exemplars, Copy Provenance & Sammelbände)
+-- NOTE: Populated when include_items=True in ingestion configuration (e.g. from OAI-PMH feeds embedding
+-- MARC 852 holdings, BIBFRAME bf:Item graphs, or local ILS dumps). Disabled by default (include_items=False)
+-- to prevent massive storage overhead from routine physical holding copies.
 CREATE TABLE items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     manifestation_id INTEGER NOT NULL REFERENCES manifestations(id) ON DELETE CASCADE,
@@ -2555,7 +2603,7 @@ CREATE INDEX idx_items_barcode ON items(barcode);
 CREATE INDEX idx_items_org ON items(holding_organization);
 
 
--- 6. Universal Polymorphic Identifiers
+-- 7. Universal Polymorphic Identifiers
 CREATE TABLE identifiers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation', 'item', 'agent')),
@@ -2568,7 +2616,7 @@ CREATE INDEX idx_identifiers_lookup ON identifiers(scheme, value_normalized);
 CREATE INDEX idx_identifiers_entity ON identifiers(entity_type, entity_id);
 
 
--- 7. Agent Contributions with Relator Roles
+-- 8. Agent Contributions with Relator Roles
 CREATE TABLE contributions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation', 'item')),
@@ -2581,7 +2629,7 @@ CREATE INDEX idx_contributions_entity ON contributions(entity_type, entity_id);
 CREATE INDEX idx_contributions_agent ON contributions(agent_id, role);
 
 
--- 8. Inter-Work Relationships & Lineages (Succession, Series, Derivations, Legal, Board Games, Software, Surrogates & Archival)
+-- 9. Inter-Work Relationships & Lineages (Succession, Series, Derivations, Legal, Board Games, Software, Surrogates & Archival)
 CREATE TABLE work_relationships (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
@@ -2627,7 +2675,7 @@ CREATE INDEX idx_work_rel_source ON work_relationships(source_work_id, relations
 CREATE INDEX idx_work_rel_target ON work_relationships(target_work_id, relationship_type);
 
 
--- 9. Medium of Performance (Music Works)
+-- 10. Medium of Performance (Music Works)
 CREATE TABLE work_medium_of_performance (
     work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
     medium_uri TEXT NOT NULL,                    -- YSO / PMO concept URI
@@ -2638,7 +2686,7 @@ CREATE TABLE work_medium_of_performance (
 );
 
 
--- 10. Tripartite Vector Search Index Mappings (Work, Expression & Manifestation Tiers)
+-- 11. Tripartite Vector Search Index Mappings (Work, Expression & Manifestation Tiers)
 CREATE TABLE work_vectors (
     vector_id INTEGER PRIMARY KEY,               -- Positional row index in FAISS / PyTorch work.index
     work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE
@@ -2658,7 +2706,7 @@ CREATE TABLE manifestation_vectors (
 CREATE INDEX idx_manifestation_vectors_manif_id ON manifestation_vectors(manifestation_id);
 
 
--- 11. Tripartite FTS5 Lexical BM25 Virtual Tables
+-- 12. Tripartite FTS5 Lexical BM25 Virtual Tables
 CREATE VIRTUAL TABLE works_fts USING fts5(
     work_id UNINDEXED,
     serialized_text,
@@ -2886,27 +2934,27 @@ The engine maps Wikidata statements to internal WEMI types using the following t
 - **Publisher**: `P123` (publisher entity QID) resolved to corporate agent name.
 
 ##### 3. Agent Contributor Properties & Relators
-| Property | Property Label | Internal Relator Code | Target Table |
+| Property | Property Label | Internal Relator Code | Target Table & Entity Type |
 | :--- | :--- | :--- | :--- |
-| `P50` | author | `aut` | `work_authors` |
-| `P86` | composer | `cmp` | `work_authors` |
-| `P57` | director | `drt` | `work_authors` |
-| `P170` | creator | `cre` | `work_authors` |
-| `P287` | game designer | `dsr` | `work_authors` |
-| `P178` | developer (software/game) | `prg` | `work_authors` |
-| `P84` | architect | `arc` | `work_authors` |
-| `P98` | editor | `edt` | `expression_contributors` |
-| `P655` | translator | `trl` | `expression_contributors` |
-| `P110` | illustrator | `ill` | `expression_contributors` |
-| `P175` | performer | `prf` | `expression_contributors` |
-| `P345` | narrator / voice actor | `nrt` | `expression_contributors` |
+| `P50` | author | `aut` | `contributions` (`entity_type='work'`) |
+| `P86` | composer | `cmp` | `contributions` (`entity_type='work'`) |
+| `P57` | director | `drt` | `contributions` (`entity_type='work'`) |
+| `P170` | creator | `cre` | `contributions` (`entity_type='work'`) |
+| `P287` | game designer | `dsr` | `contributions` (`entity_type='work'`) |
+| `P178` | developer (software/game) | `prg` | `contributions` (`entity_type='work'`) |
+| `P84` | architect | `arc` | `contributions` (`entity_type='work'`) |
+| `P98` | editor | `edt` | `contributions` (`entity_type='expression'`) |
+| `P655` | translator | `trl` | `contributions` (`entity_type='expression'`) |
+| `P110` | illustrator | `ill` | `contributions` (`entity_type='expression'`) |
+| `P175` | performer | `prf` | `contributions` (`entity_type='expression'`) |
+| `P345` | narrator / voice actor | `nrt` | `contributions` (`entity_type='expression'`) |
 
 ##### 4. Standard Number Identifiers
 - `P212` $\rightarrow$ ISBN-13 (`identifiers.scheme = 'isbn'`)
 - `P957` $\rightarrow$ ISBN-10 (`identifiers.scheme = 'isbn'`)
 - `P236` $\rightarrow$ ISSN (`identifiers.scheme = 'issn'`)
 - `P356` $\rightarrow$ DOI (`identifiers.scheme = 'doi'`)
-- `P244` $\rightarrow$ Library of Congress Control Number (`identifiers.scheme = 'loc'`)
+- `P244` $\rightarrow$ Library of Congress Control Number (`identifiers.scheme = 'lccn'`)
 - `P214` $\rightarrow$ VIAF ID (`identifiers.scheme = 'viaf'`)
 - `P213` $\rightarrow$ ISNI (`identifiers.scheme = 'isni'`)
 - `P227` $\rightarrow$ GND ID (`identifiers.scheme = 'gnd'`)
@@ -2918,10 +2966,10 @@ The engine maps Wikidata statements to internal WEMI types using the following t
 ##### 5. Structural Inter-Work & Expression Relationships
 - `P629` (*edition or translation of*): Explicit link connecting an edition or translation item to its conceptual parent Work QID.
 - `P144` (*based on*): Adaptation lineage $\rightarrow$ `work_relationships.relationship_type = 'adaptation_of'`.
-- `P179` (*part of the series*): Series membership $\rightarrow$ `work_relationships.relationship_type = 'subseries_of'`.
-- `P155` (*follows*) / `P156` (*followed by*): Sequential publication lineage $\rightarrow$ `work_relationships.relationship_type = 'sequel_to'`.
-- `P527` (*has part*) / `P361` (*part of*): Whole-part constituent analytics $\rightarrow$ `work_relationships.relationship_type = 'part_of_work'`.
-- `P737` (*influenced by*): Intellectual lineage $\rightarrow$ `work_relationships.relationship_type = 'influenced_by'`.
+- `P179` (*part of the series*): Series membership $\rightarrow$ `work_relationships.relationship_type = 'series_member_of'`.
+- `P155` (*follows*) / `P156` (*followed by*): Sequential publication lineage $\rightarrow$ `work_relationships.relationship_type = 'continues'` / `'continued_by'`.
+- `P527` (*has part*) / `P361` (*part of*): Whole-part constituent analytics $\rightarrow$ `work_relationships.relationship_type = 'has_series_member'` / `'series_member_of'`.
+- `P737` (*influenced by*): Intellectual lineage $\rightarrow$ `work_relationships.relationship_type = 'adaptation_of'`.
 
 ---
 
@@ -2960,8 +3008,13 @@ To process multi-gigabyte gzipped Wikidata dumps (e.g. `latest-all.json.gz`, ~10
          work_type, creation_year, source, wikidata_qid, titles_json
      ) VALUES (?, ?, ?, ?, ?, ?, 'wikidata', ?, ?);
      ```
-   - Resolves creator QIDs (`P50`, `P86`, `P57`) against `agents` and inserts rows into `work_authors`.
-   - Resolves relationship properties (`P144`, `P179`, `P155`, `P156`, `P527`) and inserts into `work_relationships`.
+   - Resolves creator QIDs (`P50`, `P86`, `P57`, `P170`, `P287`, `P178`, `P84`) against `agents` and inserts rows into `contributions`:
+     ```sql
+     INSERT OR IGNORE INTO contributions (entity_type, entity_id, agent_id, role, is_primary)
+     VALUES ('work', ?, ?, ?, 1);
+     ```
+   - Resolves relationship properties (`P144`, `P179`, `P155`, `P156`, `P527`, `P361`) and inserts into `work_relationships`.
+   - Resolves musical instrumentation (`P870`) and inserts into `work_medium_of_performance`.
 4. **Landing an Edition / Translation (`P629`)**:
    - Extracts target Work QID from `P629`.
    - **Lazy Work Stub Synthesis**: If the parent Work QID has not yet been encountered in the stream, the engine inserts a lightweight Work stub:
@@ -2969,7 +3022,7 @@ To process multi-gigabyte gzipped Wikidata dumps (e.g. `latest-all.json.gz`, ~10
      INSERT OR IGNORE INTO works (work_id, work_uri, preferred_title, source, wikidata_qid)
      VALUES ('wd:w:' || ?, 'http://www.wikidata.org/entity/' || ?, 'Unknown Work', 'wikidata', ?);
      ```
-   - Extracts language (`P407`) and contributors (`P655` translator, `P110` illustrator, `P98` editor).
+   - Extracts language (`P407`) and contributors (`P655` translator, `P110` illustrator, `P98` editor, `P175` performer, `P345` narrator).
    - Generates `expression_id = 'wd:e:' || QID || ':' || lang`.
    - Inserts into `authority.db: expressions`:
      ```sql
@@ -2978,9 +3031,31 @@ To process multi-gigabyte gzipped Wikidata dumps (e.g. `latest-all.json.gz`, ~10
          content_type, source, wikidata_qid
      ) VALUES (?, ?, ?, ?, ?, 'wikidata', ?);
      ```
+   - Inserts contributor rows into `contributions`:
+     ```sql
+     INSERT OR IGNORE INTO contributions (entity_type, entity_id, agent_id, role, is_primary)
+     VALUES ('expression', ?, ?, ?, 0);
+     ```
    - Generates `manifestation_id = 'wd:m:' || QID`.
-   - Inserts publication details (publisher `P123`, date `P577`, page count `P1104`) into `manifestations` and binds to the expression via `manifestation_expressions`.
-   - Inserts all standard identifiers (ISBN-13 `P212`, ISBN-10 `P957`, OCLC `P243`, etc.) into `identifiers`.
+   - Inserts publication details (publisher `P123`, date `P577`, place `P291`, edition `P393`, page count `P1104`, carrier `P437`, series `P179`/`P478`) into `manifestations`:
+     ```sql
+     INSERT OR REPLACE INTO manifestations (
+         manifestation_id, work_id, manifestation_uri, source, source_id,
+         title, title_normalized, publisher, publication_year, publication_place,
+         edition_statement, edition_number, extent, carrier_type,
+         series_title, series_numbering
+     ) VALUES (?, ?, ?, 'wikidata', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+     ```
+   - Binds manifestation to the expression via `manifestation_expressions`:
+     ```sql
+     INSERT OR IGNORE INTO manifestation_expressions (manifestation_id, expression_id, is_primary)
+     VALUES (?, ?, 1);
+     ```
+   - Inserts all standard identifiers (ISBN-13 `P212`, ISBN-10 `P957`, ISSN `P236`, DOI `P356`, OCLC `P243`, etc.) into `identifiers`:
+     ```sql
+     INSERT OR IGNORE INTO identifiers (entity_type, entity_id, scheme, value, value_normalized)
+     VALUES ('manifestation', ?, ?, ?, ?);
+     ```
 
 ---
 
@@ -2988,19 +3063,48 @@ To process multi-gigabyte gzipped Wikidata dumps (e.g. `latest-all.json.gz`, ~10
 
 | Source Wikidata Claim | Target Table | Target Columns & Value Mappings | Notes |
 | :--- | :--- | :--- | :--- |
-| `QID` (Work item) | `works` | `work_id='wd:w:'\|\|QID`, `work_uri='http://www.wikidata.org/entity/'\|\|QID`, `wikidata_qid=QID`, `source='wikidata'` | Canonical external work identity |
-| `P1476` / multilingual labels | `works` | `preferred_title`, `titles_json` | Primary title + alias array |
-| `P364` / `P407` (on Work) | `works` | `original_language` | ISO 639-2 language code |
-| `P31` / `P279` | `works` | `work_type` | Controlled vocabulary (§2.2.4) |
+| **Pass 1: Agent Authorities** | | | |
+| `QID` (`P31` $\in$ `Q5`, `Q43229`, `Q215380`, `Q11436`) | `agents` | `agent_id='wd:a:'\|\|QID`, `agent_uri='http://www.wikidata.org/entity/'\|\|QID`, `name=rdfs:label`, `name_normalized`, `family_name`, `given_name`, `agent_type` (`person`, `corporate_body`, `conference`), `wikidata_qid=QID`, `source='wikidata'`, `source_id=QID` | Canonical agent authority identity |
+| `P569` / `P570` | `agents` | `birth_year`, `death_year` | 4-digit Gregorian years |
+| `P213` (ISNI) | `identifiers` | `entity_type='agent'`, `entity_id=agent.id`, `scheme='isni'`, `value=raw`, `value_normalized=hyphenless_isni` | Standard agent identifier |
+| `P214` (VIAF) | `identifiers` | `entity_type='agent'`, `entity_id=agent.id`, `scheme='viaf'`, `value=raw`, `value_normalized=digits_only` | Virtual International Authority File |
+| `P4108` (Asteri / KANTO) | `identifiers` | `entity_type='agent'`, `entity_id=agent.id`, `scheme='asteri'`, `value=raw`, `value_normalized=normalized_id` | Finnish National Authority link |
+| `P496` (ORCID) | `identifiers` | `entity_type='agent'`, `entity_id=agent.id`, `scheme='orcid'`, `value=raw`, `value_normalized=normalized_orcid` | Researcher identifier |
+| **Pass 2: Creative Works** | | | |
+| `QID` (Work item: `Q7725634`, `Q571`, etc.) | `works` | `work_id='wd:w:'\|\|QID`, `work_uri='http://www.wikidata.org/entity/'\|\|QID`, `wikidata_qid=QID`, `source='wikidata'`, `source_id=QID` | Canonical external Work identity |
+| `P1476` / multilingual labels | `works` | `preferred_title`, `title_normalized`, `titles_json` | Primary title + multilingual alias array |
+| `P364` / `P407` (on Work) | `works` | `original_language` | ISO 639-2 code (`fin`, `swe`, `eng`) |
+| `P31` / `P279` (subclass of) | `works` | `work_type` | Controlled vocabulary (§2.2.4: `monograph`, `musical_work`, `game`, `map`, etc.) |
 | `P577` / `P571` | `works` | `creation_year` | 4-digit year string |
-| `P50` / `P86` / `P57` / `P287` | `work_authors` | `work_id`, `agent_id`, `relator_code` (`aut`, `cmp`, `drt`, `dsr`) | Foreign key to `agents` |
-| `QID` (Edition item) | `manifestations` | `manifestation_id='wd:m:'\|\|QID`, `manifestation_uri`, `source='wikidata'` | Physical/digital carrier release |
-| `P629` (Edition of) | `expressions` | `work_id='wd:w:'\|\|P629_QID` | Links Expression to parent Work |
-| `P407` (on Edition) | `expressions` | `language` | Expression language |
-| `P655` / `P110` / `P98` | `expression_contributors` | `expression_id`, `agent_id`, `relator_code` (`trl`, `ill`, `edt`) | Secondary contributors |
-| `P212` / `P957` | `identifiers` | `target_type='manifestation'`, `scheme='isbn'`, `value=normalized_isbn` | Normalized standard identifiers |
-| `P356` | `identifiers` | `target_type='manifestation'`, `scheme='doi'`, `value=doi_string` | Cross-reference identifier |
-| `P144`, `P179`, `P155` | `work_relationships` | `source_work_id`, `target_work_id`, `relationship_type` | `adaptation_of`, `subseries_of`, `sequel_to` |
+| `P50` / `P86` / `P57` / `P170` / `P287` / `P178` / `P84` | `contributions` | `entity_type='work'`, `entity_id=work.id`, `agent_id=resolved_agent.id`, `role` (`aut`, `cmp`, `drt`, `cre`, `dsr`, `prg`, `arc`), `is_primary=1` | Primary creators (FK to `agents`) |
+| `P870` (Instrumentation) | `work_medium_of_performance` | `work_id=work.id`, `medium_uri`, `label`, `player_count`, `is_soloist` | Musical medium of performance |
+| `P144` (based on) | `work_relationships` | `source_work_id`, `target_work_id`, `relationship_type='adaptation_of'` | Adaptation lineage |
+| `P179` (part of series) | `work_relationships` | `source_work_id`, `target_work_id`, `relationship_type='series_member_of'` | Series membership |
+| `P155` / `P156` (follows / followed by) | `work_relationships` | `source_work_id`, `target_work_id`, `relationship_type='continues'` / `'continued_by'` | Sequential title lineage |
+| `P527` / `P361` (has part / part of) | `work_relationships` | `source_work_id`, `target_work_id`, `relationship_type='has_series_member'` / `'series_member_of'` | Whole-part analytics |
+| `P8383` (BGG ID) / `P345` (IMDb) | `identifiers` | `entity_type='work'`, `entity_id=work.id`, `scheme='bgg'` / `'imdb'`, `value=raw`, `value_normalized=raw` | Specialized domain Work IDs |
+| **Pass 2: Expressions (Realizations)** | | | |
+| Synthesized Expression (`P629` + `P407`) | `expressions` | `expression_id='wd:e:'\|\|QID\|\|':'\|\|lang`, `expression_uri='http://www.wikidata.org/entity/'\|\|QID\|\|'#exp-'\|\|lang`, `work_id=parent_work.id`, `language=ISO_639_2(P407)`, `source='wikidata'`, `wikidata_qid=QID` | Realization entity |
+| Derived from Work type / `P31` / `P437` | `expressions` | `content_type` | Controlled vocabulary (§2.2.4: `text`, `spoken_word`, `notated_music`, etc.) |
+| `P393` / `P1480` | `expressions` | `version_designation` | Edition statement (e.g. `'2. korj. p.'`) |
+| `P655` / `P110` / `P98` / `P175` / `P345` | `contributions` | `entity_type='expression'`, `entity_id=expression.id`, `agent_id=resolved_agent.id`, `role` (`trl`, `ill`, `edt`, `prf`, `nrt`), `is_primary=0` | Realization contributors (translators, illustrators, editors) |
+| **Pass 2: Manifestations (Carriers)** | | | |
+| `QID` (Edition item) | `manifestations` | `manifestation_id='wd:m:'\|\|QID`, `manifestation_uri='http://www.wikidata.org/entity/'\|\|QID`, `work_id=parent_work.id`, `source='wikidata'`, `source_id=QID`, `title`, `title_normalized` | Publication carrier release |
+| `P123` (publisher) | `manifestations` | `publisher` | Publishing organization label |
+| `P577` (publication date) | `manifestations` | `publication_year` | Integer year (e.g. `2018`) |
+| `P291` (place of publication) | `manifestations` | `publication_place` | Publication city/country |
+| `P393` (edition) | `manifestations` | `edition_statement`, `edition_number` | Textual statement & parsed integer |
+| `P1104` (number of pages) / extent | `manifestations` | `pagination`, `extent` | Extent string (e.g. `'xii, 450 s.'`) |
+| `P437` / `P262` (carrier format) | `manifestations` | `carrier_type` | Controlled vocabulary (`volume`, `audio_disc`, `online_resource`, etc.) |
+| `P179` (series) + `P478` (volume) | `manifestations` | `series_title`, `series_numbering`, `volume_designation` | Publication series metadata |
+| **Manifestation–Expression Junction** | | | |
+| Carrier-to-realization link | `manifestation_expressions` | `manifestation_id=manifestation.id`, `expression_id=expression.id`, `track_number=NULL`, `disc_number=1`, `is_primary=1` | M:N association table |
+| **Standard Number Identifiers** | | | |
+| `P212` / `P957` (ISBN-13 / ISBN-10) | `identifiers` | `entity_type='manifestation'`, `entity_id=manifestation.id`, `scheme='isbn'`, `value=raw`, `value_normalized=hyphenless_isbn13` | Normalized standard carrier identifier |
+| `P236` (ISSN) | `identifiers` | `entity_type='manifestation'`, `entity_id=manifestation.id`, `scheme='issn'`, `value=raw`, `value_normalized=normalized_issn` | Serial identifier |
+| `P356` (DOI) | `identifiers` | `entity_type='manifestation'`, `entity_id=manifestation.id`, `scheme='doi'`, `value=raw`, `value_normalized=lowercase_doi` | Digital object identifier |
+| `P243` (OCLC control number) | `identifiers` | `entity_type='manifestation'`, `entity_id=manifestation.id`, `scheme='oclc'`, `value=raw`, `value_normalized=digits_only` | Union catalog control number |
+| `P244` / `P1144` (LCCN / LibraryThing) | `identifiers` | `entity_type='manifestation'`, `entity_id=manifestation.id`, `scheme='lccn'` / `'librarything'`, `value=raw`, `value_normalized=normalized` | Cross-catalog identifiers |
 
 ---
 
@@ -3086,7 +3190,10 @@ Each harvested OAI `<record>` element is deconstructed into:
      - **Dublin Core / MODS**: Transformed via normalization crosswalks into standard internal entity dictionaries.
 
 > [!IMPORTANT]
-> **Harvesting Scope Constraint**: OAI-PMH feeds provide bibliographic records describing Manifestations, Expressions, and Works. They **never** supply Item-level holding inventories (which are maintained strictly in local ILS/LSP systems). Therefore, the OAI-PMH harvesting pipeline lands data solely into `works`, `expressions`, and `manifestations` (in `authority.db`) or `target_records` (in `reconcile_corpus.db`). The `items` table is never targeted by OAI-PMH.
+> **Configurable Item Ingestion Scope (`include_items: bool = False`)**:
+> While OAI-PMH feeds and bibliographic dumps can carry Item and holding data (e.g. embedded MARC `852`/`9xx` holdings tags, OAI-PMH holding sets, or BIBFRAME `bf:Item` graphs), ingesting physical holding copies significantly multiplies storage requirements.
+> By default, `OAIIngestConfig.include_items = False`, focusing harvesting on the core Work-Expression-Manifestation triad.
+> Enabling `include_items = True` activates extraction into the `items` table, capturing copy barcodes (`852 $p`), shelfmarks (`852 $c`), holding institutions, copy condition, and provenance relators for specialized use cases (rare books, *sammelbände*, multi-ILS holding consolidation).
 
 ---
 
@@ -3138,47 +3245,65 @@ When harvesting a client or target repository (e.g. university repositories, mun
 
 Reconciliation executes across two strictly decoupled dimensions:
 
-```
-                           ┌───────────────────────────┐
-                           │ Target Input Corpus       │
-                           │ (MARCXML / BIBFRAME)      │
-                           └─────────────┬─────────────┘
-                                         │
-                   ┌─────────────────────┴─────────────────────┐
-                   │                                           │
-         [Dimension 1: External]                    [Dimension 2: Internal]
-                   │                                           │
-        ┌──────────▼──────────┐                     ┌──────────▼──────────┐
-        │ Match Authority DB  │                     │ Blocking & Feature  │
-        │ (Melinda / Wikidata)│                     │ Key Extraction      │
-        └──────────┬──────────┘                     └──────────┬──────────┘
-                   │                                           │
-        ┌──────────▼──────────┐                     ┌──────────▼──────────┐
-        │ Inherit Work/Exp    │                     │ Work Clustering     │
-        │ External URIs / QID │                     │ (Connected Comps)   │
-        └──────────┬──────────┘                     └──────────┬──────────┘
-                   │                                           │
-                   │                                ┌──────────▼──────────┐
-                   │                                │ Expression Sub-     │
-                   │                                │ Clustering          │
-                   │                                └──────────┬──────────┘
-                   │                                           │
-                   └─────────────────────┬─────────────────────┘
-                                         │
-                            ┌────────────▼────────────┐
-                            │ Graph Fusion:           │
-                            │ Cluster URIs promoted   │
-                            │ to external URIs or     │
-                            │ deterministic UUID URNs │
-                            └────────────┬────────────┘
-                                         │
-                   ┌─────────────────────┴─────────────────────┐
-                   │                                           │
-        ┌──────────▼──────────┐                     ┌──────────▼──────────┐
-        │ In-place MARCXML    │                     │ In-place BIBFRAME   │
-        │ 758 / 240 / 773     │                     │ Graph / JSON-LD     │
-        │ Enrichment          │                     │ Node Merge & sameAs │
-        └─────────────────────┘                     └─────────────────────┘
+```mermaid
+flowchart TD
+    Input["Target Input Corpus (MARCXML / BIBFRAME)"]
+
+    subgraph Dim1["Dimension 1: External Authority Matching"]
+    subgraph Dim1["Dimension 1: External Authority Matching Funnel"]
+        direction TB
+        D1_Match["Match Authority DB (Melinda / Wikidata)"]
+        D1_Inherit["Inherit Work / Expression External URIs or QID"]
+        D1_Match --> D1_Inherit
+        D1_T1["Tier 1: Fast-Path Identifiers (ISBN, ISSN, URN, DOI, Control No)"]
+        D1_T2["Tier 2: Work Semantic Search (Dense v_W + works_fts BM25)"]
+        D1_T3["Tier 3: Expression Alignment (Language, Translators, v_E)"]
+        D1_Inherit["Inherit External URIs / QIDs (Melinda / Wikidata)"]
+
+        D1_T1 -->|Exact Match| D1_Inherit
+        D1_T1 -->|Miss: Uncataloged| D1_T2
+        D1_T2 -->|Top-k Works| D1_T3
+        D1_T3 -->|Aligned| D1_Inherit
+    end
+
+    subgraph Dim2["Dimension 2: Internal Intra-Corpus Co-Reference"]
+    subgraph Dim2["Dimension 2: Intra-Corpus Multiplex Graph Clustering"]
+        direction TB
+        D2_Extract["Blocking & Feature Key Extraction"]
+        D2_Work["Work Clustering (Connected Components)"]
+        D2_Exp["Expression Sub-Clustering"]
+        D2_Extract --> D2_Work --> D2_Exp
+        D2_Extract["42 Domain Blocking & Feature Keys Extraction"]
+        D2_GM["Layer 1: Manifestation Graph G_M (Carrier Duplicate Deduplication)"]
+        D2_GE["Layer 2: Expression Graph G_E (Realization Sub-Clustering)"]
+        D2_GW["Layer 3: Work Graph G_W (Conceptual Work Families)"]
+
+        D2_Extract --> D2_GM
+        D2_GM --> D2_GE
+        D2_GE --> D2_GW
+    end
+
+    Input --> D1_Match
+    Input --> D1_T1
+    Input --> D2_Extract
+
+    Fusion["Graph Fusion: Cluster URIs promoted to external URIs or deterministic UUID URNs"]
+    Fusion["Graph Fusion & Hoisting: Promote Clusters to External URIs or Mint Deterministic URNs"]
+
+    D1_Inherit --> Fusion
+    D2_Exp --> Fusion
+    D2_GM --> Fusion
+    D2_GE --> Fusion
+    D2_GW --> Fusion
+
+    subgraph Output["Lossless Dual-Format In-Place Mutation"]
+        direction LR
+        MARC["In-place MARCXML: 758 / 240 / 773 Enrichment"]
+        BF["In-place BIBFRAME: Graph / JSON-LD Node Merge & owl:sameAs"]
+    end
+
+    Fusion --> MARC
+    Fusion --> BF
 ```
 
 ### 5.1 Dimension 1: External Authority Matching Funnels
@@ -3747,35 +3872,68 @@ Within each Work Cluster, partition records into Expression Clusters based on th
 
 ---
 
-#### 5.3 Work-Centric Vector Indexing & The WEMI Serialization Triad Architecture
+#### 5.3 Tripartite Vector Indexing & The WEMI Serialization Triad Architecture
 
-In a greenfield WEMI reconciliation engine, entity serialization and search operate across three distinct functional tiers:
-1. **Work Level (Conceptual Identity)**: Dense vector search (`work.index`) and conceptual FTS (`works_fts`) for high-recall discovery of the abstract intellectual creation (Tier 2 Semantic Fallback).
-2. **Expression Level (Realization Identity)**: Realization FTS (`expressions_fts`) and BM25 / Cross-Encoder reranking to disambiguate translations, audiobooks, and musical arrangements (Tier 3 Expression Alignment).
-3. **Manifestation Level (Carrier Identity)**: Deterministic identifier lookups, carrier FTS (`manifestations_fts`), and intra-corpus connected-components clustering to deduplicate physical publication runs.
+In a greenfield WEMI reconciliation engine, entity serialization, vector embedding, and search operate across **three distinct, isolated functional tiers**:
+1. **Work Level (Conceptual Vector Space $\mathbf{v}_W$)**: Dense vector index (`data/work.index`) and conceptual FTS (`works_fts`) for high-recall discovery of the abstract intellectual creation (Tier 2 Semantic Fallback).
+2. **Expression Level (Realization Vector Space $\mathbf{v}_E$)**: Dense vector index (`data/expression.index`) and realization FTS (`expressions_fts`) for semantic disambiguation of translations, audiobooks, and musical arrangements (Tier 3 Expression Alignment).
+3. **Manifestation Level (Carrier Vector Space $\mathbf{v}_M$)**: Dense vector index (`data/manifestation.index`) and carrier FTS (`manifestations_fts`) for publication deduplication, duplicate print-run clustering, and carrier variant verification.
 
-```
-       ┌────────────────────────────────────────────────────────────────────────┐
-       │                       THE WEMI SERIALIZATION TRIAD                     │
-       └───────────────────────────────────┬────────────────────────────────────┘
-                                           │
-         ┌─────────────────────────────────┼─────────────────────────────────┐
-         ▼                                 ▼                                 ▼
-[work_serialization.j2]        [expression_serialization.j2]    [manifestation_serialization.j2]
-- Preferred & uniform title    - Expression & parent work title - Title as published & subtitle
-- Primary creators (aut, cmp)  - Language of realization (fin)  - Publisher & place of publication
-- Work type & original lang    - Translators, narrators, perfs  - Publication year & edition stmt
-- Subjects (YSO) & classes     - Content type & version note    - Series title & numbering, extent
-         │                                 │                                 │
-         ▼                                 ▼                                 ▼
-   works.serialized_text        expressions.serialized_text      manifestations.serialized_text
-         │                                 │                                 │
-   ┌─────┴──────────────┐                  ▼                                 ▼
-   ▼                    ▼           expressions_fts                  manifestations_fts
-SentenceEmbedder    works_fts      (SQLite BM25 Lexical)            (Carrier Deduplication FTS)
-   │               (SQLite BM25)           │                                 │
-   ▼                                       ▼                                 ▼
-data/work.index                  Tier 3 Translation Align        Intra-Corpus Duplicate Cluster
+```mermaid
+flowchart TD
+    subgraph WEMI["THE WEMI SERIALIZATION TRIAD"]
+        direction TB
+
+        subgraph WorkCol["Work Tier (Conceptual Space)"]
+            direction TB
+            W_TPL["Template: work_serialization.j2"]
+            W_FIELDS["Fields: Preferred & uniform title, Primary creators (aut, cmp), Work type, YSO subjects"]
+            W_TXT[("works.serialized_text")]
+            W_EMB["SentenceEmbedder"]
+            W_FTS[("works_fts (SQLite BM25)")]
+            W_IDX[("data/work.index (work_vectors)")]
+
+            W_TPL --> W_FIELDS --> W_TXT
+            W_TXT --> W_EMB --> W_IDX
+            W_TXT --> W_FTS
+        end
+
+        subgraph ExpCol["Expression Tier (Realization Space)"]
+            direction TB
+            E_TPL["Template: expression_serialization.j2"]
+            E_FIELDS["Fields: Expression title, Realization language, Translators, Performers, Content type"]
+            E_TXT[("expressions.serialized_text")]
+            E_EMB["SentenceEmbedder"]
+            E_FTS[("expressions_fts (SQLite BM25)")]
+            E_IDX[("data/expression.index (expression_vectors)")]
+
+            E_TPL --> E_FIELDS --> E_TXT
+            E_TXT --> E_EMB --> E_IDX
+            E_TXT --> E_FTS
+        end
+
+        subgraph ManCol["Manifestation Tier (Carrier Space)"]
+            direction TB
+            M_TPL["Template: manifestation_serialization.j2"]
+            M_FIELDS["Fields: Title as published, Publisher, Year, Edition, Extent, Series"]
+            M_TXT[("manifestations.serialized_text")]
+            M_EMB["SentenceEmbedder"]
+            M_FTS[("manifestations_fts (SQLite BM25)")]
+            M_IDX[("data/manifestation.index (manifestation_vectors)")]
+
+            M_TPL --> M_FIELDS --> M_TXT
+            M_TXT --> M_EMB --> M_IDX
+            M_TXT --> M_FTS
+        end
+    end
+
+    Fusion["Hierarchical Late Fusion Multi-Vector Scoring: S_total = α cos(v_W) + β cos(v_E) + γ cos(v_M)"]
+    Cluster["3-Layer Multiplex Graph Clustering (G_M, G_E, G_W)"]
+
+    W_IDX --> Fusion
+    E_IDX --> Fusion
+    M_IDX --> Fusion
+    Fusion --> Cluster
 ```
 
 #### 5.3.1 Eliminating Carrier Noise from Semantic Search
@@ -3868,6 +4026,33 @@ CREATE INDEX idx_manifestation_vectors_manif_id ON manifestation_vectors(manifes
 #### 5.3.5 Hierarchical Multi-Vector Matching & Late Fusion Scoring
 Reconciliation leverages all three vector spaces via a **Coarse-to-Fine Funnel** and **Cross-Layer Late Fusion**:
 
+```mermaid
+flowchart TD
+    Target["Incoming Target Record (e.g. Monograph)"]
+    FastPath{"Step 1: Deterministic Fast-Path (ISBN, URN, DOI, Control Number)"}
+
+    Target --> FastPath
+
+    subgraph FastPathMatch["Fast-Path Exact Match (0ms)"]
+        direction TB
+        RetMan["Retrieve Manifestation from authority.db"]
+        Hydrate["Hydrate Parent Expression & Work URIs (Vector Search Skipped)"]
+        RetMan --> Hydrate
+    end
+
+    subgraph VectorFunnel["Semantic Fallback: Coarse-to-Fine Multi-Vector Funnel"]
+        direction TB
+        ReadText["Read pre-rendered works.serialized_text"]
+        Embed["SentenceEmbedder: Compute v_W"]
+        QueryWork["Query Work Vector Index: data/work.index (top-50 candidates)"]
+        AlignExp["Expression Alignment: Query candidate expressions in v_E (language, translators)"]
+        VerifyMan["Carrier Verification: Query candidate manifestations in v_M (format, edition)"]
+
+        ReadText --> Embed --> QueryWork --> AlignExp --> VerifyMan
+    end
+
+    FastPath -->|Match Found| FastPathMatch
+    FastPath -->|No Match| VectorFunnel
 ```
                   Incoming Target Record (e.g. Monograph)
                                     │
@@ -3922,6 +4107,30 @@ If two distinct authors publish books with the identical title *"Kootut runot"*:
 
 When reconciling an entire library corpus (intra-corpus clustering), the three vector indexes interact across a **3-Layer Multiplex Graph**:
 
+```mermaid
+flowchart TD
+    subgraph Layer3["Layer 3: Work Graph G_W (Threshold tau_W = 0.85 on v_W)"]
+        direction LR
+        W_E1["E1: English Translation"] <--> W_E2["E2: Finnish Original"] <--> W_E3["E3: Audio Performance"]
+    end
+
+    subgraph Layer2["Layer 2: Expression Graph G_E (Threshold tau_E = 0.88 on v_E)"]
+        direction LR
+        E_M1["M1: 1968 Cajander Edition"] <--> E_M2["M2: 1985 Cajander Reprint"]
+        E_M3["M3: 2019 Saarikoski Translation"]
+    end
+
+    subgraph Layer1["Layer 1: Manifestation Graph G_M (Threshold tau_M = 0.92 on v_M)"]
+        direction LR
+        M_RecA["Rec A: Otava CIP Record"] <--> M_RecB["Rec B: Otava Final Deposit"]
+        M_RecC["Rec C: WSOY Paperback"]
+    end
+
+    Layer3 -->|Downward Constraint: Strict Component Partitioning| Layer2
+    Layer2 -->|Downward Constraint: Strict Component Partitioning| Layer1
+
+    Layer1 -.->|Upward Enrichment: Sparse Metadata Vector Inheritance| Layer2
+    Layer2 -.->|Upward Enrichment: Sparse Metadata Vector Inheritance| Layer3
 ```
 [Layer 3: Work Graph G_W]          (Threshold tau_W = 0.85 on v_W)
   (E1: English) ◄────────────────► (E2: Finnish) ◄────────────────► (E3: Audio)
@@ -5032,6 +5241,7 @@ class OAIIngestConfig(BaseModel):
     metadata_prefix: str = "marc21"
     set_spec: Optional[str] = None
     target_database: Literal["authority", "corpus"] = "authority" # Direct routing: authority.db vs reconcile_corpus.db
+    include_items: bool = False                                 # If True, extracts & lands Item entities (852 holdings, bf:Item). Disabled by default to prevent storage bloat.
     workers: int = 4
     from_date: Optional[str] = None
     until_date: Optional[str] = None
@@ -5068,13 +5278,14 @@ class MultiplexClusterThresholds(BaseModel):
     manifestation: float = 0.92
 
 class ClusterConfig(BaseModel):
-    """Configuration for intra-corpus 3-layer multiplex graph clustering."""
+    """Configuration for intra-corpus multiplex graph clustering."""
     enabled: bool = True
     similarity_threshold: float = 0.85
     max_cluster_size: int = 2000
     blocking_families: Union[list[str], Literal["all"]] = "all"  # Enable all 35 blocking families or subset
     thresholds: MultiplexClusterThresholds = Field(default_factory=MultiplexClusterThresholds)
     message_passing: bool = True                                 # Enable upward enrichment & downward constraints
+    reconcile_items: bool = False                                # Special-case 4th tier: physical holding / sammelbände / copy provenance clustering
 
 class EnrichmentTogglesConfig(BaseModel):
     """Fine-grained toggles for native format tree mutation."""
@@ -5175,6 +5386,7 @@ ingest_oai:
     oai_url: "https://oai.melinda.kansalliskirjasto.fi/oai"
     metadata_prefix: "marc21"
     target_database: "authority"                  # "authority" -> authority.db, "corpus" -> reconcile_corpus.db
+    include_items: false                          # Set true to harvest 852 holdings & physical items (disabled by default to prevent storage bloat)
     workers: 4
     slice_days: 30                                # Temporal date slicing for parallel harvesting
     batch_size: 500
@@ -5202,9 +5414,9 @@ reconcile:
     expression: "reconciliator/templates/expression_serialization.j2"
     manifestation: "reconciliator/templates/manifestation_serialization.j2"
 
-  # Intra-Corpus 3-Layer Multiplex Graph Clustering
+  # Intra-Corpus Multiplex Graph Clustering
   cluster:
-    enabled: true                                 # Enable intra-corpus 3-layer multiplex clustering
+    enabled: true                                 # Enable intra-corpus multiplex clustering
     similarity_threshold: 0.85                    # Base fallback threshold
     max_cluster_size: 2000                        # Guard against anomalous mega-clusters
     blocking_families: "all"                      # "all" or specific list of blocking families to execute
@@ -5213,6 +5425,7 @@ reconcile:
       expression: 0.88                            # Layer 2 Realization cluster threshold
       manifestation: 0.92                         # Layer 1 Carrier duplicate threshold
     message_passing: true                         # Enable upward enrichment & downward constraint propagation
+    reconcile_items: false                        # Special-case 4th tier: physical holding / sammelbände / copy provenance clustering
 
   # Format Mutation & Enrichment Toggles
   enrichment:
