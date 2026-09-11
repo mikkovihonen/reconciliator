@@ -90,7 +90,11 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
     )
 
     template_path = (
-        Path(__file__).parent.parent / "src" / "reconciliator" / "templates" / "default_serialization.j2"
+        Path(__file__).parent.parent
+        / "src"
+        / "reconciliator"
+        / "templates"
+        / "default_serialization.j2"
     )
 
     with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
@@ -147,7 +151,9 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
 
     # Verify both records exist with their respective source names
     with store.get_connection() as conn:
-        rows = conn.execute("SELECT source, external_id, title FROM authority_records ORDER BY id;").fetchall()
+        rows = conn.execute(
+            "SELECT source, source_id, title FROM authority_records ORDER BY id;"
+        ).fetchall()
         assert len(rows) == 2
         assert rows[0]["source"] == "catalog_a"
         assert rows[0]["title"] == "Source A Book Title"
@@ -191,7 +197,9 @@ ingest_oai:
     mock_model = MagicMock()
     mock_model.get_embedding_dimension.return_value = 64
     mock_model.get_sentence_embedding_dimension.return_value = 64
-    mock_model.encode.side_effect = lambda texts, **kwargs: np.ones((len(texts), 64), dtype=np.float32)
+    mock_model.encode.side_effect = lambda texts, **kwargs: np.ones(
+        (len(texts), 64), dtype=np.float32
+    )
 
     mock_resp = MagicMock()
     mock_resp.content = SAMPLE_OAI_SOURCE_A
@@ -200,12 +208,16 @@ ingest_oai:
     with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
         with patch("httpx2.Client.get", return_value=mock_resp):
             # Test specifying unknown source raises error
-            res = runner.invoke(app, ["ingest-oai", "--config", str(cfg_file), "--source", "non_existent"])
+            res = runner.invoke(
+                app, ["ingest-oai", "--config", str(cfg_file), "--source", "non_existent"]
+            )
             assert res.exit_code != 0
             assert "Source 'non_existent' not found" in res.output
 
             # Test specifying specific source
-            res = runner.invoke(app, ["ingest-oai", "--config", str(cfg_file), "--source", "source_one"])
+            res = runner.invoke(
+                app, ["ingest-oai", "--config", str(cfg_file), "--source", "source_one"]
+            )
             assert res.exit_code == 0
             assert "Successfully ingested 1 records from source 'source_one'" in res.output
 

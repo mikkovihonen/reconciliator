@@ -230,6 +230,7 @@ def test_stream_oai_records_parallel_date_partitioning() -> None:
     """
     config = OAIIngestConfig(
         source_type="oai",
+        oai_url="http://example.org/oai",
         workers=2,
         from_date="2021-01-01",
         until_date="2021-03-01",
@@ -275,6 +276,7 @@ def test_stream_oai_records_autodiscovery_parallel() -> None:
     """
     config = OAIIngestConfig(
         source_type="oai",
+        oai_url="http://example.org/oai",
         workers=2,
         from_date=None,  # Should auto-discover
         until_date="2000-02-15",

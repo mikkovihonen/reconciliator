@@ -21,6 +21,8 @@ This runbook provides complete operational guidance for system administrators an
    - [Wikidata Ingestion Section (`ingest_wikidata`)](#wikidata-ingestion-section-ingest_wikidata)
    - [Reconciliation Section (`reconcile`)](#reconciliation-section-reconcile)
    - [Telemetry Section (`telemetry`)](#telemetry-section-telemetry)
+   - [Normalization Section (`normalization`)](#normalization-section-normalization)
+   - [Modular Source Configuration Files](#modular-source-configuration-files)
    - [Production Example Configurations](#production-example-configurations)
 3. [CLI Command Reference](#3-cli-command-reference)
    - [`reconciliator download-skosmos`](#reconciliator-download-skosmos)
@@ -355,7 +357,179 @@ telemetry:
 
 ---
 
-### Production Example Configurations
+### Normalization Section (`normalization`)
+
+`reconciliator` features a generalized, fully configurable normalization surface decoupled from hardcoded logic. Normalization rules can be defined globally in `normalization` (under `record` and `vocab`), or overridden per-source (in `ingest_oai.<name>.normalization`, `download_skosmos.<name>.normalization`, `ingest_wikidata.normalization`, or `reconcile.normalization`).
+
+```yaml
+normalization:
+  record:
+    non_filing_articles:
+      fi: ["yksi ", "eräs "]
+      sv: ["en ", "ett ", "den ", "det ", "de "]
+      en: ["the ", "a ", "an "]
+      de: ["der ", "die ", "das ", "ein ", "eine "]
+      fr: ["le ", "la ", "les ", "un ", "une ", "l'"]
+    publisher_suffixes:
+      - "oy"
+      - "oyj"
+      - "ab"
+      - "abp"
+      - "ltd"
+      - "inc"
+      - "corp"
+      - "gmbh"
+      - "kustannus"
+      - "kustannusosakeyhtiö"
+    volume_prefixes:
+      - "osa"
+      - "del"
+      - "vol"
+      - "volume"
+      - "bd"
+      - "band"
+      - "tome"
+      - "t"
+      - "v"
+      - "nro"
+      - "no"
+    volume_suffixes:
+      - "osa"
+      - "del"
+      - "vol"
+      - "kokoelma"
+      - "painos"
+    volume_format_template: "osa {num}"
+    fictional_qualifiers:
+      - "fiktiivinen"
+      - "fiktiv"
+      - "fictitious"
+    responsibility_prefixes:
+      - "kirjoittanut"
+      - "toimittanut"
+      - "toim."
+      - "kirj."
+      - "tekijä"
+      - "författare"
+      - "av"
+      - "by"
+      - "edited by"
+    responsibility_conjunctions:
+      - "ja"
+      - "sekä"
+      - "och"
+      - "and"
+      - "und"
+      - "et"
+    classification_priority:
+      - "ykl"
+      - "udk"
+      - "dewey"
+      - "lc"
+    default_classification_scheme: "ykl"
+    control_number_prefix: null             # e.g. "(FI-MELINDA)"
+    control_number_pattern: null
+    control_number_padding_digits: null     # e.g. 9
+    urn_pattern: "(urn:nbn:[^\\s]+)"
+    preserved_diacritics: "åäöÅÄÖ"
+    custom_relator_terms: {}
+    default_language: "fi"
+
+  vocab:
+    legacy_to_modern:
+      ysa: "yso"
+      allars: "yso"
+      kaunokki: "kauno"
+      musa: "muso"
+    thesaurus_languages:
+      ysa: "fi"
+      allars: "sv"
+      kaunokki: "fi"
+      musa: "fi"
+    language_subcode_vocabularies:
+      slm: "fin"
+      yso-paikat: "fin"
+    field_to_vocabularies:
+      "650": ["yso", "kauno", "muso", "slm", "seko"]
+      "651": ["yso-paikat", "yso"]
+      "655": ["slm", "seko"]
+      "382": ["muso", "yso"]
+    default_field_vocabularies:
+      "650": "yso"
+      "651": "yso-paikat"
+      "655": "slm"
+      "382": "muso"
+    preserved_diacritics: "åäöÅÄÖ"
+    default_language: "fi"
+```
+
+#### Record Normalization Parameters (`RecordNormalizationConfig`)
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `non_filing_articles` | `dict[str, list[str]]` | Map of ISO languages | Leading grammatical articles stripped during title normalization. |
+| `publisher_suffixes` | `list[str]` | Corporate suffixes | Legal and publishing suffixes stripped from publisher literals. |
+| `volume_prefixes` | `list[str]` | `['osa', 'vol', ...]` | Keywords preceding volume/part numbers. |
+| `volume_suffixes` | `list[str]` | `['osa', 'del', ...]` | Keywords succeeding volume/part numbers. |
+| `volume_format_template` | `str` | `osa {num}` | Canonical output template for normalized volumes. |
+| `fictional_qualifiers` | `list[str]` | `['fiktiivinen', ...]` | Substrings marking fictional entity qualifiers in agent names. |
+| `responsibility_prefixes` | `list[str]` | Lead-in phrases | Lead-in phrases stripped when parsing 245$c authors. |
+| `responsibility_conjunctions`| `list[str]` | Conjunctions | Coordinating conjunctions splitting 245$c statements. |
+| `classification_priority` | `list[str]` | `['ykl', 'udk', ...]` | Scheme hierarchy determining primary classification flag. |
+| `default_classification_scheme` | `str` | `ykl` | Default scheme when unspecified in input record. |
+| `control_number_prefix` | `str` | `None` | Prefix applied/expected for system control numbers (e.g. `(FI-MELINDA)`). |
+| `control_number_padding_digits`| `int` | `None` | Zero-padding width for numeric system control numbers (e.g. `9`). |
+| `control_number_strip_prefixes`| `list[str]`| `None` | Optional list of prefix strings to strip prior to normalization. |
+| `urn_pattern` | `str` | `(urn:nbn:[^\s]+)` | Regex pattern extracting persistent URN identifiers. |
+| `preserved_diacritics` | `str` | `åäöÅÄÖ` | Specific Unicode characters preserved during selective diacritic folding. |
+| `biographical_date_prefixes`| `list[str]` | `['ca.', 's.', 'k.', ...]` | Prefix tokens indicating birth/death/flourished date qualifiers. |
+| `biographical_era_bc` | `list[str]` | `['eaa.', 'bc', ...]` | Era designations indicating Before Common Era (BC). |
+| `biographical_era_ad` | `list[str]` | `['jaa.', 'ad', ...]` | Era designations indicating Anno Domini / Common Era (AD). |
+| `biographical_century_suffixes`| `list[str]` | `['luku', 'talet', ...]` | Suffixes designating century/period notations (e.g. `1800-luku`). |
+| `biographical_date_pattern` | `str` | `None` | Optional raw regex pattern overriding modular biographical date parsing. |
+| `roman_numerals` | `dict[str, int]` | Roman numeral map (`i: 1`, `ii: 2`, ...) | Roman numeral mappings used when normalizing volume designations. |
+| `relator_mappings` | `dict[str, str]` | Multilingual term map | Natural-language relator word to MARC code mappings (`term -> code`). |
+| `custom_relator_terms` | `dict[str, str]` | `{}` | Additional relator term mappings (`code -> term`). |
+| `default_language` | `str` | `fi` | Fallback language code when not specified on record. |
+
+#### Vocabulary Normalization Parameters (`VocabNormalizationConfig`)
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `legacy_to_modern` | `dict[str, str]` | Thesaurus mappings | Target modern vocabulary mapped from legacy thesaurus code. |
+| `thesaurus_languages` | `dict[str, str]` | Language mappings | Canonical language associated with legacy thesaurus (`ysa: fi`, `allars: sv`). |
+| `language_subcode_vocabularies`| `dict[str, str]`| Subcode mappings | Modern vocabularies requiring language subcode designations. |
+| `field_to_vocabularies` | `dict[str, list[str]]`| MARC field candidate routing | Candidate ontologies queried for each subject field (`650`, `651`, `655`, `382`). |
+| `default_field_vocabularies` | `dict[str, str]` | Default field fallbacks | Fallback ontology assigned per MARC field when lookup fails. |
+| `preserved_diacritics` | `str` | `åäöÅÄÖ` | Characters preserved during subject label folding. |
+| `biographical_date_prefixes`| `list[str]` | `['ca.', 's.', 'k.', ...]` | Prefix tokens indicating birth/death/flourished date qualifiers. |
+| `biographical_era_bc` | `list[str]` | `['eaa.', 'bc', ...]` | Era designations indicating Before Common Era (BC). |
+| `biographical_era_ad` | `list[str]` | `['jaa.', 'ad', ...]` | Era designations indicating Anno Domini / Common Era (AD). |
+| `biographical_century_suffixes`| `list[str]` | `['luku', 'talet', ...]` | Suffixes designating century/period notations. |
+| `biographical_date_pattern` | `str` | `None` | Optional raw regex pattern overriding modular date parsing. |
+| `default_language` | `str` | `fi` | Default lookup language when not specified. |
+
+---
+
+### Modular Source Configuration Files
+
+To keep `config.yaml` concise and manageable, `download_skosmos` and `ingest_oai` sections support modular external file referencing:
+
+```yaml
+# Direct file reference:
+download_skosmos:
+  finto: "sources/skosmos/finto.example.yaml"
+
+# Modular file or directory glob reference:
+ingest_oai:
+  melinda: "sources/oai/melinda.example.yaml"
+  # Or load all *.yaml files in a directory:
+  # ingest_oai: "sources/oai/"
+```
+
+Each source file can contain source-specific configurations and its own localized `normalization` overrides. All relative paths within external source configuration files are resolved seamlessly relative to the root configuration file.
+
+---
 
 #### Full Production Profile (`config.prod.yaml`)
 
@@ -648,8 +822,6 @@ reconciliator prune -c config.yaml --all --include-running -y
 - `--include-running`: Allow deletion of tasks currently in `running` state (defaults to `false` to safeguard ongoing harvests/reconciliations).
 - `-y, --yes`: Bypass interactive confirmation prompt.
 
-> [!NOTE]
-> `reconciliator prune-telemetry` is available as a hidden CLI alias providing identical functionality.
 
 ---
 

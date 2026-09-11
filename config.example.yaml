@@ -16,25 +16,13 @@ embedding:
   force_template: false # When true, permits reconciliation even if template hash differs from index metadata
 
 # 3. Skosmos Value Vocabularies Downloader (multi-source, e.g. FINTO, AGROVOC)
+# Can reference modular files, directories, or define sources inline:
 download_skosmos:
-  finto:
-    enabled: true
-    api_url: "https://api.finto.fi/rest/v1"
-    output_dir: "data/finto"
-    vocabularies:
-      - "yso"
-      - "yso-paikat"
-      - "slm"
-      - "kauno"
-      - "muso"
-      - "seko"
-    format: "text/turtle"
-    timeout_seconds: 120.0
-    overwrite: false
+  finto: "sources/skosmos/finto.example.yaml"
 
 # 4. Value Vocabularies & Migration Ingestion
 ingest_vocab:
-  input_path: "data/finto" # Directory or file path containing SKOS / Turtle / RDF dumps
+  input_path: "data/vocabularies" # Directory or file path containing SKOS / Turtle / RDF dumps
   vocabularies:
     - "yso"
     - "yso-paikat"
@@ -49,22 +37,9 @@ ingest_vocab:
     - "musa"
 
 # 5. OAI-PMH & MARCXML Authority Sources Ingestion
+# Can reference modular files, directories, or define sources inline:
 ingest_oai:
-  melinda:
-    enabled: true
-    source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
-    input_path: null      # Local XML file path when source_type is "file"
-    oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
-    metadata_prefix: "marc21"
-    set_spec: null
-    id_source: "marc_001" # "marc_001" | "oai_identifier" | "auto"
-    workers: 8            # Parallel HTTP worker threads for concurrent date slices
-    from_date: null       # "YYYY-MM-DD" (null auto-discovers repository earliestDatestamp)
-    until_date: null      # "YYYY-MM-DD" (null defaults to current date)
-    slice_days: 30        # Temporal partition width in days for parallel workers
-    batch_size: 500
-    request_delay: 0.1    # Rate-limiting pause between pagination requests in seconds
-    timeout: 60.0
+  melinda: "sources/oai/melinda.example.yaml"
 
 
 # 6. Wikidata Authority Ingestion
@@ -128,8 +103,12 @@ reconcile:
     - "SEKO"
     - "WIKIDATA"
 
-# 7. Telemetry & Progress Monitoring
+# 8. Telemetry & Progress Monitoring
 telemetry:
   heartbeat_interval_seconds: 1.0
   watch_interval_seconds: 1.0
+
+# 9. Global Normalization Rules
+# Can be omitted to use built-in defaults, defined inline, or referenced via external file:
+normalization: "sources/global/global.example.yaml"
 

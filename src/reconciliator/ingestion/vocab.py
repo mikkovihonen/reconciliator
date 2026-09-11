@@ -315,4 +315,3 @@ def ingest_vocab_file(
         )
 
     return len(total_concepts), len(total_mappings)
-

@@ -5,7 +5,7 @@ from reconciliator.normalizers.identifiers import (
     isbn_10_to_13,
     normalize_isbn,
     normalize_issn,
-    normalize_melinda_id,
+    normalize_source_id,
     normalize_urn,
 )
 from reconciliator.normalizers.record import (
@@ -40,9 +40,28 @@ def test_urn_normalization() -> None:
     assert normalize_urn(raw) == "urn:nbn:fi:bib:20210001"
 
 
-def test_melinda_id_normalization() -> None:
-    assert normalize_melinda_id("(FI-MELINDA)000123456") == "(FI-MELINDA)000123456"
-    assert normalize_melinda_id("FI-MELINDA:123456") == "(FI-MELINDA)000123456"
+def test_oai_source_id_normalization() -> None:
+    # Melinda OAI IDs
+    assert (
+        normalize_source_id("(FI-MELINDA)000123456", prefix="(FI-MELINDA)", digits=9)
+        == "(FI-MELINDA)000123456"
+    )
+    assert (
+        normalize_source_id("FI-MELINDA:123456", prefix="(FI-MELINDA)", digits=9)
+        == "(FI-MELINDA)000123456"
+    )
+    # Other OAI sources (Libris, DNB, custom OAI URIs)
+    assert (
+        normalize_source_id("SE-LIBRIS:12345", prefix="(SE-LIBRIS)", digits=8)
+        == "(SE-LIBRIS)00012345"
+    )
+    assert (
+        normalize_source_id(
+            "oai:libris.kb.se:bib/12345", pattern=r"bib/(\d+)", prefix="(SE-LIBRIS)", digits=8
+        )
+        == "(SE-LIBRIS)00012345"
+    )
+    assert normalize_source_id("(DE-101) 98765", prefix="(DE-101)", digits=9) == "(DE-101)000098765"
 
 
 def test_agent_name_normalization() -> None:

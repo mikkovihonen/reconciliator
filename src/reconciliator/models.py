@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ClassificationItem(BaseModel):
@@ -66,9 +66,7 @@ class SubjectsContainer(BaseModel):
 class BibliographicRecord(BaseModel):
     """Unified internal representation of a bibliographic entity."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    source_id: str = Field(..., validation_alias=AliasChoices("source_id", "external_id"))
+    source_id: str
     source: str
     title: str
     subtitle: Optional[str] = None

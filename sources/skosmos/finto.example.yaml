@@ -1,0 +1,56 @@
+# sources/skosmos/finto.example.yaml - Skosmos source configuration for Finto
+finto:
+  enabled: true
+  api_url: "https://api.finto.fi/rest/v1"
+  output_dir: "data/vocabularies"
+  vocabularies:
+    - "yso"
+    - "yso-paikat"
+    - "slm"
+    - "kauno"
+    - "muso"
+    - "seko"
+  dump_urls:
+    yso: "https://api.finto.fi/download/yso/yso-skos.ttl"
+    yso-paikat: "https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl"
+    yso-aika: "https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl"
+    finaf: "https://api.finto.fi/download/finaf/finaf-skos.ttl"
+    kauno: "https://api.finto.fi/download/kauno/kauno-skos.ttl"
+    kaunokki: "https://api.finto.fi/download/kaunokki/kaunokki-skos.ttl"
+    muso: "https://api.finto.fi/download/muso/muso-skos.ttl"
+    slm: "https://api.finto.fi/download/slm/slm-skos.ttl"
+    allars: "https://api.finto.fi/download/allars/allars-skos.ttl"
+    ysa: "https://api.finto.fi/download/ysa/ysa-skos.ttl"
+    musa: "https://api.finto.fi/download/musa/musa-skos.ttl"
+    seko: "https://api.finto.fi/download/seko/seko-skos.ttl"
+    mts: "https://api.finto.fi/download/metatietosanasto/metatietosanasto-skos.ttl"
+  format: "text/turtle"
+  timeout_seconds: 120.0
+  overwrite: false
+  normalization:
+    legacy_to_modern:
+      ysa: "yso"
+      allars: "yso"
+      kaunokki: "kauno"
+      musa: "muso"
+    thesaurus_languages:
+      ysa: "fi"
+      allars: "sv"
+      kaunokki: "fi"
+      musa: "fi"
+    language_subcode_vocabularies:
+      slm: "fin"
+      yso-paikat: "fin"
+    field_to_vocabularies:
+      "650": ["yso", "kauno", "muso", "slm", "seko"]
+      "651": ["yso-paikat", "yso"]
+      "655": ["slm", "seko"]
+      "382": ["muso", "yso"]
+    default_field_vocabularies:
+      "650": "yso"
+      "651": "yso-paikat"
+      "655": "slm"
+      "382": "muso"
+    preserved_diacritics: "åäöÅÄÖ"
+    default_language: "fi"
+

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Iterable, Optional
 
 
 def isbn_10_to_13(isbn10: str) -> Optional[str]:
@@ -77,13 +77,18 @@ def normalize_issn(raw_issn: str) -> Optional[str]:
     return f"{cleaned[:4]}-{cleaned[4:]}"
 
 
-def normalize_urn(raw_urn: str) -> Optional[str]:
+def normalize_urn(raw_urn: str, pattern: Optional[str] = None) -> Optional[str]:
     """Normalize persistent URN string to lowercase canonical format."""
     if not raw_urn:
         return None
 
     raw_clean = raw_urn.strip()
-    match = re.search(r"(urn:nbn:fi:[^\s]+)", raw_clean, re.IGNORECASE)
+    if pattern:
+        match = re.search(pattern, raw_clean, re.IGNORECASE)
+        if match:
+            return (match.group(1) if match.groups() else match.group(0)).lower()
+
+    match = re.search(r"(urn:nbn:[^\s]+)", raw_clean, re.IGNORECASE)
     if match:
         return match.group(1).lower()
 
@@ -93,17 +98,75 @@ def normalize_urn(raw_urn: str) -> Optional[str]:
     return None
 
 
-def normalize_melinda_id(raw_id: str) -> Optional[str]:
-    """Normalize Melinda system control number."""
+def normalize_source_id(
+    raw_id: str,
+    prefix: Optional[str] = None,
+    digits: Optional[int] = None,
+    pattern: Optional[str] = None,
+    strip_prefixes: Optional[Iterable[str]] = None,
+) -> Optional[str]:
+    """Normalize an OAI or local system source identifier using configurable rules.
+
+    Supports:
+    - Regex pattern extraction (e.g. extracting numeric record ID from OAI URN/URI).
+    - Custom list of prefix tokens to strip.
+    - Automatic stripping of standard MARC 003 / ISIL organization code variants
+      (e.g. parenthesized ``(PREFIX)``, colon-separated ``PREFIX:``, or plain ``PREFIX``).
+    - Optional zero-padding of numeric identifier tokens.
+    - Application of canonical prefix string.
+    """
     if not raw_id:
         return None
 
     clean = raw_id.strip()
-    # Strip (FI-MELINDA) prefix if present or standardize
-    clean = re.sub(r"^\(FI-MELINDA\)", "", clean, flags=re.IGNORECASE).strip()
-    clean = re.sub(r"^FI-MELINDA:?", "", clean, flags=re.IGNORECASE).strip()
-    # Remove leading zeroes if standardizing or keep standard 9-digit
-    digits = re.sub(r"\D", "", clean)
+    if not clean:
+        return None
+
+    # 1. Apply regex pattern if configured (e.g. extracting ID from full OAI URI)
+    if pattern:
+        m = re.search(pattern, clean, re.IGNORECASE)
+        if m:
+            clean = m.group(1) if m.groups() else m.group(0)
+
+    # 2. Strip explicit custom strip_prefixes
+    if strip_prefixes:
+        for sp in sorted(strip_prefixes, key=len, reverse=True):
+            clean = re.sub(
+                rf"^{re.escape(sp.strip())}:?\s*", "", clean, flags=re.IGNORECASE
+            ).strip()
+
+    # 3. If target prefix is configured, strip any existing variations of it
+    if prefix:
+        raw_prefix = prefix.strip()
+        bare_prefix = raw_prefix.strip("() :")
+        if bare_prefix:
+            clean = re.sub(
+                rf"^\({re.escape(bare_prefix)}\)\s*", "", clean, flags=re.IGNORECASE
+            ).strip()
+            clean = re.sub(
+                rf"^{re.escape(bare_prefix)}:?\s*", "", clean, flags=re.IGNORECASE
+            ).strip()
+        clean = re.sub(rf"^{re.escape(raw_prefix)}:?\s*", "", clean, flags=re.IGNORECASE).strip()
+
+    # 4. Zero-pad numeric component if digits specified
     if digits:
-        return f"(FI-MELINDA){digits.zfill(9)}"
-    return raw_id.strip()
+        found_digits = re.sub(r"\D", "", clean)
+        if found_digits:
+            formatted = found_digits.zfill(digits)
+            return f"{prefix}{formatted}" if prefix else formatted
+
+    # 5. Apply prefix if missing
+    if prefix:
+        return f"{prefix}{clean}" if not clean.startswith(prefix) else clean
+
+    return clean or None
+
+
+__all__ = [
+    "isbn_10_to_13",
+    "validate_isbn_13",
+    "normalize_isbn",
+    "normalize_issn",
+    "normalize_urn",
+    "normalize_source_id",
+]

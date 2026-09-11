@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 from lxml import etree
 
 from reconciliator.agent_transfer import AgentAligner
-from reconciliator.ingestion.skosmos_downloader import FINTO_CANONICAL_DUMP_URLS, SkosmosDownloader
+from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_bridge_files
 from reconciliator.ingestion.wikidata import extract_wikidata_yso_aliases
 from reconciliator.loaders.marcxml import parse_marc_record_elem
@@ -407,14 +407,16 @@ def test_format_target_vocab_language_suffixes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. SkosmosDownloader Canonical Dump Prioritization for Finto
+# 9. SkosmosDownloader Static Dump Prioritization
 # ---------------------------------------------------------------------------
 
 
 def test_skosmos_downloader_canonical_dump_prioritized(tmp_path: Path) -> None:
-    downloader = SkosmosDownloader(api_url="https://api.finto.fi/rest/v1")
-    expected_dump = FINTO_CANONICAL_DUMP_URLS["yso"]
-    assert expected_dump == "https://api.finto.fi/download/yso/yso-skos.ttl"
+    expected_dump = "https://api.finto.fi/download/yso/yso-skos.ttl"
+    downloader = SkosmosDownloader(
+        api_url="https://api.finto.fi/rest/v1",
+        dump_urls={"yso": expected_dump},
+    )
 
     mock_resp = MagicMock()
     mock_resp.raise_for_status.return_value = None
@@ -430,5 +432,5 @@ def test_skosmos_downloader_canonical_dump_prioritized(tmp_path: Path) -> None:
         dest = downloader.download_vocabulary("yso", output_dir=tmp_path, overwrite=True)
         assert dest.exists()
         assert b"@prefix skos" in dest.read_bytes()
-        # Verify it called the canonical dump URL first
+        # Verify it called the configured dump URL
         mock_stream.assert_called_once_with("GET", expected_dump)

@@ -35,8 +35,12 @@ def stream_oai_records(
         for raw_rec in iter_marcxml_records(config.input_path, source=source_name):
             yield raw_rec
     else:
+        if not config.oai_url:
+            raise ValueError(
+                f"oai_url must be specified for source '{source_name}' when source_type is 'oai'"
+            )
         harvester = OAIPMHHarvester(
-            endpoint_url=config.oai_url or "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib",
+            endpoint_url=config.oai_url,
             metadata_prefix=config.metadata_prefix,
             set_spec=config.set_spec,
             request_delay=config.request_delay,
@@ -253,4 +257,3 @@ def ingest_oai_pipeline(
         tracker.complete_task(metadata=meta)
 
     return total_ingested
-

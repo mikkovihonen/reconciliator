@@ -10,68 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Container, Iterable, Optional
 
-# Baseline seed terms (Finnish, Swedish, English) to ensure safe fallback
-# even before full MTS or LoC databases are populated.
-_BASELINE_RELATOR_TERMS: frozenset[str] = frozenset(
-    {
-        # Finnish (RDA-FI)
-        "ohjaaja",
-        "elokuvaohjaaja",
-        "teatteriohjaaja",
-        "näyttelijä",
-        "näyttelijät",
-        "kuvaaja",
-        "käsikirjoittaja",
-        "säveltäjä",
-        "sovittaja",
-        "sanoittaja",
-        "kääntäjä",
-        "suomentaja",
-        "toimittaja",
-        "päätoimittaja",
-        "kirjoittaja",
-        "tuottaja",
-        "esittäjä",
-        "laulaja",
-        "muusikko",
-        "kuvittaja",
-        "taiteilija",
-        "äänittäjä",
-        "tutkija",
-        # Swedish (RDA-SV)
-        "regissör",
-        "skådespelare",
-        "fotograf",
-        "manusförfattare",
-        "kompositör",
-        "arrangör",
-        "översättare",
-        "redaktör",
-        "författare",
-        "producent",
-        "dirigent",
-        "illustratör",
-        "konstnär",
-        "sångare",
-        "musiker",
-        "forskare",
-        # English (MARC / RDA)
-        "author",
-        "editor",
-        "illustrator",
-        "translator",
-        "composer",
-        "director",
-        "producer",
-        "actor",
-        "performer",
-        "singer",
-        "musician",
-        "photographer",
-        "screenwriter",
-        "researcher",
-    }
-)
+from reconciliator.config import DEFAULT_RELATOR_MAPPINGS
 
 
 class RelatorRegistry:
@@ -82,9 +21,14 @@ class RelatorRegistry:
         vocab_store: Optional[Any] = None,
         extra_terms: Optional[Iterable[str]] = None,
         custom_relators: Optional[Iterable[str]] = None,
+        relator_mappings: Optional[dict[str, str]] = None,
     ) -> None:
         self.vocab_store = vocab_store
         self._custom_terms: set[str] = set()
+        self._custom_mappings: dict[str, str] = {}
+        if relator_mappings is not None:
+            for term, code in relator_mappings.items():
+                self.register(code, term)
         terms_to_add = list(extra_terms or []) + list(custom_relators or [])
         for term in terms_to_add:
             clean = term.strip().casefold().rstrip(".")
@@ -115,6 +59,16 @@ class RelatorRegistry:
                 if clean:
                     self._custom_terms.add(clean)
 
+    def register(self, code: str, term: str) -> None:
+        """Register a custom relator term and its mapping to a MARC code."""
+        clean_term = term.strip().casefold().rstrip(".")
+        clean_code = code.strip().lower()
+        if clean_term:
+            self._custom_terms.add(clean_term)
+            if not hasattr(self, "_custom_mappings"):
+                self._custom_mappings = {}
+            self._custom_mappings[clean_term] = clean_code
+
     def is_relator(self, token: str) -> bool:
         """Check if a token matches a known relator term."""
         clean = token.strip().casefold().rstrip(".")
@@ -128,7 +82,7 @@ class RelatorRegistry:
             if self.vocab_store.is_known_relator(clean):
                 return True
 
-        return clean in _BASELINE_RELATOR_TERMS
+        return clean in DEFAULT_RELATOR_MAPPINGS
 
     def strip_relator(self, name: str) -> str:
         """Strip trailing role markers from name literals."""
@@ -155,88 +109,15 @@ class RelatorRegistry:
         if not clean:
             return None
 
+        if hasattr(self, "_custom_mappings") and clean in self._custom_mappings:
+            return self._custom_mappings[clean]
+
         if self.vocab_store is not None and hasattr(self.vocab_store, "get_relator_code"):
             code = self.vocab_store.get_relator_code(clean)
             if code:
                 return str(code)
 
-        return _BASELINE_TERM_TO_CODE.get(clean)
-
-
-_BASELINE_TERM_TO_CODE: dict[str, str] = {
-    # Finnish (RDA-FI)
-    "kirjoittaja": "aut",
-    "tekijä": "aut",
-    "toimittaja": "edt",
-    "päätoimittaja": "edt",
-    "kääntäjä": "trl",
-    "suomentaja": "trl",
-    "kuvittaja": "ill",
-    "säveltäjä": "cmp",
-    "sovittaja": "arr",
-    "sanoittaja": "lyr",
-    "ohjaaja": "drt",
-    "elokuvaohjaaja": "drt",
-    "teatteriohjaaja": "drt",
-    "näyttelijä": "act",
-    "näyttelijät": "act",
-    "kuvaaja": "cng",
-    "käsikirjoittaja": "aus",
-    "tuottaja": "pro",
-    "esittäjä": "prf",
-    "laulaja": "sng",
-    "muusikko": "mus",
-    "taiteilija": "art",
-    "äänittäjä": "rcd",
-    "tutkija": "res",
-    "haastattelija": "ivr",
-    "haastateltava": "ive",
-    "kertoja": "nrt",
-    "valokuvaaja": "pht",
-    "kustantaja": "pbl",
-    "julkaisija": "pbl",
-    # Swedish (RDA-SV)
-    "författare": "aut",
-    "redaktör": "edt",
-    "huvudredaktör": "edt",
-    "översättare": "trl",
-    "illustratör": "ill",
-    "kompositör": "cmp",
-    "arrangör": "arr",
-    "textförfattare": "lyr",
-    "regissör": "drt",
-    "skådespelare": "act",
-    "fotograf": "pht",
-    "manusförfattare": "aus",
-    "producent": "pro",
-    "dirigent": "cnd",
-    "konstnär": "art",
-    "sångare": "sng",
-    "musiker": "mus",
-    "forskare": "res",
-    "utgivare": "pbl",
-    # English (MARC / RDA)
-    "author": "aut",
-    "editor": "edt",
-    "illustrator": "ill",
-    "translator": "trl",
-    "composer": "cmp",
-    "arranger": "arr",
-    "lyricist": "lyr",
-    "director": "drt",
-    "producer": "pro",
-    "actor": "act",
-    "performer": "prf",
-    "singer": "sng",
-    "musician": "mus",
-    "photographer": "pht",
-    "screenwriter": "aus",
-    "researcher": "res",
-    "publisher": "pbl",
-    "interviewer": "ivr",
-    "interviewee": "ive",
-    "narrator": "nrt",
-}
+        return DEFAULT_RELATOR_MAPPINGS.get(clean)
 
 
 _DEFAULT_REGISTRY = RelatorRegistry()

@@ -368,17 +368,7 @@ storage:
     assert res.exit_code == 0
     assert "Successfully pruned 1 task(s)" in res.output
 
-    # 6. Test prune-telemetry alias
-    t_comp = ProgressTracker(prog_db, task_id="comp-alias", task_type="reconciliation")
-    t_comp.start_task()
-    t_comp.complete_task()
-    res = runner.invoke(
-        app, ["prune-telemetry", "--config", str(cfg_file), "--task-id", "comp-alias", "-y"]
-    )
-    assert res.exit_code == 0
-    assert "Successfully pruned 1 task(s)" in res.output
-
-    # 7. Test status --prune
+    # 6. Test status --prune
     t_comp = ProgressTracker(prog_db, task_id="comp-status", task_type="reconciliation")
     t_comp.start_task()
     t_comp.complete_task()

@@ -1,0 +1,282 @@
+# default_normalization.yaml - Canonical Package Normalization Defaults
+#
+# Single Source of Truth for baseline normalization heuristics.
+# Loaded automatically by reconciliator.config when initializing default models.
+
+normalization:
+  record:
+    non_filing_articles:
+      fi: ["yksi ", "eräs "]
+      sv: ["en ", "ett ", "den ", "det ", "de "]
+      en: ["the ", "a ", "an "]
+      de: ["der ", "die ", "das ", "ein ", "eine "]
+      fr: ["le ", "la ", "les ", "un ", "une ", "l'"]
+
+    publisher_suffixes:
+      - "oy"
+      - "oyj"
+      - "ab"
+      - "abp"
+      - "ltd"
+      - "inc"
+      - "corp"
+      - "gmbh"
+      - "kustannus"
+      - "kustannusosakeyhtiö"
+      - "förlag"
+      - "publishing"
+
+    volume_prefixes:
+      - "osa"
+      - "del"
+      - "vol"
+      - "volume"
+      - "bd"
+      - "band"
+      - "tome"
+      - "t"
+      - "v"
+      - "nro"
+      - "no"
+      - "nide"
+
+    volume_suffixes:
+      - "osa"
+      - "del"
+      - "vol"
+      - "kokoelma"
+      - "painos"
+      - "nide"
+      - "band"
+
+    volume_format_template: "osa {num}"
+
+    fictional_qualifiers:
+      - "fiktiivinen"
+      - "fiktiv"
+      - "fictitious"
+      - "(fiktiivinen hahmo)"
+      - "(fiktiv gestalt)"
+      - "(fictitious character)"
+      - "(fiktiivinen paikka)"
+      - "(fiktiv plats)"
+      - "(fictitious place)"
+      - "(fiktiivinen yhteisö)"
+      - "(fiktiv organisation)"
+      - "(fictitious organization)"
+      - "(fiktiivinen esine)"
+      - "(fiktivt föremål)"
+      - "(fiktiivinen alus)"
+
+    responsibility_prefixes:
+      - "kirjoittanut"
+      - "toimittanut"
+      - "suomentanut"
+      - "kuvittanut"
+      - "toim."
+      - "kirj."
+      - "suom."
+      - "kuv."
+      - "tekijä"
+      - "författare"
+      - "redaktör"
+      - "redigerad av"
+      - "av"
+      - "by"
+      - "edited by"
+      - "illustrated by"
+      - "translated by"
+
+    responsibility_conjunctions:
+      - "ja"
+      - "sekä"
+      - "och"
+      - "and"
+      - "und"
+      - "et"
+      - "&"
+
+    classification_priority:
+      - "ykl"
+      - "udk"
+      - "dewey"
+      - "lc"
+
+    default_classification_scheme: "ykl"
+
+    control_number_prefix: null
+    control_number_pattern: null
+    control_number_padding_digits: null
+
+    urn_pattern: "(urn:nbn:[^\\s]+)"
+
+    roman_numerals:
+      i: 1
+      ii: 2
+      iii: 3
+      iv: 4
+      v: 5
+      vi: 6
+      vii: 7
+      viii: 8
+      ix: 9
+      x: 10
+      xi: 11
+      xii: 12
+
+    relator_mappings:
+      kirjoittaja: "aut"
+      toimittaja: "edt"
+      kuvittaja: "ill"
+      kääntäjä: "trl"
+      suomentaja: "trl"
+      säveltäjä: "cmp"
+      sovittaja: "arr"
+      sanoittaja: "lyr"
+      ohjaaja: "drt"
+      tuottaja: "pro"
+      näyttelijä: "act"
+      esiintyjä: "prf"
+      laulaja: "sng"
+      muusikko: "mus"
+      valokuvaaja: "pht"
+      käsikirjoittaja: "aus"
+      tutkija: "res"
+      kustantaja: "pbl"
+      haastattelija: "ivr"
+      haastateltava: "ive"
+      kertoja: "nrt"
+      author: "aut"
+      editor: "edt"
+      illustrator: "ill"
+      translator: "trl"
+      composer: "cmp"
+      arranger: "arr"
+      lyricist: "lyr"
+      director: "drt"
+      producer: "pro"
+      actor: "act"
+      performer: "prf"
+      singer: "sng"
+      musician: "mus"
+      photographer: "pht"
+      screenwriter: "aus"
+      researcher: "res"
+      publisher: "pbl"
+      interviewer: "ivr"
+      interviewee: "ive"
+      narrator: "nrt"
+      författare: "aut"
+      redaktör: "edt"
+      illustratör: "ill"
+      översättare: "trl"
+
+    preserved_diacritics: "åäöÅÄÖ"
+
+    biographical_date_prefixes:
+      - "ca."
+      - "circa"
+      - "n."
+      - "s."
+      - "f."
+      - "b."
+      - "k."
+      - "d."
+      - "fl."
+      - "floruit"
+      - "born"
+      - "died"
+      - "död"
+      - "syntynyt"
+      - "kuollut"
+
+    biographical_era_bc:
+      - "eaa."
+      - "ekr."
+      - "f.kr."
+      - "bc"
+      - "bce"
+
+    biographical_era_ad:
+      - "jaa."
+      - "jkr."
+      - "ad"
+
+    biographical_century_suffixes:
+      - "luku"
+      - "talet"
+      - "l."
+      - "t."
+
+    biographical_date_pattern: null
+    custom_relator_terms: {}
+    default_language: "fi"
+
+  vocab:
+    legacy_to_modern:
+      ysa: "yso"
+      allars: "yso"
+      kaunokki: "kauno"
+      musa: "muso"
+
+    thesaurus_languages:
+      ysa: "fi"
+      allars: "sv"
+      kaunokki: "fi"
+      musa: "fi"
+
+    language_subcode_vocabularies:
+      slm: "fin"
+      yso-paikat: "fin"
+
+    field_to_vocabularies:
+      "650": ["yso", "kauno", "muso", "slm", "seko"]
+      "651": ["yso-paikat", "yso"]
+      "655": ["slm", "seko"]
+      "382": ["seko", "muso", "yso"]
+
+    default_field_vocabularies:
+      "650": "yso"
+      "651": "yso-paikat"
+      "655": "slm"
+      "382": "seko"
+
+    preserved_diacritics: "åäöÅÄÖ"
+    biographical_date_prefixes:
+      - "ca."
+      - "circa"
+      - "n."
+      - "s."
+      - "f."
+      - "b."
+      - "k."
+      - "d."
+      - "fl."
+      - "floruit"
+      - "born"
+      - "died"
+      - "död"
+      - "syntynyt"
+      - "kuollut"
+
+    biographical_era_bc:
+      - "eaa."
+      - "ekr."
+      - "f.kr."
+      - "bc"
+      - "bce"
+
+    biographical_era_ad:
+      - "jaa."
+      - "jkr."
+      - "ad"
+
+    biographical_century_suffixes:
+      - "luku"
+      - "talet"
+      - "l."
+      - "t."
+
+    biographical_date_pattern: null
+    default_language: "fi"
+

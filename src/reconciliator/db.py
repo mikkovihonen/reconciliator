@@ -34,7 +34,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
             CREATE TABLE IF NOT EXISTS authority_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source TEXT NOT NULL,
-                external_id TEXT NOT NULL UNIQUE,
+                source_id TEXT NOT NULL UNIQUE,
                 title TEXT NOT NULL,
                 title_normalized TEXT,
                 uniform_title TEXT,

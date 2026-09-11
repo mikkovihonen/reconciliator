@@ -52,7 +52,7 @@ class OAIPMHHarvester:
 
     def __init__(
         self,
-        endpoint_url: str = "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib",
+        endpoint_url: str,
         metadata_prefix: str = "marc21",
         set_spec: Optional[str] = None,
         timeout: float = 60.0,

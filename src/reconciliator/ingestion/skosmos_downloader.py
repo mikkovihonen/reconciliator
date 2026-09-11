@@ -11,22 +11,6 @@ import httpx2
 from reconciliator.progress import ProgressTracker
 from reconciliator.version import get_default_user_agent
 
-FINTO_CANONICAL_DUMP_URLS: dict[str, str] = {
-    "yso": "https://api.finto.fi/download/yso/yso-skos.ttl",
-    "yso-paikat": "https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl",
-    "yso-aika": "https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl",
-    "finaf": "https://api.finto.fi/download/finaf/finaf-skos.ttl",
-    "kauno": "https://api.finto.fi/download/kauno/kauno-skos.ttl",
-    "kaunokki": "https://api.finto.fi/download/kaunokki/kaunokki-skos.ttl",
-    "muso": "https://api.finto.fi/download/muso/muso-skos.ttl",
-    "slm": "https://api.finto.fi/download/slm/slm-skos.ttl",
-    "allars": "https://api.finto.fi/download/allars/allars-skos.ttl",
-    "ysa": "https://api.finto.fi/download/ysa/ysa-skos.ttl",
-    "musa": "https://api.finto.fi/download/musa/musa-skos.ttl",
-    "seko": "https://api.finto.fi/download/seko/seko-skos.ttl",
-    "mts": "https://api.finto.fi/download/metatietosanasto/metatietosanasto-skos.ttl",
-}
-
 
 class SkosmosDownloader:
     """Client for discovering and downloading SKOS vocabularies from Skosmos REST APIs."""
@@ -36,10 +20,12 @@ class SkosmosDownloader:
         api_url: str = "https://api.finto.fi/rest/v1",
         timeout_seconds: float = 120.0,
         user_agent: Optional[str] = None,
+        dump_urls: Optional[dict[str, str]] = None,
     ) -> None:
         self.api_url = api_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.user_agent = user_agent if user_agent is not None else get_default_user_agent()
+        self.dump_urls = dump_urls or {}
 
     def list_vocabularies(self, lang: str = "fi") -> list[dict[str, Any]]:
         """
@@ -90,10 +76,9 @@ class SkosmosDownloader:
             "Accept": f"{format}, application/x-turtle, text/n3;q=0.9, */*;q=0.1",
         }
 
-        # Try fast static dump if connecting to Finto and requesting Turtle
-        is_finto = "finto.fi" in self.api_url
-        if is_finto and "turtle" in format and vocab_id in FINTO_CANONICAL_DUMP_URLS:
-            dump_url = FINTO_CANONICAL_DUMP_URLS[vocab_id]
+        # Try static pre-built dump if configured for this vocabulary and format is turtle
+        if self.dump_urls and vocab_id in self.dump_urls and "turtle" in format:
+            dump_url = self.dump_urls[vocab_id]
             try:
                 with httpx2.Client(
                     timeout=self.timeout_seconds, headers=headers, follow_redirects=True
@@ -166,4 +151,3 @@ class SkosmosDownloader:
             )
 
         return downloaded
-

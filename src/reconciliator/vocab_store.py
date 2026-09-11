@@ -420,7 +420,9 @@ class VocabStore:
 
         with self.get_connection() as conn:
             # Clear existing vocabulary-derived aliases
-            conn.execute("DELETE FROM concept_aliases WHERE source IN ('vocab', 'concept_mapping');")
+            conn.execute(
+                "DELETE FROM concept_aliases WHERE source IN ('vocab', 'concept_mapping');"
+            )
 
             # 1. From concepts
             legacy_vocabs = {"ysa", "allars", "kaunokki", "bella", "musa", "cilla"}
@@ -510,4 +512,3 @@ class VocabStore:
 
         self.insert_aliases(aliases_to_insert)
         return len(aliases_to_insert)
-

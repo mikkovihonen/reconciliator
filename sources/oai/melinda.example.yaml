@@ -1,0 +1,148 @@
+# sources/oai/melinda.example.yaml - OAI-PMH source configuration for Melinda
+melinda:
+  enabled: true
+  source_type: "oai"
+  input_path: null
+  oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
+  metadata_prefix: "marc21"
+  set_spec: null
+  id_source: "marc_001"
+  workers: 8
+  from_date: null
+  until_date: null
+  slice_days: 30
+  batch_size: 500
+  request_delay: 0.1
+  timeout: 60.0
+  normalization:
+    non_filing_articles:
+      fi: ["yksi ", "eräs "]
+      sv: ["en ", "ett ", "den ", "det ", "de "]
+      en: ["the ", "a ", "an "]
+      de: ["der ", "die ", "das ", "ein ", "eine "]
+      fr: ["le ", "la ", "les ", "un ", "une ", "l'"]
+    publisher_suffixes:
+      - "oy"
+      - "oyj"
+      - "ab"
+      - "abp"
+      - "ltd"
+      - "inc"
+      - "corp"
+      - "gmbh"
+      - "kustannus"
+      - "kustannusosakeyhtiö"
+    volume_prefixes:
+      - "osa"
+      - "del"
+      - "vol"
+      - "volume"
+      - "bd"
+      - "band"
+      - "tome"
+      - "t"
+      - "v"
+      - "nro"
+      - "no"
+    volume_suffixes:
+      - "osa"
+      - "del"
+      - "vol"
+      - "kokoelma"
+      - "painos"
+    volume_format_template: "osa {num}"
+    fictional_qualifiers:
+      - "fiktiivinen"
+      - "fiktiv"
+      - "fictitious"
+    responsibility_prefixes:
+      - "kirjoittanut"
+      - "toimittanut"
+      - "toim."
+      - "kirj."
+      - "tekijä"
+      - "författare"
+      - "av"
+      - "by"
+      - "edited by"
+    responsibility_conjunctions:
+      - "ja"
+      - "sekä"
+      - "och"
+      - "and"
+      - "und"
+      - "et"
+    classification_priority:
+      - "ykl"
+      - "udk"
+      - "dewey"
+      - "lc"
+    default_classification_scheme: "ykl"
+    control_number_prefix: "(FI-MELINDA)"
+    control_number_padding_digits: 9
+    urn_pattern: "(urn:nbn:[^\\s]+)"
+    roman_numerals:
+      i: 1
+      ii: 2
+      iii: 3
+      iv: 4
+      v: 5
+      vi: 6
+      vii: 7
+      viii: 8
+      ix: 9
+      x: 10
+      xi: 11
+      xii: 12
+    relator_mappings:
+      kirjoittaja: "aut"
+      toimittaja: "edt"
+      kuvittaja: "ill"
+      kääntäjä: "trl"
+      suomentaja: "trl"
+      säveltäjä: "cmp"
+      author: "aut"
+      editor: "edt"
+      illustrator: "ill"
+      translator: "trl"
+      composer: "cmp"
+      författare: "aut"
+      redaktör: "edt"
+      illustratör: "ill"
+      översättare: "trl"
+    preserved_diacritics: "åäöÅÄÖ"
+    biographical_date_prefixes:
+      - "ca."
+      - "circa"
+      - "n."
+      - "s."
+      - "f."
+      - "b."
+      - "k."
+      - "d."
+      - "fl."
+      - "floruit"
+      - "born"
+      - "died"
+      - "död"
+      - "syntynyt"
+      - "kuollut"
+    biographical_era_bc:
+      - "eaa."
+      - "ekr."
+      - "f.kr."
+      - "bc"
+      - "bce"
+    biographical_era_ad:
+      - "jaa."
+      - "jkr."
+      - "ad"
+    biographical_century_suffixes:
+      - "luku"
+      - "talet"
+      - "l."
+      - "t."
+    biographical_date_pattern: null
+    custom_relator_terms: {}
+    default_language: "fi"
+

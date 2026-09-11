@@ -19,7 +19,7 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO authority_records (
-                        source, external_id, title
+                        source, source_id, title
                     ) VALUES ('melinda', ?, ?);
                     """,
                     (f"REC_{worker_id}_{i}", f"Title {worker_id} - {i}"),

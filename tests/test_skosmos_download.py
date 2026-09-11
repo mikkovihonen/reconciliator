@@ -11,10 +11,7 @@ import pytest
 import typer
 
 from reconciliator.cli import download_skosmos_cmd
-from reconciliator.ingestion.skosmos_downloader import (
-    FINTO_CANONICAL_DUMP_URLS,
-    SkosmosDownloader,
-)
+from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file, parse_turtle_simple
 from reconciliator.version import get_version
 from reconciliator.vocab_store import VocabStore
@@ -94,9 +91,13 @@ def test_skosmos_downloader_download_single(tmp_path: Path) -> None:
         )
 
 
-def test_skosmos_downloader_finto_dump_fallback(tmp_path: Path) -> None:
-    """Test that Finto URL triggers fast static dump endpoint for known vocabularies."""
-    downloader = SkosmosDownloader(api_url="https://api.finto.fi/rest/v1")
+def test_skosmos_downloader_static_dump_endpoint(tmp_path: Path) -> None:
+    """Test that configured dump_urls triggers fast static dump endpoint."""
+    dump_urls = {"yso": "https://api.finto.fi/download/yso/yso-skos.ttl"}
+    downloader = SkosmosDownloader(
+        api_url="https://api.finto.fi/rest/v1",
+        dump_urls=dump_urls,
+    )
     sample_turtle = b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
 
     mock_response = MagicMock()
@@ -111,7 +112,7 @@ def test_skosmos_downloader_finto_dump_fallback(tmp_path: Path) -> None:
         dest = downloader.download_vocabulary("yso", output_dir=tmp_path)
         assert dest.exists()
         assert dest.name == "yso.ttl"
-        mock_stream.assert_called_once_with("GET", FINTO_CANONICAL_DUMP_URLS["yso"])
+        mock_stream.assert_called_once_with("GET", dump_urls["yso"])
 
 
 def test_skosmos_downloader_skip_existing(tmp_path: Path) -> None:
@@ -356,7 +357,9 @@ download_skosmos:
 
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
-    mock_response.iter_bytes.return_value = [b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"]
+    mock_response.iter_bytes.return_value = [
+        b"@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+    ]
     mock_stream_ctx = MagicMock()
     mock_stream_ctx.__enter__.return_value = mock_response
     mock_stream_ctx.__exit__.return_value = None
@@ -405,7 +408,7 @@ def test_cli_download_skosmos_list(capsys: Any, tmp_path: Path) -> None:
             all_sources=False,
             vocab=None,
             output_dir=None,
-            api_url=None,
+            api_url="https://api.finto.fi/rest/v1",
             all_vocabs=False,
             list_vocabs=True,
             force=False,
@@ -440,4 +443,3 @@ download_skosmos:
             ingest=False,
         )
     assert exc_info.value.exit_code == 1
-

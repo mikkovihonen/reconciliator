@@ -235,38 +235,6 @@ def prune_cmd(
     console.print(f"[green]Successfully pruned {deleted} task(s) from progress.db.[/green]")
 
 
-@app.command("prune-telemetry", hidden=True)
-def prune_telemetry_cmd(
-    config: Path = typer.Option(
-        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
-    ),
-    task_id: Optional[str] = typer.Option(None, "--task-id", help="Prune specific task ID"),
-    completed: bool = typer.Option(False, "--completed", help="Prune completed tasks"),
-    failed: bool = typer.Option(False, "--failed", help="Prune failed tasks"),
-    older_than: Optional[str] = typer.Option(
-        None, "--older-than", help="Prune tasks older than duration (e.g. 7d, 24h, 30m, 60s)"
-    ),
-    keep_last: Optional[int] = typer.Option(None, "--keep-last", help="Keep the latest N tasks"),
-    all_tasks: bool = typer.Option(False, "--all", "-a", help="Prune all finished tasks"),
-    include_running: bool = typer.Option(
-        False, "--include-running", help="Include active running tasks in pruning"
-    ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
-) -> None:
-    """Alias for prune command."""
-    prune_cmd(
-        config=config,
-        task_id=task_id,
-        completed=completed,
-        failed=failed,
-        older_than=older_than,
-        keep_last=keep_last,
-        all_tasks=all_tasks,
-        include_running=include_running,
-        yes=yes,
-    )
-
-
 def _download_single_skosmos_source(
     cfg: AppConfig,
     src_name: str,
@@ -282,7 +250,11 @@ def _download_single_skosmos_source(
     target_dir = output_dir or dl_cfg.output_dir
     overwrite = force or dl_cfg.overwrite
 
-    downloader = SkosmosDownloader(api_url=target_api_url, timeout_seconds=dl_cfg.timeout_seconds)
+    downloader = SkosmosDownloader(
+        api_url=target_api_url,
+        timeout_seconds=dl_cfg.timeout_seconds,
+        dump_urls=dl_cfg.dump_urls,
+    )
 
     if all_vocabs:
         console.print(f"[cyan]Discovering all vocabularies from {target_api_url}...[/cyan]")
@@ -351,7 +323,7 @@ def download_skosmos_cmd(
         None,
         "--source",
         "-s",
-        help="Name of configured Skosmos source to download (defaults to 'finto')",
+        help="Name of configured Skosmos source to download",
     ),
     all_sources: bool = typer.Option(
         False, "--all", "-a", help="Download vocabularies for all enabled Skosmos sources"
@@ -365,9 +337,7 @@ def download_skosmos_cmd(
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", "-o", help="Target directory for downloaded .ttl files"
     ),
-    api_url: Optional[str] = typer.Option(
-        None, "--api-url", help="Override Skosmos REST API URL (e.g. https://api.finto.fi/rest/v1)"
-    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override Skosmos REST API URL"),
     all_vocabs: bool = typer.Option(
         False,
         "--all-vocabs",
@@ -391,12 +361,13 @@ def download_skosmos_cmd(
         if not effective_api_url:
             if source and source in cfg.download_skosmos:
                 effective_api_url = cfg.download_skosmos[source].api_url
-            elif "finto" in cfg.download_skosmos:
-                effective_api_url = cfg.download_skosmos["finto"].api_url
             elif cfg.download_skosmos:
                 effective_api_url = next(iter(cfg.download_skosmos.values())).api_url
             else:
-                effective_api_url = "https://api.finto.fi/rest/v1"
+                console.print(
+                    "[red]Error: No Skosmos API URL provided and no source configured under 'download_skosmos'.[/red]"
+                )
+                raise typer.Exit(code=1)
 
         downloader = SkosmosDownloader(api_url=effective_api_url)
         console.print(f"[cyan]Fetching available vocabularies from {effective_api_url}...[/cyan]")
@@ -412,11 +383,15 @@ def download_skosmos_cmd(
 
     if all_sources:
         if not cfg.download_skosmos:
-            console.print("[yellow]No Skosmos sources configured under 'download_skosmos'.[/yellow]")
+            console.print(
+                "[yellow]No Skosmos sources configured under 'download_skosmos'.[/yellow]"
+            )
             return
         enabled_sources = {k: v for k, v in cfg.download_skosmos.items() if v.enabled}
         if not enabled_sources:
-            console.print("[yellow]No Skosmos sources are currently enabled under 'download_skosmos'.[/yellow]")
+            console.print(
+                "[yellow]No Skosmos sources are currently enabled under 'download_skosmos'.[/yellow]"
+            )
             return
         for name, dl_cfg in enabled_sources.items():
             _download_single_skosmos_source(
@@ -443,16 +418,21 @@ def download_skosmos_cmd(
         src_name = source
         dl_cfg = cfg.download_skosmos[source]
     else:
-        if "finto" in cfg.download_skosmos:
-            src_name = "finto"
-            dl_cfg = cfg.download_skosmos["finto"]
+        enabled_sources = {k: v for k, v in cfg.download_skosmos.items() if v.enabled}
+        if enabled_sources:
+            src_name = next(iter(enabled_sources.keys()))
+            dl_cfg = enabled_sources[src_name]
         elif cfg.download_skosmos:
             src_name = next(iter(cfg.download_skosmos.keys()))
             dl_cfg = cfg.download_skosmos[src_name]
         else:
-            # Default fallback when no config exists or download_skosmos is unconfigured
-            src_name = "finto"
-            dl_cfg = SkosmosDownloadConfig()
+            console.print(
+                "[red]Error: No Skosmos source specified and none configured in 'download_skosmos'.[/red]"
+            )
+            console.print(
+                "Please specify --source or configure at least one source under 'download_skosmos'."
+            )
+            raise typer.Exit(code=1)
 
     _download_single_skosmos_source(
         cfg=cfg,
@@ -545,11 +525,11 @@ def ingest_oai_cmd(
         raise typer.Exit(code=1)
 
     vocab_store = VocabStore(cfg.storage.vocab_db)
-    vocab_folder = VocabFolder(vocab_store)
+    vocab_cfg = (
+        cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
+    ) or cfg.normalization.vocab
+    vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
     embedder = SentenceEmbedder(cfg.embedding)
-    normalizer = RecordNormalizer(
-        vocab_folder=vocab_folder, template_engine=embedder.template_engine
-    )
     store = AuthorityStore(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
     )
@@ -559,6 +539,13 @@ def ingest_oai_cmd(
             src_cfg.from_date = from_date
         if until_date:
             src_cfg.until_date = until_date
+
+        src_norm_cfg = src_cfg.normalization or cfg.normalization.record
+        normalizer = RecordNormalizer(
+            vocab_folder=vocab_folder,
+            template_engine=embedder.template_engine,
+            config=src_norm_cfg,
+        )
 
         tracker = ProgressTracker(
             db_path=cfg.storage.progress_db,
@@ -594,10 +581,16 @@ def ingest_wikidata_cmd(
         raise typer.Exit(code=1)
 
     vocab_store = VocabStore(cfg.storage.vocab_db)
-    vocab_folder = VocabFolder(vocab_store)
+    vocab_cfg = (
+        cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
+    ) or cfg.normalization.vocab
+    vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
     embedder = SentenceEmbedder(cfg.embedding)
+    wiki_norm_cfg = cfg.ingest_wikidata.normalization or cfg.normalization.record
     normalizer = RecordNormalizer(
-        vocab_folder=vocab_folder, template_engine=embedder.template_engine
+        vocab_folder=vocab_folder,
+        template_engine=embedder.template_engine,
+        config=wiki_norm_cfg,
     )
     store = AuthorityStore(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
@@ -635,10 +628,16 @@ def reconcile_cmd(
         raise typer.Exit(code=1)
 
     vocab_store = VocabStore(cfg.storage.vocab_db)
-    vocab_folder = VocabFolder(vocab_store)
+    vocab_cfg = (
+        cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
+    ) or cfg.normalization.vocab
+    vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
     embedder = SentenceEmbedder(cfg.embedding)
+    rec_norm_cfg = r_cfg.normalization or cfg.normalization.record
     normalizer = RecordNormalizer(
-        vocab_folder=vocab_folder, template_engine=embedder.template_engine
+        vocab_folder=vocab_folder,
+        template_engine=embedder.template_engine,
+        config=rec_norm_cfg,
     )
     store = AuthorityStore(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension

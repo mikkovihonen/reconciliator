@@ -52,11 +52,11 @@ class AuthorityStore:
                 cursor = conn.execute(
                     """
                     INSERT INTO authority_records (
-                        source, external_id, title, title_normalized,
+                        source, source_id, title, title_normalized,
                         uniform_title, edition, series, volume_info,
                         year, publisher, language, subjects_json, record_json
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(external_id) DO UPDATE SET
+                    ON CONFLICT(source_id) DO UPDATE SET
                         title = excluded.title,
                         record_json = excluded.record_json
                     RETURNING id;
@@ -177,7 +177,7 @@ class AuthorityStore:
     def find_exact_matches(self, identifiers: RecordIdentifiers) -> list[BibliographicRecord]:
         """
         Fast-path Tier 1 exact match query across ISBN, ISSN, URN, and control numbers.
-        Melinda records are prioritized over Wikidata.
+        Bibliographic authority records are prioritized over Wikidata.
         """
         query_values: list[tuple[str, str]] = []
         for isbn in identifiers.isbn:
