@@ -64,36 +64,16 @@ Extend the Reconciliator engine from a manifestation-level matching tool into a 
 ### 2.1 The WEMI Hierarchy
 Bibliographic metadata is organized into four distinct ontological levels:
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                                 WORK                                   │
-│  Abstract intellectual/artistic creation                               │
-│  • Uniform Title, Original Language, Primary Creator (Composer/Author) │
-│  • Subject Concept (YSO), Form/Genre (SLM), Medium of Performance      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ 1:N
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                              EXPRESSION                                │
-│  Intellectual or artistic realization of a Work                        │
-│  • Language of Expression, Content Type (text, spoken, audio)          │
-│  • Secondary Contributors: Translator (trl), Arranger (arr),           │
-│    Performer (prf), Conductor (cnd)                                    │
-│  • Version/Edition Designation (e.g., 'Revised translation', 'Live')   │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ 1:N
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                             MANIFESTATION                              │
-│  Physical or digital embodiment of one or more Expressions             │
-│  • Imprint: Publisher, Year, Publication Place                         │
-│  • Carrier Type, Extent, Edition, Volume/Part Designation              │
-│  • Standard Carrier Identifiers: ISBN, ISSN, URN, DOI, Publisher No    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ 1:N
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                                 ITEM                                   │
-│  Single physical copy or digital access license                        │
-│  • Barcode, Call Number, Shelf Location, Provenance / Condition        │
-└────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W["WORK: Abstract intellectual/artistic creation | Uniform Title, Original Language, Primary Creator (Composer/Author), Subject Concept (YSO), Form/Genre (SLM), Medium of Performance"]
+    E["EXPRESSION: Intellectual/artistic realization of a Work | Language of Expression, Content Type (text, spoken, audio), Secondary Contributors (trl, arr, prf, cnd), Version/Edition Designation"]
+    M["MANIFESTATION: Physical or digital embodiment | Imprint (Publisher, Year, Place), Carrier Type, Extent, Edition, Volume/Part, Standard Identifiers (ISBN, ISSN, URN, DOI, Publisher No)"]
+    I["ITEM: Single physical copy or digital access license | Barcode, Call Number, Shelf Location, Provenance / Condition"]
+
+    W -->|"1:N"| E
+    E -->|"1:N"| M
+    M -->|"1:N (opt-in)"| I
 ```
 
 ### 2.2 Container–Component (Whole–Part) Modeling for Aggregates
@@ -150,59 +130,27 @@ Monographs represent simple 1:1:1 ($W \rightarrow E \rightarrow M$) structures. 
 #### 2.2.2 Detailed WEMI Structures per Aggregate Type
 
 ##### A. Recorded Sound (Music CDs / Streaming Albums)
-```
-Container        ┌──────────────────────────────────┐
-(Album)          │ Manifestation (The Audio CD)      │
-                 │ Label: Ondine, No: ODE 1020       │
-                 │ Carrier: 'audio disc'             │
-                 └──────────────┬───────────────────┘
-                                │ manifestation_expressions (1:N, track_number)
-                 ┌──────────────▼───────────────────┐
-Components       │ Audio Expressions (Tracks)        │
-(Tracks)         │ content_type: 'audio_music'       │
-                 │ Perf: HKO, Cond: Mälkki           │
-                 └──────────────┬───────────────────┘
-                                │ expressionOf
-                 ┌──────────────▼───────────────────┐
-Constituent      │ Musical Works (Compositions)      │
-Works            │ Sibelius: Symphony No. 1, op. 39  │
-                 │ work_type: 'music'                │
-                 │ Role: cmp (Jean Sibelius)          │
-                 │ Medium: orchestra                  │
-                 └──────────────────────────────────┘
+```mermaid
+flowchart TD
+    M["Manifestation: The Audio CD | Label: Ondine, No: ODE 1020 | Carrier: audio disc"]
+    E["Audio Expressions (Tracks) | content_type: audio_music | Perf: HKO, Cond: Mälkki"]
+    W["Musical Works (Compositions) | Sibelius: Symphony No. 1, op. 39 | work_type: music | Role: cmp (Jean Sibelius) | Medium: orchestra"]
+
+    M -->|"manifestation_expressions (1:N, track_number)"| E
+    E -->|"expressionOf"| W
 ```
 
 ##### B. Notated Music (Printed Scores)
 Notated music has a fundamentally different WEMI split from recorded sound. The **Work** is the composition itself, the **Expression** represents a specific **edition/arrangement/reduction** (full score vs. vocal score vs. piano reduction vs. study score vs. parts), and the **Manifestation** is the printed publication:
 
-```
-Container        ┌───────────────────────────────────────┐
-(Score Volume)   │ Manifestation (Printed Score/Parts)    │
-                 │ Publisher: Breitkopf & Härtel           │
-                 │ ISMN: 979-0-004-18200-5                 │
-                 │ Plate No: EB 8548                       │
-                 │ Carrier: 'volume' (score) / 'volume'    │
-                 │          (parts set)                     │
-                 └──────────────┬────────────────────────┘
-                                │ manifestation_expressions (1:N if collection)
-                 ┌──────────────▼────────────────────────┐
-Expression       │ Score Expression                       │
-(Edition/        │ content_type: 'notated_music'          │
- Arrangement)    │ language: 'zxx' (no linguistic content) │
-                 │ edition_designation: 'Full Score' /      │
-                 │   'Vocal Score' / 'Piano Reduction'     │
-                 │ Arranger (arr) if reduction/arrangement │
-                 └──────────────┬────────────────────────┘
-                                │ expressionOf
-                 ┌──────────────▼────────────────────────┐
-Work             │ Musical Work (Composition)             │
-                 │ Sibelius: Finlandia, op. 26             │
-                 │ work_type: 'music'                      │
-                 │ Role: cmp (Jean Sibelius)                │
-                 │ Medium: orchestra                        │
-                 │ Key: A♭ major (if applicable)            │
-                 │ Thematic catalog: Op. 26                 │
-                 └──────────────────────────────────────┘
+```mermaid
+flowchart TD
+    M["Manifestation: Printed Score/Parts | Publisher: Breitkopf & Härtel | ISMN: 979-0-004-18200-5 | Plate No: EB 8548 | Carrier: volume"]
+    E["Score Expression | content_type: notated_music | language: zxx | edition_designation: Full Score / Vocal Score / Piano Reduction | Arranger (arr)"]
+    W["Musical Work (Composition) | Sibelius: Finlandia, op. 26 | work_type: music | Role: cmp (Jean Sibelius) | Medium: orchestra | Key: A♭ major | Thematic catalog: Op. 26"]
+
+    M -->|"manifestation_expressions (1:N if collection)"| E
+    E -->|"expressionOf"| W
 ```
 
 **Key difference from Recorded Sound**: In notated music, a single physical score volume may contain **multiple Works** (e.g., *"Sibelius: Complete Symphonies — Study Score"* containing 7 symphonies). This creates a container-component relationship where each constituent Work has its own Expression (all sharing `content_type: 'notated_music'` but potentially differing in arrangement type).
@@ -217,59 +165,33 @@ Work             │ Musical Work (Composition)             │
 - `700 12 $t` — Analytical entries for individual pieces in a collection score
 
 ##### C. Article Repositories (Journal Articles / Book Chapters)
-```
-Container        ┌───────────────────────────────────────┐
-(Host Journal)   │ Host Manifestation (Journal Issue/Vol) │
-                 │ "Virittäjä", Vol. 127, No. 2 (2023)   │
-                 │ ISSN: 0042-6806                        │
-                 └───────────────────┬───────────────────┘
-                                     │ container_id (1:N)
-                 ┌───────────────────▼───────────────────┐
-Components       │ Component Manifestation (The Article)  │
-(Articles)       │ is_component: true                      │
-                 │ component_type: 'article'               │
-                 │ pagination: 'p. 180-205'                │
-                 │ DOI: 10.1234/xyz                        │
-                 └───────────────────┬───────────────────┘
-                                     │ manifestation_expressions
-                 ┌───────────────────▼───────────────────┐
-Expression       │ Article Expression                      │
-                 │ content_type: 'text'                    │
-                 │ language: 'fin'                         │
-                 └───────────────────┬───────────────────┘
-                                     │ expressionOf
-                 ┌───────────────────▼───────────────────┐
-Work             │ Article Work                            │
-                 │ Author: Virtanen, M. (role: 'aut')      │
-                 │ work_type: 'text'                       │
-                 └───────────────────────────────────────┘
+```mermaid
+flowchart TD
+    M_Host["Host Manifestation: Journal Issue/Vol | Virittäjä, Vol. 127, No. 2 (2023) | ISSN: 0042-6806"]
+    M_Comp["Component Manifestation: The Article | is_component: true | component_type: article | pagination: p. 180-205 | DOI: 10.1234/xyz"]
+    E["Article Expression | content_type: text | language: fin"]
+    W["Article Work | Author: Virtanen, M. (role: aut) | work_type: text"]
+
+    M_Host -->|"container_id (1:N)"| M_Comp
+    M_Comp -->|"manifestation_expressions"| E
+    E -->|"expressionOf"| W
 ```
 
 ##### D. Audiobooks & Spoken Word
 The audiobook expression **realizes the same underlying textual Work** as the printed book. This cross-content-type linkage is essential:
 
-```
-                 ┌──────────────────────────────────────────┐
-                 │            Shared Work                    │
-                 │  Tolkien: The Lord of the Rings           │
-                 │  work_type: 'text'                        │
-                 │  Role: aut (J.R.R. Tolkien)               │
-                 └────────┬──────────────────┬──────────────┘
-                          │                  │
-            ┌─────────────▼───┐    ┌─────────▼──────────────┐
-            │ Text Expression │    │ Spoken Word Expression  │
-            │ language: 'fin' │    │ language: 'fin'         │
-            │ trl: Kersti Juva│    │ content_type:           │
-            │ content_type:   │    │   'spoken_word'         │
-            │   'text'        │    │ nrt: Ville Virtanen     │
-            └────────┬────────┘    └─────────┬──────────────┘
-                     │                       │
-            ┌────────▼────────┐    ┌─────────▼──────────────┐
-            │ Print Edition   │    │ Audiobook CD/Download   │
-            │ ISBN: 978-...   │    │ Publisher No: ...       │
-            │ carrier: volume │    │ carrier: audio disc /   │
-            └─────────────────┘    │   online resource       │
-                                   └────────────────────────┘
+```mermaid
+flowchart TD
+    W["Shared Work: Tolkien: The Lord of the Rings | work_type: text | Role: aut (J.R.R. Tolkien)"]
+    E_Text["Text Expression | language: fin | trl: Kersti Juva | content_type: text"]
+    E_Spoken["Spoken Word Expression | language: fin | content_type: spoken_word | nrt: Ville Virtanen"]
+    M_Print["Print Edition | ISBN: 978-... | carrier: volume"]
+    M_Audio["Audiobook CD/Download | Publisher No: ... | carrier: audio disc / online resource"]
+
+    W --> E_Text
+    W --> E_Spoken
+    E_Text --> M_Print
+    E_Spoken --> M_Audio
 ```
 
 **MARC specifics for Audiobooks**:
@@ -279,27 +201,14 @@ The audiobook expression **realizes the same underlying textual Work** as the pr
 - The textual Work can be linked back via `240 $0` or `758` to the same Work URI as the printed edition
 
 ##### E. Moving Image (Film / Video Compilations)
-```
-Container        ┌──────────────────────────────────────┐
-(Box Set)        │ Manifestation (DVD/Blu-ray Box Set)   │
-                 │ "Aki Kaurismäki Collection"            │
-                 │ Carrier: 'videodisc'                   │
-                 │ EAN/UPC: 6438044366...                 │
-                 └──────────────┬───────────────────────┘
-                                │ manifestation_expressions (1:N, disc_number)
-                 ┌──────────────▼───────────────────────┐
-Components       │ Moving Image Expressions              │
-(Films)          │ content_type: 'moving_image'          │
-                 │ language: 'fin' (audio) / subtitles   │
-                 └──────────────┬───────────────────────┘
-                                │ expressionOf
-                 ┌──────────────▼───────────────────────┐
-Constituent      │ Moving Image Works                    │
-Works            │ "Mies vailla menneisyyttä" (2002)     │
-                 │ work_type: 'moving_image'             │
-                 │ drt: Aki Kaurismäki                   │
-                 │ aus: Aki Kaurismäki (screenwriter)    │
-                 └──────────────────────────────────────┘
+```mermaid
+flowchart TD
+    M["Manifestation: DVD/Blu-ray Box Set | Aki Kaurismäki Collection | Carrier: videodisc | EAN/UPC: 6438044366..."]
+    E["Moving Image Expressions | content_type: moving_image | language: fin (audio) / subtitles"]
+    W["Moving Image Works | Mies vailla menneisyyttä (2002) | work_type: moving_image | drt: Aki Kaurismäki | aus: Aki Kaurismäki"]
+
+    M -->|"manifestation_expressions (1:N, disc_number)"| E
+    E -->|"expressionOf"| W
 ```
 
 **MARC specifics for Moving Image**:
@@ -310,56 +219,29 @@ Works            │ "Mies vailla menneisyyttä" (2002)     │
 - `028` — Publisher / distributor number
 
 ##### F. Anthologies & Essay Collections
-```
-Container        ┌───────────────────────────────────────┐
-(Anthology)      │ Manifestation (Printed Collection)     │
-                 │ "Finnish Short Stories of the 20th C." │
-                 │ ISBN: 978-951-...                      │
-                 │ edt: Pekka Tarkka (editor)             │
-                 └──────────────┬────────────────────────┘
-                                │ manifestation_expressions (1:N)
-                 ┌──────────────▼────────────────────────┐
-Components       │ Text Expressions                       │
-(Stories)        │ content_type: 'text'                   │
-                 │ language: 'fin'                        │
-                 └──────────────┬────────────────────────┘
-                                │ expressionOf
-                 ┌──────────────▼────────────────────────┐
-Constituent      │ Independent Text Works                 │
-Works            │ Alexis Kivi: "Seitsemän veljestä" (excerpt) │
-                 │ Juhani Aho: "Rautatie"                │
-                 │ Each with own aut, own Work URI        │
-                 └──────────────────────────────────────┘
+```mermaid
+flowchart TD
+    M["Manifestation: Printed Collection | Finnish Short Stories of the 20th C. | ISBN: 978-951-... | edt: Pekka Tarkka (editor)"]
+    E["Text Expressions | content_type: text | language: fin"]
+    W["Independent Text Works | Aleksis Kivi: Seitsemän veljestä (excerpt) | Juhani Aho: Rautatie | Each with own aut, own Work URI"]
+
+    M -->|"manifestation_expressions (1:N)"| E
+    E -->|"expressionOf"| W
 ```
 
 ##### G. Serials & Continuing Resources (Journals, Periodicals, Newspapers)
 Serials represent continuing intellectual works that unfold over time through sequential issues or volumes. A key complexity in serials is **title succession** (MARC `780`/`785`), where major title changes create distinct bibliographic Works connected in a historical chain:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Preceding Serial Work                        │
-                  │ "Suomi: Kirjoituksia isänmaallisista..."     │
-                  │ ISSN: 0355-1237                              │
-                  └──────────────────────┬───────────────────────┘
-                                         │ succeededBy (MARC 785 / bf:succeededBy)
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Current Serial Work                          │
-                  │ "Suomi: Suomalaisen Kirjallisuuden Seuran..."│
-                  │ ISSN: 1238-4567                              │
-                  └──────────────────────┬───────────────────────┘
-                                         │ continues (MARC 780 / bf:precededBy)
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-Container         │ Serial Manifestation                         │
-(Issues / Volumes)│ Vol. 142 (2020), No. 1–4                     │
-                  │ ISSN-L: 0355-1237                            │
-                  │ Publisher: Suomalaisen Kirjallisuuden Seura  │
-                  └──────────────────────┬───────────────────────┘
-                                         │ contains constituent articles (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-Components        │ Component Manifestations (Articles)          │
-                  │ Linked via 773 $w to Serial Manifestation    │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Prec["Preceding Serial Work: Suomi: Kirjoituksia isänmaallisista... | ISSN: 0355-1237"]
+    W_Curr["Current Serial Work: Suomi: Suomalaisen Kirjallisuuden Seuran... | ISSN: 1238-4567"]
+    M_Serial["Serial Manifestation: Vol. 142 (2020), No. 1–4 | ISSN-L: 0355-1237 | Publisher: Suomalaisen Kirjallisuuden Seura"]
+    M_Art["Component Manifestations (Articles) | Linked via 773 $w to Serial Manifestation"]
+
+    W_Prec -->|"succeededBy (MARC 785 / bf:succeededBy)"| W_Curr
+    W_Curr -->|"continues (MARC 780 / bf:precededBy) (1:N)"| M_Serial
+    M_Serial -->|"contains constituent articles (1:N)"| M_Art
 ```
 
 **MARC specifics for Serials**:
@@ -373,28 +255,16 @@ Components        │ Component Manifestations (Articles)          │
 ##### H. Multi-Part Monograph Series
 Multi-part series (e.g. *Suomen kansan vanhat runot* or *Harry Potter*) involve two levels of Works: the **Series Work** (the overarching collection/series entity) and individual **Monograph Works** (each volume with its own distinct intellectual content and author/title):
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Series Super-Work                            │
-                  │ "Suomen kansan vanhat runot" (SKVR)          │
-                  │ Series ISSN / Uniform Title                  │
-                  └──────────────────────┬───────────────────────┘
-                                         │ hasPart (1:N) / seriesMember
-                  ┌──────────────────────▼───────────────────────┐
-Constituent Work  │ Volume Work                                  │
-(Specific Volume) │ SKVR I: Vienan läänin runot 1                │
-                  │ Volume author/editor: A. Borenius            │
-                  └──────────────────────┬───────────────────────┘
-                                         │ realization (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-Volume Expression │ Language / Version Expression                │
-                  └──────────────────────┬───────────────────────┘
-                                         │ manifestation (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-Manifestation     │ Volume Manifestation                         │
-                  │ ISBN: 978-951-...                            │
-                  │ 490/830 Series statement + volume numbering  │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Series["Series Super-Work: Suomen kansan vanhat runot (SKVR) | Series ISSN / Uniform Title"]
+    W_Vol["Volume Work: SKVR I: Vienan läänin runot 1 | Volume author/editor: A. Borenius"]
+    E_Vol["Volume Expression: Language / Version Expression"]
+    M_Vol["Volume Manifestation: ISBN: 978-951-... | 490/830 Series statement + volume numbering"]
+
+    W_Series -->|"hasPart (1:N) / seriesMember"| W_Vol
+    W_Vol -->|"realization (1:N)"| E_Vol
+    E_Vol -->|"manifestation (1:N)"| M_Vol
 ```
 
 **MARC specifics for Multi-Part Series**:
@@ -403,26 +273,14 @@ Manifestation     │ Volume Manifestation                         │
 ##### I. Conference Proceedings
 Conference proceedings are aggregates of peer-reviewed papers resulting from a specific scholarly event. The conference itself is an **Event Entity** (`CorporateName` / `MeetingName`), while the published book is an aggregate Manifestation containing individual paper Works:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Conference Event Entity                      │
-                  │ "Nordic Conference on Computational          │
-                  │  Linguistics (NODALIDA 2023)"                │
-                  │ MARC 111/711, Asteri / VIAF ID               │
-                  └──────────────────────┬───────────────────────┘
-                                         │ outputOf (Event -> Publication)
-                  ┌──────────────────────▼───────────────────────┐
-Container         │ Proceedings Manifestation                    │
-(Book / PDF)      │ "Proceedings of NODALIDA 2023"               │
-                  │ ISBN: 978-9916-..., Editors (edt)            │
-                  └──────────────────────┬───────────────────────┘
-                                         │ contains constituent papers (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-Constituent Work  │ Conference Paper Work                        │
-(Paper)           │ Author: Korhonen, A. (aut)                   │
-                  │ DOI: 10.18653/v1/2023.nodalida-1.5           │
-                  │ Linked via MARC 773 to proceedings volume    │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Conf["Conference Event Entity | Nordic Conference on Computational Linguistics (NODALIDA 2023) | MARC 111/711, Asteri / VIAF ID"]
+    M_Proc["Proceedings Manifestation | Proceedings of NODALIDA 2023 | ISBN: 978-9916-..., Editors (edt)"]
+    W_Paper["Conference Paper Work | Author: Korhonen, A. (aut) | DOI: 10.18653/v1/2023.nodalida-1.5 | Linked via MARC 773"]
+
+    Conf -->|"outputOf (Event -> Publication)"| M_Proc
+    M_Proc -->|"contains constituent papers (1:N)"| W_Paper
 ```
 
 **MARC specifics for Conference Proceedings**:
@@ -432,27 +290,16 @@ Constituent Work  │ Conference Paper Work                        │
 ##### J. Academic Theses & Dissertations
 Academic theses (doctoral dissertations, master's theses, licentiate theses) are intellectual Works created in satisfaction of degree requirements. In Finnish academic repositories (Theseus, Osuva, Helda) and Melinda, they frequently exhibit **dual-manifestation pairs** (printed edition + open access institutional PDF repository copy):
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Academic Thesis Work                         │
-                  │ Author: Mäkinen, L. (aut)                    │
-                  │ Title: "Neural Models for Morphologically    │
-                  │         Rich Languages"                      │
-                  │ Academic Degree: Doctoral dissertation       │
-                  │ University / Faculty (dgg): Univ. of Helsinki│
-                  │ Supervisor (ths): Salakoski, T.              │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:1
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Thesis Expression                            │
-                  │ Language: fin / eng                          │
-                  └───────────┬──────────────────────┬───────────┘
-                              │ 1:N                  │
-              ┌───────────────▼────────┐   ┌─────────▼───────────────┐
-              │ Print Manifestation    │   │ Digital Repository PDF  │
-              │ ISBN: 978-951-51-1234-5│   │ URN: URN:NBN:fi:hulib...│
-              │ Diss. Univ. Helsinki   │   │ Handle: 10138/...       │
-              └────────────────────────┘   └─────────────────────────┘
+```mermaid
+flowchart TD
+    W_Thesis["Academic Thesis Work | Author: Mäkinen, L. (aut) | Neural Models for Morphologically Rich Languages | Degree: Doctoral dissertation | Univ. of Helsinki (dgg) | Supervisor: Salakoski, T. (ths)"]
+    E_Thesis["Thesis Expression | Language: fin / eng"]
+    M_Print["Print Manifestation | ISBN: 978-951-51-1234-5 | Diss. Univ. Helsinki"]
+    M_Digi["Digital Repository PDF | URN: URN:NBN:fi:hulib... | Handle: 10138/..."]
+
+    W_Thesis -->|"1:1"| E_Thesis
+    E_Thesis -->|"1:N"| M_Print
+    E_Thesis -->|"1:N"| M_Digi
 ```
 
 **MARC specifics for Theses**:
@@ -464,27 +311,14 @@ Academic theses (doctoral dissertations, master's theses, licentiate theses) are
 ##### K. Cartographic Materials (Maps, Atlases, Remote Sensing)
 Cartographic works depict geographic space. The primary distinguishing attributes are **mathematical data** (scale, projection, bounding coordinates) rather than textual or musical properties:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Cartographic Work                            │
-                  │ Area: "Nuuksion kansallispuisto"             │
-                  │ work_type: 'cartography'                     │
-                  │ Coordinates (034): Bounding box lat/lon      │
-                  │ Primary Cartographer (ctg): Maanmittauslaitos│
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Cartographic Expression                      │
-                  │ Scale (255): 1:25 000                        │
-                  │ Projection: ETRS-TM35FIN                     │
-                  │ Edition / Revision Date: 2023                │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Map Manifestation (Sheet / Folded Map)       │
-                  │ Carrier: sheet / volume (if atlas)           │
-                  │ ISBN / National Map Sheet No (024 / 028)     │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Map["Cartographic Work | Area: Nuuksion kansallispuisto | work_type: cartography | Coordinates (034): Bounding box lat/lon | Primary Cartographer (ctg): Maanmittauslaitos"]
+    E_Map["Cartographic Expression | Scale (255): 1:25 000 | Projection: ETRS-TM35FIN | Edition / Revision Date: 2023"]
+    M_Map["Map Manifestation (Sheet / Folded Map) | Carrier: sheet / volume (if atlas) | ISBN / National Map Sheet No (024 / 028)"]
+
+    W_Map --> E_Map
+    E_Map --> M_Map
 ```
 
 **MARC specifics for Cartographic Materials**:
@@ -496,29 +330,16 @@ Cartographic works depict geographic space. The primary distinguishing attribute
 ##### L. Graphic Novels, Comics & Manga
 Sequential art represents an intersection of visual and textual storytelling with multi-tiered creative collaboration and long-running serial/anthology structures:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Comic Series Super-Work                      │
-                  │ "Muumipeikko" / "Sandman"                    │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Volume / Issue Work                          │
-                  │ Writer (aut): Gaiman, Neil                   │
-                  │ Penciler / Illustrator (ill): Kieth, Sam     │
-                  │ Colorist / Inker roles                       │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Translated Expression                        │
-                  │ Language: fin, Translator (trl)              │
-                  │ Lettering adaptation                         │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Album / Tankōbon Manifestation               │
-                  │ ISBN, Carrier: volume                        │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Series["Comic Series Super-Work | Muumipeikko / Sandman"]
+    W_Issue["Volume / Issue Work | Writer (aut): Gaiman, Neil | Penciler / Illustrator (ill): Kieth, Sam | Colorist / Inker roles"]
+    E_Trans["Translated Expression | Language: fin, Translator (trl) | Lettering adaptation"]
+    M_Album["Album / Tankōbon Manifestation | ISBN, Carrier: volume"]
+
+    W_Series -->|"1:N"| W_Issue
+    W_Issue -->|"1:N"| E_Trans
+    E_Trans -->|"1:N"| M_Album
 ```
 
 **MARC specifics for Comics/Manga**:
@@ -529,25 +350,14 @@ Sequential art represents an intersection of visual and textual storytelling wit
 ##### M. Datasets & Digital Research Data
 Research datasets are dynamic digital entities increasingly assigned DOIs (via DataCite) and deposited in open science repositories (Zenodo, Etsin, IDA):
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Dataset Work                                 │
-                  │ Creator (aut): Research Project Team         │
-                  │ work_type: 'dataset'                         │
-                  │ Spatial/temporal coverage                    │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Dataset Version Expression                   │
-                  │ Version Designation: "Version 2.1.0"         │
-                  │ File Formats: CSV, NetCDF, Parquet           │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Digital Manifestation (Data Package)         │
-                  │ DOI: 10.23729/... (DataCite DOI)             │
-                  │ Repository: Fairdata Etsin / Zenodo          │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Data["Dataset Work | Creator (aut): Research Project Team | work_type: dataset | Spatial/temporal coverage"]
+    E_Data["Dataset Version Expression | Version Designation: Version 2.1.0 | File Formats: CSV, NetCDF, Parquet"]
+    M_Data["Digital Manifestation (Data Package) | DOI: 10.23729/... (DataCite DOI) | Repository: Fairdata Etsin / Zenodo"]
+
+    W_Data -->|"1:N"| E_Data
+    E_Data -->|"1:N"| M_Data
 ```
 
 **MARC specifics for Datasets**:
@@ -560,29 +370,16 @@ Research datasets are dynamic digital entities increasingly assigned DOIs (via D
 ##### N. Standards & Technical Reports
 Standards (e.g. SFS, ISO, CEN) and government technical reports (VTT, STUK) are characterized by rigid organizational attribution and strict **supersession / replacement lineages**:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Superseded Standard Work                     │
-                  │ "SFS-EN ISO 9001:2008"                       │
-                  └──────────────────────┬───────────────────────┘
-                                         │ replacedBy (MARC 785 / bf:replacementOf)
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Current Standard Work                        │
-                  │ "SFS-EN ISO 9001:2015"                       │
-                  │ Issuing Body (110): Suomen Standardisoimis-  │
-                  │                     liitto SFS               │
-                  │ work_type: 'standard'                        │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Official Language Expression (fin / swe / eng)│
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Published Standard Manifestation             │
-                  │ Standard Number: SFS-EN ISO 9001:2015        │
-                  │ ICS Classification (084): 03.120.10          │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Old["Superseded Standard Work: SFS-EN ISO 9001:2008"]
+    W_New["Current Standard Work: SFS-EN ISO 9001:2015 | Issuing Body (110): Suomen Standardisoimisliitto SFS | work_type: standard"]
+    E_Std["Official Language Expression (fin / swe / eng)"]
+    M_Std["Published Standard Manifestation | Standard Number: SFS-EN ISO 9001:2015 | ICS Classification (084): 03.120.10"]
+
+    W_Old -->|"replacedBy (MARC 785 / bf:replacementOf)"| W_New
+    W_New -->|"1:N"| E_Std
+    E_Std -->|"1:N"| M_Std
 ```
 
 **MARC specifics for Standards & Reports**:
@@ -594,20 +391,12 @@ Standards (e.g. SFS, ISO, CEN) and government technical reports (VTT, STUK) are 
 ##### O. Government Publications & Official Grey Literature
 Official publications (state committee reports *komiteanmietinnöt*, government bills *hallituksen esitykset*, ministry publication series) feature hierarchical institutional authorship:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Official Document Work                       │
-                  │ Issuing Ministry: Opetus- ja kulttuurimin.   │
-                  │ Title: "Korkeakoulutuksen kehittäminen..."   │
-                  │ Series: Opetus- ja kulttuuriministeriön      │
-                  │         julkaisuja 2023:14                   │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Open Access Government Manifestation         │
-                  │ URN: URN:ISBN:978-952-... (Valto repository) │
-                  │ Government series ISSN                       │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Gov["Official Document Work | Issuing Ministry: Opetus- ja kulttuurimin. | Korkeakoulutuksen kehittäminen... | Series: OKM julkaisuja 2023:14"]
+    M_Gov["Open Access Government Manifestation | URN: URN:ISBN:978-952-... (Valto) | Government series ISSN"]
+
+    W_Gov --> M_Gov
 ```
 
 **MARC specifics for Government Publications**:
@@ -617,18 +406,12 @@ Official publications (state committee reports *komiteanmietinnöt*, government 
 ##### P. 3D Objects, Realia & Educational Kits
 Realia encompass physical artefacts, museum objects, architectural models, and multi-media learning kits:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Realia Work                                  │
-                  │ Creator / Manufacturer                       │
-                  │ work_type: 'realia'                          │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Physical Artefact Manifestation              │
-                  │ Carrier Type (338): object / kit             │
-                  │ Physical Description (300): material, dims   │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Realia["Realia Work | Creator / Manufacturer | work_type: realia"]
+    M_Realia["Physical Artefact Manifestation | Carrier Type (338): object / kit | Physical Description (300): material, dims"]
+
+    W_Realia --> M_Realia
 ```
 
 **MARC specifics for Realia**:
@@ -639,32 +422,16 @@ Realia encompass physical artefacts, museum objects, architectural models, and m
 ##### Q. Archival Collections & Literary Manuscripts
 Archival materials follow **hierarchical multi-level arrangement** (ISAD(G) / Records in Contexts - RiC) rather than discrete independent publications. A central bibliographic objective is linking preliminary draft manuscripts (`draft_of`) to the final published canonical Work:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Archival Fonds / Collection                  │
-                  │ "Mika Waltarin arkisto"                      │
-                  │ Kansalliskirjasto käsikirjoituskokoelma      │
-                  │ Creator (cre): Waltari, Mika                 │
-                  └──────────────────────┬───────────────────────┘
-                                         │ hasPart (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Archival Series / Box                        │
-                  │ Kotelo 12: Käsikirjoitusluonnokset          │
-                  └──────────────────────┬───────────────────────┘
-                                         │ hasPart (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Manuscript Item (Draft Work)                 │
-                  │ "Sinuhe egyptiläinen (käsikirjoitusversio)"  │
-                  │ Leader/06 = 't' (Manuscript text)            │
-                  │ Provenance (561): Lahjoitus tekijältä 1978   │
-                  │ Draft Expression: Holograph manuscript       │
-                  └──────────────────────┬───────────────────────┘
-                                         │ draft_of (work_relationships)
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Published Canonical Work                     │
-                  │ "Sinuhe egyptiläinen" (W000100200)           │
-                  │ work_type: 'text'                            │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Fonds["Archival Fonds / Collection | Mika Waltarin arkisto | Kansalliskirjasto käsikirjoituskokoelma | Creator (cre): Waltari, Mika"]
+    Series["Archival Series / Box | Kotelo 12: Käsikirjoitusluonnokset"]
+    Item["Manuscript Item (Draft Work) | Sinuhe egyptiläinen (käsikirjoitusversio) | Leader/06: t (Manuscript text) | Provenance (561): Lahjoitus tekijältä 1978 | Draft Expression: Holograph manuscript"]
+    Canon["Published Canonical Work | Sinuhe egyptiläinen (W000100200) | work_type: text"]
+
+    Fonds -->|"hasPart (1:N)"| Series
+    Series -->|"hasPart (1:N)"| Item
+    Item -->|"draft_of (work_relationships)"| Canon
 ```
 
 **MARC specifics for Manuscripts & Archives**:
@@ -678,26 +445,16 @@ Archival materials follow **hierarchical multi-level arrangement** (ISAD(G) / Re
 ##### R. Still Images, Artworks & Ephemera
 Visual arts and cultural ephemera encompass photographs, art prints, original paintings, posters (*julisteet*), postcards, and legal-deposit ephemera (*pienpainatteet*):
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Visual Art Work                              │
-                  │ "Haavoittunut enkeli" (The Wounded Angel)    │
-                  │ Artist (art): Simberg, Hugo                  │
-                  │ work_type: 'still_image'                     │
-                  │ Depicted Scene / Place (751): Helsinki       │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Visual Expression                            │
-                  │ Content Type: 'still_image'                  │
-                  │ Technique: Oil on canvas / Print / Negative  │
-                  └───────────┬──────────────────────┬───────────┘
-                              │                      │
-              ┌───────────────▼────────┐   ┌─────────▼───────────────┐
-              │ Original Painting      │   │ Art Print / Poster      │
-              │ Ateneum Taidemuseo     │   │ Pienpainatekokoelma     │
-              │ Physical: oil, 127x154 │   │ Offset print, paper     │
-              └────────────────────────┘   └─────────────────────────┘
+```mermaid
+flowchart TD
+    W_Art["Visual Art Work | Haavoittunut enkeli (The Wounded Angel) | Artist (art): Simberg, Hugo | work_type: still_image | Depicted Scene / Place (751): Helsinki"]
+    E_Art["Visual Expression | Content Type: still_image | Technique: Oil on canvas / Print / Negative"]
+    M_Paint["Original Painting | Ateneum Taidemuseo | Physical: oil, 127x154"]
+    M_Print["Art Print / Poster | Pienpainatekokoelma | Offset print, paper"]
+
+    W_Art -->|"1:N"| E_Art
+    E_Art --> M_Paint
+    E_Art --> M_Print
 ```
 
 **MARC specifics for Visual Arts & Ephemera**:
@@ -709,27 +466,14 @@ Visual arts and cultural ephemera encompass photographs, art prints, original pa
 ##### S. Legal Norms, Statutes & Case Law
 Statutes (*Suomen säädöskokoelma / Finlex*), EU directives/regulations, and court rulings (*KKO, KHO, ECLI*) feature structured legislative uniform titles and **amendment/consolidation lineages**:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Base Statute Work                            │
-                  │ "Tekijänoikeuslaki" (Copyright Act)          │
-                  │ Uniform Title (240): Laki tekijänoikeudesta..│
-                  │ Jurisdiction: Suomi (110 1#)                 │
-                  │ Statute ID: SDK 19610404 (404/1961)          │
-                  └──────────────────────┬───────────────────────┘
-                                         │ amended_by / has_consolidation
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Amendment Act Work                           │
-                  │ "Laki tekijänoikeuslain muuttamisesta"       │
-                  │ Statute ID: SDK 20230433 (433/2023)          │
-                  │ DSM-direktiivin voimaansaattaminen           │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Enacted Law Manifestation                    │
-                  │ Säädöskokoelma 2023, s. 1-28                 │
-                  │ Finlex URI: https://data.finlex.fi/eli/sd... │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Base["Base Statute Work | Tekijänoikeuslaki (Copyright Act) | Uniform Title (240): Laki tekijänoikeudesta.. | Jurisdiction: Suomi (110 1#) | Statute ID: SDK 19610404 (404/1961)"]
+    W_Amend["Amendment Act Work | Laki tekijänoikeuslain muuttamisesta | Statute ID: SDK 20230433 (433/2023) | DSM-direktiivin voimaansaattaminen"]
+    M_Law["Enacted Law Manifestation | Säädöskokoelma 2023, s. 1-28 | Finlex URI: data.finlex.fi/eli/sd..."]
+
+    W_Base -->|"amended_by / has_consolidation"| W_Amend
+    W_Amend --> M_Law
 ```
 
 **MARC specifics for Legal Materials**:
@@ -741,21 +485,12 @@ Statutes (*Suomen säädöskokoelma / Finlex*), EU directives/regulations, and c
 ##### T. Patents & Intellectual Property
 Patents (PRH, EPO, WIPO) represent documented technical inventions organized by the International Patent Classification (IPC/CPC) with priority lineages:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Inventive Work (Invention)                   │
-                  │ Title: "Method for Biofuel Processing"       │
-                  │ Inventor (inv): Laaksonen, K.                │
-                  │ IPC Class (084): C10L 1/02                   │
-                  │ Priority Application: FI 20215123            │
-                  └──────────────────────┬───────────────────────┘
-                                         │ patent_family_member (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Patent Application / Grant Manifestation     │
-                  │ Patent No (013): FI 129456 B (Granted)       │
-                  │ Assignee / Applicant (asn): Neste Oyj        │
-                  │ Publication Date: 2023-05-15                 │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Pat["Inventive Work (Invention) | Title: Method for Biofuel Processing | Inventor (inv): Laaksonen, K. | IPC Class (084): C10L 1/02 | Priority Application: FI 20215123"]
+    M_Pat["Patent Application / Grant Manifestation | Patent No (013): FI 129456 B (Granted) | Assignee / Applicant (asn): Neste Oyj | Publication Date: 2023-05-15"]
+
+    W_Pat -->|"patent_family_member (1:N)"| M_Pat
 ```
 
 **MARC specifics for Patents**:
@@ -766,26 +501,14 @@ Patents (PRH, EPO, WIPO) represent documented technical inventions organized by 
 ##### U. Video Games & Interactive Media
 Video games represent multi-disciplinary interactive Works. While the underlying story, mechanics, and asset design form a single Game Work, **platform requirements create distinct Expressions and Manifestations**:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Interactive Game Work                        │
-                  │ "Alan Wake II"                               │
-                  │ Studio / Developer (cre): Remedy Entertainment│
-                  │ Lead Designer / Writer (dsr): Lake, Sam      │
-                  │ work_type: 'interactive_game'                │
-                  └──────────────────────┬───────────────────────┘
-                                         │ platform_expression (1:N)
-                  ┌──────────────────────▼───────────────────────┐
-Platform          │ PlayStation 5 Expression                     │
-Expression        │ Game Engine / PS5 build, PEGI 18 (521)       │
-                  └──────────────────────┬───────────────────────┘
-                                         │ 1:N
-Physical/Digital  ┌──────────────────────▼───────────────────────┐
-Manifestation     │ PS5 Disc / PlayStation Store Digital         │
-                  │ Barcode (024): 64300...                      │
-                  │ Carrier: computer disc / online resource     │
-                  │ System Specs (538): PlayStation 5 console    │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Game["Interactive Game Work | Alan Wake II | Studio / Developer (cre): Remedy Entertainment | Lead Designer / Writer (dsr): Lake, Sam | work_type: interactive_game"]
+    E_Platform["PlayStation 5 Expression | Game Engine / PS5 build, PEGI 18 (521)"]
+    M_PS5["PS5 Disc / PlayStation Store Digital | Barcode (024): 64300... | Carrier: computer disc / online resource | System Specs (538): PlayStation 5 console"]
+
+    W_Game -->|"platform_expression (1:N)"| E_Platform
+    E_Platform -->|"1:N"| M_PS5
 ```
 
 **MARC specifics for Video Games**:
@@ -798,26 +521,14 @@ Manifestation     │ PS5 Disc / PlayStation Store Digital         │
 ##### V. Integrating Resources & Loose-Leaf Publications
 Integrating resources (loose-leaf reference manuals, legal compendiums, continuously updated portals) do not produce separate issues; rather, new updates **integrate into and overwrite the existing resource**:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Integrating Resource Work                    │
-                  │ "Suomen laki: irtolehtijulkaisu"             │
-                  │ work_type: 'integrating'                     │
-                  │ Issuance: Integrating resource (Leader/07='i')│
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Integrating Expression                       │
-                  │ Language: fin / swe                          │
-                  │ Frequency (310): 4 päivityspakettia / vuosi  │
-                  └──────────────────────┬───────────────────────┘
-                                         │ successive replacement iterations
-                  ┌──────────────────────▼───────────────────────┐
-                  │ Current Integrated Manifestation             │
-                  │ Base Volume + Lisälehti No. 34 (Syksy 2023)  │
-                  │ Carrier: loose-leaf binder                   │
-                  │ Updating Dates (362): 1995-                  │
-                  └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Integ["Integrating Resource Work | Suomen laki: irtolehtijulkaisu | work_type: integrating | Issuance: Integrating resource (Leader/07=i)"]
+    E_Integ["Integrating Expression | Language: fin / swe | Frequency (310): 4 päivityspakettia / vuosi"]
+    M_Integ["Current Integrated Manifestation | Base Volume + Lisälehti No. 34 (Syksy 2023) | Carrier: loose-leaf binder | Updating Dates (362): 1995-"]
+
+    W_Integ --> E_Integ
+    E_Integ -->|"successive replacement iterations"| M_Integ
 ```
 
 **MARC specifics for Integrating Resources**:
@@ -828,36 +539,18 @@ Integrating resources (loose-leaf reference manuals, legal compendiums, continuo
 ##### W. Board Games & Tabletop Games (Lautapelit ja pöytäpelit)
 Board games represent physical ludic systems with distinct intellectual mechanics (Work), multilingual localized rulebooks/components (Expression), physical boxed products (Manifestation), and **expansion dependencies / Big Box aggregates**:
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ Base Board Game Work                         │
-                  │ "Catan" (The Settlers of Catan)              │
-                  │ Game Designer (dsr): Klaus Teuber            │
-                  │ Original Year: 1995                          │
-                  │ work_type: 'board_game'                      │
-                  └──────────────┬───────────────────────────────┘
-                                 │
-                 ┌───────────────┴───────────────────────────────┐
-                 │                                               │
-                 │ realization (1:N)                             │ expansion_of (1:N)
-                 ▼                                               ▼
-  ┌──────────────────────────────┐                ┌──────────────────────────────┐
-  │ Nordic Rules Expression      │                │ Expansion Work               │
-  │ Languages (041): fin,swe,dan │                │ "Catan: Merenkulkijat"       │
-  │ Rules Translator (trl)       │                │ (Seafarers of Catan)         │
-  └──────────────┬───────────────┘                └──────────────┬───────────────┘
-                 │                                               │
-                 │ manifestation (1:N)                           │ manifestation_expressions
-                 ▼                                               ▼
-  ┌──────────────────────────────┐                ┌──────────────────────────────┐
-  │ Standard Box Manifestation   │                │ "Big Box" Aggregate Box      │
-  │ Publisher: Lautapelit.fi     │                │ Embodies BOTH Base Game Work │
-  │ EAN (024): 643001827...      │                │ AND Seafarers Expansion Work │
-  │ Product No (028): LFI-CATAN  │                │ Carrier: box / object        │
-  │ Players (500): 3-4 pelaajaa  │                │ EAN (024): 400205169...      │
-  │ Duration: 60-90 min          │                └──────────────────────────────┘
-  │ Age (521): Ikäsuositus: 10+  │
-  └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Catan["Base Board Game Work | Catan (The Settlers of Catan) | Game Designer (dsr): Klaus Teuber | Original Year: 1995 | work_type: board_game"]
+    E_Nordic["Nordic Rules Expression | Languages (041): fin,swe,dan | Rules Translator (trl)"]
+    W_Seafarers["Expansion Work | Catan: Merenkulkijat (Seafarers of Catan)"]
+    M_Standard["Standard Box Manifestation | Publisher: Lautapelit.fi | EAN (024): 643001827... | Product No (028): LFI-CATAN | Players: 3-4 pelaajaa | Duration: 60-90 min | Age: Ikäsuositus: 10+"]
+    M_BigBox["Big Box Aggregate Box | Embodies BOTH Base Game Work AND Seafarers Expansion Work | Carrier: box / object | EAN (024): 400205169..."]
+
+    W_Catan -->|"realization (1:N)"| E_Nordic
+    W_Catan -->|"expansion_of (1:N)"| W_Seafarers
+    E_Nordic -->|"manifestation (1:N)"| M_Standard
+    W_Seafarers -->|"manifestation_expressions"| M_BigBox
 ```
 
 **MARC specifics for Board Games**:
@@ -873,27 +566,14 @@ Board games represent physical ludic systems with distinct intellectual mechanic
 ##### X. Early Printed Books & Incunabula (C15–C18 / Vanha painettu kirjallisuus)
 Early printed books (hand-press period) require modeling distinct typesetting states and imprint issues under a canonical intellectual Work. Physical copies (Items) hold unique copy-specific evidence (rubrication, binding, manuscript marginalia, provenance):
 
-```
-Container        ┌──────────────────────────────────────────────────────────┐
-(Manifestation)  │ Manifestation (Hand-Press Imprint / Issue)               │
-                 │ Colophon: Michael Agricola, Rucouskiria (1544)           │
-                 │ Printer: Amund Laurentsson, Stockholm                    │
-                 │ Fingerprint (026): e-te e-re r-e- thal 1544R             │
-                 │ Format: 4to (quarto), Collation: [4], CCXXXVI, [8] ff.   │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestation_expressions (1:1)
-                 ┌──────────────▼───────────────────────────────────────────┐
-                 │ Expression (Hand-Press Textual State / Edition)          │
-                 │ Language: fin (Early Modern Finnish)                     │
-                 │ Content Type: 'text'                                     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ expressionOf
-                 ┌──────────────▼───────────────────────────────────────────┐
-                 │ Canonical Work                                           │
-                 │ Michael Agricola: Rucouskiria Bibliasta                  │
-                 │ work_type: 'early_print' / 'text'                        │
-                 │ Uniform Title (240): Rucouskiria                         │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    M_Early["Manifestation: Hand-Press Imprint / Issue | Colophon: Michael Agricola, Rucouskiria (1544) | Printer: Amund Laurentsson, Stockholm | Fingerprint (026): e-te e-re r-e- thal 1544R | Format: 4to (quarto), Collation: 4, CCXXXVI, 8 ff."]
+    E_Early["Expression: Hand-Press Textual State / Edition | Language: fin (Early Modern Finnish) | Content Type: text"]
+    W_Early["Canonical Work | Michael Agricola: Rucouskiria Bibliasta | work_type: early_print / text | Uniform Title (240): Rucouskiria"]
+
+    M_Early -->|"manifestation_expressions (1:1)"| E_Early
+    E_Early -->|"expressionOf"| W_Early
 ```
 
 **MARC specifics for Early Printed Books**:
@@ -907,32 +587,18 @@ Container        ┌────────────────────
 ##### Y. Tactile & Accessible Media (Braille, DAISY-äänikirjat, koskettelukirjat)
 Tactile and accessible materials (produced by agencies such as Celia in Finland or NLS/RNIB) are **alternative accessible Expressions** linked directly back to the primary canonical Work:
 
-```
-Base Work        ┌──────────────────────────────────────────────────────────┐
-                 │ Canonical Literary Work                                  │
-                 │ Tove Jansson: Muumipappa ja meri (1965)                  │
-                 │ work_type: 'text', Author: aut (Tove Jansson)            │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │                                                          │
-                 │ expressionOf (Standard)                                  │ accessible_reproduction_of
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Print Swedish Expression     │                           │ Accessible Braille Expression│
-  │ content_type: 'text'         │                           │ content_type: 'tactile_text' │
-  │ language: 'swe'              │                           │ Transcription: Grade 2 Braill│
-  └──────────────┬───────────────┘                           │ Transcriber (brl): Celia     │
-                 │                                           └──────────────┬───────────────┘
-                 │ manifestation                                            │ manifestation
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Trade Book Manifestation     │                           │ Embossed Braille Volume      │
-  │ Schildts, 1965               │                           │ Celia, 1982                  │
-  │ ISBN: 951-50-...             │                           │ Carrier: tactile volume (338)│
-  │ Carrier: volume              │                           │ Access (341): tactile        │
-  └──────────────────────────────┘                           │ Summary (532): Pistekirjoitus│
-                                                             └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Lit["Canonical Literary Work | Tove Jansson: Muumipappa ja meri (1965) | work_type: text, Author: aut (Tove Jansson)"]
+    E_Swe["Print Swedish Expression | content_type: text | language: swe"]
+    E_Brl["Accessible Braille Expression | content_type: tactile_text | Transcription: Grade 2 Braille | Transcriber (brl): Celia"]
+    M_Trade["Trade Book Manifestation | Schildts, 1965 | ISBN: 951-50-... | Carrier: volume"]
+    M_Brl["Embossed Braille Volume | Celia, 1982 | Carrier: tactile volume (338) | Access (341): tactile | Summary (532): Pistekirjoitus"]
+
+    W_Lit -->|"expressionOf (Standard)"| E_Swe
+    W_Lit -->|"accessible_reproduction_of"| E_Brl
+    E_Swe -->|"manifestation"| M_Trade
+    E_Brl -->|"manifestation"| M_Brl
 ```
 
 **MARC specifics for Tactile & Accessible Media**:
@@ -945,32 +611,18 @@ Base Work        ┌────────────────────
 ##### Z. Software Source Code, Computational Pipelines & Trained AI Models
 Computational artifacts in research repositories (Zenodo, Software Heritage, Hugging Face) represent algorithms (Works), code distributions or model weight checkpoints (Expressions), and software distributions/repositories (Manifestations):
 
-```
-Work             ┌──────────────────────────────────────────────────────────┐
-                 │ Algorithm / Model Architecture Work                      │
-                 │ "FinBERT: Finnish Bidirectional Encoder"                 │
-                 │ work_type: 'ai_model' / 'software'                       │
-                 │ Creator (mlm/prg): TurkuNLP Group                        │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │                                                          │
-                 │ expressionOf (Base Weights)                              │ fine_tuned_from (Lineage)
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Base Model Weights Expression│                           │ Fine-Tuned Domain Weights    │
-  │ content_type: 'model_weights'│                           │ "FinBERT-cased-v0.1-ner"     │
-  │ Framework: PyTorch / SafeTen │                           │ content_type: 'model_weights'│
-  └──────────────┬───────────────┘                           └──────────────┬───────────────┘
-                 │                                                          │
-                 │ manifestation                                            │ manifestation
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Hugging Face Model Snapshot  │                           │ Hugging Face Fine-Tuned Repo │
-  │ Identifier: TurkuNLP/bert-   │                           │ Identifier: TurkuNLP/bert-   │
-  │   base-finnish-cased-v1      │                           │   base-finnish-cased-ner     │
-  │ SWHID: swh:1:dir:...         │                           │ SWHID: swh:1:dir:...         │
-  └──────────────────────────────┘                           └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Algo["Algorithm / Model Architecture Work | FinBERT: Finnish Bidirectional Encoder | work_type: ai_model / software | Creator (mlm/prg): TurkuNLP Group"]
+    E_Base["Base Model Weights Expression | content_type: model_weights | Framework: PyTorch / SafeTensors"]
+    E_FT["Fine-Tuned Domain Weights | FinBERT-cased-v0.1-ner | content_type: model_weights"]
+    M_HFBase["Hugging Face Model Snapshot | Identifier: TurkuNLP/bert-base-finnish-cased-v1 | SWHID: swh:1:dir:..."]
+    M_HFFT["Hugging Face Fine-Tuned Repo | Identifier: TurkuNLP/bert-base-finnish-cased-ner | SWHID: swh:1:dir:..."]
+
+    W_Algo -->|"expressionOf (Base Weights)"| E_Base
+    W_Algo -->|"fine_tuned_from (Lineage)"| E_FT
+    E_Base -->|"manifestation"| M_HFBase
+    E_FT -->|"manifestation"| M_HFFT
 ```
 
 **MARC specifics for Software & AI Models**:
@@ -984,32 +636,18 @@ Work             ┌────────────────────
 ##### AA. Dramatic Works, Choreography & Theatrical Staging (Näytelmät ja koreografiat)
 Performing arts separate the dramatic or choreographic creation (Work) from specific theatrical productions or stagings (Expressions) and published prompt scripts or video captures (Manifestations):
 
-```
-Dramatic         ┌──────────────────────────────────────────────────────────┐
-Work             │ Dramatic Work (Play)                                     │
-                 │ Aleksis Kivi: Lea (1869)                                 │
-                 │ work_type: 'drama', Playwright (aut): Aleksis Kivi       │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │                                                          │
-                 │ realization (Text Expression)                            │ staging_of (1:N)
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Printed Play Script Express. │                           │ Premiere Staging Production  │
-  │ content_type: 'text'         │                           │ Theater: Nya Teatern, 1869   │
-  │ Language: 'fin'              │                           │ Stage Director (drt): Kaarlo │
-  └──────────────┬───────────────┘                           │   Bergbom; Actress (act):    │
-                 │                                           │   Hedvig Charlotte Raa       │
-                 │ manifestation                             └──────────────┬───────────────┘
-                 ▼                                                          │
-  ┌──────────────────────────────┐                                          │ manifestation
-  │ Published Playbook           │                                          ▼
-  │ Imprint: Helsinki, 1869      │                           ┌──────────────────────────────┐
-  │ Carrier: volume              │                           │ Archival Production Prompt   │
-  └──────────────────────────────┘                           │   Book & Premiere Prompt MS  │
-                                                             │ Carrier: manuscript volume   │
-                                                             └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Drama["Dramatic Work (Play) | Aleksis Kivi: Lea (1869) | work_type: drama, Playwright (aut): Aleksis Kivi"]
+    E_Script["Printed Play Script Expression | content_type: text | Language: fin"]
+    E_Stage["Premiere Staging Production | Theater: Nya Teatern, 1869 | Stage Director (drt): Kaarlo Bergbom | Actress (act): Hedvig Charlotte Raa"]
+    M_Book["Published Playbook | Imprint: Helsinki, 1869 | Carrier: volume"]
+    M_Prompt["Archival Production Prompt Book & Premiere Prompt MS | Carrier: manuscript volume"]
+
+    W_Drama -->|"realization (Text Expression)"| E_Script
+    W_Drama -->|"staging_of (1:N)"| E_Stage
+    E_Script -->|"manifestation"| M_Book
+    E_Stage -->|"manifestation"| M_Prompt
 ```
 
 **MARC specifics for Drama & Choreography**:
@@ -1022,28 +660,14 @@ Work             │ Dramatic Work (Play)                                     �
 ##### BB. Broadcast Podcasts, Webcasts & Episodic Media (Podcastit ja verkko-ohjelmasarjat)
 Podcasts form digital episodic serial aggregates where an ongoing Show/Channel (Serial Work) contains individual Episodes (Component Works & Expressions), embodied in digital audio/video streams (Manifestations):
 
-```
-Show Work        ┌──────────────────────────────────────────────────────────┐
-(Serial)         │ Podcast Show Serial Work                                 │
-                 │ "Tiedeykkönen"                                           │
-                 │ work_type: 'podcast' / 'serial'                          │
-                 │ Broadcaster/Publisher (pbl): Yleisradio (Yle Areena)     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ has_part (1:N episodes)
-Episode Work     ┌──────────────▼───────────────────────────────────────────┐
-& Expression     │ Episode Component Work & Expression                      │
-                 │ "Kvanttifysiikan uudet arvoitukset"                      │
-                 │ Season: 2023, Episode: 42 (362 / 490 $v)                 │
-                 │ Host (hst): Sisko Loikkanen; Interviewee (ive): Fyysikko │
-                 │ content_type: 'spoken_word', Duration: 00:48:15          │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestation (1:N)
-Digital          ┌──────────────▼───────────────────────────────────────────┐
-Manifestation    │ Digital Audio Enclosure Manifestation                    │
-                 │ RSS GUID: yle:areena:podcast:tiedeykkonen:2023-10-15     │
-                 │ Audio Format: AAC / MP3, 128 kbps                        │
-                 │ Carrier: online resource (338)                           │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Podcast["Podcast Show Serial Work | Tiedeykkönen | work_type: podcast / serial | Broadcaster/Publisher (pbl): Yleisradio (Yle Areena)"]
+    E_Ep["Episode Component Work & Expression | Kvanttifysiikan uudet arvoitukset | Season: 2023, Episode: 42 (362 / 490 $v) | Host (hst): Sisko Loikkanen | Interviewee (ive): Fyysikko | content_type: spoken_word, Duration: 00:48:15"]
+    M_Digi["Digital Audio Enclosure Manifestation | RSS GUID: yle:areena:podcast:tiedeykkonen:2023-10-15 | Audio Format: AAC / MP3, 128 kbps | Carrier: online resource (338)"]
+
+    W_Podcast -->|"has_part (1:N episodes)"| E_Ep
+    E_Ep -->|"manifestation (1:N)"| M_Digi
 ```
 
 **MARC specifics for Podcasts**:
@@ -1056,31 +680,18 @@ Manifestation    │ Digital Audio Enclosure Manifestation                    �
 ##### CC. Bound-With / Sammelbände (Post-Publication Item-Level Composite Aggregates / Kokoomasidokset)
 *Sammelbände* represent post-publication physical integration. Distinct, independently published Manifestations (often printed by different printers in different years) were bound together into a **single physical Item** by a collector or library:
 
-```
-Item             ┌──────────────────────────────────────────────────────────┐
-(Physical Copy)  │ Single Physical Item (Composite Volume / Sammelband)     │
-                 │ Library Barcode: 31234009876543                          │
-                 │ Call Number: Fennica V. 12. sid.                         │
-                 │ Binding Date: c. 1720, Full leather with gilt spine      │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ itemOf (1:N composite binding)
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │ Bound-With Item Sequence 1                               │ Bound-With Item Sequence 2
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Independent Manifestation A  │                           │ Independent Manifestation B  │
-  │ Imprint: Turku, 1685         │                           │ Imprint: Stockholm, 1702     │
-  │ Printer: Johan Winter        │                           │ Printer: Henrik Keyser       │
-  │ Note (501): Sidottu yhteen   │                           │ Note (501): Sidottu yhteen   │
-  │   teoksen B kanssa           │                           │   teoksen A kanssa           │
-  └──────────────┬───────────────┘                           └──────────────┬───────────────┘
-                 │ manifestationOf                                          │ manifestationOf
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Distinct Work A              │                           │ Distinct Work B              │
-  │ Ericus Castren: Dissertatio  │                           │ Laurentius Tammelin: Oratio  │
-  │ work_type: 'text'            │                           │ work_type: 'text'            │
-  └──────────────────────────────┘                           └──────────────────────────────┘
+```mermaid
+flowchart TD
+    Item["Single Physical Item (Composite Volume / Sammelband) | Barcode: 31234009876543 | Call Number: Fennica V. 12. sid. | Binding: c. 1720, Full leather with gilt spine"]
+    M_A["Independent Manifestation A | Imprint: Turku, 1685 | Printer: Johan Winter | Note (501): Sidottu yhteen teoksen B kanssa"]
+    M_B["Independent Manifestation B | Imprint: Stockholm, 1702 | Printer: Henrik Keyser | Note (501): Sidottu yhteen teoksen A kanssa"]
+    W_A["Distinct Work A | Ericus Castren: Dissertatio | work_type: text"]
+    W_B["Distinct Work B | Laurentius Tammelin: Oratio | work_type: text"]
+
+    Item -->|"itemOf (1:N composite binding)"| M_A
+    Item -->|"itemOf (1:N composite binding)"| M_B
+    M_A -->|"manifestationOf"| W_A
+    M_B -->|"manifestationOf"| W_B
 ```
 
 **MARC specifics for Sammelbände / Bound-With**:
@@ -1092,27 +703,14 @@ Item             ┌────────────────────
 ##### DD. Web Archives & Harvested Web Crawls (Verkkoarkisto / WARC / WACZ)
 Web archives model harvested online captures under statutory legal deposit. A web domain, seed URL, or thematic harvest campaign is the abstract Work, individual crawl snapshots at discrete timestamps $T$ are Expressions, and physical WARC container files or WACZ packages are Manifestations:
 
-```
-Seed Work        ┌──────────────────────────────────────────────────────────┐
-                 │ Web Harvesting Seed Work / Campaign                      │
-                 │ "Suomalainen verkkoarkisto: Eduskuntavaalit 2023"        │
-                 │ work_type: 'web_harvest', Target: vaalit.fi              │
-                 │ Harvester (pbl): Kansalliskirjasto                       │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ realization (1:N crawl runs)
-Crawl Snapshot   ┌──────────────▼───────────────────────────────────────────┐
-Expression       │ Crawl Snapshot Expression (Timestamped)                  │
-                 │ Capture Date: 2023-03-28T14:15:30Z                       │
-                 │ Memento URI: http://verkkoarkisto.fi/web/20230328...     │
-                 │ content_type: 'web_archive_snapshot'                     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestation (1:N)
-WARC Package     ┌──────────────▼───────────────────────────────────────────┐
-Manifestation    │ Web ARChive (WARC) Container Manifestation               │
-                 │ WARC Record-ID: urn:uuid:7f3a8b20-1122-3344-5566...      │
-                 │ Filename: KAVI-ELEC-20230328-001.warc.gz                 │
-                 │ Carrier: online resource / digital archive file (338)    │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Seed["Web Harvesting Seed Work / Campaign | Suomalainen verkkoarkisto: Eduskuntavaalit 2023 | work_type: web_harvest, Target: vaalit.fi | Harvester (pbl): Kansalliskirjasto"]
+    E_Crawl["Crawl Snapshot Expression (Timestamped) | Capture Date: 2023-03-28T14:15:30Z | Memento URI: verkkoarkisto.fi/web/20230328... | content_type: web_archive_snapshot"]
+    M_WARC["Web ARChive (WARC) Container Manifestation | WARC Record-ID: urn:uuid:7f3a8b20-1122-3344-5566... | Filename: KAVI-ELEC-20230328-001.warc.gz | Carrier: online resource / digital archive file (338)"]
+
+    W_Seed -->|"realization (1:N crawl runs)"| E_Crawl
+    E_Crawl -->|"manifestation (1:N)"| M_WARC
 ```
 
 **MARC specifics for Web Archives**:
@@ -1124,33 +722,18 @@ Manifestation    │ Web ARChive (WARC) Container Manifestation               �
 ##### EE. Oral Histories & Ethnographic Fieldwork Collections (Muistitieto ja kenttä-äänitteet)
 Oral history and folkloric collections (SKS, Kotus, SLS) capture spoken testimonies and folk traditions. A single informant interview session (Work) yields concurrent, co-equal Expressions: the recorded spoken audio and synchronous verbatim transcriptions or phonetic glosses:
 
-```
-Interview        ┌──────────────────────────────────────────────────────────┐
-Session Work     │ Oral History Interview Work                              │
-                 │ "Inkeriläisten kansanlaulujen keruu: Larin Paraske"      │
-                 │ work_type: 'oral_history', Date: 1891                    │
-                 │ Field Collector (col): Adolf Neovius                     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │                                                          │
-                 │ realization (Spoken Audio Take)                          │ realization (Verbatim Text Transcript)
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Spoken Audio Expression      │                           │ Verbatim Transcript Express. │
-  │ content_type: 'interview_aud'│                           │ content_type: 'text'         │
-  │ Informant (ive): Larin Paras.│                           │ Transcriber (trc): Neovius   │
-  │ Interviewer (ivr): Neovius   │                           │ Language: 'fin' (dialect)    │
-  └──────────────┬───────────────┘                           └──────────────┬───────────────┘
-                 │                                                          │
-                 │ manifestation                                            │ manifestation
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Archival Master Audio Tape   │                           │ Manuscript Field Notebook    │
-  │ Repository: SKS Äänitearkisto│                           │ SKS Kansanrunousarkisto      │
-  │ Signum: SKS-Ä-1891-042       │                           │ Signum: SKS KRA Neovius 12   │
-  │ Restrictions (506): Avoin    │                           │ Restrictions (540): CC-BY    │
-  └──────────────────────────────┘                           └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Interview["Oral History Interview Work | Inkeriläisten kansanlaulujen keruu: Larin Paraske | work_type: oral_history, Date: 1891 | Field Collector (col): Adolf Neovius"]
+    E_Aud["Spoken Audio Expression | content_type: interview_aud | Informant (ive): Larin Paraske | Interviewer (ivr): Neovius"]
+    E_Trans["Verbatim Transcript Expression | content_type: text | Transcriber (trc): Neovius | Language: fin (dialect)"]
+    M_Tape["Archival Master Audio Tape | Repository: SKS Äänitearkisto | Signum: SKS-Ä-1891-042 | Restrictions (506): Avoin"]
+    M_MS["Manuscript Field Notebook | SKS Kansanrunousarkisto | Signum: SKS KRA Neovius 12 | Restrictions (540): CC-BY"]
+
+    W_Interview -->|"realization (Spoken Audio Take)"| E_Aud
+    W_Interview -->|"realization (Verbatim Text Transcript)"| E_Trans
+    E_Aud -->|"manifestation"| M_Tape
+    E_Trans -->|"manifestation"| M_MS
 ```
 
 **MARC specifics for Oral Histories**:
@@ -1162,29 +745,14 @@ Session Work     │ Oral History Interview Work                              �
 ##### FF. Broadcast Television & Radio Program Flow Archives (KAVI / Ritva)
 Audiovisual preservation institutes archive continuous linear broadcasting. A television/radio program or news broadcast is a broadcasting Work, specific linear scheduled airings are broadcast Expressions, and digital captures are Manifestations:
 
-```
-Program Work     ┌──────────────────────────────────────────────────────────┐
-                 │ Broadcast Program Work                                   │
-                 │ "Ajankohtainen kakkonen"                                 │
-                 │ work_type: 'broadcast_program'                           │
-                 │ Broadcaster (brd): Yleisradio (Yle TV2)                  │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ realization (1:N scheduled airings)
-Transmission     ┌──────────────▼───────────────────────────────────────────┐
-Expression       │ Broadcast Transmission Expression                        │
-                 │ Air Date & Time: 2015-12-08T21:00:00+02:00               │
-                 │ Channel: Yle TV2 (DVB-T / HD)                            │
-                 │ EIDR: 10.5240/1489-49A2-3956-4B2E-E023-M                 │
-                 │ content_type: 'broadcast_stream'                         │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestation (1:N)
-Off-Air Master   ┌──────────────▼───────────────────────────────────────────┐
-Manifestation    │ KAVI Ritva Off-Air Master Stream Manifestation           │
-                 │ KAVI Program ID: ritva:ohjelma:20151208004               │
-                 │ ISAN: 0000-0001-893A-0000-Z-0000-0000-U                 │
-                 │ Format: MPEG-2 TS Broadcast Transport Stream             │
-                 │ Carrier: digital master repository (338)                 │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Prog["Broadcast Program Work | Ajankohtainen kakkonen | work_type: broadcast_program | Broadcaster (brd): Yleisradio (Yle TV2)"]
+    E_Tx["Broadcast Transmission Expression | Air Date & Time: 2015-12-08T21:00:00+02:00 | Channel: Yle TV2 (DVB-T / HD) | EIDR: 10.5240/1489-49A2-3956-4B2E-E023-M | content_type: broadcast_stream"]
+    M_Master["KAVI Ritva Off-Air Master Stream Manifestation | KAVI Program ID: ritva:ohjelma:20151208004 | ISAN: 0000-0001-893A-0000-Z-0000-0000-U | Format: MPEG-2 TS | Carrier: digital master repository (338)"]
+
+    W_Prog -->|"realization (1:N scheduled airings)"| E_Tx
+    E_Tx -->|"manifestation (1:N)"| M_Master
 ```
 
 **MARC specifics for Broadcast Program Flow**:
@@ -1196,37 +764,17 @@ Manifestation    │ KAVI Ritva Off-Air Master Stream Manifestation           �
 ##### GG. Parallel Multilingual Editions & Polyglot Texts (Rinnakkaistekstit)
 Parallel text publications represent an aggregate of **multiple Expressions within a single physical Manifestation**. A single printed or digital volume presents two or more language realizations of the **same Work** side by side:
 
-```
-Single Work      ┌──────────────────────────────────────────────────────────┐
-                 │ Canonical Literary Work                                  │
-                 │ Sophocles: Oedipus Rex                                   │
-                 │ work_type: 'drama' / 'text', Author (aut): Sophocles     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │                                                          │
-                 │ realization (Greek Original Expression)                  │ realization (Finnish Verse Translation)
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Original Greek Text Express. │                           │ Finnish Verse Translation    │
-  │ content_type: 'text'         │                           │ content_type: 'text'         │
-  │ language: 'grc'              │                           │ language: 'fin'              │
-  └──────────────┬───────────────┘                           │ Translator (trl): Veijo Meri │
-                 │                                           └──────────────┬───────────────┘
-                 │                                                          │
-                 └──────────────────────────────┬───────────────────────────┘
-                                                │ BOTH expressions manifested in (1:N)
-                                                ▼
-                                 ┌──────────────────────────────┐
-                                 │ Bilingual Facing-Page Book   │
-                                 │ "Kuningas Oidipus /          │
-                                 │  Oidipous Tyrannos"          │
-                                 │ Languages (041): grc, fin    │
-                                 │ Language Note (546): Kreikan-│
-                                 │   ja suomenkieliset rinnakk. │
-                                 │ ISBN: 978-951-0-12345-6      │
-                                 │ Carrier: volume              │
-                                 └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Drama["Canonical Literary Work | Sophocles: Oedipus Rex | work_type: drama / text, Author (aut): Sophocles"]
+    E_Grc["Original Greek Text Expression | content_type: text | language: grc"]
+    E_Fin["Finnish Verse Translation | content_type: text | language: fin | Translator (trl): Veijo Meri"]
+    M_Book["Bilingual Facing-Page Book | Kuningas Oidipus / Oidipous Tyrannos | Languages (041): grc, fin | ISBN: 978-951-0-12345-6 | Carrier: volume"]
+
+    W_Drama -->|"realization (Greek Original Expression)"| E_Grc
+    W_Drama -->|"realization (Finnish Verse Translation)"| E_Fin
+    E_Grc -->|"manifestation (1:N)"| M_Book
+    E_Fin -->|"manifestation (1:N)"| M_Book
 ```
 
 **MARC specifics for Parallel Texts**:
@@ -1237,26 +785,15 @@ Single Work      ┌────────────────────
 ##### HH. Preservation Surrogates & Microform Facsimiles (Mikromuodot ja digitoidut korvikkeet)
 Preservation reproductions (master microfilms, microfiche jackets, high-resolution preservation digital scans in *digi.kansalliskirjasto.fi*) are distinct **reproduction Manifestations** linked to the parent print publication and canonical Work:
 
-```
-Canonical Work   ┌──────────────────────────────────────────────────────────┐
-                 │ Serial Work                                              │
-                 │ "Uusi Suometar" (1869-1918)                              │
-                 │ work_type: 'serial', ISSN: 1457-4683                     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │
-                 ┌──────────────┴───────────────────────────────────────────┐
-                 │                                                          │
-                 │ manifestationOf (Original Print)                         │ has_reproduction (Preservation)
-                 ▼                                                          ▼
-  ┌──────────────────────────────┐                           ┌──────────────────────────────┐
-  │ Original Print Manifestation │                           │ Digitized Preservation Surrog│
-  │ Year: 1899                   │                           │ "Digi - Kansalliskirjasto"   │
-  │ Carrier: volume / newspaper  │                           │ Carrier: online resource(338)│
-  │ Condition: Happamoitunut     │                           │ URN: urn.fi/URN:NBN:fi-fd... │
-  └──────────────┬───────────────┘                           │ Linking (776): Mikrofilmi /  │
-                 │ reproduction_of                           │   Alkuperäinen painate       │
-                 └──────────────────────────────────────────►│ Note (533): Digitoitu 2012   │
-                                                             └──────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Serial["Serial Work | Uusi Suometar (1869-1918) | work_type: serial, ISSN: 1457-4683"]
+    M_Print["Original Print Manifestation | Year: 1899 | Carrier: volume / newspaper | Condition: Happamoitunut"]
+    M_Digi["Digitized Preservation Surrogate | Digi - Kansalliskirjasto | Carrier: online resource (338) | URN: urn.fi/URN:NBN:fi-fd..."]
+
+    W_Serial -->|"manifestationOf (Original Print)"| M_Print
+    W_Serial -->|"has_reproduction (Preservation)"| M_Digi
+    M_Print -.->|"reproduction_of"| M_Digi
 ```
 
 **MARC specifics for Preservation Surrogates**:
@@ -1265,152 +802,89 @@ Canonical Work   ┌────────────────────
 - `007` — Physical characteristics of reproduction (microform reduction ratio, generation, film emulsion, or electronic file)
 
 ##### II. Medieval Manuscript Fragments & Codicological Reconstructions (Fragmenta Membranea)
-```
-Virtual Parent   ┌──────────────────────────────────────────────────────────┐
-Codex Work       │ Reconstructed Medieval Codex Work                        │
-                 │ "Missale Aboense Codicis Antiqui" (c. 1400)              │
-                 │ work_type: 'codex_fragment', Uniform Title: Missale      │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ expressionOf (1:N)
-                 ┌──────────────┴───────────────────────────────────────────┐
-Dispersed Text & │ Liturgical Text & Neumatic Chant Expression              │
-Chant Expression │ content_type: 'manuscript_fragment', lang: 'lat'         │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestation_expressions (1:N)
-                 ┌──────────────┴───────────────────────────────────────────┐
-Fragment Items   │ Dispersed Physical Fragments (Fragmenta Membranea)       │
-Recycled in      │ 1. F.M. I.24: Folio 1r-v (Kansalliskirjasto)             │
-Bailiff Accounts │    recycled_in: Voutien tilikirjat, Häme 1556 (KA 3822)  │
-                 │ 2. F.M. I.25: Folio 2r-v (Kansallisarkisto)              │
-                 │    recycled_in: Voutien tilikirjat, Satakunta 1558       │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Codex["Reconstructed Medieval Codex Work | Missale Aboense Codicis Antiqui (c. 1400) | work_type: codex_fragment, Uniform Title: Missale"]
+    E_Liturg["Liturgical Text & Neumatic Chant Expression | content_type: manuscript_fragment, lang: lat"]
+    I_Frags["Dispersed Physical Fragments (Fragmenta Membranea) | 1. F.M. I.24: Folio 1r-v (Kansalliskirjasto) - Häme 1556 (KA 3822) | 2. F.M. I.25: Folio 2r-v (Kansallisarkisto) - Satakunta 1558"]
+
+    W_Codex -->|"expressionOf (1:N)"| E_Liturg
+    E_Liturg -->|"manifestation_expressions (1:N)"| I_Frags
 ```
 **MARC specifics for Medieval Manuscript Fragments**:
 - `024 7` — Persistent Fragment ID (`$a F.M. I.24 $2 fragmenta`)
 - `500` — Codicological note (`$a Fragmentti purettu voudintilikirjasta Häme 1556 (KA 3822)`)
 - `546` — Script & Notation (`$a Gotiikan kirjasinlaji, neliökirjoitusnotaatio`)
-- `758` — Work link to virtual parent reconstructed codex (`$4 http://id.loc.gov/ontologies/bibframe/hasWork`)
+- `758` — Work link to virtual parent reconstructed codex (`$4 http://id.loc.gov/ontologies/bibframe/instanceOf` or `$4 http://rdaregistry.info/Elements/m/P30135`)
 
 ##### JJ. Ephemera & Job Printing (Pienpainatteet / Commercial Catalogs)
-```
-Corporate Body   ┌──────────────────────────────────────────────────────────┐
-Anchor Work      │ Corporate Publication Aggregate Work                     │
-                 │ "Stockmannin tuoteluettelot ja hinnastot"                │
-                 │ work_type: 'ephemera', Corporate Body: Oy Stockmann Ab   │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ expressionOf (Chronological Series)
-                 ┌──────────────┴───────────────────────────────────────────┐
-Seasonal Text &  │ Seasonal Price List / Catalog Expression                 │
-Graphic Expr.    │ "Stockmannin syyskuvasto 1935", content_type: 'text'     │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestationOf
-Ephemeral Print  ┌──────────────┴───────────────────────────────────────────┐
-Leaflet / Booklet│ Physical Leaflet Manifestation                           │
-                 │ Year: 1935, Extent: 48 s. kuv., 655 #7: Pienpainatteet  │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Corp["Corporate Publication Aggregate Work | Stockmannin tuoteluettelot ja hinnastot | work_type: ephemera, Corporate Body: Oy Stockmann Ab"]
+    E_Cat["Seasonal Price List / Catalog Expression | Stockmannin syyskuvasto 1935, content_type: text"]
+    M_Leaf["Physical Leaflet Manifestation | Year: 1935, Extent: 48 s. kuv., 655 #7: Pienpainatteet"]
+
+    W_Corp -->|"expressionOf (Chronological Series)"| E_Cat
+    E_Cat -->|"manifestationOf"| M_Leaf
 ```
 
 ##### KK. Exhibition Catalogues & Curated Display Aggregates
-```
-Museum Event     ┌──────────────────────────────────────────────────────────┐
-Work             │ Exhibition Event Work (MARC 111 / bf:Event)              │
-                 │ "Edelfelt Pariisissa" (Ateneum 2023)                     │
-                 │ work_type: 'event' / 'exhibition', Curator: Ateneum      │
-                 └───────▲──────────────────────────────┬───────────────────┘
-                         │ documentationOf              │ exhibitsWork (1:N)
-Printed Monograph┌───────┴────────────────────┐  ┌──────▼───────────────────┐
-Catalogue        │ Monographic Manifestation  │  │ Exhibited Constituent W  │
-Manifestation    │ "Albert Edelfelt" (2023)   │  │ "Pariisitar" (1883)      │
-                 │ ISBN: 978-952-7371-55-8    │  │ Artist: Albert Edelfelt  │
-                 │ Carrier: volume            │  │ work_type: 'still_image' │
-                 └────────────────────────────┘  └──────────────────────────┘
+```mermaid
+flowchart TD
+    Event["Exhibition Event Work (MARC 111 / bf:Event) | Edelfelt Pariisissa (Ateneum 2023) | work_type: event / exhibition, Curator: Ateneum"]
+    M_Cat["Monographic Manifestation | Albert Edelfelt (2023) | ISBN: 978-952-7371-55-8 | Carrier: volume"]
+    W_Exh["Exhibited Constituent Work | Pariisitar (1883) | Artist: Albert Edelfelt | work_type: still_image"]
+
+    M_Cat -->|"documentationOf"| Event
+    Event -->|"exhibitsWork (1:N)"| W_Exh
 ```
 
 ##### LL. Scholarly Critical Editions & Textual Apparatus (Variorum Editions)
-```
-Canonical Base   ┌──────────────────────────────────────────────────────────┐
-Literary Work    │ Authorial Canonical Work                                 │
-                 │ Aleksis Kivi: "Seitsemän veljestä" (1870)                │
-                 │ work_type: 'text', Author: Aleksis Kivi                  │
-                 └───────▲──────────────────────────────────────────────────┘
-                         │ critical_edition_of
-Scholarly Critical┌──────┴──────────────────────────────────────────────────┐
-Edition Aggregate│ Critical Edition Work & Apparatus                        │
-                 │ "Seitsemän veljestä : kriittinen editio" (SKS 2017)      │
-                 │ work_type: 'critical_edition', Editor: Sakari Katajamäki │
-                 └───────┬──────────────────────────────────────────────────┘
-                         │ expressionOf
-Annotated Text & ┌───────┴──────────────────────────────────────────────────┐
-Variant Apparatus│ Critical Expression (Base Text + Apparatus Criticus)     │
-                 │ content_type: 'text', contains manuscript variants       │
-                 └───────┬──────────────────────────────────────────────────┘
-                         │ manifestationOf
-Scholarly Book   ┌───────┴──────────────────────────────────────────────────┐
-Manifestation    │ Printed Scholarly Manifestation                          │
-                 │ Publisher: SKS, ISBN: 978-952-222-835-2                  │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Base["Authorial Canonical Work | Aleksis Kivi: Seitsemän veljestä (1870) | work_type: text, Author: Aleksis Kivi"]
+    W_Crit["Critical Edition Work & Apparatus | Seitsemän veljestä: kriittinen editio (SKS 2017) | work_type: critical_edition, Editor: Sakari Katajamäki"]
+    E_Crit["Critical Expression (Base Text + Apparatus Criticus) | content_type: text, contains manuscript variants"]
+    M_Crit["Printed Scholarly Manifestation | Publisher: SKS, ISBN: 978-952-222-835-2"]
+
+    W_Crit -->|"critical_edition_of"| W_Base
+    W_Crit -->|"expressionOf"| E_Crit
+    E_Crit -->|"manifestationOf"| M_Crit
 ```
 
 ##### MM. Spatial Vector/Raster Geodata & GIS Web Services
-```
-Spatial Dataset  ┌──────────────────────────────────────────────────────────┐
-Resource Work    │ Spatial Dataset Work                                     │
-                 │ "Maastotietokanta (National Topographic Database)"       │
-                 │ work_type: 'geodata_service', Corporate: Maanmittauslaitos│
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ expressionOf (Vector vs Raster vs API)
-                 ┌──────────────┴───────────────────────────────────────────┐
-Geospatial Vector│ Spatial Vector Layer Expression                          │
-Layer Expression │ content_type: 'spatial_vector', CRS: EPSG:3067 (ETRS-TM35)│
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestationOf (Service vs File Package)
-OGC Web Service /┌──────────────┴───────────────────────────────────────────┐
-GeoPackage       │ GeoPackage Download / WFS 3.0 API Manifestation          │
-Manifestation    │ Format: OGC API Features / GeoPackage, URL in 856 $u     │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Geo["Spatial Dataset Work | Maastotietokanta (National Topographic Database) | work_type: geodata_service, Corporate: Maanmittauslaitos"]
+    E_Geo["Spatial Vector Layer Expression | content_type: spatial_vector, CRS: EPSG:3067 (ETRS-TM35)"]
+    M_Geo["GeoPackage Download / WFS 3.0 API Manifestation | Format: OGC API Features / GeoPackage, URL in 856 $u"]
+
+    W_Geo -->|"expressionOf (Vector vs Raster vs API)"| E_Geo
+    E_Geo -->|"manifestationOf (Service vs File Package)"| M_Geo
 ```
 
 ##### NN. Numismatics, Philately & Historical Seals
-```
-Sovereign Issue  ┌──────────────────────────────────────────────────────────┐
-Work             │ Monetary Issue / Stamp Design Work                       │
-                 │ "Suomi 1917 Itsenäisyys 100 vuotta 2 euron erikoisraha"  │
-                 │ work_type: 'numismatic', Issuing Body: Suomen Rahapaja   │
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ expressionOf
-Engraved Die /   │ Engraved Die / Stamp Plate Expression                    │
-Plate Expression │ content_type: 'numismatic_object', Engraver: Simon Daniels│
-                 └──────────────┬───────────────────────────────────────────┘
-                                │ manifestationOf
-Minted Specimen /┌──────────────┴───────────────────────────────────────────┐
-Postal Sheet     │ Physical Coin / Postage Sheet Manifestation              │
-Manifestation    │ Michel No: FI 2344, KM No: 245, Metal: Cu/Ni, Face: 2 EUR│
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Num["Monetary Issue / Stamp Design Work | Suomi 1917 Itsenäisyys 100 vuotta 2 euron erikoisraha | work_type: numismatic, Issuing Body: Suomen Rahapaja"]
+    E_Num["Engraved Die / Stamp Plate Expression | content_type: numismatic_object, Engraver: Simon Daniels"]
+    M_Num["Physical Coin / Postage Sheet Manifestation | Michel No: FI 2344, KM No: 245, Metal: Cu/Ni, Face: 2 EUR"]
+
+    W_Num -->|"expressionOf"| E_Num
+    E_Num -->|"manifestationOf"| M_Num
 ```
 
 ##### OO. 3D Cultural Heritage Digital Twins & XR Reconstructions
-```
-Physical Heritage┌──────────────────────────────────────────────────────────┐
-Monument Work    │ Historical Monument / Site Work                          │
-                 │ "Viipurin kaupunginkirjasto (Alvar Aalto, 1935)"         │
-                 │ work_type: 'realia' / 'architecture', Architect: Aalto   │
-                 └───────▲──────────────────────────────────────────────────┘
-                         │ digital_twin_of
-Reconstruction   ┌───────┴──────────────────────────────────────────────────┐
-Model Work       │ 3D Reconstruction Model Work                             │
-                 │ "Virtuaali-Viipuri 1939: Kirjasto"                       │
-                 │ work_type: 'heritage_model', Modeler: VirtuaaliViipuri ry│
-                 └───────┬──────────────────────────────────────────────────┘
-                         │ expressionOf
-Polygon Mesh     ┌───────┴──────────────────────────────────────────────────┐
-Spatial Expr.    │ 3D Polygonal Mesh & Texture Expression                   │
-                 │ content_type: 'three_dimensional_model', 4K photogrammetry│
-                 └───────┬──────────────────────────────────────────────────┘
-                         │ manifestationOf
-Digital Asset    ┌───────┴──────────────────────────────────────────────────┐
-Package          │ glTF / USDZ / WebXR Manifestation Package                │
-                 │ Format: glTF 2.0 binary (.glb), System: WebGL/XR         │
-                 └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    W_Phys["Historical Monument / Site Work | Viipurin kaupunginkirjasto (Alvar Aalto, 1935) | work_type: realia / architecture, Architect: Aalto"]
+    W_Model["3D Reconstruction Model Work | Virtuaali-Viipuri 1939: Kirjasto | work_type: heritage_model, Modeler: VirtuaaliViipuri ry"]
+    E_Mesh["3D Polygonal Mesh & Texture Expression | content_type: three_dimensional_model, 4K photogrammetry"]
+    M_XR["glTF / USDZ / WebXR Manifestation Package | Format: glTF 2.0 binary (.glb), System: WebGL/XR"]
+
+    W_Model -->|"digital_twin_of"| W_Phys
+    W_Model -->|"expressionOf"| E_Mesh
+    E_Mesh -->|"manifestationOf"| M_XR
 ```
 
 ---
@@ -1602,9 +1076,9 @@ Item ingestion and reconciliation can be selectively enabled for specialized, hi
 
 | Entity / Function | MARC 21 Field & Subfield | Details & Finnish Cataloging Practice |
 | :--- | :--- | :--- |
-| **Work Entity (Canonical)** | **`758`** (`ind1='1'` or `#`)<br>`$a` Work title<br>`$0` Work URI<br>`$1` Wikidata QID<br>`$4` Relationship code/URI<br>`$2` Source (`bffi`, `uri`) | Canonical IFLA LRM / BIBFRAME bridge field.<br>`$4 http://id.loc.gov/ontologies/bibframe/hasWork`<br>`$4 http://rdaregistry.info/Elements/m/P30135` (*work manifested*) |
+| **Work Entity (Canonical)** | **`758`** (`ind1=' '` and `ind2=' '`)<br>`$a` Work title<br>`$0` Work URI<br>`$1` Wikidata QID<br>`$4` Relationship code/URI<br>`$2` Source (`bffi`, `uri`)<br>`$i` Relationship text | Canonical IFLA LRM / BIBFRAME bridge field.<br>`$4 http://id.loc.gov/ontologies/bibframe/instanceOf`<br>`$4 http://rdaregistry.info/Elements/m/P30135` (*work manifested*) |
 | **Work Uniform Title** | **`130` / `240`**<br>`$a` Uniform title<br>`$l` Language<br>`$m` Medium of performance<br>`$n` Number (opus)<br>`$r` Key<br>`$0` Authority URI / Asteri<br>`$1` Wikidata QID | `240 $0` holds Asteri Work Authority (`urn.fi/URN:NBN:fi:au:wa:...`). `$l` indicates language of expression. For music: `$m` medium, `$n` opus number, `$r` key. |
-| **Expression Entity (Canonical)** | **`758`** (`ind1='2'` or `#`)<br>`$a` Expression title<br>`$0` Expression URI<br>`$4` Relationship | `$4 http://id.loc.gov/ontologies/bibframe/hasExpression`<br>`$4 http://rdaregistry.info/Elements/m/P30139` (*expression manifested*) |
+| **Expression Entity (Canonical)** | **`758`** (`ind1=' '` and `ind2=' '`)<br>`$a` Expression title<br>`$0` Expression URI<br>`$4` Relationship<br>`$2` Source (`bffi`)<br>`$i` Relationship text | Canonical IFLA LRM / BFFI bridge field.<br>`$4 http://rdaregistry.info/Elements/m/P30139` (*expression manifested*)<br>`$4 http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested` |
 | **Constituent Works / Track Analytics** | **`700` / `710` with `ind2='2'` and `$t`**<br>`$a` Composer/Author<br>`$t` Title of work<br>`$m` Medium, `$n` Number, `$r` Key<br>`$0` Work URI<br>`$4` Relationship | Used on Music CDs, scores, anthologies. `ind2=2` marks analytical entry.<br>`$4 http://rdaregistry.info/Elements/m/P30135` |
 | **Music Publisher / Matrix Number** | **`028 02`** (Issue number)<br>**`028 20`** (Plate number)<br>`$a` Number value<br>`$b` Source / Label | Primary identifier for Sound Recordings (`028 02`, e.g. `ODE 1020-2`) and Notated Music (`028 20` plate number, e.g. `EB 8548`). |
 | **ISMN (Music Scores)** | **`024 2`**<br>`$a` ISMN value | International Standard Music Number for printed scores (`979-0-...`). |
@@ -1723,7 +1197,7 @@ The Reconciliator engine natively handles three primary BIBFRAME profile dialect
 | **Expression Entity** | `bffi:Expression` (+ 10 typed subclasses) | *None* (implicit attributes on `bf:Work`) | `bf:Work` / `pmo:Performance` | `expressions` (`expression_id`, `content_type`, language) |
 | **Manifestation / Instance** | `bffi:Manifestation`, `bffi:CollectionManifestation` | `bf:Instance` | `bf:Instance` | `manifestations` (`carrier_type`, imprint, ISBN/ISSN) |
 | **Item Entity** | `bffi:Item` | `bf:Item` | `bf:Item` | `items` (holding org, shelfmark, barcode, provenance) |
-| **Work–Expression Link** | `bffi:expressionOf` (inverse: `bffi:hasExpression`) | *N/A* (conflated) or `bf:hasExpression` | `bf:expressionOf` / `pmo:performedWork` | Foreign key `expressions.work_id REFERENCES works(id)` |
+| **Work–Expression Link** | `bffi:expressionOf` (inverse: `bffi:expressionManifested`) | *N/A* (conflated) or `bf:expressionOf` | `bf:expressionOf` / `pmo:performedWork` | Foreign key `expressions.work_id REFERENCES works(id)` |
 | **Expression–Instance Link** | `bffi:expressionManifested` | *N/A* (direct `bf:instanceOf`) | `pmo:recordedIn` / implicit via work | `manifestation_expressions(manifestation_id, expression_id)` |
 | **Manifestation–Work Shortcut** | `bffi:workManifested`, `bffi:manifestationOfWork` | `bf:instanceOf` (points directly to `bf:Work`) | `bf:instanceOf` (points to `bf:Work` or `bf:Hub`) | `manifestations.work_id` (nullable shortcut foreign key) |
 | **Agent Provenance Bridge** | `bffi:marcKey` (e.g. `1001 $aWaltari, Mika,$d1908-1979,$ewriter`) | `bflc:name00MatchKey`, `bflc:primaryContributorName00MatchKey` | `bflc:authorizedAccessPoint`, `bflc:name00MatchKey` | `agents`, `contributions(entity_type, role, field_tag)` |
@@ -1739,7 +1213,7 @@ The tables below define the exact, property-by-property crosswalk between the Re
 
 | Reconciliator Column / Field | BFFI 1.0 (Finnish LKD Profile) | LC BIBFRAME 2.0 | LC BIBFRAME 3.0 & PMO | MARC 21 Origin Bridge | Ingestion & Disambiguation Semantics |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`work_uri`** (URI PK) | Subject IRI of `bffi:Work` or Asteri URI in `bffi:identifiedBy` | Subject IRI of `bf:Work` | Subject IRI of `bf:Hub` (or parent `bf:Work`) | `758 $0` or `130`/`240 $0` | Canonical URI. If blank node, mints `urn:reconciliator:work:<hash>`. Resolves Asteri `urn.fi/URN:NBN:fi:au:wa:...` to primary authority. |
+| **`work_uri`** (URI PK) | Subject IRI of `bffi:Work` or Asteri URI in `bffi:identifiedBy` | Subject IRI of `bf:Work` | Subject IRI of `bf:Hub` (or parent `bf:Work`) | `758 $0` (with `$4 .../instanceOf` or `P30135`) or `130`/`240 $0` | Canonical URI. If blank node, mints `urn:reconciliator:work:<hash>`. Resolves Asteri `urn.fi/URN:NBN:fi:au:wa:...` to primary authority. |
 | **`title`** (Preferred Title) | `bffi:title / bffi:Title / bffi:mainTitle` or `rdfs:label` | `bf:title / bf:Title / bf:mainTitle` or `rdfs:label` | `bf:title / bf:Title / bf:mainTitle` on `bf:Hub` | `130 $a` / `240 $a` (or `245 $a` if original) | Uniform preferred title of the abstract work. Strips non-filing characters and leading articles for normalization. |
 | **`title_normalized`** | Transformed from `bffi:mainTitle` | Transformed from `bf:mainTitle` | Transformed from `bf:mainTitle` | `130 $a` / `240 $a` | Lowercase, whitespace folded, NFC normalized, diacritics stripped. |
 | **`original_language`** | `bffi:languageOfRepresentativeExpression` or `bffi:language` | `bflc:language` on `bf:Hub` (or parsed from `bf:Work`) | `bflc:language` on `bf:Hub` | `041 $h` or `240 $l` (inverse) | ISO 639-2/B 3-letter code (e.g. `fin`, `swe`, `eng`). Identifies the creation language of the conceptual work. |
@@ -1755,8 +1229,8 @@ The tables below define the exact, property-by-property crosswalk between the Re
 
 | Reconciliator Column / Field | BFFI 1.0 (Finnish LKD Profile) | LC BIBFRAME 2.0 (Decomposed) | LC BIBFRAME 3.0 & PMO | MARC 21 Origin Bridge | Ingestion & Disambiguation Semantics |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`expression_uri`** (URI PK) | Subject IRI of `bffi:Expression` | Decomposed URI: `<WorkURI>#expr-<hash>` or `bf:hasExpression` IRI | Subject IRI of `pmo:Performance` or variant `bf:Work` | `758 $0` (with `ind1='2'`) | Canonical Expression IRI. Guaranteed unique per realization. |
-| **`work_id`** (FK $\rightarrow$ `works`) | Target IRI of `bffi:expressionOf` | Subject IRI of parent `bf:Work` or target of `bf:translationOf` | Target IRI of `bf:expressionOf` or `pmo:performedWork` | `758 $0` (with `ind1='1'`) | Foreign key binding Expression to parent conceptual Work. |
+| **`expression_uri`** (URI PK) | Subject IRI of `bffi:Expression` | Decomposed URI: `<WorkURI>#expr-<hash>` or `bf:expressionOf` IRI | Subject IRI of `pmo:Performance` or variant `bf:Work` | `758 $0` (with `$4 .../P30139` or `expressionManifested`) | Canonical Expression IRI. Guaranteed unique per realization. |
+| **`work_id`** (FK $\rightarrow$ `works`) | Target IRI of `bffi:expressionOf` | Subject IRI of parent `bf:Work` or target of `bf:translationOf` | Target IRI of `bf:expressionOf` or `pmo:performedWork` | `758 $0` (with `$4 .../instanceOf` or `P30135`) | Foreign key binding Expression to parent conceptual Work. |
 | **`expression_title`** | `bffi:title / bffi:Title / bffi:mainTitle` on `bffi:Expression` | `bf:title / bf:Title / bf:mainTitle` on variant `bf:Work` | `bf:title` on `bf:Work` or label on `pmo:Performance` | `245 $a`, `$b` (or `242 $a` translation title) | Title as realized in this expression (e.g. translated title *Sinouhé l'Égyptien*). |
 | **`content_type`** (28 Types) | Subclass of `bffi:Expression` (`bffi:MonographExpression` $\rightarrow$ `text`, `bffi:MusicAudioExpression` $\rightarrow$ `audio_music`) | Inferred from `bf:content` URI (e.g. `http://id.loc.gov/vocabulary/contentTypes/txt`) | `bf:content` or `pmo:Performance` $\rightarrow$ `performed_music` | `336 $b` (`txt`, `prm`, `spw`, `tdi`, `sti`) | Mapped into the unified 28-value `content_type` enumeration (§2.2.4 Table 2). |
 | **`language`** | `bffi:languageOfExpression` (e.g. `"fin"`, `"swe"`, `"fra"`) or `bffi:language` | `bf:language` (e.g. `http://id.loc.gov/vocabulary/languages/fre`) | `bf:language` | `041 $a`, `546 $a` | ISO 639-2/B 3-letter language code of this expression. |
@@ -1781,7 +1255,7 @@ The tables below define the exact, property-by-property crosswalk between the Re
 | **`series_numbering`** | `bffi:seriesEnumeration` | `bf:seriesEnumeration` | `bf:seriesEnumeration` | `490 $v` / `830 $v` | Volume/issue number within series (e.g. "Osa 14", "vol. 5"). |
 | **`extent`** | `bffi:extent / bffi:Extent / rdfs:label` | `bf:extent / bf:Extent / rdfs:label` | `bf:extent / bf:Extent / rdfs:label` | `300 $a` | Physical extent (e.g. "456 s.", "1 CD-äänilevy (54 min)"). |
 | **`dimensions`** | `bffi:dimensions` | `bf:dimensions` | `bf:dimensions` | `300 $c` | Physical dimensions (e.g. "21 cm", "12 in."). |
-| **`work_id`** (Nullable FK) | Target IRI of `bffi:workManifested` or `bffi:manifestationOfWork` | Target IRI of `bf:instanceOf` (when targeting `bf:Work`) | Target IRI of `bf:instanceOf` (when targeting `bf:Hub`) | `758 $0` (with `ind1='1'`) | Shortcut pointer to Work entity. In BFFI, populated from direct shortcut link. |
+| **`work_id`** (Nullable FK) | Target IRI of `bffi:workManifested` or `bffi:manifestationOfWork` | Target IRI of `bf:instanceOf` (when targeting `bf:Work`) | Target IRI of `bf:instanceOf` (when targeting `bf:Hub`) | `758 $0` (with `$4 .../instanceOf` or `P30135`) | Shortcut pointer to Work entity. In BFFI, populated from direct shortcut link. |
 | **`serialized_text`** | Generated by `manifestation_serialization.j2` | Generated by `manifestation_serialization.j2` | Generated by `manifestation_serialization.j2` | N/A | Materialized carrier text string for Manifestation Indexing (`manifestation.index`) and FTS5. |
 
 ---
@@ -1873,9 +1347,15 @@ In alignment with IFLA LRM, BFFI 1.0 distinguishes between representative attrib
 
 #### 6. Dual-Path Graph Traversal (Canonical vs. Shortcut)
 BFFI 1.0 manifests both the canonical 4-tier traversal and a fast shortcut link:
-```
-Canonical Path:     Manifestation ──[expressionManifested]──► Expression ──[expressionOf]──► Work
-Shortcut Path:      Manifestation ───────────────────[workManifested]─────────────────────► Work
+```mermaid
+flowchart LR
+    M["Manifestation"]
+    E["Expression"]
+    W["Work"]
+
+    M -->|"expressionManifested (Canonical Path)"| E
+    E -->|"expressionOf (Canonical Path)"| W
+    M -->|"workManifested (Shortcut Path)"| W
 ```
 When ingesting BFFI 1.0 graphs:
 - If both `expressionManifested` and `workManifested` are present, the engine validates consistency: `workManifested` must match `expressionManifested -> expressionOf`.
@@ -1898,34 +1378,31 @@ These are indexed into `identifiers(scheme='fennica', value='194500123')` and pr
 
 Because Library of Congress BIBFRAME 2.0 conflates Work and Expression into `bf:Work`, while Finnish BFFI 1.0 strictly separates them, the ingestion engine employs a deterministic graph decomposition pipeline:
 
-```
-                            Incoming RDF Graph
-                                    │
-           ┌────────────────────────┴────────────────────────┐
-           ▼                                                 ▼
-   [Profile: bffi_1]                                 [Profile: bibframe_2 / bibframe_3]
-   Strict 4-Tier LRM                                 3-Tier Conflated (or Hub Centroid)
-           │                                                 │
-   Direct 1:1 Extraction                             Graph Decomposition Algorithm
-   - bffi:Work ──► works                             (Inspect Hubs, Translations,
-   - bffi:Expression ──► expressions                  Relators & Linguistic Properties)
-   - bffi:Manifestation ──► manifestations                   │
-           │                                                 ▼
-           │                                         Partition Triples:
-           │                                         Work vs. Expression Partitions
-           │                                                 │
-           └────────────────────────┬────────────────────────┘
-                                    ▼
-                     Target Reconciliator Database
-                     ┌─────────────────────────────┐
-                     │ authority.db                │
-                     │ - works                     │
-                     │ - expressions               │
-                     │ - manifestations            │
-                     │ - items                     │
-                     │ - contributions             │
-                     │ - identifiers               │
-                     └─────────────────────────────┘
+```mermaid
+flowchart TD
+    RDF["Incoming RDF Graph"]
+
+    subgraph BFFI["Profile: bffi_1 (Strict 4-Tier LRM)"]
+        direction TB
+        BFFI_Extract["Direct 1:1 Extraction: bffi:Work -> works, bffi:Expression -> expressions, bffi:Manifestation -> manifestations"]
+    end
+
+    subgraph BF["Profile: bibframe_2 / bibframe_3 (3-Tier Conflated or Hub Centroid)"]
+        direction TB
+        BF_Decomp["Graph Decomposition Algorithm (Inspect Hubs, Translations, Relators & Linguistic Properties)"]
+        BF_Part["Partition Triples: Work vs. Expression Partitions"]
+        BF_Decomp --> BF_Part
+    end
+
+    subgraph Target["Target Reconciliator Database (authority.db)"]
+        direction TB
+        T_Tables[("authority.db tables: works, expressions, manifestations, items, contributions, identifiers")]
+    end
+
+    RDF --> BFFI
+    RDF --> BF
+    BFFI_Extract --> Target
+    BF_Part --> Target
 ```
 
 #### The Graph Decomposition Decision Matrix
@@ -1973,7 +1450,7 @@ To demonstrate how the mapping matrices operate in practice, this section provid
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
 # 1. Abstract Conceptual Work (BFFI Work)
-<http://urn.fi/URN:NBN:fi:bib:me:W00100200> a bffi:MonographWork , bffi:Work ;
+<http://urn.fi/URN:NBN:fi:au:wa:00100200> a bffi:MonographWork , bffi:Work ;
     bffi:title [
         a bffi:Title ;
         bffi:mainTitle "Sinuhe egyptiläinen"
@@ -1991,7 +1468,7 @@ To demonstrate how the mapping matrices operate in practice, this section provid
 
 # 2. French Realization (BFFI Expression)
 <http://urn.fi/URN:NBN:fi:bib:me:E00100200-fre> a bffi:MonographExpression , bffi:Expression ;
-    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:me:W00100200> ;
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:au:wa:00100200> ;
     bffi:title [
         a bffi:Title ;
         bffi:mainTitle "Sinouhé l'Égyptien" ;
@@ -2008,7 +1485,7 @@ To demonstrate how the mapping matrices operate in practice, this section provid
 # 3. Physical French Publication (BFFI Manifestation)
 <http://urn.fi/URN:NBN:fi:bib:me:M00100200-2020> a bffi:Manifestation ;
     bffi:expressionManifested <http://urn.fi/URN:NBN:fi:bib:me:E00100200-fre> ;
-    bffi:workManifested <http://urn.fi/URN:NBN:fi:bib:me:W00100200> ; # Shortcut link
+    bffi:workManifested <http://urn.fi/URN:NBN:fi:au:wa:00100200> ; # Shortcut link
     bffi:identifiedBy [
         a bffi:Identifier ;
         bffi:source "isbn" ;
@@ -2077,7 +1554,7 @@ To demonstrate how the mapping matrices operate in practice, this section provid
 INSERT INTO works (id, work_uri, source, source_id, title, title_normalized, original_language, primary_agent_id, work_type, subjects_json, serialized_text)
 VALUES (
     1,
-    'http://urn.fi/URN:NBN:fi:bib:me:W00100200',
+    'http://urn.fi/URN:NBN:fi:au:wa:00100200',
     'melinda',
     'W00100200',
     'Sinuhe egyptiläinen',
@@ -2151,7 +1628,7 @@ VALUES
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
 # 1. Musical Composition Work
-<http://urn.fi/URN:NBN:fi:bib:me:W_SIBELIUS_SYM5> a bffi:MusicWork , bffi:Work ;
+<http://urn.fi/URN:NBN:fi:au:wa:_SIBELIUS_SYM5> a bffi:MusicWork , bffi:Work ;
     bffi:title [
         a bffi:Title ;
         bffi:mainTitle "Sinfonia nro 5 es-duuri op. 82"
@@ -2169,7 +1646,7 @@ VALUES
 
 # 2. Recorded Audio Performance Expression
 <http://urn.fi/URN:NBN:fi:bib:me:E_SIBELIUS_SYM5_KARAJAN1968> a bffi:MusicAudioExpression , bffi:Expression ;
-    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:me:W_SIBELIUS_SYM5> ;
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:au:wa:_SIBELIUS_SYM5> ;
     bffi:musicMedium [
         a bffi:MusicMedium ;
         rdfs:label "sinfoniaorkesteri"
@@ -2257,7 +1734,7 @@ VALUES
 INSERT INTO works (id, work_uri, source, source_id, title, title_normalized, work_type, primary_agent_id, serialized_text)
 VALUES (
     2,
-    'http://urn.fi/URN:NBN:fi:bib:me:W_SIBELIUS_SYM5',
+    'http://urn.fi/URN:NBN:fi:au:wa:_SIBELIUS_SYM5',
     'melinda',
     'W_SIBELIUS_SYM5',
     'Sinfonia nro 5 es-duuri op. 82',
@@ -2462,7 +1939,7 @@ CREATE INDEX idx_agents_surname ON agents(surname);
 -- 2. Works Table (Abstract Intellectual Creations)
 CREATE TABLE works (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    work_uri TEXT NOT NULL UNIQUE,               -- 'http://urn.fi/URN:NBN:fi:bib:me:W000100200'
+    work_uri TEXT NOT NULL UNIQUE,               -- 'http://urn.fi/URN:NBN:fi:au:wa:000100200'
     source TEXT NOT NULL,                        -- 'melinda', 'wikidata', 'loc'
     source_id TEXT NOT NULL,                     -- e.g. 'W000100200', 'Q212267'
     wikidata_qid TEXT,                           -- 'Q212267'
@@ -2875,26 +2352,31 @@ Wikidata provides a global graph of cultural entities, works, editions, translat
 
 The Reconciliator implements a dedicated **two-pass streaming ingestion engine** (`src/reconciliator/ingestion/wikidata.py`) that decomposes the Wikidata knowledge graph directly into the relational `authority.db` schema.
 
-```
-                              Wikidata JSON Dump
-                            (latest-all.json.gz)
-                                     │
-           ┌─────────────────────────┴─────────────────────────┐
-           ▼                                                   ▼
-     [PASS 1: Agents & Entities]                 [PASS 2: Bibliographic Entities]
-     - Filter Q5 (Human), Q43229 (Org)           - Filter Q571, Q7725634, Q3331189...
-     - Extract P213 (ISNI), P214 (VIAF)          - Extract P1476 (Title), P50 (Author)
-     - Extract P4108 (Asteri), Labels            - Extract P629 (Edition of Work QID)
-           │                                                   │
-           ▼                                                   ▼
-  authority.db: agents                         authority.db: works / expressions
-  (agent_id, name, wikidata_qid, ...)          (work_id, preferred_title, ...)
-                                                               │
-                                                   [Resolve Author & Work links]
-                                                               │
-                                                               ▼
-                                                  authority.db: manifestations
-                                                  (manifestation_id, isbn, pub_year)
+```mermaid
+flowchart TD
+    Dump["Wikidata JSON Dump (latest-all.json.gz)"]
+
+    subgraph Pass1["PASS 1: Agents & Entities"]
+        direction TB
+        P1_Filter["Filter Q5 (Human), Q43229 (Org) | Extract P213 (ISNI), P214 (VIAF), P4108 (Asteri), Labels"]
+        P1_Target[("authority.db: agents (agent_id, name, wikidata_qid, ...)")]
+        P1_Filter --> P1_Target
+    end
+
+    subgraph Pass2["PASS 2: Bibliographic Entities"]
+        direction TB
+        P2_Filter["Filter Q571, Q7725634, Q3331189... | Extract P1476 (Title), P50 (Author), P629 (Edition of Work QID)"]
+        P2_Target1[("authority.db: works / expressions (work_id, preferred_title, ...)")]
+        P2_Resolve["Resolve Author & Work links"]
+        P2_Target2[("authority.db: manifestations (manifestation_id, isbn, pub_year)")]
+
+        P2_Filter --> P2_Target1
+        P2_Target1 --> P2_Resolve
+        P2_Resolve --> P2_Target2
+    end
+
+    Dump --> Pass1
+    Dump --> Pass2
 ```
 
 #### 4.3.1 Wikidata Bibliographic Entity & Property Taxonomy
@@ -3112,31 +2594,42 @@ To process multi-gigabyte gzipped Wikidata dumps (e.g. `latest-all.json.gz`, ~10
 
 The Reconciliator harvests bibliographic records and authority feeds from remote repositories via **OAI-PMH (Open Archives Initiative Protocol for Metadata Harvesting)** and **ResourceSync (ANSI/NISO Z39.99)**.
 
-```
-       OAI-PMH Endpoint                     ResourceSync Endpoint
-    (ListRecords / marc21 / bffi)           (CapabilityList / ChangeList)
-                 │                                        │
-                 └───────────────────┬────────────────────┘
-                                     │
-                    [OAIPMHHarvester / ResourceSyncHarvester]
-                    - ResumptionToken handling & Retry-After backoff
-                    - Multithreaded temporal date slicing (slice_days=30)
-                    - Header status="deleted" filtering
-                                     │
-                                     ▼
-                        [Format Router & Parser]
-                                     │
-           ┌─────────────────────────┴─────────────────────────┐
-           ▼                                                   ▼
-      [MARCXML Stream]                                  [BIBFRAME Stream]
-  iter_marcxml_records()                             parse_bibframe_graph()
-           │                                                   │
-           ├─────────────────────────┬─────────────────────────┤
-           │                         │                         │
-           ▼                         ▼                         ▼
-   [Destination 1]           [Destination 2]           [State Tracking]
-    authority.db             reconcile_corpus.db       harvest_state
-  External Authorities     Target Corpus Staging      Last Datestamp / Resume
+```mermaid
+flowchart TD
+    OAI["OAI-PMH Endpoint (ListRecords / marc21 / bffi)"]
+    RS["ResourceSync Endpoint (CapabilityList / ChangeList)"]
+
+    subgraph Harvester["OAIPMHHarvester / ResourceSyncHarvester"]
+        direction TB
+        H_Desc["ResumptionToken handling & Retry-After backoff | Multithreaded temporal date slicing (slice_days=30) | Header status=deleted filtering"]
+    end
+
+    Router["Format Router & Parser"]
+
+    subgraph Streams["Parsing Streams"]
+        direction LR
+        MARC["MARCXML Stream: iter_marcxml_records()"]
+        BF["BIBFRAME Stream: parse_bibframe_graph()"]
+    end
+
+    subgraph Dests["Destinations & State"]
+        direction LR
+        AuthDB[("Destination 1: authority.db (External Authorities)")]
+        CorpusDB[("Destination 2: reconcile_corpus.db (Target Corpus Staging)")]
+        State[("State Tracking: harvest_state (Last Datestamp / Resume)")]
+    end
+
+    OAI --> Harvester
+    RS --> Harvester
+    Harvester --> Router
+    Router --> MARC
+    Router --> BF
+    MARC --> AuthDB
+    MARC --> CorpusDB
+    MARC --> State
+    BF --> AuthDB
+    BF --> CorpusDB
+    BF --> State
 ```
 
 #### 4.4.1 Harvesting Protocol Lifecycle & State Management
@@ -3976,24 +3469,14 @@ To eliminate CPU-heavy Jinja2 template rendering during bulk query execution:
 #### 5.3.4 Tripartite Vector Spaces & Relational Storage Mapping
 The engine builds and queries three distinct vector spaces, each isolated to its proper FRBR/LRM level of abstraction:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│ 1. Work Vector Space (v_W)       Conceptual Invariance                          │
-│ File: data/work.index            - Invariant to language, translator, year, format│
-│ Table: authority.db:work_vectors - Neighborhood: "Hamlet" English ≈ Finnish text│
-└────────────────────────┬────────────────────────────────────────────────────────┘
-                         │ 1:N expresses
-┌────────────────────────▼────────────────────────────────────────────────────────┐
-│ 2. Expression Vector Space (v_E) Realization Invariance                         │
-│ File: data/expression.index      - Invariant to publisher, print run, binding   │
-│ Table: authority.db:expression_vectors - Separates: Cajander suom. ≠ Saarikoski  │
-└────────────────────────┬────────────────────────────────────────────────────────┘
-                         │ 1:N embodies
-┌────────────────────────▼────────────────────────────────────────────────────────┐
-│ 3. Manifestation Vector Space (v_M) Carrier & Imprint Identity                  │
-│ File: data/manifestation.index   - Invariant to cataloging variations / typos   │
-│ Table: authority.db:manifestation_vectors - Separates: 2021 Otava ≠ 1945 WSOY    │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    V_W["1. Work Vector Space (v_W) | File: data/work.index | Table: authority.db:work_vectors | Conceptual Invariance: Invariant to language, translator, year, format | Neighborhood: 'Hamlet' English ≈ Finnish text"]
+    V_E["2. Expression Vector Space (v_E) | File: data/expression.index | Table: authority.db:expression_vectors | Realization Invariance: Invariant to publisher, print run, binding | Separates: Cajander suom. ≠ Saarikoski"]
+    V_M["3. Manifestation Vector Space (v_M) | File: data/manifestation.index | Table: authority.db:manifestation_vectors | Carrier & Imprint Identity: Invariant to cataloging variations / typos | Separates: 2021 Otava ≠ 1945 WSOY"]
+
+    V_W -->|"1:N expresses"| V_E
+    V_E -->|"1:N embodies"| V_M
 ```
 
 The database maps the zero-indexed integer rows of each FAISS / PyTorch index directly to the primary keys of the respective SQLite entity tables:
@@ -4054,35 +3537,6 @@ flowchart TD
     FastPath -->|Match Found| FastPathMatch
     FastPath -->|No Match| VectorFunnel
 ```
-                  Incoming Target Record (e.g. Monograph)
-                                    │
-                                    ▼
-       ┌────────────────────────────────────────────────────────┐
-       │ Step 1: Deterministic Fast-Path (ISBN, URN, DOI, etc.) │
-       └────────────────────────────┬───────────────────────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-             [Exact Match Found]             [No Exact Match]
-                    │                               │
-                    ▼                               ▼
-       Retrieve Manifestation           Read pre-rendered serialized_work
-       Hydrate Work & Expression                    │
-       (Vector search skipped: 0ms)                 ▼
-                                        SentenceEmbedder.embed_texts()
-                                                    │
-                                                    ▼
-                                        Query Work Vector Index: v_W (top-50)
-                                                    │
-                                                    ▼
-                                        Expression Alignment: v_E
-                                        - Query candidate expressions in v_E
-                                        - Disambiguate translation / narrator
-                                                    │
-                                                    ▼
-                                        Carrier Verification: v_M
-                                        - Query candidate manifestations in v_M
-                                        - Identify duplicate printings vs new ed.
-```
 
 ##### Late Fusion Composite Scoring:
 When evaluating candidate matches across ambiguous records (e.g. generic titles such as *"Valitut teokset"* or *"Johdatus fysiikkaan"*), the engine computes a weighted composite similarity score:
@@ -4132,17 +3586,7 @@ flowchart TD
     Layer1 -.->|Upward Enrichment: Sparse Metadata Vector Inheritance| Layer2
     Layer2 -.->|Upward Enrichment: Sparse Metadata Vector Inheritance| Layer3
 ```
-[Layer 3: Work Graph G_W]          (Threshold tau_W = 0.85 on v_W)
-  (E1: English) ◄────────────────► (E2: Finnish) ◄────────────────► (E3: Audio)
-        │                                │                                │
-        ▼                                ▼                                ▼
-[Layer 2: Expression Graph G_E]    (Threshold tau_E = 0.88 on v_E)
-  (M1: 1968 Cajander) ◄──────────► (M2: 1985 Cajander)            (M3: 2019 Saarikoski)
-        │                                │                                │
-        ▼                                ▼                                ▼
-[Layer 1: Manifestation Graph G_M] (Threshold tau_M = 0.92 on v_M)
-  (Rec A: Otava CIP) ◄───────────► (Rec B: Otava Final)           (Rec C: WSOY)
-```
+
 
 1. **Layer 1: Manifestation Graph ($G_M$)**:
    - Edges formed between target records where $\cos(\mathbf{v}_M^i, \mathbf{v}_M^j) \ge 0.92$ (and publisher/year blocking keys align).
@@ -4175,24 +3619,49 @@ The core underlying classes remain intact and are directly leveraged:
 
 ### 6.1 MARCXML In-Place Tree Mutation (`MARCXMLEnricher`)
 
+#### 6.1.1 MARC 21 Field 758 Standard Mechanics & URI Injection Strategy
+The MARC 21 Bibliographic format natively supports linking bibliographic records (Manifestations/Instances) to abstract Works and Expressions via **Field 758 (Resource Identifier)**, introduced in Update 25 (2017) and expanded in Update 28 (2019). Because a MARC bibliographic record represents a concrete Manifestation/Instance, all outbound links injected by `MARCXMLEnricher` conform to official ontology predicates and MARC 21 standards:
+
+1. **Indicator Positions**:
+   - Both `ind1` and `ind2` are **undefined** (`#` / blank space ` `).
+2. **Work-Tier Linking (`Manifestation` $\rightarrow$ `Work`)**:
+   - **BIBFRAME 2.0 / 3.0**: Predicate in `$4` is `http://id.loc.gov/ontologies/bibframe/instanceOf` (BIBFRAME defines an Instance as an *instance of* a Work; the property `hasWork` does not exist).
+   - **RDA / IFLA LRM**: Predicate in `$4` is `http://rdaregistry.info/Elements/m/P30135` (*work manifested*).
+   - **Authority URI (`$0`)**: Holds the canonical Work Authority record URI (e.g. Finnish Asteri Work authority `http://urn.fi/URN:NBN:fi:au:wa:...` or LC Work URI `http://id.loc.gov/resources/works/...`).
+   - **Real World Object URI (`$1`)**: Holds external real-world entity URIs, notably Wikidata (`http://www.wikidata.org/entity/Q...`).
+   - **Relationship Text (`$i`)**: Human-readable display label, e.g. `Work manifested:` or `Instance of work:`.
+3. **Expression-Tier Linking (`Manifestation` $\rightarrow$ `Expression`)**:
+   - Standard LC BIBFRAME 2.0 conflates Expression into Work; therefore, Expression-tier linking uses **RDA** or the Finnish **BFFI** ontology:
+     - RDA: `<subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>` (*expression manifested*).
+     - BFFI: `<subfield code="4">http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested</subfield>`.
+   - **Expression URI (`$0`)**: Canonical Expression URI (e.g. `urn:reconciliator:exp:<hash>` or repository expression URN).
+   - **Relationship Text (`$i`)**: E.g. `Expression manifested:`.
+4. **Dual-Path ILS Backward Compatibility**:
+   - While modern LSPs (Ex Libris Alma, Koha $\ge$ 20.05) fully recognize and index `758`, legacy ILS engines continue to rely on Authorized Access Points (Uniform Titles).
+   - Where a Uniform Title exists or is synthesized (`130 0#` or `240 10`), `MARCXMLEnricher` injects the canonical Work URI into `<subfield code="0">` of that field as well, ensuring seamless backward-compatible authority control alongside the modern `758` linked data field.
+
+#### 6.1.2 Enriched Record Exemplars Across Material Types
+
 #### A. Monograph Record Enrichment:
 ```xml
 <!-- Injected Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Sinuhe egyptiläinen</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000100200</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000100200</subfield>
   <subfield code="1">http://www.wikidata.org/entity/Q212267</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="4">http://rdaregistry.info/Elements/m/P30135</subfield>
+  <subfield code="i">Work manifested:</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
 <!-- Injected Expression Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">The Egyptian (English translation by Walford)</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:E000100201</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="0">urn:reconciliator:exp:e000100201</subfield>
   <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
+  <subfield code="4">http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested</subfield>
+  <subfield code="i">Expression manifested:</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
@@ -4212,7 +3681,7 @@ The core underlying classes remain intact and are directly leveraged:
   <subfield code="t">Symphonies,</subfield>
   <subfield code="n">no. 1, op. 39,</subfield>
   <subfield code="r">E minor.</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000123456</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000123456</subfield>
   <subfield code="4">http://rdaregistry.info/Elements/m/P30135</subfield>
 </datafield>
 ```
@@ -4223,7 +3692,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Syntaktisia havaintoja vanhasta kirjasuomesta</subfield>
   <subfield code="0">urn:reconciliator:work:a1b2c3d4e5</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 <datafield tag="773" ind1="0" ind2="8">
   <subfield code="t">Virittäjä</subfield>
@@ -4242,16 +3711,16 @@ The core underlying classes remain intact and are directly leveraged:
   <subfield code="n">no. 1, op. 39,</subfield>
   <subfield code="r">E minor</subfield>
   <subfield code="m">orchestra</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000123456</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000123456</subfield>
   <subfield code="1">http://www.wikidata.org/entity/Q845221</subfield>
 </datafield>
 
 <!-- Injected Work Link via 758 -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Sibelius: Symphony no. 1, op. 39, E minor</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000123456</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000123456</subfield>
   <subfield code="1">http://www.wikidata.org/entity/Q845221</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
@@ -4259,7 +3728,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Sibelius: Symphony no. 1 (Full Score)</subfield>
   <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:E000123457</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 ```
@@ -4269,8 +3738,8 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Links audiobook to the same textual Work as the printed edition -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Taru sormusten herrasta</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000200100</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000200100</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
@@ -4278,7 +3747,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Taru sormusten herrasta (äänikirja, kertoja: Ville Virtanen)</subfield>
   <subfield code="0">urn:reconciliator:exp:f6a7b8c9d0</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 ```
@@ -4288,8 +3757,8 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Canonical Serial Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Virittäjä</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000300400</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000300400</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
@@ -4298,7 +3767,7 @@ The core underlying classes remain intact and are directly leveraged:
   <subfield code="t">Kotikielen seuran aikakauskirja</subfield>
   <subfield code="x">0355-1237</subfield>
   <subfield code="w">(FI-MELINDA)000123999</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000300399</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000300399</subfield>
 </datafield>
 ```
 
@@ -4307,8 +3776,8 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Monograph Volume Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Vienan läänin runot 1</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000400501</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000400501</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
@@ -4317,7 +3786,7 @@ The core underlying classes remain intact and are directly leveraged:
   <subfield code="a">Suomen kansan vanhat runot ;</subfield>
   <subfield code="v">1</subfield>
   <subfield code="x">0081-6787</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000400500</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000400500</subfield>
 </datafield>
 ```
 
@@ -4326,8 +3795,8 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Enriched Thesis Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Neural Models for Morphologically Rich Languages</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000500600</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000500600</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
@@ -4353,7 +3822,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Tekijänoikeuslaki 404/1961</subfield>
   <subfield code="0">http://data.finlex.fi/eli/sd/1961/404</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">eli</subfield>
 </datafield>
 ```
@@ -4368,7 +3837,7 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Manuscript Draft Linking to Published Canonical Work -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Sinuhe egyptiläinen (alkuperäinen käsikirjoitusversio)</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000100200</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000100200</subfield>
   <subfield code="4">http://rdaregistry.info/Elements/w/P10078</subfield> <!-- draft of -->
   <subfield code="2">bffi</subfield>
 </datafield>
@@ -4390,14 +3859,14 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Alan Wake II</subfield>
   <subfield code="0">urn:reconciliator:work:alanwake2game</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Platform Expression Link (PS5 Build) -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Alan Wake II (PlayStation 5 edition)</subfield>
   <subfield code="0">urn:reconciliator:exp:alanwake2ps5</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4408,7 +3877,7 @@ The core underlying classes remain intact and are directly leveraged:
   <subfield code="a">Catan</subfield>
   <subfield code="0">urn:reconciliator:work:catan1995</subfield>
   <subfield code="1">https://boardgamegeek.com/boardgame/13</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Expansion Link to Base Game -->
@@ -4422,7 +3891,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Catan (Pohjoismainen nelikielinen laitos)</subfield>
   <subfield code="0">urn:reconciliator:exp:catannordic</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4439,9 +3908,9 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Canonical Work Authority Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Rucouskiria Bibliasta</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000991122</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000991122</subfield>
   <subfield code="1">http://www.wikidata.org/entity/Q3738873</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 ```
@@ -4461,15 +3930,15 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Link to Canonical Base Literary Work -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Muumipappa ja meri</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000554433</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000554433</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Accessible Expression Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Muumipappa ja meri (pistekirjoitusversio)</subfield>
   <subfield code="0">urn:reconciliator:exp:muumipappabraille</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4491,7 +3960,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">FinBERT (Finnish BERT Model Architecture)</subfield>
   <subfield code="0">urn:reconciliator:work:finbertmodel</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4513,7 +3982,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Oratio de pace Nystadiensi</subfield>
   <subfield code="0">urn:reconciliator:work:tammelin1702</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4545,15 +4014,15 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Enriched Seed Entity Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Helsingin Sanomat verkkojulkaisu</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000998811</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000998811</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Temporal Snapshot Expression Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Helsingin Sanomat (verkkoarkistoharavointi 2023-05-01)</subfield>
   <subfield code="0">urn:reconciliator:exp:hs20230501snapshot</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4586,14 +4055,14 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Maria Kettusen haastattelu Ilomantsissa 14.7.1968 (SKS ÄA 1968:42)</subfield>
   <subfield code="0">urn:reconciliator:work:sks1968kettunen</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Verbatim Text Transcript Expression Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Maria Kettusen haastattelun transkriptio (kirjoittanut Leena Lahti)</subfield>
   <subfield code="0">urn:reconciliator:exp:sks1968kettunentranscript</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4619,14 +4088,14 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Linnan juhlat 2023</subfield>
   <subfield code="0">urn:reconciliator:work:linnanjuhlat2023</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Linear Off-Air Broadcast Transmission Expression -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Linnan juhlat 2023 (Yle TV1 suora lähetys 6.12.2023)</subfield>
   <subfield code="0">urn:reconciliator:exp:linnanjuhlat2023yletv1</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4646,23 +4115,23 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Single Canonical Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Kalevala</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000001001</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000001001</subfield>
   <subfield code="1">http://www.wikidata.org/entity/Q130924</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Parallel Expression 1: Original Finnish Runes -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Kalevala (suomenkielinen alkuteksti)</subfield>
   <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:E000001001</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 
 <!-- Parallel Expression 2: Swedish Translation by Collán -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Kalevala (ruotsinnos: Karl Collan)</subfield>
   <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:E000001002</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4689,15 +4158,15 @@ The core underlying classes remain intact and are directly leveraged:
 <!-- Preserves Parent Work Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Missale Aboense</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000999888</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000999888</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Expression Link (Shares Exact Same Expression as Original Print Edition) -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Missale Aboense (1488 liturgia)</subfield>
   <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:E000999888</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4723,14 +4192,14 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Missale Aboense Codicis Antiqui (reconstructed codex c. 1400)</subfield>
   <subfield code="0">urn:reconciliator:work:fragmenta_codex_aboense_1400</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 
 <!-- Dispersed Leaf Expression Link -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Missale Aboense Codicis Antiqui: Canon Missae (fragment leaf F.M. I.24)</subfield>
   <subfield code="0">urn:reconciliator:exp:fragmenta_fmi24</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasExpression</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
 </datafield>
 ```
 
@@ -4760,7 +4229,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Stockmannin tuoteluettelot ja hinnastot</subfield>
   <subfield code="0">urn:reconciliator:work:stockmann_ephemera_catalogs</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4791,7 +4260,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Albert Edelfelt (Ateneumin näyttelyjulkaisu 2023)</subfield>
   <subfield code="0">urn:reconciliator:work:edelfelt2023ateneum</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4807,7 +4276,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="240" ind1="1" ind2="0">
   <subfield code="a">Seitsemän veljestä</subfield>
   <subfield code="s">Kriittinen editio</subfield>
-  <subfield code="0">http://urn.fi/URN:NBN:fi:bib:me:W000055112</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000055112</subfield>
 </datafield>
 
 <!-- Critical Editor & Commentator -->
@@ -4825,7 +4294,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Seitsemän veljestä : kriittinen editio (SKS)</subfield>
   <subfield code="0">urn:reconciliator:work:kivi7veljestakriittinen</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4855,7 +4324,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Maastotietokanta (vektoriaineisto)</subfield>
   <subfield code="0">urn:reconciliator:work:mml_maastotietokanta</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4881,7 +4350,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Suomen itsenäisyys 100 vuotta 2 euron juhlaraha (2017)</subfield>
   <subfield code="0">urn:reconciliator:work:suomi100kolikko2017</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4907,7 +4376,7 @@ The core underlying classes remain intact and are directly leveraged:
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Virtuaali-Viipuri 1939: Kaupunginkirjasto (3D-digitaalinen kaksonen)</subfield>
   <subfield code="0">urn:reconciliator:work:virtuaaliviipuri_kirjasto1939</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/hasWork</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
 </datafield>
 ```
 
@@ -4922,18 +4391,18 @@ When sibling manifestations in the corpus belong to the same Work or Expression,
 # Sibling Manifestation A
 <http://example.org/instance/target-001> a bffi:Manifestation ;
     rdfs:label "The Egyptian (1949 hardcover)" ;
-    bffi:workManifested <http://urn.fi/URN:NBN:fi:bib:me:W000100200> ;
+    bffi:workManifested <http://urn.fi/URN:NBN:fi:au:wa:000100200> ;
     bffi:expressionManifested <http://urn.fi/URN:NBN:fi:bib:me:E000100201> .
 
 # Sibling Manifestation B (Merged!)
 <http://example.org/instance/target-002> a bffi:Manifestation ;
     rdfs:label "The Egyptian (2002 paperback)" ;
-    bffi:workManifested <http://urn.fi/URN:NBN:fi:bib:me:W000100200> ;
+    bffi:workManifested <http://urn.fi/URN:NBN:fi:au:wa:000100200> ;
     bffi:expressionManifested <http://urn.fi/URN:NBN:fi:bib:me:E000100201> .
 
 # Shared Expression Node
 <http://urn.fi/URN:NBN:fi:bib:me:E000100201> a bffi:Expression ;
-    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:me:W000100200> ;
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:au:wa:000100200> ;
     bffi:languageOfExpression "eng" ;
     bffi:contribution [
         a bffi:Contribution ;
@@ -4942,7 +4411,7 @@ When sibling manifestations in the corpus belong to the same Work or Expression,
     ] .
 
 # Shared Work Node
-<http://urn.fi/URN:NBN:fi:bib:me:W000100200> a bffi:Work ;
+<http://urn.fi/URN:NBN:fi:au:wa:000100200> a bffi:Work ;
     owl:sameAs <http://www.wikidata.org/entity/Q212267> ;
     bffi:title [
         a bffi:Title ;
@@ -4966,7 +4435,7 @@ When sibling manifestations in the corpus belong to the same Work or Expression,
     bf:hasPart <http://urn.fi/URN:NBN:fi:bib:me:E00099901> . # Track 1
 
 <http://urn.fi/URN:NBN:fi:bib:me:E00099901> a bffi:MusicAudioExpression ;
-    bffi:expressionOf <http://urn.fi/URN:NBN:fi:bib:me:W000123456> ; # Symphony No. 1
+    bffi:expressionOf <http://urn.fi/URN:NBN:fi:au:wa:000123456> ; # Symphony No. 1
     bffi:contribution [
         a bffi:Contribution ;
         bffi:role <http://id.loc.gov/vocabulary/relators/cnd> ;
@@ -4982,7 +4451,7 @@ The BIBFRAME graph mutator (`src/reconciliator/loaders/bibframe/enricher.py`) up
    - For LC BIBFRAME 2.0 / 3.0: Injects `(instance_node, bf:instanceOf, URIRef(canonical_work_uri))`. If a `bf:Hub` was resolved, injects `(canonical_work_node, bflc:hasHub, URIRef(hub_uri))`.
 2. **Expression URI Injection**:
    - For BFFI: Injects `(instance_node, bffi:expressionManifested, URIRef(canonical_expression_uri))` and ensures `(canonical_expression_node, bffi:expressionOf, URIRef(canonical_work_uri))` is asserted.
-   - For LC BF: If distinct expression modeling is enabled, asserts `(canonical_work_node, bf:hasExpression, URIRef(canonical_expression_uri))`.
+   - For LC BF: If distinct expression modeling is enabled, asserts `(canonical_expression_node, bf:expressionOf, URIRef(canonical_work_uri))` or connects via `bflc:relation`.
 3. **External Authority Equivalence Links (`owl:sameAs`)**:
    - Reconciled external identifiers are attached directly to the resolved Work node:
      ```python
@@ -5013,14 +4482,18 @@ The enriched RDF graph is serialized back into the source format requested by th
 
 ## 7. Implementation Roadmap & Milestones
 
-```
-Phase 1: Greenfield Storage & Models ────────────┐
-                                                 │
-Phase 2: Ingestion & Parser Extensions ──────────┼──► Phase 5: Verification & Benchmarks
-                                                 │
-Phase 3: Domain Matching Funnels (A through PP) ─┤
-                                                 │
-Phase 4: Intra-Corpus Graph Clusterer ───────────┘
+```mermaid
+flowchart LR
+    P1["Phase 1: Greenfield Storage & Models"]
+    P2["Phase 2: Ingestion & Parser Extensions"]
+    P3["Phase 3: Domain Matching Funnels (A through PP)"]
+    P4["Phase 4: Intra-Corpus Graph Clusterer"]
+    P5["Phase 5: Verification & Benchmarks"]
+
+    P1 --> P5
+    P2 --> P5
+    P3 --> P5
+    P4 --> P5
 ```
 
 ### Milestone 1: Greenfield Data Models & Relational Schema
@@ -5190,17 +4663,18 @@ With the mandate of **zero backward-compatibility constraints**, the configurati
 
 ### 8.2 Streamlined Pydantic Schemas (`src/reconciliator/config.py`)
 
-```
-AppConfig
- ├── storage: StorageConfig (authority_db, vocab_db, progress_db, corpus_db, work_index)
- ├── embedding: EmbeddingConfig (model_name, template_path -> work_serialization.j2)
- ├── download_skosmos: dict[str, SkosmosDownloadConfig]
- ├── ingest_vocab: VocabIngestConfig
- ├── ingest_oai: dict[str, OAIIngestConfig] (target_database, slice_days)
- ├── ingest_wikidata: WikidataIngestConfig (pass1_only, extract_works)
- ├── reconcile: ReconcileConfig (work_reports, expression_reports, cluster, enrichment)
- ├── telemetry: TelemetryConfig
- └── normalization: NormalizationConfig
+```mermaid
+flowchart TD
+    App["AppConfig"]
+    App --> Storage["storage: StorageConfig (authority_db, vocab_db, progress_db, corpus_db, work_index)"]
+    App --> Embed["embedding: EmbeddingConfig (model_name, template_path -> work_serialization.j2)"]
+    App --> Skosmos["download_skosmos: dict[str, SkosmosDownloadConfig]"]
+    App --> Vocab["ingest_vocab: VocabIngestConfig"]
+    App --> OAI["ingest_oai: dict[str, OAIIngestConfig] (target_database, slice_days)"]
+    App --> Wiki["ingest_wikidata: WikidataIngestConfig (pass1_only, extract_works)"]
+    App --> Recon["reconcile: ReconcileConfig (work_reports, expression_reports, cluster, enrichment)"]
+    App --> Telem["telemetry: TelemetryConfig"]
+    App --> Norm["normalization: NormalizationConfig"]
 ```
 
 #### Detailed Model Definitions:
