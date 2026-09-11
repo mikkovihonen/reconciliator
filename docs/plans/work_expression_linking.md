@@ -129,6 +129,8 @@ Monographs represent simple 1:1:1 ($W \rightarrow E \rightarrow M$) structures. 
 #### 2.2.2 Detailed WEMI Structures per Aggregate Type
 
 ##### A. Recorded Sound (Music CDs / Streaming Albums)
+Recorded sound (commercial audio CDs, vinyl LPs, digital streaming albums, and archival master tapes) represents an aggregate where a single physical or digital carrier Manifestation gathers multiple track Expressions, each realizing a distinct musical composition or performance Work. The engine must separate the underlying musical composition (Work) from specific recorded performances (Expressions) and physical album releases (Manifestations):
+
 ```mermaid
 flowchart TD
     M["Manifestation: The Audio CD | Label: Ondine, No: ODE 1020 | Carrier: audio disc"]
@@ -138,6 +140,19 @@ flowchart TD
     M -->|"manifestation_expressions (1:N, track_number)"| E
     E -->|"expressionOf"| W
 ```
+
+**MARC specifics for Recorded Sound**:
+- Leader/06 = `j` (Musical sound recording); Leader/07 = `m` (Monographic audio album)
+- `028 02` — Recording label / matrix publisher number (`$a ODE 1020-2 $b Ondine`)
+- `024 0` / `024 1` / `024 7` — Standard identifiers: ISRC (`024 0`), UPC/EAN commercial barcode (`024 1`), streaming URI (`024 7 $2 uri`)
+- `100 1#` / `700 1# $4 cmp` — Composer of the musical work (`$a Sibelius, Jean, $d 1865-1957 $4 cmp`), lyricist (`$4 lyr`), librettist (`$4 lib`)
+- `700 1#` / `710 2# $4 prf` — Primary performing artist (`$4 prf`), conductor (`$4 cnd`), soloist (`$4 itr`, `$4 voc`), orchestra / ensemble (`$4 mus`, `$4 cht`)
+- `240 10` — Musical uniform title with key, opus, and thematic catalogue designation (`$a Symphonies, $n no. 1, op. 39, $r E minor`)
+- `305` / `306` — Playing duration statement (`$a 004215`)
+- `382` — Medium of performance statement (`$a orchestra $n 1 $s 1 $2 lcmpt`)
+- `505 0#` — Formatted tracklist contents note with track titles, timings, and composers
+- `511 0#` — Performer and ensemble note (`$a Helsingin kaupunginorkesteri, johtajana Susanna Mälkki`)
+- `700 12 $t` — Analytical added entries for individual musical works included on the album
 
 ##### B. Notated Music (Printed Scores)
 Notated music has a fundamentally different WEMI split from recorded sound. The **Work** is the composition itself, the **Expression** represents a specific **edition/arrangement/reduction** (full score vs. vocal score vs. piano reduction vs. study score vs. parts), and the **Manifestation** is the printed publication:
@@ -164,6 +179,8 @@ flowchart TD
 - `700 12 $t` — Analytical entries for individual pieces in a collection score
 
 ##### C. Article Repositories (Journal Articles / Book Chapters)
+Article repositories and citation indexes (Crossref, ArXiv, Journal.fi, Elektra, Doria) model constituent analytical components published within host serials or edited volumes. The individual article or chapter forms its own Work and Expression, embodied as a component Manifestation (`is_component: true`) linked to its host journal issue or book Manifestation:
+
 ```mermaid
 flowchart TD
     M_Host["Host Manifestation: Journal Issue/Vol | Virittäjä, Vol. 127, No. 2 (2023) | ISSN: 0042-6806"]
@@ -175,6 +192,22 @@ flowchart TD
     M_Comp -->|"manifestation_expressions"| E
     E -->|"expressionOf"| W
 ```
+
+**MARC specifics for Article Repositories**:
+- Leader/06 = `a` (Language material); Leader/07 = `b` (Serial component part / journal article) or `a` (Monographic component part / book chapter)
+- `024 7` — Digital Object Identifier (`$a 10.1234/xyz $2 doi`) or persistent handle
+- `100 1# $4 aut` — Primary article author, co-authors in `700 1# $4 aut`
+- `245 10` — Article title and subtitle
+- `520 3#` — Abstract or executive summary
+- `536` — Funding sponsor / grant number note (`$a Suomen Akatemia, päätösnumero 345678`)
+- `773 08` — Host item entry linking component part to containing journal issue or edited collection:
+  - `$t` Host title (`Virittäjä`)
+  - `$x` Host ISSN (`0042-6806`)
+  - `$d` Publication year (`2023`)
+  - `$g` Enumeration and chronology (`Vol. 127, nro 2 (2023), s. 180-205`)
+  - `$w` Host record control number (`(FI-MELINDA)000123456`)
+  - `$7` Linking control subfield (`$7 nnas` for serial host)
+- `856 40` — Full-text article access URI (`$u https://journal.fi/virittaja/article/view/...`)
 
 ##### D. Audiobooks & Spoken Word
 The audiobook expression **realizes the same underlying textual Work** as the printed book. This cross-content-type linkage is essential:
@@ -200,6 +233,8 @@ flowchart TD
 - The textual Work can be linked back via `240 $0` or `758` to the same Work URI as the printed edition
 
 ##### E. Moving Image (Film / Video Compilations)
+Moving image materials (theatrical feature films, television series, documentaries, video art, and box sets) feature complex collaborative authorship and format diversity. Under RDA/LRM cataloging rules, the film director (`drt`) is treated as the primary Work creator alongside screenwriters (`aus`), while performers (`act`), cinematographers (`cng`), and producers (`pro`) contribute at the Expression and Manifestation tiers:
+
 ```mermaid
 flowchart TD
     M["Manifestation: DVD/Blu-ray Box Set | Aki Kaurismäki Collection | Carrier: videodisc | EAN/UPC: 6438044366..."]
@@ -211,13 +246,21 @@ flowchart TD
 ```
 
 **MARC specifics for Moving Image**:
-- Leader/06 = `g` (Projected medium)
-- `700 12 $t` — Analytical entries for individual films in a compilation
-- `508` — Creation/production credits (directors, producers)
-- `511` — Performer/cast note
-- `028` — Publisher / distributor number
+- Leader/06 = `g` (Projected medium / videorecording); Leader/07 = `m` (Monographic release / box set)
+- `024 1` / `024 7` — Standard identifiers: UPC/EAN barcode (`024 1`), ISAN (`024 7 $2 isan`), EIDR (`024 7 $2 eidr`)
+- `028 42` — Videorecording publisher / distributor number
+- `100/700 1# $4 drt` — Film director (primary Work creator), `700 $4 aus` (Screenwriter), `700 $4 cre` (Creator)
+- `700 1# $4 pro` — Producer, `$4 act` (Actor / Cast), `$4 cng` (Director of photography), `$4 cmp` (Film score composer)
+- `347` — Digital video characteristics (`$a videonauhoitus $b Blu-ray $c 1080p Full HD $d 16:9`)
+- `508` — Creation and production credits
+- `511 1#` — Cast / performer credits (`$a Markku Peltola, Kati Outinen, Juhani Niemelä`)
+- `521 1#` — Age rating / content warning note (`$a K-12 $b Kansallinen audiovisuaalinen instituutti (KAVI)`)
+- `546` — Spoken audio language and subtitle specifications (`$a Puhuttu suomeksi ; tekstitys ruotsiksi, englanniksi`)
+- `700 12 $t` — Analytical added entries for individual films contained in a compilation box set
 
 ##### F. Anthologies & Essay Collections
+Anthologies, essay collections, and festschriften are aggregated publications in which an editor or compiler collects distinct, pre-existing or commissioned independent Works by multiple authors into a single printed or digital volume. The collection Manifestation links simultaneously to multiple independent constituent Expressions via `manifestation_expressions`, each tracing back to its own distinct authorial Work:
+
 ```mermaid
 flowchart TD
     M["Manifestation: Printed Collection | Finnish Short Stories of the 20th C. | ISBN: 978-951-... | edt: Pekka Tarkka (editor)"]
@@ -227,6 +270,15 @@ flowchart TD
     M -->|"manifestation_expressions (1:N)"| E
     E -->|"expressionOf"| W
 ```
+
+**MARC specifics for Anthologies & Essay Collections**:
+- Leader/06 = `a` (Language material); Leader/07 = `m` (Monographic volume)
+- `100 1#` / `700 1# $4 edt` — Collection editor (`$a Tarkka, Pekka $4 edt`), compiler (`$4 com`), or festschrift honoree (`$4 hnr`)
+- `245 00` — Collective collection title (often cataloged under title main entry)
+- `020` — Monographic collection ISBN (`$a 978-951-...`)
+- `505 0#` — Formatted contents note enumerating constituent authors, work titles, and page spans
+- `700 12` — Author/title analytical added entries for constituent Works (`$a Kivi, Aleksis, $d 1834-1872. $t Seitsemän veljestä. $k Katkelma. $4 aut`)
+- WEMI Cardinality: `manifestation_expressions` maps the single `manifestation_id` to multiple `expression_id` rows, preserving the distinct identity and authorship of each constituent piece.
 
 ##### G. Serials & Continuing Resources (Journals, Periodicals, Newspapers)
 Serials represent continuing intellectual works that unfold over time through sequential issues or volumes. A key complexity in serials is **title succession** (MARC `780`/`785`), where major title changes create distinct bibliographic Works connected in a historical chain:
@@ -267,7 +319,12 @@ flowchart TD
 ```
 
 **MARC specifics for Multi-Part Series**:
-- `490` / `830` — Series statement (untraced `490 0#` vs. series added entry `830 #0` with uniform title `$a`, volume number `$v`, ISSN `$x`, and authority URI `$0`).
+- Leader/06 = `a` (Language material); Leader/07 = `m` (Monographic volume in a series)
+- `490 1#` / `830 #0` — Series statement and series added entry: uniform series title `$a`, volume designation `$v`, series ISSN `$x`, and series authority URI `$0` (Asteri / VIAF / IdRef)
+- `020` — Volume-specific ISBN (`020 $a ... (sidottu)`) and set ISBN (`020 $a ... (koko teos) $q set`)
+- `245 10` — Multipart title statement with volume number `$n` and volume title `$p` (`$a Suomen kansan vanhat runot. $n I, $p Vienan läänin runot 1`)
+- `700 1# $4 edt` — General series editor (`$4 edt`) vs. volume author (`$4 aut`)
+- `758` / `work_relationships`: Linking individual volume Work to Series Super-Work via `relationship_type='series_member'` or `relationship_type='part_of'`
 
 ##### I. Conference Proceedings
 Conference proceedings are aggregates of peer-reviewed papers resulting from a specific scholarly event. The conference itself is an **Event Entity** (`CorporateName` / `MeetingName`), while the published book is an aggregate Manifestation containing individual paper Works:
@@ -283,8 +340,13 @@ flowchart TD
 ```
 
 **MARC specifics for Conference Proceedings**:
-- `111` / `711` — Meeting name entry (`$a` meeting name, `$d` date, `$c` location, `$n` number of conference, `$0` URI)
-- `700 12 $t` / `711 02 $t` — Analytical paper entries or conference paper links
+- Leader/06 = `a` (Language material); Leader/07 = `m` (Monographic volume) or `s` (Recurring annual conference proceedings)
+- `111 2#` / `711 2#` — Meeting name entry: `$a` meeting name, `$n` conference number, `$d` date, `$c` location, `$0` meeting authority URI (`$a NODALIDA $n (24th : $d 2023 : $c Tórshavn, Faroe Islands)`)
+- `700 1# $4 edt` — Proceedings editor (`$4 edt`) or program chair (`$4 pbd`)
+- `710 2#` — Sponsoring learned society or publisher (`$a Association for Computational Linguistics $4 spn`)
+- `020` / `024 7` — Proceedings ISBN and conference DOI prefix
+- `700 12 $t` / `711 02 $t` — Analytical entries for individual conference papers
+- `773 08` — Host linking entry from individual papers back to the proceedings manifestation
 
 ##### J. Academic Theses & Dissertations
 Academic theses (doctoral dissertations, master's theses, licentiate theses) are intellectual Works created in satisfaction of degree requirements. In Finnish academic repositories (Theseus, Osuva, Helda) and Melinda, they frequently exhibit **dual-manifestation pairs** (printed edition + open access institutional PDF repository copy):
@@ -399,8 +461,14 @@ flowchart TD
 ```
 
 **MARC specifics for Government Publications**:
-- `110 1#` / `710 1#` — Government body corporate entry (`$a Finland. $b Opetus- ja kulttuuriministeriö`)
-- `024 7 $2 urn` — Valto / institutional repository permanent link
+- Leader/06 = `a` (Language material); Leader/07 = `m` (Monographic report) or `s` (Serial official gazette / annual review)
+- `008/28` — Government publication level code (`f` for federal/national, `s` for state/provincial, `l` for local/municipal)
+- `110 1#` / `710 1#` — Hierarchical government corporate entry (`$a Finland. $b Opetus- ja kulttuuriministeriö $4 aut`)
+- `024 7 $2 urn` — Valto / institutional repository permanent URN (`$a URN:ISBN:978-952-343-987-6 $2 urn`)
+- `024 7 $2 sdk` / `$2 eduskunta` — Statute / parliamentary document identifier (`$a HE 123/2023 vp`, `$a SDK 404/1961`)
+- `088` — Report / committee document series identifier (`$a OKM julkaisuja 2023:14`, `$a KM 2023:5`)
+- `490 1#` / `830 #0` — Official ministry series statement with ISSN
+- `655 #7` — Controlled grey literature genre headings (`$a Komiteanmietinnöt $2 yso/slm`, `$a Hallituksen esitykset $2 yso/slm`, `$a Selvitykset $2 yso/slm`)
 
 ##### P. 3D Objects, Realia & Educational Kits
 Realia encompass physical artefacts, museum objects, architectural models, and multi-media learning kits:
@@ -801,6 +869,8 @@ flowchart TD
 - `007` — Physical characteristics of reproduction (microform reduction ratio, generation, film emulsion, or electronic file)
 
 ##### II. Medieval Manuscript Fragments & Codicological Reconstructions (Fragmenta Membranea)
+Medieval manuscript fragments (*Fragmenta Membranea*, codicological reconstructions) represent dismembered medieval codices whose parchment leaves were cut up and reused in the 16th and 17th centuries as binding covers for bailiffs' tax account books (*voutien tilikirjat*). The reconstructed liturgical or theological book (Missal, Breviary, Antiphoner, Gradual) constitutes a virtual canonical codex Work, the liturgical chant notation and Latin text constitute an Expression, and individual dispersed parchment folios preserved across institutional repositories (Kansalliskirjasto, Kansallisarkisto, Riksarkivet) constitute physical Items:
+
 ```mermaid
 flowchart TD
     W_Codex["Reconstructed Medieval Codex Work | Missale Aboense Codicis Antiqui (c. 1400) | work_type: codex_fragment, Uniform Title: Missale"]
@@ -817,6 +887,8 @@ flowchart TD
 - `758` — Work link to virtual parent reconstructed codex (`$4 http://id.loc.gov/ontologies/bibframe/instanceOf` or `$4 http://rdaregistry.info/Elements/m/P30135`)
 
 ##### JJ. Ephemera & Job Printing (Pienpainatteet / Commercial Catalogs)
+Ephemera and commercial job printing (*pienpainatteet*, trade catalogs, seasonal price lists, broadsides, election leaflets, and theater programs) represent corporate-issued serial or monographic publications often processed via collective cataloging (*kokoelmatason kuvailu* / *ryhmäkuvailu*). The corporate issuer (e.g. *Oy Stockmann Ab*, *Suomen Höyrylaiva Osakeyhtiö*) embodies the ongoing commercial publication Work, specific seasonal or annual trade issues are Expressions, and physical leaflets or catalogs are Manifestations:
+
 ```mermaid
 flowchart TD
     W_Corp["Corporate Publication Aggregate Work | Stockmannin tuoteluettelot ja hinnastot | work_type: ephemera, Corporate Body: Oy Stockmann Ab"]
@@ -827,7 +899,20 @@ flowchart TD
     E_Cat -->|"manifestationOf"| M_Leaf
 ```
 
+**MARC specifics for Ephemera & Job Printing**:
+- Leader/06 = `a` (Language material) or `k` (Two-dimensional graphic / broadside / poster); Leader/07 = `m` (Monograph) or `s` (Serial / seasonal price list)
+- `110 2#` / `710 2#` — Corporate issuer / retailer / manufacturer (`$a Oy Stockmann Ab $4 iss`)
+- `245 10` / `246 1#` — Commercial title with seasonal or annual designation (`$a Stockmannin syyskuvasto 1935`)
+- `260` / `264` — Commercial job printer imprint (`$b F. Tilgmannin kirjapaino $c 1935`)
+- `300` — Physical extent statement (`$a 48 s. : $b kuv. ; $c 28 cm` or `$a 1 lehti (kaksipuolinen)`)
+- `362 0#` / `362 1#` — Numeric / chronological seasonal issue designation (`$a Syksy 1935`)
+- `655 #7` — Controlled ephemera genre heading (`$a Pienpainatteet $2 yso/slm`, `$a Hinnastot $2 yso/slm`, `$a Tuoteluettelot $2 yso/slm`, `$a Vaalijulisteet $2 yso/slm`, `$a Teatteriohjelmat $2 yso/slm`)
+- `773 08` — Host corporate collection entry for collective grouping (`$7 nnas $t Oy Stockmann Ab:n hinnastot ja tuoteluettelot $w (FI-MELINDA)005432109`)
+- Agent roles: `$4 iss` (Issuing body), `$4 prt` (Printer / Typographer), `$4 ltg` (Lithographer)
+
 ##### KK. Exhibition Catalogues & Curated Display Aggregates
+Exhibition catalogues embody a dual-entity hybrid: a monographic publication (containing scholarly curatorial essays and documentation) and the underlying **curated museum exhibition event** itself. The publication Manifestation documents the Exhibition Event Work (MARC 111 / `bf:Event`), which in turn gathers and displays multiple constituent Artworks (Works):
+
 ```mermaid
 flowchart TD
     Event["Exhibition Event Work (MARC 111 / bf:Event) | Edelfelt Pariisissa (Ateneum 2023) | work_type: event / exhibition, Curator: Ateneum"]
@@ -838,7 +923,20 @@ flowchart TD
     Event -->|"exhibitsWork (1:N)"| W_Exh
 ```
 
+**MARC specifics for Exhibition Catalogues**:
+- Leader/06 = `a` (Language material); Leader/07 = `m` (Monographic volume)
+- `111 2#` / `711 2#` — Exhibition event name, dates, and venue (`$a Albert Edelfelt - Pariisin valtias $d 2023 $c Helsinki $c Ateneumin taidemuseo`)
+- `710 2# $4 his` — Host institution / museum venue (`$a Ateneumin taidemuseo $4 his`)
+- `700 1# $4 cur` — Exhibition curator (`$a Hovinheimo, Petja $4 cur`), `$4 edt` (Catalogue editor), `$4 aut` (Catalogue essayists)
+- `700 12` — Analytical added entries for exhibited masterworks (`$a Edelfelt, Albert, $d 1854-1905. $t Pariisitar. $4 art`)
+- `500` / `518` — Exhibition history note (`$a Julkaistu Ateneumin taidemuseon näyttelyn yhteydessä 5.5.–17.9.2023`)
+- `655 #7` — Genre heading (`$a Näyttelyluettelot $2 yso/slm`)
+- `020` — Monographic ISBN (`$a 978-952-7371-55-8`)
+- `758` / `work_relationships`: Linking publication Manifestation to Exhibition Event Work (`relationship_type='documentation_of'`), and Exhibition Event Work to constituent Artworks (`relationship_type='exhibits_work'`)
+
 ##### LL. Scholarly Critical Editions & Textual Apparatus (Variorum Editions)
+Scholarly critical editions (*kriittiset editiot*, variorum editions, *Gesamtausgaben*) combine a canonical authorial/musical base Work with new, independent intellectual scholarship: the critical apparatus (*apparatus criticus*), stemmatic analysis, manuscript variant readings, and editorial commentary. The engine must model both the underlying base Work and the scholarly critical edition Work without conflating them into a simple reprint:
+
 ```mermaid
 flowchart TD
     W_Base["Authorial Canonical Work | Aleksis Kivi: Seitsemän veljestä (1870) | work_type: text, Author: Aleksis Kivi"]
@@ -851,7 +949,20 @@ flowchart TD
     E_Crit -->|"manifestationOf"| M_Crit
 ```
 
+**MARC specifics for Scholarly Critical Editions**:
+- Leader/06 = `a` (Language material) or `c`/`d` (Notated music for complete critical editions / *Gesamtausgaben*); Leader/07 = `m`
+- `100 1#` — Author or composer of the canonical base work (`$a Kivi, Aleksis, $d 1834-1872 $4 aut` / `$a Sibelius, Jean, $d 1865-1957 $4 cmp`)
+- `240 10` — Uniform title of the underlying canonical work (`$a Seitsemän veljestä $0 http://urn.fi/URN:NBN:fi:bib:me:w...`)
+- `245 10` — Critical edition title statement (`$a Seitsemän veljestä : $b kriittinen editio / $c toimittanut Sakari Katajamäki (päätoimittaja)...`)
+- `700 1# $4 edt` / `$4 cwt` — Critical editor (`$a Katajamäki, Sakari $4 edt`), annotator (`$4 anm`), or commentator (`$4 cwt`)
+- `710 2#` — Sponsoring academy or learned society (`$a Suomalaisen Kirjallisuuden Seura $4 pbl` / `$a Kansalliskirjasto $4 edt`)
+- `490 1#` / `830 #0` — Critical edition series (`$a Suomalaisen Kirjallisuuden Seuran toimituksia $x 0355-1768 ; $v 1424 $a Aleksis Kiven teokset : kriittinen editio ; $v 4`)
+- `500` / `504` — Critical apparatus notes (`$a Sisältää tekstikriittisen laiteiston, käsikirjoitusvariantit ja selitykset`)
+- `758` / `work_relationships`: Distinct `work_type='critical_edition'` linked to canonical base Work via `relationship_type='critical_edition_of'`
+
 ##### MM. Spatial Vector/Raster Geodata & GIS Web Services
+Spatial geodata resources comprise geographic vector layers, satellite/aerial raster imagery, and dynamic OGC/GIS web services (WFS, WMS, OGC API Features). The geographic spatial dataset forms the Work, specific coordinate reference systems (CRS) or data representations (vector vs. raster) are Expressions, and downloadable container files (GeoPackage, GeoTIFF, Shapefile) or API service endpoints are Manifestations:
+
 ```mermaid
 flowchart TD
     W_Geo["Spatial Dataset Work | Maastotietokanta (National Topographic Database) | work_type: geodata_service, Corporate: Maanmittauslaitos"]
@@ -862,7 +973,23 @@ flowchart TD
     E_Geo -->|"manifestationOf (Service vs File Package)"| M_Geo
 ```
 
+**MARC specifics for Spatial Geodata & Web Services**:
+- Leader/06 = `m` (Computer file) or `e` (Cartographic material); Leader/07 = `m` (Monographic dataset/package) or `s`/`i` (Integrating / serial web service)
+- `034` — Coded cartographic mathematical data (`$a a $b 10000 $d E0190000 $e E0313000 $f N0700500 $g N0594500` — bounding coordinates)
+- `084` — Coordinate reference system classification (`$a EPSG:3067 $2 epsg` — ETRS-TM35FIN)
+- `110 1#` / `110 2#` — Mapping agency / geospatial data provider (`$a Maanmittauslaitos $4 ctg` / `$4 dtc`)
+- `255` — Mathematical cartographic data statement (`$a Mittakaava 1:10 000 ; ETRS-TM35FIN-projektio`)
+- `256` — Computer file characteristics (`$a Vektoriaineisto (GeoPackage, GML) ja OGC API Features -rajapintapalvelu`)
+- `336` — Content type (`$a paikkatietoaineisto $b cartographic dataset $2 rdacontent`)
+- `337` — Media type (`$a tietokonekäyttöinen $b c $2 rdamedia`)
+- `338` — Carrier type (`$a verkkoaineisto $b cr $2 rdacarrier`)
+- `538` — System requirements and GIS specifications (`$a Vaatii paikkatieto-ohjelmiston (QGIS, ArcGIS) tai REST/WFS-asiakassovelluksen`)
+- `856 40` — Endpoint URI (`$u https://paikkatietoalusta.fi/... $z OGC API Features / WFS 3.0 rajapintapalvelu`)
+- Agent roles: `$4 ctg` (Cartographer), `$4 dtc` (Data creator), `$4 gis` (Geographic information specialist), `$4 prg` (API programmer)
+
 ##### NN. Numismatics, Philately & Historical Seals
+Numismatics, philately, and historical sigillography represent state-authorized or corporate emissions of currency, postage, and official seals. The authorized monetary issue, denomination, or stamp design is the conceptual Work, the engraved die or printing plate master is the Expression, and physical struck coins, medals, or printed stamp sheets are Manifestations:
+
 ```mermaid
 flowchart TD
     W_Num["Monetary Issue / Stamp Design Work | Suomi 1917 Itsenäisyys 100 vuotta 2 euron erikoisraha | work_type: numismatic, Issuing Body: Suomen Rahapaja"]
@@ -873,7 +1000,20 @@ flowchart TD
     E_Num -->|"manifestationOf"| M_Num
 ```
 
+**MARC specifics for Numismatics & Philately**:
+- Leader/06 = `r` (Three-dimensional artifact / coin / medal) or `k` (Two-dimensional nonprojectable graphic / stamp / seal); Leader/07 = `m`
+- `024 7` — Standard numismatic / philatelic catalogue numbers (`$a FI-KM245 $2 km` [Krause-Mishler], `$a 2344 $2 michel` [Michel stamp catalogue], `$a 1420 $2 scott`)
+- `110 1#` / `110 2#` — Issuing jurisdiction / mint / postal operator (`$a Suomi $4 iss` / `$a Suomen Rahapaja $4 mfp` / `$a Posti Oyj $4 pbl`)
+- `245 00` — Monetary issue or stamp commemorative title (`$a Suomi 1917 Itsenäisyys 100 vuotta 2 euron erikoisraha`)
+- `300` — Physical description: denomination, weight, dimensions, and alloy (`$a 1 kolikko : $b kaksimetallinen (CuNi/NiMessinki), 8.5 g ; $c halkaisija 25.75 mm`)
+- `340` — Material composition (`$a kuparinikkeli $b CuNi $2 rdamat`)
+- `655 #7` — Genre headings (`$a Erikoisrahat $2 yso/slm`, `$a Postimerkit $2 yso/slm`, `$a Mitalit $2 yso/slm`)
+- `700 1#` — Die engraver, medallist, or stamp artist (`$a Daniels, Simon $4 egr` [Engraver], `$4 dsr` [Designer])
+- `758` / `work_relationships`: Linking individual physical specimen Manifestations to the state-sanctioned monetary issue Work
+
 ##### OO. 3D Cultural Heritage Digital Twins & XR Reconstructions
+3D cultural heritage digital twins and extended reality (XR) reconstructions capture architectural monuments, archaeological structures, or museum artifacts in immersive digital form. The real-world historical monument or site is the physical anchor Work, the 3D polygonal reconstruction model is a distinct digital twin Work, the polygonal mesh and texture maps are Expressions, and standard 3D distribution containers (glTF, USDZ, WebXR) are Manifestations:
+
 ```mermaid
 flowchart TD
     W_Phys["Historical Monument / Site Work | Viipurin kaupunginkirjasto (Alvar Aalto, 1935) | work_type: realia / architecture, Architect: Aalto"]
@@ -885,6 +1025,21 @@ flowchart TD
     W_Model -->|"expressionOf"| E_Mesh
     E_Mesh -->|"manifestationOf"| M_XR
 ```
+
+**MARC specifics for 3D Cultural Heritage Digital Twins**:
+- Leader/06 = `m` (Computer file); Leader/07 = `m` (Monograph / single release package)
+- `024 7` — Digital repository handle / SHA-256 asset hash (`$a urn:nbn:fi:csc-2023-0042 $2 hdl` / `$2 sha256`)
+- `100 1#` / `700 1#` — Historical monument architect (`$a Aalto, Alvar, $d 1898-1976 $4 arc`), 3D modeler (`$a Virtanen, Matti $4 mod`), photogrammetrist (`$4 pht`)
+- `110 2#` / `710 2#` — Cultural heritage reconstruction group / institute (`$a VirtuaaliViipuri ry $4 cre` / `$4 cph`)
+- `245 00` — Title with temporal reconstruction phase (`$a Virtuaali-Viipuri 1939 : $b Viipurin kaupunginkirjasto : 3D-malli ja virtuaalirekonstruktio`)
+- `336` — Content type (`$a kolmiulotteinen koneluettava malli $b three-dimensional computer-generated model $2 rdacontent`)
+- `337` — Media type (`$a tietokonekäyttöinen $b c $2 rdamedia`)
+- `338` — Carrier type (`$a verkkoaineisto $b cr $2 rdacarrier`)
+- `347` — Digital file characteristics (`$a 3D-malli $b glTF 2.0 (GLB) / USDZ $c 45 MB`)
+- `518` — Historic temporal baseline date modeled (`$d 1939-11-30 $p Viipuri`)
+- `538` — System requirements and WebXR viewer compatibility (`$a WebGL 2.0 / WebXR -yhteensopiva selain tai 3D-katselin`)
+- `651 #7` / `751 #7` — Real-world architectural monument / historical site (`$a Viipurin kaupunginkirjasto $2 yso/paikat`)
+- `776 08` / `758` — Reproduction / digital twin relationship to physical building/site (`$i Digitaalinen kaksonen kohteesta: $t Viipurin kaupunginkirjasto $w (FI-MELINDA)... $4 http://id.loc.gov/ontologies/bibframe/instanceOf`)
 
 ---
 
