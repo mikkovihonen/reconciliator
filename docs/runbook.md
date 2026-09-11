@@ -25,7 +25,7 @@ This runbook provides complete operational guidance for system administrators an
 3. [CLI Command Reference](#3-cli-command-reference)
    - [`reconciliator download-finto`](#reconciliator-download-finto)
    - [`reconciliator ingest-finto`](#reconciliator-ingest-finto)
-   - [`reconciliator ingest-melinda`](#reconciliator-ingest-melinda)
+   - [`reconciliator ingest-oai`](#reconciliator-ingest-oai)
    - [`reconciliator ingest-wikidata`](#reconciliator-ingest-wikidata)
    - [`reconciliator reconcile`](#reconciliator-reconcile)
    - [`reconciliator run`](#reconciliator-run)
@@ -379,13 +379,15 @@ ingest_finto:
   vocabularies: ["yso", "yso-paikat", "kauno", "muso", "slm", "seko"]
   legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 
-ingest_melinda:
-  source_type: "oai"
-  oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
-  metadata_prefix: "marc21"
-  workers: 8
-  slice_days: 15
-  batch_size: 1000
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "oai"
+    oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
+    metadata_prefix: "marc21"
+    workers: 8
+    slice_days: 15
+    batch_size: 1000
 
 reconcile:
   target_file: "/var/data/incoming/batch_2026_09.xml"
@@ -574,13 +576,13 @@ reconciliator status -c config.yaml --prune
 
 #### Terminal Dashboard Table Example:
 ```text
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
-┃ Task ID                  ┃ Type           ┃ Status    ┃ Stage            ┃ Progress   ┃ Elapsed       ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ finto-download-172596950 │ finto_ingest   │ completed │ done             │ 6/6 vocabs │ 00:00:14      │
-│ melinda-ingest-172596955 │ oai_pmh_harves │ completed │ indexing         │ 100.0%     │ 00:03:42      │
-│ reconciliation-172596960 │ reconciliation │ running   │ reconciling      │ 78.4%      │ 00:01:15      │
-└──────────────────────────┴────────────────┴───────────┴──────────────────┴────────────┴───────────────┘
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Task ID                      ┃ Type           ┃ Status    ┃ Stage            ┃ Progress   ┃ Elapsed       ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ finto-download-172596950     │ finto_ingest   │ completed │ done             │ 6/6 vocabs │ 00:00:14      │
+│ oai-ingest-melinda-172596955 │ oai_pmh_harves │ completed │ indexing         │ 100.0%     │ 00:03:42      │
+│ reconciliation-172596960     │ reconciliation │ running   │ reconciling      │ 78.4%      │ 00:01:15      │
+└──────────────────────────────┴────────────────┴───────────┴──────────────────┴────────────┴───────────────┘
 ```
 
 #### Options:
@@ -683,7 +685,7 @@ mkdir -p data/finto data/reports
 reconciliator download-finto -c config.yaml -v yso -v yso-paikat -v slm -v kauno -v muso -v seko --ingest
 
 # Step 3: Ingest Melinda authority records and build FAISS vector index
-reconciliator ingest-melinda -c config.yaml
+reconciliator ingest-oai -c config.yaml -s melinda
 
 # Step 4: Run reconciliation on target records
 reconciliator reconcile -c config.yaml
@@ -728,7 +730,7 @@ In secure, offline cataloging environments where external internet access is pro
    - Transfer `finto.db`, `authority.db`, `authority.faiss`, and `/path/to/local/model_dir`.
 3. **Configuration**:
    - Set `model_name: "/path/to/local/model_dir"`.
-   - Set `source_type: "file"` for Melinda ingestion.
+   - Set `source_type: "file"` for configured OAI/MARCXML sources.
 4. **Run Reconciliation**:
    - Execute `reconciliator reconcile -c config.offline.yaml`.
    - **Zero network requests** are made during execution.

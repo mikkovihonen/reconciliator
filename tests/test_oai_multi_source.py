@@ -5,12 +5,10 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
-import typer
 from typer.testing import CliRunner
 
-from reconciliator.cli import app, ingest_oai_cmd
-from reconciliator.config import AppConfig, OAIIngestConfig
+from reconciliator.cli import app
+from reconciliator.config import OAIIngestConfig
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.finto_folding import FintoFolder
 from reconciliator.finto_store import FintoStore
