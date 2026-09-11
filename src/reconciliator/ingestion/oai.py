@@ -239,7 +239,7 @@ def ingest_oai_pipeline(
 
     batch: list[BibliographicRecord] = []
     last_checkpoint = 0
-    checkpoint_interval = 5000
+    checkpoint_interval = getattr(config, "checkpoint_interval", 50000)
 
     try:
         for raw_rec in stream_oai_records(

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -106,12 +108,37 @@ class VocabStore:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()
         with self.get_connection() as conn:
             init_vocab_db(conn)
 
     def get_connection(self) -> sqlite3.Connection:
-        """Create a new SQLite connection with WAL pragmas."""
-        return get_db_connection(self.db_path)
+        """Get or create a thread-local SQLite connection with WAL pragmas."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = get_db_connection(self.db_path)
+            self._local.conn = conn
+        return conn
+
+    def close(self) -> None:
+        """Close thread-local SQLite connection if open."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
+
+    def clear_caches(self) -> None:
+        """Clear all in-memory LRU caches."""
+        self.find_concept_by_uri.cache_clear()
+        self.find_concept_by_label.cache_clear()
+        self.find_legacy_mapping_by_uri.cache_clear()
+        self.find_legacy_mapping_by_label.cache_clear()
+        self.find_concept_by_alias.cache_clear()
+        self.is_known_relator.cache_clear()
+        self.get_relator_code.cache_clear()
 
     def insert_concepts(self, concepts: list[VocabConcept]) -> None:
         """Bulk insert or replace concepts in concepts table."""
@@ -150,6 +177,7 @@ class VocabStore:
                 """,
                 rows,
             )
+        self.clear_caches()
 
     def insert_mappings(self, mappings: list[ConceptMapping]) -> None:
         """Bulk insert legacy mappings into concept_mappings."""
@@ -178,7 +206,9 @@ class VocabStore:
                 """,
                 rows,
             )
+        self.clear_caches()
 
+    @functools.lru_cache(maxsize=32768)
     def find_concept_by_uri(self, uri: str) -> Optional[VocabConcept]:
         """Look up concept by URI."""
         with self.get_connection() as conn:
@@ -197,6 +227,7 @@ class VocabStore:
                 target_field=row["target_field"],
             )
 
+    @functools.lru_cache(maxsize=32768)
     def find_concept_by_label(
         self, label: str, vocabulary: Optional[str] = None, lang: str = "fi"
     ) -> Optional[VocabConcept]:
@@ -225,6 +256,7 @@ class VocabStore:
                 target_field=row["target_field"],
             )
 
+    @functools.lru_cache(maxsize=16384)
     def find_legacy_mapping_by_uri(self, uri: str) -> Optional[ConceptMapping]:
         """Look up migration mapping by legacy URI."""
         with self.get_connection() as conn:
@@ -244,6 +276,7 @@ class VocabStore:
                 target_field=row["target_field"],
             )
 
+    @functools.lru_cache(maxsize=16384)
     def find_legacy_mapping_by_label(
         self, label: str, legacy_vocab: Optional[str] = None, lang: str = "fi"
     ) -> Optional[ConceptMapping]:
@@ -309,7 +342,9 @@ class VocabStore:
                 """,
                 rows,
             )
+        self.clear_caches()
 
+    @functools.lru_cache(maxsize=8192)
     def is_known_relator(self, folded_term: str) -> bool:
         """Check whether a folded role term exists in relator_terms."""
         with self.get_connection() as conn:
@@ -319,6 +354,7 @@ class VocabStore:
             ).fetchone()
             return bool(row)
 
+    @functools.lru_cache(maxsize=8192)
     def get_relator_code(self, folded_term: str) -> Optional[str]:
         """Look up standard MARC code for a folded role term in relator_terms."""
         with self.get_connection() as conn:
@@ -362,7 +398,9 @@ class VocabStore:
                 """,
                 rows,
             )
+        self.clear_caches()
 
+    @functools.lru_cache(maxsize=65536)
     def find_concept_by_alias(
         self,
         folded_label: str,

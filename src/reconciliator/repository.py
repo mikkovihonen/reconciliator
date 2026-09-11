@@ -56,6 +56,10 @@ class AuthorityStore:
             return []
 
         record_ids: list[int] = []
+        all_id_rows: list[tuple[int, str, str]] = []
+        all_agent_rows: list[tuple[int, str, str, Optional[str], Optional[str], str, str]] = []
+        all_fts_rows: list[tuple[int, int, str, str, str, str, str]] = []
+
         with self.get_connection() as conn:
             for record in records:
                 # Upsert authority_records
@@ -90,34 +94,21 @@ class AuthorityStore:
                 rec_id = cursor.fetchone()["id"]
                 record_ids.append(rec_id)
 
-                # Clean existing identifiers, agents, FTS entries, and vector mappings for this record if re-inserting
-                conn.execute("DELETE FROM authority_identifiers WHERE record_id = ?;", (rec_id,))
-                conn.execute("DELETE FROM authority_agents WHERE record_id = ?;", (rec_id,))
-                conn.execute("DELETE FROM authority_fts WHERE record_id = ?;", (rec_id,))
-                conn.execute("DELETE FROM vector_mappings WHERE record_id = ?;", (rec_id,))
-
-                # Insert identifiers
-                id_rows = []
+                # Prepare identifiers
                 for isbn in record.identifiers.isbn:
-                    id_rows.append((rec_id, "isbn", isbn))
+                    all_id_rows.append((rec_id, "isbn", isbn))
                 for issn in record.identifiers.issn:
-                    id_rows.append((rec_id, "issn", issn))
+                    all_id_rows.append((rec_id, "issn", issn))
                 for urn in record.identifiers.urn:
-                    id_rows.append((rec_id, "urn", urn))
+                    all_id_rows.append((rec_id, "urn", urn))
                 for oid in record.identifiers.other_ids:
-                    id_rows.append((rec_id, "other", oid))
+                    all_id_rows.append((rec_id, "other", oid))
                 id_type = "wikidata_qid" if record.source == "wikidata" else record.source
-                id_rows.append((rec_id, id_type, record.source_id))
+                all_id_rows.append((rec_id, id_type, record.source_id))
 
-                conn.executemany(
-                    "INSERT INTO authority_identifiers (record_id, id_type, id_value) VALUES (?, ?, ?);",
-                    id_rows,
-                )
-
-                # Insert agents
-                agent_rows = []
+                # Prepare agents
                 for a in record.agents:
-                    agent_rows.append(
+                    all_agent_rows.append(
                         (
                             rec_id,
                             a.name,
@@ -128,16 +119,8 @@ class AuthorityStore:
                             json.dumps(a.uri_subfield_1, ensure_ascii=False),
                         )
                     )
-                conn.executemany(
-                    """
-                    INSERT INTO authority_agents (
-                        record_id, name, name_normalized, surname, role, uri_subfield_0, uri_subfield_1
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?);
-                    """,
-                    agent_rows,
-                )
 
-                # Insert FTS
+                # Prepare FTS
                 agent_names_str = " ".join(a.name for a in record.agents)
                 all_subjs = (
                     record.subjects.topical
@@ -146,19 +129,47 @@ class AuthorityStore:
                     + record.subjects.medium_of_performance
                 )
                 subj_terms = " ".join(s.pref_label for s in all_subjs if s.pref_label)
-                conn.execute(
-                    """
-                    INSERT INTO authority_fts (record_id, title, uniform_title, author_names, publisher, subjects)
-                    VALUES (?, ?, ?, ?, ?, ?);
-                    """,
+                all_fts_rows.append(
                     (
+                        rec_id,
                         rec_id,
                         record.title,
                         record.uniform_title or "",
                         agent_names_str,
                         record.publisher or "",
                         subj_terms,
-                    ),
+                    )
+                )
+
+            # Clean existing child rows in batch for any re-inserted / updated records (using fast rowid for FTS5)
+            rec_id_tuples = [(rid,) for rid in record_ids]
+            conn.executemany("DELETE FROM authority_identifiers WHERE record_id = ?;", rec_id_tuples)
+            conn.executemany("DELETE FROM authority_agents WHERE record_id = ?;", rec_id_tuples)
+            conn.executemany("DELETE FROM authority_fts WHERE rowid = ?;", rec_id_tuples)
+            conn.executemany("DELETE FROM vector_mappings WHERE record_id = ?;", rec_id_tuples)
+
+            # Bulk insert children
+            if all_id_rows:
+                conn.executemany(
+                    "INSERT INTO authority_identifiers (record_id, id_type, id_value) VALUES (?, ?, ?);",
+                    all_id_rows,
+                )
+            if all_agent_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO authority_agents (
+                        record_id, name, name_normalized, surname, role, uri_subfield_0, uri_subfield_1
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    all_agent_rows,
+                )
+            if all_fts_rows:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO authority_fts (rowid, record_id, title, uniform_title, author_names, publisher, subjects)
+                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    all_fts_rows,
                 )
 
         # Add vectors to vector index if provided

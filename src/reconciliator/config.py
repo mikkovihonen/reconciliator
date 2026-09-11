@@ -233,6 +233,7 @@ class OAIIngestConfig(BaseModel):
     until_date: Optional[str] = None
     slice_days: int = 30
     batch_size: int = 500
+    checkpoint_interval: int = 50000
     request_delay: float = 0.1
     timeout: float = 60.0
     normalization: Optional[RecordNormalizationConfig] = None
