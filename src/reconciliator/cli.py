@@ -779,7 +779,7 @@ def reconcile_cmd(
             match_tier = best_match.match_tier if best_match else "unmatched"
             match_score = best_match.match_score if best_match else 0.0
             dense_score = best_match.dense_score if best_match else None
-            sparse_score = best_match.sparse_score if best_match else None
+            rerank_score = best_match.rerank_score if best_match else None
 
             for idx, agent in enumerate(target_record.agents):
                 selected = res.selected_agent_uris.get(idx, [])
@@ -839,7 +839,7 @@ def reconcile_cmd(
                             match_tier=match_tier,
                             match_score=match_score,
                             dense_score=dense_score,
-                            sparse_score=sparse_score,
+                            rerank_score=rerank_score,
                             agent_name_score=agent_name_score,
                             action=action,
                             is_novel=is_novel,
@@ -884,7 +884,7 @@ def reconcile_cmd(
                             match_tier=match_tier,
                             match_score=match_score,
                             dense_score=dense_score,
-                            sparse_score=sparse_score,
+                            rerank_score=rerank_score,
                             agent_name_score=agent_name_score,
                             action="suppressed_by_priority",
                             is_novel=True,

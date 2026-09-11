@@ -60,10 +60,11 @@ reconcile:
   subject_reports:
     detailed_file: "{reports_dir}/subject_uris.tsv"
     summary_file: "{reports_dir}/subject_summary.tsv"
-  sparse_rerank:
+  rerank:
     enabled: true
+    engine: "bm25"
     dense_weight: 0.6
-    sparse_weight: 0.4
+    rerank_weight: 0.4
     top_k: 5
     short_circuit:
       enabled: true
@@ -178,10 +179,11 @@ reconcile:
   subject_reports:
     detailed_file: "{reports_dir}/subject_uris.tsv"
     summary_file: "{reports_dir}/subject_summary.tsv"
-  sparse_rerank:
+  rerank:
     enabled: true
+    engine: "bm25"
     dense_weight: 0.6
-    sparse_weight: 0.4
+    rerank_weight: 0.4
     top_k: 5
     short_circuit:
       enabled: true

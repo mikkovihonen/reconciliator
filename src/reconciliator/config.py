@@ -261,12 +261,19 @@ class ShortCircuitConfig(BaseModel):
         return self
 
 
-class SparseRerankConfig(BaseModel):
-    """Configuration for lexical BM25 reranking and metadata discriminators."""
+RerankEngineType = Literal["bm25", "cross_encoder", "fuzzy", "noop"]
+
+
+class RerankConfig(BaseModel):
+    """Configuration for candidate reranking and metadata discriminators."""
 
     enabled: bool = True
+    engine: RerankEngineType = "bm25"
+    model_name: Optional[str] = None
+    device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
+    batch_size: int = 16
     dense_weight: float = 0.6
-    sparse_weight: float = 0.4
+    rerank_weight: float = 0.4
     top_k: int = 50
     short_circuit: ShortCircuitConfig = Field(default_factory=ShortCircuitConfig)
     require_volume_match: bool = True
@@ -275,14 +282,14 @@ class SparseRerankConfig(BaseModel):
     year_penalty_threshold: int = 1
 
     @model_validator(mode="after")
-    def validate_weights(self) -> SparseRerankConfig:
+    def validate_weights(self) -> RerankConfig:
         if not (0.0 <= self.dense_weight <= 1.0):
             raise ValueError(f"dense_weight must be in [0.0, 1.0], got {self.dense_weight}")
-        if not (0.0 <= self.sparse_weight <= 1.0):
-            raise ValueError(f"sparse_weight must be in [0.0, 1.0], got {self.sparse_weight}")
-        if round(self.dense_weight + self.sparse_weight, 5) != 1.0:
+        if not (0.0 <= self.rerank_weight <= 1.0):
+            raise ValueError(f"rerank_weight must be in [0.0, 1.0], got {self.rerank_weight}")
+        if round(self.dense_weight + self.rerank_weight, 5) != 1.0:
             raise ValueError(
-                f"dense_weight and sparse_weight must sum to 1.0, got {self.dense_weight + self.sparse_weight}"
+                f"dense_weight and rerank_weight must sum to 1.0, got {self.dense_weight + self.rerank_weight}"
             )
         return self
 
@@ -306,7 +313,7 @@ class ReconcileConfig(BaseModel):
     enrich: bool = True
     fold_legacy: bool = True
     threshold: float = 0.85
-    sparse_rerank: SparseRerankConfig = Field(default_factory=SparseRerankConfig)
+    rerank: RerankConfig = Field(default_factory=RerankConfig)
     link_policy: Literal["priority_fallback", "all"] = "priority_fallback"
     vocabularies: list[str] = Field(
         default_factory=lambda: [

@@ -1,28 +1,30 @@
-"""Sparse lexical reranker, BM25 scoring, and hard metadata discriminators."""
+"""Candidate evaluation, metadata discrimination, and score fusion pipeline."""
 
 from __future__ import annotations
 
-import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from rank_bm25 import BM25Okapi
-
-from reconciliator.config import SparseRerankConfig
 from reconciliator.models import BibliographicRecord, ReconciliationMatch
+from reconciliator.rerank.base import RerankScorer
+from reconciliator.rerank.factory import create_rerank_scorer
+
+if TYPE_CHECKING:
+    from reconciliator.config import RerankConfig
 
 
-def tokenize_text(text: str) -> list[str]:
-    """Tokenize text into lowercase alphanumeric tokens."""
-    if not text:
-        return []
-    return re.findall(r"\w+", text.lower())
+class CandidateEvaluator:
+    """
+    Evaluates retrieval candidates using domain metadata discriminators (volume, surname, year),
+    dense short-circuiting, and pluggable reranker score fusion.
+    """
 
-
-class SparseReranker:
-    """Configurable candidate reranker applying BM25 scoring, volume checks, and surname validation."""
-
-    def __init__(self, config: SparseRerankConfig) -> None:
+    def __init__(
+        self,
+        config: RerankConfig,
+        scorer: Optional[RerankScorer] = None,
+    ) -> None:
         self.config = config
+        self.scorer: RerankScorer = scorer or create_rerank_scorer(config)
 
     def check_volume_match(
         self, target_volume: Optional[str], candidate_volume: Optional[str]
@@ -73,26 +75,6 @@ class SparseReranker:
 
         return True, min(penalty, 0.5), diff
 
-    def compute_bm25_score(self, target_text: str, candidate_text: str) -> float:
-        """Compute normalized BM25 lexical similarity in [0.0, 1.0]."""
-        target_tokens = tokenize_text(target_text)
-        cand_tokens = tokenize_text(candidate_text)
-
-        if not target_tokens or not cand_tokens:
-            return 0.0
-
-        bm25 = BM25Okapi([cand_tokens])
-        raw_score = bm25.get_scores(target_tokens)[0]
-
-        # Max possible score reference for normalization
-        max_possible = bm25.get_scores(cand_tokens)[0]
-        if max_possible > 0:
-            norm_score = raw_score / max_possible
-        else:
-            norm_score = 0.0
-
-        return max(0.0, min(1.0, float(norm_score)))
-
     def evaluate_candidate(
         self,
         target_record: BibliographicRecord,
@@ -100,7 +82,7 @@ class SparseReranker:
         dense_score: float,
         acceptance_threshold: float = 0.85,
     ) -> ReconciliationMatch:
-        """Evaluate a candidate record through short-circuit or hybrid dense+sparse scoring."""
+        """Evaluate a candidate record through short-circuit or hybrid dense+rerank scoring."""
         vol_match = self.check_volume_match(
             target_record.volume_designation, candidate_record.volume_designation
         )
@@ -119,7 +101,7 @@ class SparseReranker:
                     match_tier="tier2_dense",
                     match_score=dense_score,
                     dense_score=dense_score,
-                    sparse_score=None,
+                    rerank_score=None,
                     volume_match=False,
                     surname_match=surname_match,
                     year_diff=year_diff,
@@ -132,14 +114,14 @@ class SparseReranker:
                 match_tier="tier2_dense",
                 match_score=dense_score,
                 dense_score=dense_score,
-                sparse_score=None,
+                rerank_score=None,
                 volume_match=True,
                 surname_match=surname_match,
                 year_diff=year_diff,
                 accepted=True,
             )
 
-        # If sparse rerank is disabled, lexical reranking and hard discriminators are bypassed
+        # If reranking is disabled, reranking and hard discriminators are bypassed
         if not self.config.enabled:
             accepted = dense_score >= acceptance_threshold
             return ReconciliationMatch(
@@ -148,22 +130,21 @@ class SparseReranker:
                 match_tier="tier2_dense",
                 match_score=dense_score,
                 dense_score=dense_score,
-                sparse_score=None,
+                rerank_score=None,
                 volume_match=vol_match,
                 surname_match=surname_match,
                 year_diff=year_diff,
                 accepted=accepted,
             )
 
-        # Stage 2 BM25 reranking
-        raw_sparse = self.compute_bm25_score(
-            f"{target_record.title} {target_record.publisher or ''}",
-            f"{candidate_record.title} {candidate_record.publisher or ''}",
-        )
-        sparse_score = max(0.0, raw_sparse - year_penalty)
+        # Stage 3 Reranking
+        target_text = f"{target_record.title} {target_record.publisher or ''}"
+        candidate_text = f"{candidate_record.title} {candidate_record.publisher or ''}"
+        raw_rerank = self.scorer.score(target_text, candidate_text)
+        rerank_score = max(0.0, raw_rerank - year_penalty)
 
         hybrid_score = (self.config.dense_weight * dense_score) + (
-            self.config.sparse_weight * sparse_score
+            self.config.rerank_weight * rerank_score
         )
 
         hard_pass = vol_match and surname_match and year_valid
@@ -175,9 +156,10 @@ class SparseReranker:
             match_tier="tier3_hybrid_rerank",
             match_score=round(hybrid_score, 4),
             dense_score=round(dense_score, 4),
-            sparse_score=round(sparse_score, 4),
+            rerank_score=round(rerank_score, 4),
             volume_match=vol_match,
             surname_match=surname_match,
             year_diff=year_diff,
             accepted=accepted,
         )
+

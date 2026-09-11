@@ -7,8 +7,8 @@ import pytest
 from reconciliator.config import (
     AppConfig,
     EmbeddingConfig,
+    RerankConfig,
     ShortCircuitConfig,
-    SparseRerankConfig,
     load_config,
 )
 
@@ -24,9 +24,10 @@ def test_load_sample_config() -> None:
     assert config.embedding.batch_size == 16
     assert config.reconcile is not None
     assert config.reconcile.threshold == 0.85
-    assert config.reconcile.sparse_rerank.enabled is True
-    assert config.reconcile.sparse_rerank.dense_weight == 0.6
-    assert config.reconcile.sparse_rerank.short_circuit.threshold == 0.98
+    assert config.reconcile.rerank.enabled is True
+    assert config.reconcile.rerank.engine == "bm25"
+    assert config.reconcile.rerank.dense_weight == 0.6
+    assert config.reconcile.rerank.short_circuit.threshold == 0.98
     assert "melinda" in config.ingest_oai
     assert config.ingest_oai["melinda"].source_type == "file"
     assert config.ingest_oai["melinda"].batch_size == 10
@@ -39,9 +40,9 @@ def test_missing_config_raises_file_not_found() -> None:
         load_config(Path("non_existent_config.yaml"))
 
 
-def test_sparse_rerank_weights_must_sum_to_one() -> None:
+def test_rerank_weights_must_sum_to_one() -> None:
     with pytest.raises(ValueError, match="must sum to 1.0"):
-        SparseRerankConfig(dense_weight=0.7, sparse_weight=0.5)
+        RerankConfig(dense_weight=0.7, rerank_weight=0.5)
 
 
 def test_short_circuit_threshold_range() -> None:

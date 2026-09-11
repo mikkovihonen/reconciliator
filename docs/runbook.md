@@ -292,14 +292,15 @@ reconcile:
     detailed_file: "data/reports/subject_reconciliation_uris.tsv"
     summary_file: "data/reports/subject_reconciliation_summary.tsv"
 
-  sparse_rerank:
-    enabled: true              # Toggle BM25 sparse reranking on/off
+  rerank:
+    enabled: true              # Toggle reranking on/off
+    engine: "bm25"             # Reranking engine: "bm25", "cross_encoder", "fuzzy", or "noop"
     dense_weight: 0.6          # Dense semantic cosine weight [0.0, 1.0]
-    sparse_weight: 0.4         # Sparse BM25 lexical weight [0.0, 1.0] (must sum to 1.0)
-    top_k: 50                  # Number of dense candidates retrieved from FAISS
+    rerank_weight: 0.4         # Reranking weight [0.0, 1.0] (must sum to 1.0)
+    top_k: 50                  # Number of dense candidates retrieved
     short_circuit:
       enabled: true            # Fast-path shortcut for near-identical matches
-      threshold: 0.98          # Score threshold bypassing sparse reranking
+      threshold: 0.98          # Score threshold bypassing reranking
     require_volume_match: true # Enforce volume/part numbering consistency ("osa 1" vs "osa 2")
     require_surname_match: true# Require at least one matching author surname
     max_year_difference: 5     # Maximum allowable publication year gap
@@ -580,10 +581,11 @@ reconcile:
   subject_reports:
     detailed_file: "/var/reports/subject_detailed.tsv"
     summary_file: "/var/reports/subject_summary.tsv"
-  sparse_rerank:
+  rerank:
     enabled: true
+    engine: "bm25"
     dense_weight: 0.65
-    sparse_weight: 0.35
+    rerank_weight: 0.35
     top_k: 40
     short_circuit:
       enabled: true

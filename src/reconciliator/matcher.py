@@ -9,7 +9,7 @@ from reconciliator.config import ReconcileConfig
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.models import AgentURI, BibliographicRecord, ReconciliationMatch
 from reconciliator.repository import AuthorityStore
-from reconciliator.sparse import SparseReranker
+from reconciliator.rerank import CandidateEvaluator
 from reconciliator.vocabularies import VocabularyManager
 
 
@@ -38,7 +38,7 @@ class ReconciliationEngine:
         self.embedder = embedder
         self.config = config
 
-        self.sparse_reranker = SparseReranker(config.sparse_rerank)
+        self.evaluator = CandidateEvaluator(config.rerank)
         self.vocab_manager = VocabularyManager(
             allowed_vocabularies=config.vocabularies,
             agent_priority=config.agent_priority,
@@ -64,7 +64,7 @@ class ReconciliationEngine:
                     match_tier="tier1_exact_id",
                     match_score=1.0,
                     dense_score=None,
-                    sparse_score=None,
+                    rerank_score=None,
                     volume_match=True,
                     surname_match=True,
                     year_diff=None,
@@ -73,12 +73,12 @@ class ReconciliationEngine:
                 matches.append(match)
                 accepted_candidates.append(cand)
 
-        # Step 2.3: Tier 2 FAISS Dense Retrieval & Step 2.4: Sparse Reranking
+        # Step 2.3: Tier 2 Dense Retrieval & Step 2.4: Pluggable Reranking
         dense_candidates = []
         if self.authority_store.indexer.total_vectors > 0:
             query_vector = self.embedder.embed_records([target_record])
             dense_candidates = self.authority_store.search_vector_candidates(
-                query_vector, top_k=self.config.sparse_rerank.top_k
+                query_vector, top_k=self.config.rerank.top_k
             )
 
         for cand_record, dense_score in dense_candidates:
@@ -86,7 +86,7 @@ class ReconciliationEngine:
                 continue
             seen_cand_ids.add(cand_record.source_id)
 
-            match = self.sparse_reranker.evaluate_candidate(
+            match = self.evaluator.evaluate_candidate(
                 target_record=target_record,
                 candidate_record=cand_record,
                 dense_score=dense_score,

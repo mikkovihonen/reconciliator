@@ -47,7 +47,7 @@ def test_agent_reports(tmp_path: Path) -> None:
             match_tier="tier1_exact_id",
             match_score=1.0,
             dense_score=None,
-            sparse_score=None,
+            rerank_score=None,
             agent_name_score=100.0,
             action="injected",
             is_novel=True,

@@ -41,7 +41,7 @@ class AgentReportRow:
     match_tier: str
     match_score: float
     dense_score: Optional[float]
-    sparse_score: Optional[float]
+    rerank_score: Optional[float]
     agent_name_score: Optional[float]
     action: str  # "injected", "proposed", "existing", "suppressed_by_priority", "filtered_vocab", "below_threshold"
     is_novel: bool
@@ -85,7 +85,7 @@ AGENT_TSV_COLUMNS = [
     "match_tier",
     "match_score",
     "dense_score",
-    "sparse_score",
+    "rerank_score",
     "agent_name_score",
     "action",
     "is_novel",
@@ -158,7 +158,7 @@ class ReportGenerator:
                     sanitize_tsv_cell(r.match_tier),
                     sanitize_tsv_cell(r.match_score),
                     sanitize_tsv_cell(r.dense_score),
-                    sanitize_tsv_cell(r.sparse_score),
+                    sanitize_tsv_cell(r.rerank_score),
                     sanitize_tsv_cell(r.agent_name_score),
                     sanitize_tsv_cell(r.action),
                     sanitize_tsv_cell(r.is_novel),

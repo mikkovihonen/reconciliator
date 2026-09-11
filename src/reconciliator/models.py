@@ -135,7 +135,7 @@ class ReconciliationMatch(BaseModel):
     match_tier: str  # "tier1_exact_id", "tier2_dense", "tier3_hybrid_rerank"
     match_score: float
     dense_score: Optional[float] = None
-    sparse_score: Optional[float] = None
+    rerank_score: Optional[float] = None
     agent_name_score: Optional[float] = None
     volume_match: bool = True
     surname_match: bool = True
