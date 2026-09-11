@@ -385,3 +385,42 @@ storage:
     res = runner.invoke(app, ["status", "--config", str(cfg_file), "--prune"])
     assert res.exit_code == 0
     assert "Pruned 1 completed task(s)" in res.output
+
+
+def test_telemetry_clarification_display(progress_db: Path) -> None:
+    tracker = ProgressTracker(
+        db_path=progress_db,
+        task_id="melinda-ingest-test",
+        task_type="oai_pmh_harvest",
+    )
+    tracker.start_task(stage="harvest_and_index", metadata={"harvested": 0, "indexed": 0})
+    tracker.update_progress(
+        stage="harvest_and_index",
+        items_processed=1000,
+        metadata={"harvested": 1500, "indexed": 1000},
+        force=True,
+    )
+
+    tasks = list_tasks(progress_db)
+    assert len(tasks) == 1
+    assert tasks[0].current_stage == "harvest_and_index"
+
+    # Test table formatting
+    from rich.console import Console
+
+    console = Console(record=True, width=200)
+    table = format_task_table(tasks)
+    console.print(table)
+    table_text = console.export_text()
+    assert "1,000 indexed" in table_text
+    assert "1,500" in table_text
+    assert "harvest_and_index" in table_text
+
+    # Test TUI rendering
+    tui = render_telemetry_tui(tasks, db_path=progress_db)
+    console = Console(record=True, width=200)
+    console.print(tui)
+    tui_text = console.export_text()
+    assert "1,000 indexed" in tui_text
+    assert "1,500" in tui_text
+    assert "harvest_and_index" in tui_text

@@ -607,38 +607,51 @@ def ingest_wikidata_pipeline(
     """Run streaming Wikidata dump ingestion with batch embedding and indexing."""
     batch: list[BibliographicRecord] = []
     total_ingested = 0
+    last_checkpoint = 0
+    checkpoint_interval = 5000
 
-    for raw_data in stream_wikidata_dump(config.dump_path, store=store, tracker=tracker):
-        record = normalizer.normalize(raw_data)
-        batch.append(record)
+    try:
+        for raw_data in stream_wikidata_dump(config.dump_path, store=store, tracker=tracker):
+            record = normalizer.normalize(raw_data)
+            batch.append(record)
 
-        if len(batch) >= config.batch_size:
+            if len(batch) >= config.batch_size:
+                vectors = embedder.embed_records(batch)
+                store.insert_records_batch(batch, vectors=vectors)
+                total_ingested += len(batch)
+                batch.clear()
+
+                if total_ingested - last_checkpoint >= checkpoint_interval:
+                    store.save_index(
+                        metadata={
+                            "model_name": embedder.config.model_name,
+                            "dimension": embedder.dimension,
+                            "template_hash": embedder.template_hash,
+                        }
+                    )
+                    last_checkpoint = total_ingested
+
+                if tracker:
+                    tracker.update_progress(stage="indexing", items_processed=total_ingested)
+
+        if batch:
             vectors = embedder.embed_records(batch)
             store.insert_records_batch(batch, vectors=vectors)
             total_ingested += len(batch)
             batch.clear()
-
-            if tracker:
-                tracker.update_progress(stage="indexing", items_processed=total_ingested)
-
-    if batch:
-        vectors = embedder.embed_records(batch)
-        store.insert_records_batch(batch, vectors=vectors)
-        total_ingested += len(batch)
-        batch.clear()
-
-    store.save_index(
-        metadata={
-            "model_name": embedder.config.model_name,
-            "dimension": embedder.dimension,
-            "template_hash": embedder.template_hash,
-        }
-    )
-    store.set_embedding_metadata(
-        model_name=embedder.config.model_name,
-        dimension=embedder.dimension,
-        template_hash=embedder.template_hash,
-    )
+    finally:
+        store.save_index(
+            metadata={
+                "model_name": embedder.config.model_name,
+                "dimension": embedder.dimension,
+                "template_hash": embedder.template_hash,
+            }
+        )
+        store.set_embedding_metadata(
+            model_name=embedder.config.model_name,
+            dimension=embedder.dimension,
+            template_hash=embedder.template_hash,
+        )
 
     if tracker:
         tracker.complete_task(metadata={"records_ingested": total_ingested})

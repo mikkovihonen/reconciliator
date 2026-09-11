@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Iterator, Optional
 
@@ -135,6 +136,7 @@ class OAIPMHHarvester:
         from_date: Optional[str] = None,
         until_date: Optional[str] = None,
         tracker: Optional[ProgressTracker] = None,
+        on_record_harvested: Optional[Callable[[], None]] = None,
     ) -> Iterator[etree._Element]:
         """Harvest records for a given date slice, following resumptionTokens."""
         client = httpx2.Client(
@@ -202,7 +204,9 @@ class OAIPMHHarvester:
                         else:
                             yield rec
 
-                    if tracker:
+                    if on_record_harvested:
+                        on_record_harvested()
+                    elif tracker:
                         tracker.update_progress(items_increment=1)
 
                 # Check resumptionToken

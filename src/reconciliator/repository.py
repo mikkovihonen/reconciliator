@@ -80,9 +80,11 @@ class AuthorityStore:
                 rec_id = cursor.fetchone()["id"]
                 record_ids.append(rec_id)
 
-                # Clean existing identifiers and agents for this record if re-inserting
+                # Clean existing identifiers, agents, FTS entries, and vector mappings for this record if re-inserting
                 conn.execute("DELETE FROM authority_identifiers WHERE record_id = ?;", (rec_id,))
                 conn.execute("DELETE FROM authority_agents WHERE record_id = ?;", (rec_id,))
+                conn.execute("DELETE FROM authority_fts WHERE record_id = ?;", (rec_id,))
+                conn.execute("DELETE FROM vector_mappings WHERE record_id = ?;", (rec_id,))
 
                 # Insert identifiers
                 id_rows = []
@@ -151,11 +153,11 @@ class AuthorityStore:
 
         # Add vectors to FAISS index if provided
         if vectors is not None and len(vectors) == len(records):
-            faiss_ids = self.indexer.add_vectors(vectors)
+            faiss_ids = self.indexer.add_vectors(vectors, ids=record_ids)
             with self.get_connection() as conn:
                 mapping_rows = list(zip(faiss_ids, record_ids))
                 conn.executemany(
-                    "INSERT INTO vector_mappings (faiss_id, record_id) VALUES (?, ?);",
+                    "INSERT OR REPLACE INTO vector_mappings (faiss_id, record_id) VALUES (?, ?);",
                     mapping_rows,
                 )
 
@@ -245,9 +247,11 @@ class AuthorityStore:
                 faiss_to_rec_id[r["faiss_id"]] = r["record_id"]
 
         results: list[tuple[BibliographicRecord, float]] = []
+        seen_record_ids: set[int] = set()
         for f_id, score in zip(faiss_indices, dense_scores):
-            if f_id in faiss_to_rec_id:
-                rec_id = faiss_to_rec_id[f_id]
+            rec_id = faiss_to_rec_id.get(f_id, f_id if f_id >= 0 else None)
+            if rec_id is not None and rec_id not in seen_record_ids:
+                seen_record_ids.add(rec_id)
                 rec = self.get_record_by_id(rec_id)
                 if rec:
                     results.append((rec, float(score)))

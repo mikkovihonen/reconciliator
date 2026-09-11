@@ -408,8 +408,18 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
         )
         status_text = f"[{status_style}]{t.status.upper()}[/{status_style}]"
 
-        total_str = f"{t.items_total:,}" if t.items_total is not None else "?"
-        count_str = f"{t.items_processed:,} / {total_str}"
+        meta: dict[str, Any] = {}
+        if t.metadata_json:
+            try:
+                meta = json.loads(t.metadata_json)
+            except Exception:
+                pass
+
+        if meta.get("harvested") is not None and meta.get("indexed") is not None:
+            count_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
+        else:
+            total_str = f"{t.items_total:,}" if t.items_total is not None else "?"
+            count_str = f"{t.items_processed:,} / {total_str}"
         pct_str = f"{t.percentage:.1f}%"
         rate_str = f"{t.rate_per_sec:.1f}/s"
 
@@ -478,7 +488,16 @@ def render_telemetry_tui(
 
             pct_str = f"[bold green]{t.percentage:.1f}%[/]" if t.percentage > 0 else "0.0%"
 
-            if t.items_total is not None or t.items_processed > 0:
+            meta: dict[str, Any] = {}
+            if t.metadata_json:
+                try:
+                    meta = json.loads(t.metadata_json)
+                except Exception:
+                    pass
+
+            if meta.get("harvested") is not None and meta.get("indexed") is not None:
+                counts_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
+            elif t.items_total is not None or t.items_processed > 0:
                 tot_str = f"{t.items_total:,}" if t.items_total is not None else "?"
                 counts_str = f"{t.items_processed:,} / {tot_str}"
             elif t.bytes_total is not None or t.bytes_processed > 0:
