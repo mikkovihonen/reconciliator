@@ -202,11 +202,11 @@ class ReportGenerator:
         vocab_denom = max(1, total_uris)
 
         # Source metrics
-        melinda_count = sum(1 for r in self.agent_rows if r.authority_source.lower() == "melinda")
-        wiki_source_count = sum(
-            1 for r in self.agent_rows if r.authority_source.lower() == "wikidata"
-        )
-        source_denom = max(1, melinda_count + wiki_source_count)
+        source_counts: dict[str, int] = {}
+        for r in self.agent_rows:
+            s_name = r.authority_source.lower() if r.authority_source else "unknown"
+            source_counts[s_name] = source_counts.get(s_name, 0) + 1
+        source_denom = max(1, sum(source_counts.values()))
 
         # Quality score brackets
         score_high = sum(1 for r in self.agent_rows if r.match_score >= 0.95)
@@ -377,42 +377,49 @@ class ReportGenerator:
                 f"{(viaf_count / vocab_denom) * 100:.1f}%",
                 "Virtual International Authority File URIs ($0)",
             ),
-            (
-                "sources",
-                "melinda",
-                str(melinda_count),
-                f"{(melinda_count / source_denom) * 100:.1f}%",
-                "Agent links sourced from Melinda/Asteri",
-            ),
-            (
-                "sources",
-                "wikidata",
-                str(wiki_source_count),
-                f"{(wiki_source_count / source_denom) * 100:.1f}%",
-                "Agent links sourced from Wikidata",
-            ),
-            (
-                "quality",
-                "score_0.95_to_1.00",
-                str(score_high),
-                f"{(score_high / quality_denom) * 100:.1f}%",
-                "Candidate matches with score in [0.95, 1.00]",
-            ),
-            (
-                "quality",
-                "score_0.90_to_0.95",
-                str(score_mid),
-                f"{(score_mid / quality_denom) * 100:.1f}%",
-                "Candidate matches with score in [0.90, 0.95)",
-            ),
-            (
-                "quality",
-                "score_0.85_to_0.90",
-                str(score_low),
-                f"{(score_low / quality_denom) * 100:.1f}%",
-                "Candidate matches with score in [0.85, 0.90)",
-            ),
         ]
+
+        source_metric_rows = [
+            (
+                "sources",
+                src,
+                str(cnt),
+                f"{(cnt / source_denom) * 100:.1f}%",
+                f"Agent links sourced from {src}",
+            )
+            for src, cnt in sorted(source_counts.items())
+        ]
+        if not source_metric_rows:
+            source_metric_rows = [
+                ("sources", "total", "0", "0.0%", "Agent links sourced from authority records")
+            ]
+
+        rows.extend(source_metric_rows)
+        rows.extend(
+            [
+                (
+                    "quality",
+                    "score_0.95_to_1.00",
+                    str(score_high),
+                    f"{(score_high / quality_denom) * 100:.1f}%",
+                    "Candidate matches with score in [0.95, 1.00]",
+                ),
+                (
+                    "quality",
+                    "score_0.90_to_0.95",
+                    str(score_mid),
+                    f"{(score_mid / quality_denom) * 100:.1f}%",
+                    "Candidate matches with score in [0.90, 0.95)",
+                ),
+                (
+                    "quality",
+                    "score_0.85_to_0.90",
+                    str(score_low),
+                    f"{(score_low / quality_denom) * 100:.1f}%",
+                    "Candidate matches with score in [0.85, 0.90)",
+                ),
+            ]
+        )
 
         with file_path.open("w", encoding="utf-8", newline="\n") as f:
             f.write("\t".join(SUMMARY_COLUMNS) + "\n")

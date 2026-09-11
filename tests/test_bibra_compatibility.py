@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from lxml import etree
 
-from reconciliator.cli import ingest_finto_cmd, ingest_melinda_cmd, reconcile_cmd, reset_cmd
+from reconciliator.cli import ingest_finto_cmd, ingest_oai_cmd, reconcile_cmd, reset_cmd
 from reconciliator.loaders.bibra import (
     BibraPublicationMetadata,
     bibra_to_marcxml_elem,
@@ -277,11 +277,13 @@ ingest_finto:
   vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
   legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 
-ingest_melinda:
-  source_type: "file"
-  input_path: "{sample_melinda}"
-  workers: 1
-  batch_size: 10
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "file"
+    input_path: "{sample_melinda}"
+    workers: 1
+    batch_size: 10
 
 reconcile:
   target_file: "{bibra_input}"
@@ -338,7 +340,7 @@ telemetry:
     with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
         reset_cmd(config=config_file, yes=True)
         ingest_finto_cmd(config=config_file)
-        ingest_melinda_cmd(config=config_file)
+        ingest_oai_cmd(config=config_file)
 
         # 1. Run reconciliation producing MARCXML
         reconcile_cmd(config=config_file)

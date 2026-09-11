@@ -48,16 +48,27 @@ def _get_controlfield(record: etree._Element, tag: str) -> Optional[str]:
     return cf.text.strip() if cf is not None and cf.text else None
 
 
-def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") -> dict[str, Any]:
+def parse_marc_record_elem(
+    record_elem: etree._Element,
+    source: str = "target",
+    fallback_id: Optional[str] = None,
+    id_source: str = "marc_001",
+) -> dict[str, Any]:
     """Extract raw bibliographic fields from an lxml MARCXML <record> element."""
     # Control numbers
     f001 = _get_controlfield(record_elem, "001")
     f003 = _get_controlfield(record_elem, "003")
     f008 = _get_controlfield(record_elem, "008")
+    oai_id = record_elem.get("_oai_identifier") or fallback_id
 
-    source_id = f001 or ""
-    if f003 and source_id and not source_id.startswith("("):
-        source_id = f"({f003}){source_id}"
+    if id_source == "oai_identifier" and oai_id:
+        source_id = oai_id
+    elif f001:
+        source_id = f001
+        if f003 and not source_id.startswith("("):
+            source_id = f"({f003}){source_id}"
+    else:
+        source_id = oai_id or ""
 
     # Titles
     title_proper = ""

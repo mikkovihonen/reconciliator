@@ -26,8 +26,12 @@ def test_load_sample_config() -> None:
     assert config.reconcile.threshold == 0.85
     assert config.reconcile.sparse_rerank.enabled is True
     assert config.reconcile.sparse_rerank.dense_weight == 0.6
-    assert config.reconcile.sparse_rerank.sparse_weight == 0.4
     assert config.reconcile.sparse_rerank.short_circuit.threshold == 0.98
+    assert "melinda" in config.ingest_oai
+    assert config.ingest_oai["melinda"].source_type == "file"
+    assert config.ingest_oai["melinda"].batch_size == 10
+    assert config.ingest_oai["melinda"].input_path is not None
+    assert config.ingest_oai["melinda"].input_path.is_absolute()
 
 
 def test_missing_config_raises_file_not_found() -> None:

@@ -1,4 +1,4 @@
-"""Melinda authority ingestion pipeline coordinating harvesting/file reading, normalization, embedding, and indexing."""
+"""Generic OAI-PMH and MARCXML authority ingestion pipeline coordinating harvesting, normalization, embedding, and indexing."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
-from reconciliator.config import MelindaIngestConfig
+from reconciliator.config import OAIIngestConfig
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.loaders.marcxml import iter_marcxml_records, parse_marc_record_elem
@@ -20,16 +20,19 @@ from reconciliator.repository import AuthorityStore
 logger = logging.getLogger(__name__)
 
 
-def stream_melinda_records(
-    config: MelindaIngestConfig,
+def stream_oai_records(
+    source_name: str,
+    config: OAIIngestConfig,
     tracker: Optional[ProgressTracker] = None,
     on_record_harvested: Optional[Callable[[], None]] = None,
 ) -> Iterator[dict[str, Any]]:
-    """Yield raw record dictionaries from either local file or OAI-PMH harvest."""
+    """Yield raw record dictionaries from either local file or OAI-PMH harvest for a configured source."""
     if config.source_type == "file":
         if not config.input_path:
-            raise ValueError("input_path must be specified when source_type is 'file'")
-        for raw_rec in iter_marcxml_records(config.input_path, source="melinda"):
+            raise ValueError(
+                f"input_path must be specified for source '{source_name}' when source_type is 'file'"
+            )
+        for raw_rec in iter_marcxml_records(config.input_path, source=source_name):
             yield raw_rec
     else:
         harvester = OAIPMHHarvester(
@@ -37,6 +40,7 @@ def stream_melinda_records(
             metadata_prefix=config.metadata_prefix,
             set_spec=config.set_spec,
             request_delay=config.request_delay,
+            timeout=config.timeout,
         )
 
         from_date = config.from_date
@@ -49,7 +53,8 @@ def stream_melinda_records(
                 discovered = harvester.get_earliest_datestamp()
                 from_date = discovered or "2000-01-01"
                 logger.info(
-                    "Auto-discovered date range for parallel harvesting (%d workers): %s to %s",
+                    "Auto-discovered date range for parallel harvesting source '%s' (%d workers): %s to %s",
+                    source_name,
                     config.workers,
                     from_date,
                     until_date,
@@ -65,7 +70,9 @@ def stream_melinda_records(
                     tracker=tracker if on_record_harvested is None else None,
                     on_record_harvested=on_record_harvested,
                 ):
-                    raw_rec = parse_marc_record_elem(elem, source="melinda")
+                    raw_rec = parse_marc_record_elem(
+                        elem, source=source_name, id_source=config.id_source
+                    )
                     yield raw_rec
         else:
             import queue
@@ -86,10 +93,18 @@ def stream_melinda_records(
                     ):
                         if worker_error:
                             return
-                        raw_rec = parse_marc_record_elem(elem, source="melinda")
+                        raw_rec = parse_marc_record_elem(
+                            elem, source=source_name, id_source=config.id_source
+                        )
                         record_queue.put(raw_rec)
                 except Exception as e:
-                    logger.error("Error harvesting partition %s to %s: %s", from_dt, until_dt, e)
+                    logger.error(
+                        "Error harvesting partition %s to %s for source '%s': %s",
+                        from_dt,
+                        until_dt,
+                        source_name,
+                        e,
+                    )
                     worker_error.append(e)
 
             def dispatch() -> None:
@@ -103,7 +118,6 @@ def stream_melinda_records(
                 finally:
                     record_queue.put(sentinel)
 
-            # Start background dispatcher thread
             dispatch_thread = threading.Thread(target=dispatch, daemon=True)
             dispatch_thread.start()
 
@@ -122,14 +136,15 @@ def stream_melinda_records(
                     continue
 
 
-def ingest_melinda_pipeline(
-    config: MelindaIngestConfig,
+def ingest_oai_pipeline(
+    source_name: str,
+    config: OAIIngestConfig,
     store: AuthorityStore,
     normalizer: RecordNormalizer,
     embedder: SentenceEmbedder,
     tracker: Optional[ProgressTracker] = None,
 ) -> int:
-    """Run full Melinda authority ingestion, embedding, and storage indexing."""
+    """Run full authority ingestion, embedding, and storage indexing for a configured OAI/file source."""
     is_oai = config.source_type != "file"
     stage_name = "harvest_and_index" if is_oai else "indexing"
 
@@ -142,17 +157,16 @@ def ingest_melinda_pipeline(
         with harvested_lock:
             harvested_count += 1
             cur_h = harvested_count
-        # Periodically emit initial heartbeat if 0 records indexed yet
         if tracker and cur_h % 200 == 0:
             tracker.update_progress(
                 stage=stage_name,
-                metadata={"harvested": cur_h, "indexed": total_ingested},
+                metadata={"harvested": cur_h, "indexed": total_ingested, "source": source_name},
             )
 
     if tracker:
         tracker.start_task(
             stage=stage_name,
-            metadata={"harvested": 0, "indexed": 0} if is_oai else None,
+            metadata={"harvested": 0, "indexed": 0, "source": source_name} if is_oai else None,
         )
 
     batch: list[BibliographicRecord] = []
@@ -160,8 +174,9 @@ def ingest_melinda_pipeline(
     checkpoint_interval = 5000
 
     try:
-        for raw_rec in stream_melinda_records(
-            config,
+        for raw_rec in stream_oai_records(
+            source_name=source_name,
+            config=config,
             tracker=tracker,
             on_record_harvested=on_record_harvested if is_oai else None,
         ):
@@ -186,7 +201,11 @@ def ingest_melinda_pipeline(
 
                 if tracker:
                     meta = (
-                        {"harvested": harvested_count, "indexed": total_ingested}
+                        {
+                            "harvested": harvested_count,
+                            "indexed": total_ingested,
+                            "source": source_name,
+                        }
                         if is_oai
                         else None
                     )
@@ -205,10 +224,13 @@ def ingest_melinda_pipeline(
                 tracker.update_progress(
                     stage=stage_name,
                     items_processed=total_ingested,
-                    metadata={"harvested": harvested_count, "indexed": total_ingested},
+                    metadata={
+                        "harvested": harvested_count,
+                        "indexed": total_ingested,
+                        "source": source_name,
+                    },
                 )
     finally:
-        # Always persist FAISS index and metadata even if interrupted or cancelled
         store.save_index(
             metadata={
                 "model_name": embedder.config.model_name,
@@ -224,10 +246,11 @@ def ingest_melinda_pipeline(
 
     if tracker:
         meta = (
-            {"harvested": harvested_count, "indexed": total_ingested}
+            {"harvested": harvested_count, "indexed": total_ingested, "source": source_name}
             if is_oai
-            else {"records_ingested": total_ingested}
+            else {"records_ingested": total_ingested, "source": source_name}
         )
         tracker.complete_task(metadata=meta)
 
     return total_ingested
+

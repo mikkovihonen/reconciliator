@@ -26,11 +26,13 @@ ingest_finto:
     - "kaunokki"
     - "musa"
 
-ingest_melinda:
-  source_type: "file"
-  input_path: "sample_melinda.xml"
-  workers: 1
-  batch_size: 10
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "file"
+    input_path: "sample_melinda.xml"
+    workers: 1
+    batch_size: 10
 
 ingest_wikidata:
   dump_path: "sample_wikidata.json.gz"

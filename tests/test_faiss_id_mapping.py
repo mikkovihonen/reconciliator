@@ -107,4 +107,3 @@ def test_authority_store_idempotent_ingest(tmp_path: Path) -> None:
     assert len(cands_updated) == 1
     assert cands_updated[0][0].source_id == "MEL-001"
     assert cands_updated[0][0].title == "Updated Title"
-

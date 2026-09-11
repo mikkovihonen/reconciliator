@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from lxml import etree
 
-from reconciliator.cli import ingest_finto_cmd, ingest_melinda_cmd, reconcile_cmd, reset_cmd
+from reconciliator.cli import ingest_finto_cmd, ingest_oai_cmd, reconcile_cmd, reset_cmd
 from reconciliator.loaders.marcxml import _get_subfields
 
 
@@ -41,11 +41,13 @@ ingest_finto:
   vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
   legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 
-ingest_melinda:
-  source_type: "file"
-  input_path: "{sample_melinda}"
-  workers: 1
-  batch_size: 10
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "file"
+    input_path: "{sample_melinda}"
+    workers: 1
+    batch_size: 10
 
 reconcile:
   target_file: "{sample_target}"
@@ -106,8 +108,8 @@ telemetry:
         # 2. Ingest FINTO
         ingest_finto_cmd(config=config_file)
 
-        # 3. Ingest Melinda authority records
-        ingest_melinda_cmd(config=config_file)
+        # 3. Ingest authority records from OAI/file
+        ingest_oai_cmd(config=config_file)
 
         # 4. Run offline reconciliation and enrichment
         reconcile_cmd(config=config_file)

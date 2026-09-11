@@ -69,7 +69,7 @@ class BibliographicRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     source_id: str = Field(..., validation_alias=AliasChoices("source_id", "external_id"))
-    source: Literal["melinda", "wikidata", "target"]
+    source: str
     title: str
     subtitle: Optional[str] = None
     uniform_title: Optional[str] = None

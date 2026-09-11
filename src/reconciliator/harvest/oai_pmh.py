@@ -194,15 +194,32 @@ class OAIPMHHarvester:
                     records = root.findall(".//record")
 
                 for rec in records:
+                    header_id: Optional[str] = None
+                    hdr = rec.find("oai:header", OAI_NS)
+                    if hdr is None:
+                        hdr = rec.find(".//header")
+                    if hdr is not None:
+                        id_el = hdr.find("oai:identifier", OAI_NS)
+                        if id_el is None:
+                            id_el = hdr.find(".//identifier")
+                        if id_el is not None and id_el.text:
+                            header_id = id_el.text.strip()
+
                     metadata_elem = rec.find("oai:metadata", OAI_NS)
+                    target_elem: etree._Element
                     if metadata_elem is not None and len(metadata_elem) > 0:
-                        yield metadata_elem[0]
+                        target_elem = metadata_elem[0]
                     else:
                         marc_rec = rec.find(".//marc:record", OAI_NS)
                         if marc_rec is not None:
-                            yield marc_rec
+                            target_elem = marc_rec
                         else:
-                            yield rec
+                            target_elem = rec
+
+                    if header_id:
+                        target_elem.set("_oai_identifier", header_id)
+
+                    yield target_elem
 
                     if on_record_harvested:
                         on_record_harvested()

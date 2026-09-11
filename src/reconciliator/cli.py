@@ -12,14 +12,14 @@ from lxml import etree
 from rich.console import Console
 from rich.table import Table
 
-from reconciliator.config import AppConfig, FintoDownloadConfig, load_config
+from reconciliator.config import AppConfig, FintoDownloadConfig, OAIIngestConfig, load_config
 from reconciliator.db import reset_all_storage
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.finto_folding import FintoFolder
 from reconciliator.finto_store import FintoStore
 from reconciliator.ingestion.finto import ingest_finto_file
 from reconciliator.ingestion.finto_downloader import FintoDownloader
-from reconciliator.ingestion.melinda import ingest_melinda_pipeline
+from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
 from reconciliator.loaders.bibra import (
     bibra_to_marcxml_elem,
@@ -397,16 +397,54 @@ def ingest_finto_cmd(
     )
 
 
-@app.command("ingest-melinda")
-def ingest_melinda_cmd(
+@app.command("ingest-oai")
+def ingest_oai_cmd(
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
+    source: Optional[str] = typer.Option(
+        None,
+        "--source",
+        "-s",
+        help="Name of specific configured OAI source to ingest (e.g. melinda)",
+    ),
+    all_sources: bool = typer.Option(
+        False, "--all", "-a", help="Ingest all enabled configured OAI sources"
+    ),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Override harvest start date (YYYY-MM-DD)"
+    ),
+    until_date: Optional[str] = typer.Option(
+        None, "--until", help="Override harvest end date (YYYY-MM-DD)"
+    ),
 ) -> None:
-    """Harvest or read Melinda authority records, embed, and index into authority.db and FAISS."""
+    """Harvest or read authority records from configured OAI-PMH/XML sources."""
     cfg = load_config(config)
-    if not cfg.ingest_melinda:
-        console.print("[red]No ingest_melinda section found in configuration.[/red]")
+    if not cfg.ingest_oai:
+        console.print("[red]No ingest_oai section found in configuration.[/red]")
+        raise typer.Exit(code=1)
+
+    targets: dict[str, OAIIngestConfig] = {}
+    if all_sources:
+        targets = {name: src for name, src in cfg.ingest_oai.items() if src.enabled}
+        if not targets:
+            console.print("[yellow]No enabled sources found under ingest_oai.[/yellow]")
+            return
+    elif source:
+        if source not in cfg.ingest_oai:
+            available = ", ".join(cfg.ingest_oai.keys())
+            console.print(
+                f"[red]Source '{source}' not found in ingest_oai config. Available sources: {available}[/red]"
+            )
+            raise typer.Exit(code=1)
+        targets = {source: cfg.ingest_oai[source]}
+    elif len(cfg.ingest_oai) == 1:
+        targets = {k: v for k, v in cfg.ingest_oai.items() if v.enabled}
+    else:
+        available = ", ".join(cfg.ingest_oai.keys())
+        console.print(
+            f"[red]Multiple OAI sources configured ({available}). Please specify --source <name> or --all.[/red]"
+        )
         raise typer.Exit(code=1)
 
     finto_store = FintoStore(cfg.storage.finto_db)
@@ -419,18 +457,31 @@ def ingest_melinda_cmd(
         cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
     )
 
-    tracker = ProgressTracker(
-        db_path=cfg.storage.progress_db,
-        task_id=f"melinda-ingest-{int(time.time())}",
-        task_type="oai_pmh_harvest",
-        heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
-    )
+    for src_name, src_cfg in targets.items():
+        if from_date:
+            src_cfg.from_date = from_date
+        if until_date:
+            src_cfg.until_date = until_date
 
-    console.print("[cyan]Ingesting Melinda authority records...[/cyan]")
-    total = ingest_melinda_pipeline(
-        cfg.ingest_melinda, store, normalizer, embedder, tracker=tracker
-    )
-    console.print(f"[green]Successfully ingested {total} records from Melinda.[/green]")
+        tracker = ProgressTracker(
+            db_path=cfg.storage.progress_db,
+            task_id=f"oai-ingest-{src_name}-{int(time.time())}",
+            task_type="oai_pmh_harvest",
+            heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
+        )
+
+        console.print(f"[cyan]Ingesting authority records from source '{src_name}'...[/cyan]")
+        total = ingest_oai_pipeline(
+            source_name=src_name,
+            config=src_cfg,
+            store=store,
+            normalizer=normalizer,
+            embedder=embedder,
+            tracker=tracker,
+        )
+        console.print(
+            f"[green]Successfully ingested {total} records from source '{src_name}'.[/green]"
+        )
 
 
 @app.command("ingest-wikidata")
@@ -814,8 +865,8 @@ def run_cmd(
     cfg = load_config(config)
     if cfg.ingest_finto:
         ingest_finto_cmd(config=config)
-    if cfg.ingest_melinda:
-        ingest_melinda_cmd(config=config)
+    if cfg.ingest_oai:
+        ingest_oai_cmd(config=config, all_sources=True)
     if cfg.ingest_wikidata:
         ingest_wikidata_cmd(config=config)
     if cfg.reconcile:

@@ -46,19 +46,24 @@ ingest_finto:
     - "kaunokki"
     - "musa"
 
-# 5. Melinda Authority Ingestion
-ingest_melinda:
-  source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
-  input_path: null      # Local XML file path when source_type is "file"
-  oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
-  metadata_prefix: "marc21"
-  set_spec: null
-  workers: 8            # Parallel HTTP worker threads for concurrent date slices
-  from_date: null       # "YYYY-MM-DD" (null auto-discovers repository earliestDatestamp)
-  until_date: null      # "YYYY-MM-DD" (null defaults to current date)
-  slice_days: 30        # Temporal partition width in days for parallel workers
-  batch_size: 500
-  request_delay: 0.1    # Rate-limiting pause between pagination requests in seconds
+# 5. OAI-PMH & MARCXML Authority Sources Ingestion
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "oai"    # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
+    input_path: null      # Local XML file path when source_type is "file"
+    oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
+    metadata_prefix: "marc21"
+    set_spec: null
+    id_source: "marc_001" # "marc_001" | "oai_identifier" | "auto"
+    workers: 8            # Parallel HTTP worker threads for concurrent date slices
+    from_date: null       # "YYYY-MM-DD" (null auto-discovers repository earliestDatestamp)
+    until_date: null      # "YYYY-MM-DD" (null defaults to current date)
+    slice_days: 30        # Temporal partition width in days for parallel workers
+    batch_size: 500
+    request_delay: 0.1    # Rate-limiting pause between pagination requests in seconds
+    timeout: 60.0
+
 
 # 6. Wikidata Authority Ingestion
 ingest_wikidata:

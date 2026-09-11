@@ -59,20 +59,23 @@ class FintoIngestConfig(BaseModel):
     )
 
 
-class MelindaIngestConfig(BaseModel):
-    """Configuration for Melinda authority ingestion."""
+class OAIIngestConfig(BaseModel):
+    """Configuration for an individual OAI-PMH or MARCXML authority source."""
 
+    enabled: bool = True
     source_type: Literal["oai", "file"] = "oai"
     input_path: Optional[Path] = None
     oai_url: Optional[str] = "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
     metadata_prefix: str = "marc21"
     set_spec: Optional[str] = None
+    id_source: Literal["marc_001", "oai_identifier", "auto"] = "marc_001"
     workers: int = 4
     from_date: Optional[str] = None
     until_date: Optional[str] = None
     slice_days: int = 30
     batch_size: int = 500
     request_delay: float = 0.1
+    timeout: float = 60.0
 
 
 class WikidataIngestConfig(BaseModel):
@@ -183,7 +186,7 @@ class AppConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     download_finto: Optional[FintoDownloadConfig] = None
     ingest_finto: Optional[FintoIngestConfig] = None
-    ingest_melinda: Optional[MelindaIngestConfig] = None
+    ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
     ingest_wikidata: Optional[WikidataIngestConfig] = None
     reconcile: Optional[ReconcileConfig] = None
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
@@ -238,8 +241,9 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
     if config.ingest_finto and config.ingest_finto.input_path:
         config.ingest_finto.input_path = resolve_p(config.ingest_finto.input_path)  # type: ignore[assignment]
 
-    if config.ingest_melinda and config.ingest_melinda.input_path:
-        config.ingest_melinda.input_path = resolve_p(config.ingest_melinda.input_path)
+    for oai_cfg in config.ingest_oai.values():
+        if oai_cfg.input_path:
+            oai_cfg.input_path = resolve_p(oai_cfg.input_path)
 
     if config.ingest_wikidata and config.ingest_wikidata.dump_path:
         config.ingest_wikidata.dump_path = resolve_p(config.ingest_wikidata.dump_path)  # type: ignore[assignment]

@@ -17,7 +17,7 @@ This runbook provides complete operational guidance for system administrators an
    - [Embedding Section (`embedding`)](#embedding-section-embedding)
    - [FINTO Downloader Section (`download_finto`)](#finto-downloader-section-download_finto)
    - [FINTO Ingestion Section (`ingest_finto`)](#finto-ingestion-section-ingest_finto)
-   - [Melinda Ingestion Section (`ingest_melinda`)](#melinda-ingestion-section-ingest_melinda)
+   - [OAI-PMH & MARCXML Ingestion Section (`ingest_oai`)](#oai-pmh--marcxml-ingestion-section-ingest_oai)
    - [Wikidata Ingestion Section (`ingest_wikidata`)](#wikidata-ingestion-section-ingest_wikidata)
    - [Reconciliation Section (`reconcile`)](#reconciliation-section-reconcile)
    - [Telemetry Section (`telemetry`)](#telemetry-section-telemetry)
@@ -207,23 +207,27 @@ ingest_finto:
 
 ---
 
-### Melinda Ingestion Section (`ingest_melinda`)
+### OAI-PMH & MARCXML Ingestion Section (`ingest_oai`)
 
-Configures harvesting or reading Melinda authority records and creating dense FAISS embeddings.
+Configures harvesting or reading authority records from one or multiple OAI-PMH endpoints or local MARCXML files, generating dense FAISS embeddings with idempotent updates.
 
 ```yaml
-ingest_melinda:
-  source_type: "oai"        # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
-  input_path: null          # Path to local MARCXML file if source_type is "file"
-  oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
-  metadata_prefix: "marc21"
-  set_spec: null            # Optional OAI set specifier
-  workers: 8                # Number of parallel workers for chunk harvesting (recommended: 8-16)
-  request_delay: 0.1        # Rate limit delay between requests per worker in seconds
-  from_date: null           # "YYYY-MM-DD" selective harvest start (auto-discovered via Identify if null)
-  until_date: null          # "YYYY-MM-DD" selective harvest end (defaults to current date if null)
-  slice_days: 30            # Temporal slice window per worker in days
-  batch_size: 500           # Authority database insertion batch size
+ingest_oai:
+  melinda:
+    enabled: true
+    source_type: "oai"        # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
+    input_path: null          # Path to local MARCXML file if source_type is "file"
+    oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
+    metadata_prefix: "marc21"
+    set_spec: null            # Optional OAI set specifier
+    id_source: "marc_001"     # "marc_001" | "oai_identifier" | "auto"
+    workers: 8                # Number of parallel workers for chunk harvesting (recommended: 8-16)
+    request_delay: 0.1        # Rate limit delay between requests per worker in seconds
+    from_date: null           # "YYYY-MM-DD" selective harvest start (auto-discovered via Identify if null)
+    until_date: null          # "YYYY-MM-DD" selective harvest end (defaults to current date if null)
+    slice_days: 30            # Temporal slice window per worker in days
+    batch_size: 500           # Authority database insertion batch size
+    timeout: 60.0
 ```
 
 | Parameter | Type | Default | Description |
@@ -467,22 +471,27 @@ reconciliator ingest-finto -c config.yaml
 
 ---
 
-### `reconciliator ingest-melinda`
+### `reconciliator ingest-oai`
 
-Harvests or reads Melinda / Fennica authority records, normalizes agent names, generates dense embeddings using `SentenceEmbedder`, and builds the FAISS vector index.
+Harvests or reads authority records from configured OAI-PMH or MARCXML sources (e.g. Melinda, Koha, Libris), normalizes agent names, generates dense embeddings using `SentenceEmbedder`, and builds the FAISS vector index with direct ID mapping and idempotent updates.
 
 ```bash
-# Ingest authority records using settings from config.yaml (OAI-PMH or local file)
-reconciliator ingest-melinda -c config.yaml
+# Ingest single configured source (e.g. melinda)
+reconciliator ingest-oai -c config.yaml -s melinda
+
+# Ingest all enabled sources in sequence
+reconciliator ingest-oai -c config.yaml --all
+
+# Override harvest date filters on CLI
+reconciliator ingest-oai -c config.yaml -s melinda --from 2024-01-01 --until 2024-06-01
 ```
 
-#### Example Output:
-```text
-Ingesting Melinda authority records...
-[1/4] Harvested chunk 2025-01-01 -> 2025-01-30 (12,450 records)
-Indexed 12,450 vectors into FAISS.
-Successfully ingested 12450 records from Melinda.
-```
+#### Options:
+- `-c, --config PATH`: Path to YAML configuration file (default: `config.yaml`).
+- `-s, --source TEXT`: Name of specific configured OAI source to ingest.
+- `-a, --all`: Ingest all enabled sources declared under `ingest_oai`.
+- `--from TEXT`: Selective harvest start date (`YYYY-MM-DD`).
+- `--until TEXT`: Selective harvest end date (`YYYY-MM-DD`).
 
 ---
 
@@ -526,7 +535,7 @@ reconciliator reconcile -c config.audit.yaml
 
 Executes the entire end-to-end pipeline in sequence as configured in your YAML file:
 1. `ingest-finto` (if `ingest_finto` section is present)
-2. `ingest-melinda` (if `ingest_melinda` section is present)
+2. `ingest-oai` (if `ingest_oai` section is present)
 3. `ingest-wikidata` (if `ingest_wikidata` section is present)
 4. `reconcile` (if `reconcile` section is present)
 
@@ -789,14 +798,14 @@ Over time, long-running ingestion harvests and batch reconciliation jobs accumul
 - **Symptom**: `ValueError: Index metadata mismatch: expected model ... but found ...`.
 - **Cause**: The FAISS index was generated using an embedding model or serialization template different from the one currently configured.
 - **Remedy**:
-  - Re-run `ingest-melinda` to regenerate index vectors with the new model.
+  - Re-run `ingest-oai` to regenerate index vectors with the new model.
   - Or, if only the Jinja2 template was modified without affecting vector semantics, set `force_template: true` in the `embedding` config section.
 
 ### Issue 3: Out of Memory (OOM) During Ingestion
 - **Symptom**: Process killed by OS during dense embedding generation.
 - **Remedy**:
   - Lower `embedding.batch_size` (e.g. from `64` to `32` or `16`).
-  - If running on CPU or low-memory instance, lower `ingest_melinda.workers` (e.g. from `4` to `1` or `2`).
+  - If running on CPU or low-memory instance, lower `workers` in `ingest_oai` (e.g. from `8` to `1` or `2`).
 
 ### Issue 4: SQLite `database is locked`
 - **Symptom**: SQLite operational error during high-concurrency ingestion.

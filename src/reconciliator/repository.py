@@ -186,13 +186,6 @@ class AuthorityStore:
             query_values.append(("issn", issn))
         for urn in identifiers.urn:
             query_values.append(("urn", urn))
-        for oid in identifiers.other_ids:
-            query_values.append(("other", oid))
-            query_values.append(("melinda", oid))
-            query_values.append(("wikidata_qid", oid))
-
-        if not query_values:
-            return []
 
         matched_record_ids: list[int] = []
         with self.get_connection() as conn:
@@ -203,9 +196,25 @@ class AuthorityStore:
                     FROM authority_identifiers i
                     JOIN authority_records r ON i.record_id = r.id
                     WHERE i.id_type = ? AND i.id_value = ?
-                    ORDER BY CASE WHEN r.source = 'melinda' THEN 0 ELSE 1 END;
+                    ORDER BY CASE WHEN r.source != 'wikidata' THEN 0 ELSE 1 END;
                     """,
                     (id_type, id_value),
+                ).fetchall()
+                for r in rows:
+                    rec_id = r["id"]
+                    if rec_id not in matched_record_ids:
+                        matched_record_ids.append(rec_id)
+
+            for oid in identifiers.other_ids:
+                rows = conn.execute(
+                    """
+                    SELECT r.id, r.source
+                    FROM authority_identifiers i
+                    JOIN authority_records r ON i.record_id = r.id
+                    WHERE i.id_type NOT IN ('isbn', 'issn', 'urn') AND i.id_value = ?
+                    ORDER BY CASE WHEN r.source != 'wikidata' THEN 0 ELSE 1 END;
+                    """,
+                    (oid,),
                 ).fetchall()
                 for r in rows:
                     rec_id = r["id"]

@@ -208,9 +208,9 @@ def test_harvest_partition_no_records_match() -> None:
         assert len(records) == 0
 
 
-def test_stream_melinda_records_parallel_date_partitioning() -> None:
-    from reconciliator.config import MelindaIngestConfig
-    from reconciliator.ingestion.melinda import stream_melinda_records
+def test_stream_oai_records_parallel_date_partitioning() -> None:
+    from reconciliator.config import OAIIngestConfig
+    from reconciliator.ingestion.oai import stream_oai_records
 
     sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
     <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
@@ -228,7 +228,7 @@ def test_stream_melinda_records_parallel_date_partitioning() -> None:
       </ListRecords>
     </OAI-PMH>
     """
-    config = MelindaIngestConfig(
+    config = OAIIngestConfig(
         source_type="oai",
         workers=2,
         from_date="2021-01-01",
@@ -243,20 +243,24 @@ def test_stream_melinda_records_parallel_date_partitioning() -> None:
     mock_resp.raise_for_status = MagicMock()
 
     with patch("httpx2.Client.get", return_value=mock_resp):
-        records = list(stream_melinda_records(config))
+        records = list(stream_oai_records(source_name="test_oai", config=config))
         # 2 date slices, each returning 1 record -> 2 records yielded
         assert len(records) == 2
         assert records[0]["title"] == "Parallel Book"
+        assert records[0]["source"] == "test_oai"
 
 
-def test_stream_melinda_records_autodiscovery_parallel() -> None:
-    from reconciliator.config import MelindaIngestConfig
-    from reconciliator.ingestion.melinda import stream_melinda_records
+def test_stream_oai_records_autodiscovery_parallel() -> None:
+    from reconciliator.config import OAIIngestConfig
+    from reconciliator.ingestion.oai import stream_oai_records
 
     sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
     <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
       <ListRecords>
         <record>
+          <header>
+            <identifier>oai:example.org:auto/123</identifier>
+          </header>
           <metadata>
             <record xmlns="http://www.loc.gov/MARC21/slim">
               <controlfield tag="001">rec_auto</controlfield>
@@ -269,7 +273,7 @@ def test_stream_melinda_records_autodiscovery_parallel() -> None:
       </ListRecords>
     </OAI-PMH>
     """
-    config = MelindaIngestConfig(
+    config = OAIIngestConfig(
         source_type="oai",
         workers=2,
         from_date=None,  # Should auto-discover
@@ -288,6 +292,7 @@ def test_stream_melinda_records_autodiscovery_parallel() -> None:
         return_value="2000-01-01",
     ):
         with patch("httpx2.Client.get", return_value=mock_resp):
-            records = list(stream_melinda_records(config))
+            records = list(stream_oai_records(source_name="melinda", config=config))
             assert len(records) >= 1
             assert records[0]["title"] == "Auto Book"
+            assert records[0]["source"] == "melinda"
