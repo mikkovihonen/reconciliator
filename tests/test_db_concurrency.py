@@ -45,3 +45,23 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
     with get_db_connection(db_path) as conn:
         total = conn.execute("SELECT COUNT(*) as cnt FROM authority_records;").fetchone()["cnt"]
         assert total == 4 * 20
+
+
+def test_db_metadata_persistence(tmp_path: Path) -> None:
+    from reconciliator.repository import AuthorityStore
+
+    store = AuthorityStore(
+        db_path=tmp_path / "authority.db",
+        index_path=tmp_path / "authority.faiss",
+        dimension=768,
+    )
+    store.set_embedding_metadata(
+        model_name="TurkuNLP/sbert-finnish",
+        dimension=768,
+        template_hash="abc123hash",
+    )
+
+    meta = store.get_embedding_metadata()
+    assert meta["model_name"] == "TurkuNLP/sbert-finnish"
+    assert meta["dimension"] == "768"
+    assert meta["template_hash"] == "abc123hash"

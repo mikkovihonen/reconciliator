@@ -48,3 +48,13 @@ def test_embedder_empty_list(mock_sentence_transformer: MagicMock) -> None:
 
         res = embedder.embed_texts([])
         assert res.shape == (0, 384)
+
+
+def test_embedder_fp16_flag(mock_sentence_transformer: MagicMock) -> None:
+    with patch(
+        "reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer
+    ):
+        config = EmbeddingConfig(device="cpu", batch_size=32)
+        embedder = SentenceEmbedder(config)
+        assert embedder.use_fp16 is False
+        assert embedder.batch_size == 32

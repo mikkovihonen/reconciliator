@@ -1,6 +1,11 @@
 """Unit tests for device detection and configuration."""
 
-from reconciliator.device import configure_execution_threads, get_optimal_batch_size, resolve_device
+from reconciliator.device import (
+    configure_execution_threads,
+    configure_mixed_precision,
+    get_optimal_batch_size,
+    resolve_device,
+)
 
 
 def test_resolve_device_auto() -> None:
@@ -20,4 +25,10 @@ def test_configure_execution_threads() -> None:
 
 def test_get_optimal_batch_size() -> None:
     assert get_optimal_batch_size(32, "cpu") == 32
-    assert get_optimal_batch_size(64, "cuda") == 64
+    assert get_optimal_batch_size(64, "cuda") == 256
+    assert get_optimal_batch_size(32, "mps") == 64
+
+
+def test_configure_mixed_precision() -> None:
+    assert configure_mixed_precision("cpu") is False
+    assert configure_mixed_precision("mps") is False

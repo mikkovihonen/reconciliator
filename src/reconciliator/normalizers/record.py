@@ -21,6 +21,7 @@ from reconciliator.normalizers.identifiers import (
     normalize_issn,
     normalize_urn,
 )
+from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.template import RecordTemplateEngine
 
 ROMAN_NUMERALS = {
@@ -237,9 +238,13 @@ class RecordNormalizer:
         self,
         finto_folder: Optional[FintoFolder] = None,
         template_engine: Optional[RecordTemplateEngine] = None,
+        relator_registry: Optional[RelatorRegistry] = None,
     ) -> None:
         self.finto_folder = finto_folder or FintoFolder()
         self.template_engine = template_engine
+        self.relator_registry = relator_registry or RelatorRegistry(
+            finto_store=getattr(self.finto_folder, "finto_store", None)
+        )
 
     def normalize(self, raw_data: dict[str, Any]) -> BibliographicRecord:
         """Normalize raw extracted record dictionary into unified BibliographicRecord."""
@@ -342,13 +347,21 @@ class RecordNormalizer:
             is_fictional = bool(raw_agent.get("is_fictional", False)) or any(
                 q in name_raw.lower() for q in FICTIONAL_QUALIFIERS
             )
-            norm_name, surname = normalize_agent_name(name_raw, is_personal=is_personal)
+            norm_name, surname = normalize_agent_name(
+                name_raw, is_personal=is_personal, relator_registry=self.relator_registry
+            )
             if norm_name:
+                role_raw = raw_agent.get("role")
+                role = role_raw
+                if role_raw and len(role_raw) > 3:
+                    mapped = self.relator_registry.term_to_code(role_raw)
+                    if mapped:
+                        role = mapped
                 agents.append(
                     Agent(
                         name=norm_name,
                         surname=surname,
-                        role=raw_agent.get("role"),
+                        role=role,
                         field_tag=raw_agent.get("field_tag"),
                         is_personal=is_personal,
                         is_fictional=is_fictional,
@@ -362,7 +375,6 @@ class RecordNormalizer:
             names_245c = parse_245c_agents(raw_data["statement_of_responsibility"])
             for n in names_245c:
                 s_name = extract_surname(n)
-                agents.append(Agent(name=n, surname=s_name, role="aut", field_tag="245"))
                 fict = any(q in n.lower() for q in FICTIONAL_QUALIFIERS)
                 agents.append(
                     Agent(name=n, surname=s_name, role="aut", field_tag="245", is_fictional=fict)

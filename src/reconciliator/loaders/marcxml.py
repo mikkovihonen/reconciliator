@@ -84,7 +84,15 @@ def parse_marc_record_elem(record_elem: etree._Element, source: str = "target") 
             uniform_title = _get_subfield(f240[0], "a")
 
     variant_titles: list[str] = []
-    for f in _get_datafields(record_elem, "246") + _get_datafields(record_elem, "740"):
+    for f in _get_datafields(record_elem, "246"):
+        vt_a = _get_subfield(f, "a")
+        if vt_a:
+            vt_b = _get_subfield(f, "b")
+            combined = vt_a.strip()
+            if vt_b:
+                combined = f"{combined} {vt_b.strip()}"
+            variant_titles.append(combined)
+    for f in _get_datafields(record_elem, "740"):
         vt = _get_subfield(f, "a")
         if vt:
             variant_titles.append(vt)

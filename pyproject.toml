@@ -15,7 +15,6 @@ dependencies = [
     "lxml>=5.2.0",
     "orjson>=3.10.0",
     "pydantic>=2.7.0",
-    "pymarc>=5.1.0",
     "pyyaml>=6.0.1",
     "rank-bm25>=0.2.2",
     "rapidfuzz>=3.9.0",

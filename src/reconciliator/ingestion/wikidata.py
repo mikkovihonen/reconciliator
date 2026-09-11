@@ -1,8 +1,13 @@
-"""Zero-RAM streaming ingestion pipeline for gzipped Wikidata dump latest-all.json.gz."""
+"""Two-pass streaming ingestion pipeline for gzipped Wikidata dump latest-all.json.gz.
+
+Pass 1: Pre-scan all human/organization/place entities into SQLite wikidata_authors table.
+Pass 2: Stream bibliographic entities, hydrating authors from SQLite for true O(1) memory.
+"""
 
 from __future__ import annotations
 
 import gzip
+import logging
 import os
 import re
 from pathlib import Path
@@ -17,6 +22,8 @@ from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import AuthorityStore
+
+logger = logging.getLogger(__name__)
 
 WIKIDATA_LANG_MAP = {
     "Q1412": "fin",
@@ -43,6 +50,17 @@ BIB_INDICATORS = (
     b'"Q47461344"',
     b'"Q2085381"',
     b'"P1476"',
+)
+
+_HUMAN_AND_ENTITY_TYPES = {"Q5", "Q2085381", "Q4830453", "Q43229", "Q515", "Q6256"}
+_BOOK_TYPES = {"Q571", "Q7725634", "Q47461344", "Q3331189"}
+_AUTHOR_PROPERTIES = (
+    ("P50", "aut"),
+    ("P98", "edt"),
+    ("P655", "trl"),
+    ("P110", "ill"),
+    ("P86", "cmp"),
+    ("P767", "ctb"),
 )
 
 
@@ -84,54 +102,95 @@ def extract_claim_qualifier_string(
     return None
 
 
-def parse_wikidata_entity(
-    entity: dict[str, Any], author_cache: dict[str, dict[str, Any]]
+def _has_bib_indicator(line: bytes) -> bool:
+    """Fast byte-level pre-filter for lines likely containing bibliographic or author entities."""
+    return any(indicator in line for indicator in BIB_INDICATORS)
+
+
+def _extract_author_data(
+    entity: dict[str, Any],
 ) -> Optional[dict[str, Any]]:
-    """Parse a Wikidata entity into raw bibliographic dictionary format."""
+    """Extract author/entity metadata from a Wikidata entity if it matches criteria.
+
+    Returns a dict suitable for insert_wikidata_authors, or None.
+    """
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
     labels = entity.get("labels", {})
 
-    # Check if author or entity (organization, publisher, place): cache if contains identifiers or relevant type
     instance_of = get_claim_qids(claims, "P31")
     is_human = "Q5" in instance_of
-    is_org_or_place = any(
-        k in instance_of for k in ("Q2085381", "Q4830453", "Q43229", "Q515", "Q6256")
-    )
+    is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
     has_auth_ids = "P3595" in claims or "P213" in claims or "P214" in claims
 
-    if is_human or is_org_or_place or has_auth_ids:
-        name_val = ""
-        for lang in ("fi", "sv", "en"):
-            if lang in labels:
-                name_val = labels[lang].get("value", "")
-                if name_val:
-                    break
-        fam_name = ""
-        fam_qids = get_claim_qids(claims, "P734")
-        if fam_qids:
-            fam_name = fam_qids[0]
+    if not (is_human or is_org_or_place or has_auth_ids):
+        return None
 
-        asteri_id = get_claim_snak_value(claims, "P3595")
-        isni = get_claim_snak_value(claims, "P213")
-        viaf = get_claim_snak_value(claims, "P214")
+    name_val = ""
+    for lang in ("fi", "sv", "en"):
+        if lang in labels:
+            name_val = labels[lang].get("value", "")
+            if name_val:
+                break
+    fam_name = ""
+    fam_qids = get_claim_qids(claims, "P734")
+    if fam_qids:
+        fam_name = fam_qids[0]
 
-        if name_val or asteri_id or isni or viaf:
-            author_cache[qid] = {
-                "qid": qid,
-                "name": name_val,
-                "family_name": fam_name,
-                "asteri_id": asteri_id,
-                "isni": isni,
-                "viaf": viaf,
-            }
+    asteri_id = get_claim_snak_value(claims, "P3595")
+    isni = get_claim_snak_value(claims, "P213")
+    viaf = get_claim_snak_value(claims, "P214")
 
-    # Human authors and organizations/places are never bibliographic book records
+    if name_val or asteri_id or isni or viaf:
+        return {
+            "qid": qid,
+            "name": name_val,
+            "family_name": fam_name,
+            "asteri_id": asteri_id,
+            "isni": isni,
+            "viaf": viaf,
+        }
+    return None
+
+
+def _lookup_entity_name(
+    qid: str,
+    store: Optional[AuthorityStore],
+) -> Optional[str]:
+    """Look up an entity name from SQLite wikidata_authors by QID."""
+    if not store or not qid:
+        return None
+    author = store.get_wikidata_author(qid)
+    if author:
+        name = author.get("name")
+        if name and not re.match(r"^Q\d+$", str(name)):
+            return str(name)
+    return None
+
+
+def parse_wikidata_entity(
+    entity: dict[str, Any],
+    store: Optional[AuthorityStore] = None,
+) -> Optional[dict[str, Any]]:
+    """Parse a Wikidata entity into raw bibliographic dictionary format.
+
+    Author/publisher/subject names are hydrated from the SQLite wikidata_authors table
+    via the store parameter, achieving O(1) memory usage.
+    """
+    qid = entity.get("id", "")
+    claims = entity.get("claims", {})
+    labels = entity.get("labels", {})
+
+    # Check if this is a human/org/place entity — skip bibliographic processing
+    instance_of = get_claim_qids(claims, "P31")
+    is_human = "Q5" in instance_of
+    is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
+
     if is_human or is_org_or_place:
         return None
 
     # Check if bibliographic work / book
-    is_book = any(k in instance_of for k in ("Q571", "Q7725634", "Q47461344", "Q3331189"))
+    is_book = any(k in instance_of for k in _BOOK_TYPES)
     has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
 
     if not (is_book or has_bib_ids):
@@ -198,25 +257,21 @@ def parse_wikidata_entity(
             if m:
                 year_str = m.group(1)
 
-    # Publisher: first check qualifier (P1810 / P1932 'stated as'), then cached entity name
+    # Publisher: first check qualifier (P1810 / P1932 'stated as'), then SQLite lookup
     publisher = extract_claim_qualifier_string(claims, "P123")
     if not publisher:
         pub_qids = get_claim_qids(claims, "P123")
-        if pub_qids and pub_qids[0] in author_cache:
-            p_name = author_cache[pub_qids[0]].get("name")
-            if p_name and not re.match(r"^Q\d+$", p_name):
-                publisher = p_name
+        if pub_qids:
+            publisher = _lookup_entity_name(pub_qids[0], store)
     if publisher and re.match(r"^Q\d+$", publisher.strip()):
         publisher = None
 
-    # Publication Place: first check qualifier, then cached entity name
+    # Publication Place: first check qualifier, then SQLite lookup
     publication_place = extract_claim_qualifier_string(claims, "P291")
     if not publication_place:
         place_qids = get_claim_qids(claims, "P291")
-        if place_qids and place_qids[0] in author_cache:
-            pl_name = author_cache[place_qids[0]].get("name")
-            if pl_name and not re.match(r"^Q\d+$", pl_name):
-                publication_place = pl_name
+        if place_qids:
+            publication_place = _lookup_entity_name(place_qids[0], store)
     if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
         publication_place = None
 
@@ -264,10 +319,8 @@ def parse_wikidata_entity(
 
     if not series_title:
         series_qids = get_claim_qids(claims, "P179")
-        if series_qids and series_qids[0] in author_cache:
-            s_name = author_cache[series_qids[0]].get("name")
-            if s_name and not re.match(r"^Q\d+$", s_name):
-                series_title = s_name
+        if series_qids:
+            series_title = _lookup_entity_name(series_qids[0], store)
     if series_title and re.match(r"^Q\d+$", series_title.strip()):
         series_title = None
 
@@ -321,18 +374,13 @@ def parse_wikidata_entity(
     if p356:
         other_ids.append(f"doi:{p356}")
 
-    # Agents
+    # Agents — hydrate from SQLite
     agents: list[dict[str, Any]] = []
-    for prop, role in (
-        ("P50", "aut"),
-        ("P98", "edt"),
-        ("P655", "trl"),
-        ("P110", "ill"),
-        ("P86", "cmp"),
-        ("P767", "ctb"),
-    ):
+    for prop, role in _AUTHOR_PROPERTIES:
         for a_qid in get_claim_qids(claims, prop):
-            author_info = author_cache.get(a_qid, {})
+            author_info: dict[str, Any] = {}
+            if store:
+                author_info = store.get_wikidata_author(a_qid) or {}
             qual_name = extract_claim_qualifier_string(claims, prop)
             name = author_info.get("name") or qual_name or a_qid
             u0: list[str] = []
@@ -371,7 +419,7 @@ def parse_wikidata_entity(
                     }
                 )
 
-    # Subjects
+    # Subjects — hydrate names from SQLite
     subjects: dict[str, list[dict[str, Any]]] = {
         "topical": [],
         "genre_form": [],
@@ -379,22 +427,22 @@ def parse_wikidata_entity(
         "medium_of_performance": [],
     }
     for s_qid in get_claim_qids(claims, "P921"):
-        s_heading = author_cache.get(s_qid, {}).get("name") or s_qid
+        s_heading = _lookup_entity_name(s_qid, store) or s_qid
         subjects["topical"].append(
             {"heading": s_heading, "field": "650", "vocabulary": "yso", "uri": None}
         )
     for g_qid in get_claim_qids(claims, "P136"):
-        g_heading = author_cache.get(g_qid, {}).get("name") or g_qid
+        g_heading = _lookup_entity_name(g_qid, store) or g_qid
         subjects["genre_form"].append(
             {"heading": g_heading, "field": "655", "vocabulary": "slm", "uri": None}
         )
     for geo_qid in get_claim_qids(claims, "P840"):
-        geo_heading = author_cache.get(geo_qid, {}).get("name") or geo_qid
+        geo_heading = _lookup_entity_name(geo_qid, store) or geo_qid
         subjects["geographic"].append(
             {"heading": geo_heading, "field": "651", "vocabulary": "yso", "uri": None}
         )
     for mus_qid in get_claim_qids(claims, "P870"):
-        mus_heading = author_cache.get(mus_qid, {}).get("name") or mus_qid
+        mus_heading = _lookup_entity_name(mus_qid, store) or mus_qid
         subjects["medium_of_performance"].append(
             {"heading": mus_heading, "field": "382", "vocabulary": "seko", "uri": None}
         )
@@ -428,27 +476,22 @@ def parse_wikidata_entity(
     }
 
 
-def stream_wikidata_dump(
-    dump_path: Path | str,
-    store: Optional[AuthorityStore] = None,
-    tracker: Optional[ProgressTracker] = None,
-) -> Iterator[dict[str, Any]]:
-    """Stream Wikidata gzipped JSON dump line by line in constant memory with SQLite author persistence."""
-    path = Path(dump_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Wikidata dump not found: {path}")
+def _prescan_authors(
+    path: Path,
+    store: Optional[AuthorityStore],
+    tracker: Optional[ProgressTracker],
+) -> int:
+    """Pass 1: Stream the Wikidata dump and persist all author/org/place entities to SQLite.
 
-    total_bytes = os.path.getsize(path)
-    if tracker:
-        tracker.start_task(stage="streaming_wikidata", bytes_total=total_bytes)
-
-    author_cache: dict[str, dict[str, Any]] = {}
+    Processes line-by-line in O(1) memory — no in-memory author dict is maintained.
+    Returns the number of author entities persisted.
+    """
     author_batch: list[dict[str, Any]] = []
+    total_authors = 0
 
     with gzip.open(path, "rb") as f:
         for line in f:
-            # Fast line pre-filtering
-            if not any(indicator in line for indicator in BIB_INDICATORS):
+            if not _has_bib_indicator(line):
                 continue
 
             clean_line = line.strip().rstrip(b",")
@@ -460,18 +503,54 @@ def stream_wikidata_dump(
             except Exception:
                 continue
 
-            qid = entity.get("id", "")
-            prev_cache_len = len(author_cache)
-            parsed = parse_wikidata_entity(entity, author_cache)
-
-            # Check if an author was cached
-            if len(author_cache) > prev_cache_len and qid in author_cache:
-                author_batch.append(author_cache[qid])
+            author_data = _extract_author_data(entity)
+            if author_data:
+                author_batch.append(author_data)
                 if len(author_batch) >= 500:
                     if store is not None:
                         store.insert_wikidata_authors(author_batch)
+                    total_authors += len(author_batch)
                     author_batch.clear()
 
+            if tracker and hasattr(f, "fileobj") and f.fileobj and hasattr(f.fileobj, "tell"):
+                curr_bytes = int(getattr(f.fileobj, "tell")())
+                tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
+
+    # Flush remaining batch
+    if author_batch and store is not None:
+        store.insert_wikidata_authors(author_batch)
+        total_authors += len(author_batch)
+        author_batch.clear()
+
+    logger.info("Pass 1 complete: %d author entities persisted to SQLite", total_authors)
+    return total_authors
+
+
+def _stream_bibliographic_entities(
+    path: Path,
+    store: Optional[AuthorityStore],
+    tracker: Optional[ProgressTracker],
+) -> Iterator[dict[str, Any]]:
+    """Pass 2: Stream the Wikidata dump and yield bibliographic entities.
+
+    Author names are hydrated from the SQLite wikidata_authors table (populated in Pass 1),
+    achieving true O(1) memory consumption.
+    """
+    with gzip.open(path, "rb") as f:
+        for line in f:
+            if not _has_bib_indicator(line):
+                continue
+
+            clean_line = line.strip().rstrip(b",")
+            if not clean_line or clean_line in (b"[", b"]"):
+                continue
+
+            try:
+                entity = orjson.loads(clean_line)
+            except Exception:
+                continue
+
+            parsed = parse_wikidata_entity(entity, store=store)
             if parsed:
                 yield parsed
 
@@ -479,12 +558,43 @@ def stream_wikidata_dump(
                 curr_bytes = int(getattr(f.fileobj, "tell")())
                 tracker.update_progress(
                     bytes_processed=curr_bytes,
-                    items_increment=1,
+                    items_increment=1 if parsed else 0,
                 )
 
-        if author_batch and store is not None:
-            store.insert_wikidata_authors(author_batch)
-            author_batch.clear()
+
+def stream_wikidata_dump(
+    dump_path: Path | str,
+    store: Optional[AuthorityStore] = None,
+    tracker: Optional[ProgressTracker] = None,
+) -> Iterator[dict[str, Any]]:
+    """Two-pass Wikidata streaming: pre-scan authors into SQLite, then extract books.
+
+    Pass 1: Scans the entire dump to collect all human/organization/place entities
+            and persists them to the SQLite wikidata_authors table.
+    Pass 2: Scans the dump again to process bibliographic entities, hydrating
+            author/publisher/subject names from SQLite instead of in-memory state.
+
+    This achieves true O(1) memory consumption regardless of dump size.
+    """
+    path = Path(dump_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Wikidata dump not found: {path}")
+
+    total_bytes = os.path.getsize(path)
+
+    # Pass 1: Pre-scan all human/org entities into wikidata_authors
+    logger.info("Pass 1/2: Pre-scanning author entities into SQLite...")
+    if tracker:
+        tracker.start_task(stage="wikidata_prescan", bytes_total=total_bytes)
+    _prescan_authors(path, store, tracker)
+    if tracker:
+        tracker.complete_task(metadata={"stage": "prescan"})
+
+    # Pass 2: Stream bibliographic entities, hydrating authors from SQLite
+    logger.info("Pass 2/2: Streaming bibliographic entities...")
+    if tracker:
+        tracker.start_task(stage="streaming_wikidata", bytes_total=total_bytes)
+    yield from _stream_bibliographic_entities(path, store, tracker)
 
 
 def ingest_wikidata_pipeline(
@@ -523,6 +633,11 @@ def ingest_wikidata_pipeline(
             "dimension": embedder.dimension,
             "template_hash": embedder.template_hash,
         }
+    )
+    store.set_embedding_metadata(
+        model_name=embedder.config.model_name,
+        dimension=embedder.dimension,
+        template_hash=embedder.template_hash,
     )
 
     if tracker:

@@ -319,6 +319,15 @@ class FintoStore:
             ).fetchone()
             return bool(row)
 
+    def get_relator_code(self, folded_term: str) -> Optional[str]:
+        """Look up standard MARC code for a folded role term in relator_terms."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT code FROM relator_terms WHERE folded_term = ? AND code IS NOT NULL LIMIT 1;",
+                (folded_term.strip().casefold(),),
+            ).fetchone()
+            return row["code"] if row and row["code"] else None
+
     def get_all_relators(self) -> set[str]:
         """Retrieve all known folded relator terms."""
         with self.get_connection() as conn:

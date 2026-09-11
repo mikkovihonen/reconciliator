@@ -149,6 +149,95 @@ class RelatorRegistry:
 
         return cleaned
 
+    def term_to_code(self, token: str) -> Optional[str]:
+        """Resolve a natural-language role term to a standard 3-letter MARC relator code."""
+        clean = token.strip().casefold().rstrip(".")
+        if not clean:
+            return None
+
+        if self.finto_store is not None and hasattr(self.finto_store, "get_relator_code"):
+            code = self.finto_store.get_relator_code(clean)
+            if code:
+                return str(code)
+
+        return _BASELINE_TERM_TO_CODE.get(clean)
+
+
+_BASELINE_TERM_TO_CODE: dict[str, str] = {
+    # Finnish (RDA-FI)
+    "kirjoittaja": "aut",
+    "tekijä": "aut",
+    "toimittaja": "edt",
+    "päätoimittaja": "edt",
+    "kääntäjä": "trl",
+    "suomentaja": "trl",
+    "kuvittaja": "ill",
+    "säveltäjä": "cmp",
+    "sovittaja": "arr",
+    "sanoittaja": "lyr",
+    "ohjaaja": "drt",
+    "elokuvaohjaaja": "drt",
+    "teatteriohjaaja": "drt",
+    "näyttelijä": "act",
+    "näyttelijät": "act",
+    "kuvaaja": "cng",
+    "käsikirjoittaja": "aus",
+    "tuottaja": "pro",
+    "esittäjä": "prf",
+    "laulaja": "sng",
+    "muusikko": "mus",
+    "taiteilija": "art",
+    "äänittäjä": "rcd",
+    "tutkija": "res",
+    "haastattelija": "ivr",
+    "haastateltava": "ive",
+    "kertoja": "nrt",
+    "valokuvaaja": "pht",
+    "kustantaja": "pbl",
+    "julkaisija": "pbl",
+    # Swedish (RDA-SV)
+    "författare": "aut",
+    "redaktör": "edt",
+    "huvudredaktör": "edt",
+    "översättare": "trl",
+    "illustratör": "ill",
+    "kompositör": "cmp",
+    "arrangör": "arr",
+    "textförfattare": "lyr",
+    "regissör": "drt",
+    "skådespelare": "act",
+    "fotograf": "pht",
+    "manusförfattare": "aus",
+    "producent": "pro",
+    "dirigent": "cnd",
+    "konstnär": "art",
+    "sångare": "sng",
+    "musiker": "mus",
+    "forskare": "res",
+    "utgivare": "pbl",
+    # English (MARC / RDA)
+    "author": "aut",
+    "editor": "edt",
+    "illustrator": "ill",
+    "translator": "trl",
+    "composer": "cmp",
+    "arranger": "arr",
+    "lyricist": "lyr",
+    "director": "drt",
+    "producer": "pro",
+    "actor": "act",
+    "performer": "prf",
+    "singer": "sng",
+    "musician": "mus",
+    "photographer": "pht",
+    "screenwriter": "aus",
+    "researcher": "res",
+    "publisher": "pbl",
+    "interviewer": "ivr",
+    "interviewee": "ive",
+    "narrator": "nrt",
+}
+
 
 _DEFAULT_REGISTRY = RelatorRegistry()
 

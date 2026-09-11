@@ -127,6 +127,11 @@ def ingest_melinda_pipeline(
             "template_hash": embedder.template_hash,
         }
     )
+    store.set_embedding_metadata(
+        model_name=embedder.config.model_name,
+        dimension=embedder.dimension,
+        template_hash=embedder.template_hash,
+    )
 
     if tracker:
         tracker.complete_task(metadata={"records_ingested": total_ingested})

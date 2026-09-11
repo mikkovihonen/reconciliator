@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Literal, Optional
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_device(device_str: Literal["auto", "cuda", "mps", "cpu"] = "auto") -> str:
@@ -41,7 +44,23 @@ def configure_execution_threads(num_threads: Optional[int] = None) -> int:
 
 
 def get_optimal_batch_size(base_batch_size: int, device: str) -> int:
-    """Return effective batch size, scaling up for GPU/Metal when suitable."""
-    if device in ("cuda", "mps") and base_batch_size < 128:
-        return base_batch_size
+    """Return batch size scaled for available hardware.
+
+    Scales up for GPU/Metal when suitable to exploit hardware parallelism.
+    """
+    if device == "cuda":
+        return base_batch_size * 4
+    elif device == "mps":
+        return base_batch_size * 2
     return base_batch_size
+
+
+def configure_mixed_precision(device: str) -> bool:
+    """Return whether automatic mixed precision (fp16) should be used.
+
+    Enables fp16 on CUDA devices for faster inference with minimal accuracy loss.
+    """
+    if device == "cuda" and torch.cuda.is_available():
+        logger.info("Enabling CUDA automatic mixed precision (fp16)")
+        return True
+    return False

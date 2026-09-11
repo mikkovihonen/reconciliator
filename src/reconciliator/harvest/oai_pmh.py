@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timedelta
 from typing import Iterator, Optional
 
-from lxml import etree
-
 import httpx2
+from lxml import etree
 
 from reconciliator.progress import ProgressTracker
 from reconciliator.version import get_default_user_agent
+
+logger = logging.getLogger(__name__)
 
 OAI_NS = {
     "oai": "http://www.openarchives.org/OAI/2.0/",
@@ -53,12 +56,56 @@ class OAIPMHHarvester:
         set_spec: Optional[str] = None,
         timeout: float = 60.0,
         user_agent: Optional[str] = None,
+        max_retries: int = 5,
+        base_delay: float = 1.0,
+        request_delay: float = 0.5,
     ) -> None:
         self.endpoint_url = endpoint_url
         self.metadata_prefix = metadata_prefix
         self.set_spec = set_spec
         self.timeout = timeout
         self.user_agent = user_agent if user_agent is not None else get_default_user_agent()
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.request_delay = request_delay
+
+    def _request_with_retry(
+        self,
+        client: httpx2.Client,
+        params: dict[str, str],
+    ) -> httpx2.Response:
+        """Execute an HTTP GET with exponential backoff on transient failures."""
+        for attempt in range(self.max_retries):
+            try:
+                resp = client.get(self.endpoint_url, params=params)
+                resp.raise_for_status()
+                return resp
+            except (httpx2.HTTPStatusError, httpx2.TransportError) as exc:
+                if attempt == self.max_retries - 1:
+                    raise
+
+                # Respect Retry-After header if present
+                retry_after = getattr(
+                    getattr(exc, "response", None),
+                    "headers",
+                    {},
+                ).get("Retry-After")
+                if isinstance(retry_after, str) and retry_after.isdigit():
+                    delay = float(retry_after)
+                else:
+                    delay = min(self.base_delay * (2**attempt), 60.0)
+
+                logger.warning(
+                    "OAI-PMH request failed (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    self.max_retries,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+
+        # Unreachable, but satisfies type checker
+        raise RuntimeError("Retry loop exited without returning or raising")  # pragma: no cover
 
     def harvest_partition(
         self,
@@ -95,8 +142,7 @@ class OAIPMHHarvester:
                 else:
                     req_params = params
 
-                resp = client.get(self.endpoint_url, params=req_params)
-                resp.raise_for_status()
+                resp = self._request_with_retry(client, req_params)
 
                 root = etree.fromstring(resp.content)
                 records = root.findall(".//oai:record", OAI_NS)
@@ -126,5 +172,9 @@ class OAIPMHHarvester:
                     resumption_token = token_elem.text.strip()
                 else:
                     break
+
+                # Rate limiting between pagination requests
+                if self.request_delay > 0:
+                    time.sleep(self.request_delay)
         finally:
             client.close()

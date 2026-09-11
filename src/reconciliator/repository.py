@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from reconciliator.db import get_db_connection, init_authority_db
+from reconciliator.db import get_db_connection, get_metadata, init_authority_db, set_metadata
 from reconciliator.indexer import FAISSIndexManager
 from reconciliator.models import BibliographicRecord, RecordIdentifiers
 
@@ -309,3 +309,24 @@ class AuthorityStore:
                     "viaf": r["viaf"],
                 }
         return results
+
+    def get_wikidata_author(self, qid: str) -> dict[str, Any] | None:
+        """Fetch a single cached author entity from wikidata_authors by QID."""
+        result = self.get_wikidata_authors_batch([qid])
+        return result.get(qid)
+
+    def set_embedding_metadata(self, model_name: str, dimension: int, template_hash: str) -> None:
+        """Persist embedding metadata keys to db_metadata table."""
+        with self.get_connection() as conn:
+            set_metadata(conn, "embedding_model_name", model_name)
+            set_metadata(conn, "embedding_dimension", str(dimension))
+            set_metadata(conn, "embedding_template_hash", template_hash)
+
+    def get_embedding_metadata(self) -> dict[str, str]:
+        """Fetch embedding metadata keys from db_metadata table."""
+        with self.get_connection() as conn:
+            return {
+                "model_name": get_metadata(conn, "embedding_model_name") or "",
+                "dimension": get_metadata(conn, "embedding_dimension") or "",
+                "template_hash": get_metadata(conn, "embedding_template_hash") or "",
+            }

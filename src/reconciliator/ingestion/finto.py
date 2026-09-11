@@ -100,6 +100,10 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
             alt_fi = re.findall(r'skos:altLabel\s+"([^"]+)"@fi', body)
             alt_sv = re.findall(r'skos:altLabel\s+"([^"]+)"@sv', body)
 
+            is_deprecated = bool(
+                re.search(r'owl:deprecated\s+(?:"true"\^\^xsd:boolean|true\b)', body, re.IGNORECASE)
+            )
+
             target_field = "650"
             if vocab == "slm":
                 target_field = "655"
@@ -116,6 +120,7 @@ def parse_turtle_simple(content: str) -> tuple[list[FintoConcept], list[FintoMap
                 pref_label_en=pref_en,
                 alt_labels_fi=alt_fi,
                 alt_labels_sv=alt_sv,
+                is_deprecated=is_deprecated,
                 target_field=target_field,
             )
             concepts.append(concept)

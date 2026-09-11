@@ -114,3 +114,48 @@ def test_classifications_normalization() -> None:
     # ykl prioritized over udc when no explicit primary is set
     assert classes_mixed[0].code == "82-3" and not classes_mixed[0].is_primary
     assert classes_mixed[1].code == "84.2" and classes_mixed[1].is_primary
+
+
+def test_fallback_agents_no_duplicates() -> None:
+    from reconciliator.normalizers.record import RecordNormalizer
+
+    normalizer = RecordNormalizer()
+    raw = {
+        "source_id": "test1",
+        "title": "Test Title",
+        "statement_of_responsibility": "kirjoittanut Mika Waltari ; kuvittanut Rudolf Koivu",
+        "agents": [],
+    }
+    rec = normalizer.normalize(raw)
+    assert len(rec.agents) == 2
+    names = [a.name for a in rec.agents]
+    assert names == ["Waltari, Mika", "Koivu, Rudolf"]
+
+
+def test_relator_term_to_code() -> None:
+    from reconciliator.normalizers.record import RecordNormalizer
+    from reconciliator.normalizers.relators import RelatorRegistry
+
+    registry = RelatorRegistry()
+    assert registry.term_to_code("kirjoittaja") == "aut"
+    assert registry.term_to_code("kääntäjä") == "trl"
+    assert registry.term_to_code("författare") == "aut"
+    assert registry.term_to_code("editor") == "edt"
+    assert registry.term_to_code("unknown_role_xyz") is None
+
+    # Verify RecordNormalizer maps role terms to codes
+    normalizer = RecordNormalizer(relator_registry=registry)
+    raw = {
+        "source_id": "test2",
+        "title": "Test Title 2",
+        "agents": [
+            {"name": "Mika Waltari", "role": "kirjoittaja", "is_personal": True},
+            {"name": "Rudolf Koivu", "role": "kuvittaja", "is_personal": True},
+            {"name": "Some Editor", "role": "edt", "is_personal": True},  # Already 3-letter code
+        ],
+    }
+    rec = normalizer.normalize(raw)
+    assert len(rec.agents) == 3
+    assert rec.agents[0].role == "aut"
+    assert rec.agents[1].role == "ill"
+    assert rec.agents[2].role == "edt"

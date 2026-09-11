@@ -646,6 +646,7 @@ In secure, offline cataloging environments where external internet access is pro
    - Cache HuggingFace embedding model:
      ```python
      from sentence_transformers import SentenceTransformer
+
      model = SentenceTransformer("TurkuNLP/sbert-cased-finnish-paraphrase")
      model.save("/path/to/local/model_dir")
      ```

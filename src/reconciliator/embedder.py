@@ -8,7 +8,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from reconciliator.config import EmbeddingConfig
-from reconciliator.device import get_optimal_batch_size, resolve_device
+from reconciliator.device import configure_mixed_precision, get_optimal_batch_size, resolve_device
 from reconciliator.models import BibliographicRecord
 from reconciliator.template import RecordTemplateEngine
 
@@ -20,6 +20,7 @@ class SentenceEmbedder:
         self.config = config
         self.device = resolve_device(config.device)
         self.batch_size = get_optimal_batch_size(config.batch_size, self.device)
+        self.use_fp16 = configure_mixed_precision(self.device)
 
         self.template_engine = RecordTemplateEngine(config.template_path)
         self.template_hash = self.template_engine.compute_template_hash()
@@ -42,6 +43,9 @@ class SentenceEmbedder:
             return np.empty((0, self.dimension), dtype=np.float32)
 
         eff_batch_size = batch_size or self.batch_size
+        # TODO: If sentence-transformers adds support for precision="float16" in encode(),
+        # pass precision="float16" when self.use_fp16 and self.device == "cuda".
+        # Currently SentenceTransformer.encode only supports ("float32", "int8", "uint8", "binary", "ubinary").
         embeddings = self.model.encode(
             texts,
             batch_size=eff_batch_size,

@@ -6,10 +6,19 @@ from pathlib import Path
 import orjson
 
 from reconciliator.ingestion.wikidata import stream_wikidata_dump
+from reconciliator.repository import AuthorityStore
+
+
+def _make_store(tmp_path: Path) -> AuthorityStore:
+    """Create a temporary AuthorityStore for testing."""
+    db_path = tmp_path / "authority.db"
+    index_path = tmp_path / "authority.faiss"
+    return AuthorityStore(db_path=db_path, index_path=index_path)
 
 
 def test_stream_wikidata_dump(tmp_path: Path) -> None:
     gz_path = tmp_path / "test_wikidata.json.gz"
+    store = _make_store(tmp_path)
 
     # Create dummy entities: 1 non-bibliographic, 1 author, 1 book
     non_bib = {"id": "Q1", "claims": {}, "labels": {"en": {"value": "Universe"}}}
@@ -40,7 +49,7 @@ def test_stream_wikidata_dump(tmp_path: Path) -> None:
         f.write(orjson.dumps(book) + b"\n")
         f.write(b"]\n")
 
-    items = list(stream_wikidata_dump(gz_path))
+    items = list(stream_wikidata_dump(gz_path, store=store))
     assert len(items) == 1
     rec = items[0]
     assert rec["source_id"] == "Q12345"
@@ -51,10 +60,11 @@ def test_stream_wikidata_dump(tmp_path: Path) -> None:
     assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in rec["agents"][0]["uri_subfield_0"]
 
 
-def test_stream_sample_wikidata_fixture() -> None:
+def test_stream_sample_wikidata_fixture(tmp_path: Path) -> None:
     fixture_path = Path(__file__).parent / "fixtures" / "sample_wikidata.json.gz"
     assert fixture_path.exists()
-    items = list(stream_wikidata_dump(fixture_path))
+    store = _make_store(tmp_path)
+    items = list(stream_wikidata_dump(fixture_path, store=store))
     assert len(items) == 1
     rec = items[0]
     assert rec["source_id"] == "Q478440"
@@ -67,6 +77,7 @@ def test_stream_sample_wikidata_fixture() -> None:
 
 def test_wikidata_composer_and_author_string_and_publisher(tmp_path: Path) -> None:
     gz_path = tmp_path / "test_agents_pub.json.gz"
+    store = _make_store(tmp_path)
 
     # 1. Composer entity (P86)
     composer_item = {
@@ -125,7 +136,7 @@ def test_wikidata_composer_and_author_string_and_publisher(tmp_path: Path) -> No
         f.write(orjson.dumps(book_unresolved) + b"\n")
         f.write(b"]\n")
 
-    items = list(stream_wikidata_dump(gz_path))
+    items = list(stream_wikidata_dump(gz_path, store=store))
     assert len(items) == 2
 
     rec1 = items[0]
