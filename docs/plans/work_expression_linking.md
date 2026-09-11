@@ -3619,23 +3619,35 @@ The core underlying classes remain intact and are directly leveraged:
 
 ### 6.1 MARCXML In-Place Tree Mutation (`MARCXMLEnricher`)
 
-#### 6.1.1 MARC 21 Field 758 Standard Mechanics & URI Injection Strategy
-The MARC 21 Bibliographic format natively supports linking bibliographic records (Manifestations/Instances) to abstract Works and Expressions via **Field 758 (Resource Identifier)**, introduced in Update 25 (2017) and expanded in Update 28 (2019). Because a MARC bibliographic record represents a concrete Manifestation/Instance, all outbound links injected by `MARCXMLEnricher` conform to official ontology predicates and MARC 21 standards:
+#### 6.1.1 MARC 21 Field 758 Standard Mechanics & Configurable Predicate Profiles
+The MARC 21 Bibliographic format natively supports linking bibliographic records (Manifestations/Instances) to abstract Works and Expressions via **Field 758 (Resource Identifier)**, introduced in Update 25 (2017) and expanded in Update 28 (2019). Because a MARC bibliographic record represents a concrete Manifestation/Instance, all outbound links injected by `MARCXMLEnricher` conform strictly to official ontology predicates and MARC 21 standards.
 
+To accommodate different international and national library network standards simultaneously (Finnish linked library data, Library of Congress BIBFRAME, and pure IFLA LRM/RDA), `MARCXMLEnricher` supports configuring multiple predicate profiles via **`enrichment.marc_predicate_profiles`** alongside emission mode **`enrichment.marc_predicate_mode`**:
+
+| Profile Code | Work Subfield `$4` URI | Expression Subfield `$4` URI | Source `$2` | Target Environment & Cataloging Tradition |
+| :--- | :--- | :--- | :--- | :--- |
+| **`"bffi"`** | `http://urn.fi/URN:NBN:fi:schema:bffi:workManifested` | `http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested` | `bffi` | Finnish National Library (Kansalliskirjasto), Melinda, Asteri, Finna (LKD profile) |
+| **`"bibframe"`** | `http://id.loc.gov/ontologies/bibframe/instanceOf` | `http://rdaregistry.info/Elements/m/P30139` *(RDA fallback)* | `lcba` | Library of Congress, US/international BF pipelines |
+| **`"rda"`** | `http://rdaregistry.info/Elements/m/P30135` | `http://rdaregistry.info/Elements/m/P30139` | `rda` | Pure IFLA LRM / RDA cataloging agencies |
+
+##### Multi-Profile Emission Modes:
+- **`"stacked"` Mode (Default / Compact)**:
+  - Emits a single `758` field per entity, stacking all configured predicates into repeatable `$4` subfields (e.g. `$4 .../bffi:workManifested` followed by `$4 .../P30135`).
+  - Uses the primary configured profile's source code in `$2` (e.g. `$2 bffi`).
+  - Keeps the MARC record compact while attaching all semantic equivalents directly to the primary Work/Expression title and URI anchor.
+- **`"distinct"` Mode (Isolated per Profile)**:
+  - Emits separate `758` fields for each configured profile.
+  - Because **Subfield `$2` (Source of term) is non-repeatable (`NR`)** in MARC 21, distinct mode allows each `758` datafield to carry its own registered scheme code (`$2 bffi`, `$2 rda`, `$2 lcba`).
+  - Ideal when exporting to heterogeneous union catalogs with strict validation rules requiring isolated schema provenance.
+
+##### Standard Content Designators:
 1. **Indicator Positions**:
    - Both `ind1` and `ind2` are **undefined** (`#` / blank space ` `).
-2. **Work-Tier Linking (`Manifestation` $\rightarrow$ `Work`)**:
-   - **BIBFRAME 2.0 / 3.0**: Predicate in `$4` is `http://id.loc.gov/ontologies/bibframe/instanceOf` (BIBFRAME defines an Instance as an *instance of* a Work; the property `hasWork` does not exist).
-   - **RDA / IFLA LRM**: Predicate in `$4` is `http://rdaregistry.info/Elements/m/P30135` (*work manifested*).
-   - **Authority URI (`$0`)**: Holds the canonical Work Authority record URI (e.g. Finnish Asteri Work authority `http://urn.fi/URN:NBN:fi:au:wa:...` or LC Work URI `http://id.loc.gov/resources/works/...`).
-   - **Real World Object URI (`$1`)**: Holds external real-world entity URIs, notably Wikidata (`http://www.wikidata.org/entity/Q...`).
-   - **Relationship Text (`$i`)**: Human-readable display label, e.g. `Work manifested:` or `Instance of work:`.
-3. **Expression-Tier Linking (`Manifestation` $\rightarrow$ `Expression`)**:
-   - Standard LC BIBFRAME 2.0 conflates Expression into Work; therefore, Expression-tier linking uses **RDA** or the Finnish **BFFI** ontology:
-     - RDA: `<subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>` (*expression manifested*).
-     - BFFI: `<subfield code="4">http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested</subfield>`.
-   - **Expression URI (`$0`)**: Canonical Expression URI (e.g. `urn:reconciliator:exp:<hash>` or repository expression URN).
-   - **Relationship Text (`$i`)**: E.g. `Expression manifested:`.
+2. **Authority Identifiers (`$0`) & Real World Objects (`$1`)**:
+   - Subfield `$0` holds the canonical Work Authority record URI (e.g. Finnish Asteri Work authority `http://urn.fi/URN:NBN:fi:au:wa:...` or LC Work URI `http://id.loc.gov/resources/works/...`).
+   - Subfield `$1` holds Real World Object (RWO) URIs, notably Wikidata (`http://www.wikidata.org/entity/Q...`).
+3. **Relationship Information Text (`$i`)**:
+   - Human-readable display label (e.g. `Work manifested:`, `Expression manifested:`).
 4. **Dual-Path ILS Backward Compatibility**:
    - While modern LSPs (Ex Libris Alma, Koha $\ge$ 20.05) fully recognize and index `758`, legacy ILS engines continue to rely on Authorized Access Points (Uniform Titles).
    - Where a Uniform Title exists or is synthesized (`130 0#` or `240 10`), `MARCXMLEnricher` injects the canonical Work URI into `<subfield code="0">` of that field as well, ensuring seamless backward-compatible authority control alongside the modern `758` linked data field.
@@ -3643,24 +3655,26 @@ The MARC 21 Bibliographic format natively supports linking bibliographic records
 #### 6.1.2 Enriched Record Exemplars Across Material Types
 
 #### A. Monograph Record Enrichment:
+
+##### Mode 1: Stacked Multi-Profile (`marc_predicate_mode: "stacked"` with `["bffi", "rda"]`, Default)
 ```xml
-<!-- Injected Work Link -->
+<!-- Injected Work Link (Stacked BFFI + RDA Predicates) -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">Sinuhe egyptiläinen</subfield>
   <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000100200</subfield>
   <subfield code="1">http://www.wikidata.org/entity/Q212267</subfield>
-  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
+  <subfield code="4">http://urn.fi/URN:NBN:fi:schema:bffi:workManifested</subfield>
   <subfield code="4">http://rdaregistry.info/Elements/m/P30135</subfield>
   <subfield code="i">Work manifested:</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
 
-<!-- Injected Expression Link -->
+<!-- Injected Expression Link (Stacked BFFI + RDA Predicates) -->
 <datafield tag="758" ind1=" " ind2=" ">
   <subfield code="a">The Egyptian (English translation by Walford)</subfield>
   <subfield code="0">urn:reconciliator:exp:e000100201</subfield>
-  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
   <subfield code="4">http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30139</subfield>
   <subfield code="i">Expression manifested:</subfield>
   <subfield code="2">bffi</subfield>
 </datafield>
@@ -3669,6 +3683,39 @@ The MARC 21 Bibliographic format natively supports linking bibliographic records
 <datafield tag="775" ind1="0" ind2="8">
   <subfield code="t">Sinuhe egyptiläinen</subfield>
   <subfield code="w">target-rec-002</subfield>
+</datafield>
+```
+
+##### Mode 2: Distinct Multi-Profile (`marc_predicate_mode: "distinct"` with `["bffi", "rda", "bibframe"]`)
+```xml
+<!-- Profile 1: BFFI (Finnish LKD) Work Link -->
+<datafield tag="758" ind1=" " ind2=" ">
+  <subfield code="a">Sinuhe egyptiläinen</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000100200</subfield>
+  <subfield code="1">http://www.wikidata.org/entity/Q212267</subfield>
+  <subfield code="4">http://urn.fi/URN:NBN:fi:schema:bffi:workManifested</subfield>
+  <subfield code="i">Work manifested:</subfield>
+  <subfield code="2">bffi</subfield>
+</datafield>
+
+<!-- Profile 2: RDA / IFLA LRM Work Link -->
+<datafield tag="758" ind1=" " ind2=" ">
+  <subfield code="a">Sinuhe egyptiläinen</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000100200</subfield>
+  <subfield code="1">http://www.wikidata.org/entity/Q212267</subfield>
+  <subfield code="4">http://rdaregistry.info/Elements/m/P30135</subfield>
+  <subfield code="i">Work manifested:</subfield>
+  <subfield code="2">rda</subfield>
+</datafield>
+
+<!-- Profile 3: Library of Congress BIBFRAME Work Link -->
+<datafield tag="758" ind1=" " ind2=" ">
+  <subfield code="a">Sinuhe egyptiläinen</subfield>
+  <subfield code="0">http://urn.fi/URN:NBN:fi:au:wa:000100200</subfield>
+  <subfield code="1">http://www.wikidata.org/entity/Q212267</subfield>
+  <subfield code="4">http://id.loc.gov/ontologies/bibframe/instanceOf</subfield>
+  <subfield code="i">Instance of work:</subfield>
+  <subfield code="2">lcba</subfield>
 </datafield>
 ```
 
@@ -4764,10 +4811,14 @@ class ClusterConfig(BaseModel):
 class EnrichmentTogglesConfig(BaseModel):
     """Fine-grained toggles for native format tree mutation."""
     inject_work_links: bool = True          # MARC 758 / bffi:workManifested / bf:instanceOf
-    inject_expression_links: bool = True    # MARC 758 / bffi:expressionManifested
+    inject_expression_links: bool = True    # MARC 758 / bffi:expressionManifested / RDA P30139
     inject_hub_links: bool = True           # LC bflc:hasHub
     inject_same_as: bool = True             # owl:sameAs for Wikidata QIDs / Asteri URNs
     inject_component_links: bool = True     # Analytical 700 $t / 773 host item links
+    marc_predicate_profiles: list[Literal["bffi", "bibframe", "rda"]] = Field(
+        default_factory=lambda: ["bffi", "rda"]
+    )                                       # One or more predicate profiles for MARC 758 $4
+    marc_predicate_mode: Literal["stacked", "distinct"] = "stacked"  # "stacked" (single 758 with multiple $4) or "distinct" (separate 758 per profile)
 
 class ReconcileConfig(BaseModel):
     target_file: Path
@@ -4904,10 +4955,14 @@ reconcile:
   # Format Mutation & Enrichment Toggles
   enrichment:
     inject_work_links: true                       # MARC 758 / bffi:workManifested / bf:instanceOf
-    inject_expression_links: true                 # MARC 758 / bffi:expressionManifested
+    inject_expression_links: true                 # MARC 758 / bffi:expressionManifested / RDA P30139
     inject_hub_links: true                        # LC bflc:hasHub
     inject_same_as: true                          # owl:sameAs for Wikidata QIDs / Asteri URNs
     inject_component_links: true                  # Analytical 700 $t / 773 host item links
+    marc_predicate_profiles:                      # One or more predicate profiles: "bffi", "rda", "bibframe"
+      - "bffi"
+      - "rda"
+    marc_predicate_mode: "stacked"                # "stacked" (compact single 758) or "distinct" (separate 758 per profile with individual $2)
 
   # Complete 4-Dimension TSV Reporting Suite
   work_reports:
