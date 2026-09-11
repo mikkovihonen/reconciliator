@@ -1,27 +1,32 @@
-"""AuthorityStore repository mediating access to SQLite authority.db and FAISS vector index."""
+"""AuthorityStore repository mediating access to SQLite authority.db and vector index."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
 from reconciliator.db import get_db_connection, get_metadata, init_authority_db, set_metadata
-from reconciliator.indexer import FAISSIndexManager
+from reconciliator.indexer import VectorIndex, create_vector_engine
 from reconciliator.models import BibliographicRecord, RecordIdentifiers
+
+if TYPE_CHECKING:
+    from reconciliator.config import VectorEngineConfig
 
 
 class AuthorityStore:
-    """Encapsulates persistent authority records in SQLite and dense vectors in FAISS."""
+    """Encapsulates persistent authority records in SQLite and dense vectors in the vector index."""
 
     def __init__(
         self,
         db_path: Path | str,
         index_path: Path | str,
         dimension: int = 768,
+        vector_engine_config: Optional[VectorEngineConfig] = None,
+        indexer: Optional[VectorIndex] = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.index_path = Path(index_path)
@@ -31,7 +36,12 @@ class AuthorityStore:
         with self.get_connection() as conn:
             init_authority_db(conn)
 
-        self.indexer = FAISSIndexManager(self.index_path, dimension=self.dimension)
+        if indexer is not None:
+            self.indexer = indexer
+        else:
+            self.indexer = create_vector_engine(
+                self.index_path, dimension=self.dimension, config=vector_engine_config
+            )
 
     def get_connection(self) -> sqlite3.Connection:
         return get_db_connection(self.db_path)
@@ -151,13 +161,13 @@ class AuthorityStore:
                     ),
                 )
 
-        # Add vectors to FAISS index if provided
+        # Add vectors to vector index if provided
         if vectors is not None and len(vectors) == len(records):
-            faiss_ids = self.indexer.add_vectors(vectors, ids=record_ids)
+            vector_ids = self.indexer.add_vectors(vectors, ids=record_ids)
             with self.get_connection() as conn:
-                mapping_rows = list(zip(faiss_ids, record_ids))
+                mapping_rows = list(zip(vector_ids, record_ids))
                 conn.executemany(
-                    "INSERT OR REPLACE INTO vector_mappings (faiss_id, record_id) VALUES (?, ?);",
+                    "INSERT OR REPLACE INTO vector_mappings (vector_id, record_id) VALUES (?, ?);",
                     mapping_rows,
                 )
 
@@ -232,7 +242,7 @@ class AuthorityStore:
         self, query_vector: np.ndarray, top_k: int = 50
     ) -> list[tuple[BibliographicRecord, float]]:
         """
-        Retrieve top-k candidate records from the FAISS vector index.
+        Retrieve top-k candidate records from the vector index.
         Returns list of (BibliographicRecord, dense_cosine_similarity).
         """
         if self.indexer.total_vectors == 0:
@@ -242,23 +252,23 @@ class AuthorityStore:
         if len(scores) == 0 or len(indices) == 0:
             return []
 
-        faiss_indices = indices[0].tolist()
+        vector_indices = indices[0].tolist()
         dense_scores = scores[0].tolist()
 
-        faiss_to_rec_id: dict[int, int] = {}
+        vector_to_rec_id: dict[int, int] = {}
         with self.get_connection() as conn:
-            placeholders = ",".join("?" for _ in faiss_indices)
+            placeholders = ",".join("?" for _ in vector_indices)
             rows = conn.execute(
-                f"SELECT faiss_id, record_id FROM vector_mappings WHERE faiss_id IN ({placeholders});",
-                faiss_indices,
+                f"SELECT vector_id, record_id FROM vector_mappings WHERE vector_id IN ({placeholders});",
+                vector_indices,
             ).fetchall()
             for r in rows:
-                faiss_to_rec_id[r["faiss_id"]] = r["record_id"]
+                vector_to_rec_id[r["vector_id"]] = r["record_id"]
 
         results: list[tuple[BibliographicRecord, float]] = []
         seen_record_ids: set[int] = set()
-        for f_id, score in zip(faiss_indices, dense_scores):
-            rec_id = faiss_to_rec_id.get(f_id, f_id if f_id >= 0 else None)
+        for v_id, score in zip(vector_indices, dense_scores):
+            rec_id = vector_to_rec_id.get(v_id, v_id if v_id >= 0 else None)
             if rec_id is not None and rec_id not in seen_record_ids:
                 seen_record_ids.add(rec_id)
                 rec = self.get_record_by_id(rec_id)
@@ -268,7 +278,7 @@ class AuthorityStore:
         return results
 
     def save_index(self, metadata: Optional[dict[str, Any]] = None) -> None:
-        """Persist FAISS index to disk with metadata."""
+        """Persist vector index to disk with metadata."""
         self.indexer.save(metadata=metadata)
 
     def insert_wikidata_authors(self, authors: list[dict[str, Any]]) -> None:

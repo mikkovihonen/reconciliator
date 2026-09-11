@@ -190,7 +190,7 @@ class ReportGenerator:
 
         # Tier metrics
         tier1 = sum(1 for r in self.agent_rows if r.match_tier == "tier1_exact_id")
-        tier2 = sum(1 for r in self.agent_rows if r.match_tier == "tier2_dense_faiss")
+        tier2 = sum(1 for r in self.agent_rows if r.match_tier == "tier2_dense")
         tier3 = sum(1 for r in self.agent_rows if r.match_tier == "tier3_hybrid_rerank")
         tier_denom = max(1, tier1 + tier2 + tier3)
 
@@ -337,7 +337,7 @@ class ReportGenerator:
             ),
             (
                 "tiers",
-                "tier2_dense_faiss",
+                "tier2_dense",
                 str(tier2),
                 f"{(tier2 / tier_denom) * 100:.1f}%",
                 "Matches accepted directly from dense vector similarity",

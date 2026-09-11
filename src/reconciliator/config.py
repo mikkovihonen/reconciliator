@@ -10,13 +10,22 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
+class VectorEngineConfig(BaseModel):
+    """Vector search engine backend and hardware acceleration configuration."""
+
+    backend: Literal["auto", "faiss", "torch"] = "auto"
+    device: Literal["auto", "mps", "cuda", "cpu"] = "auto"
+    threads: Optional[int] = None
+
+
 class StorageConfig(BaseModel):
     """File paths for databases and vector indices."""
 
     authority_db: Path = Path("data/authority.db")
     vocab_db: Path = Path("data/vocab.db")
     progress_db: Path = Path("data/progress.db")
-    index_path: Path = Path("data/authority.faiss")
+    index_path: Path = Path("data/authority.index")
+    vector_engine: VectorEngineConfig = Field(default_factory=VectorEngineConfig)
 
 
 class EmbeddingConfig(BaseModel):

@@ -63,16 +63,16 @@ def reset_cmd(
         False,
         "--all",
         "-a",
-        help="Reset all storage (authority.db, vocab.db, progress.db, FAISS index)",
+        help="Reset all storage (authority.db, vocab.db, progress.db, vector index)",
     ),
     authority: bool = typer.Option(
-        False, "--authority", help="Reset authority.db and FAISS index only"
+        False, "--authority", help="Reset authority.db and vector index only"
     ),
     vocab: bool = typer.Option(False, "--vocab", help="Reset vocab.db only"),
     progress: bool = typer.Option(False, "--progress", help="Reset progress.db only"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
-    """Reset configured databases and FAISS vector index."""
+    """Reset configured databases and vector index."""
     cfg = load_config(config)
 
     # Determine which components to reset
@@ -531,7 +531,10 @@ def ingest_oai_cmd(
     vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
     embedder = SentenceEmbedder(cfg.embedding)
     store = AuthorityStore(
-        cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
+        cfg.storage.authority_db,
+        cfg.storage.index_path,
+        dimension=embedder.dimension,
+        vector_engine_config=cfg.storage.vector_engine,
     )
 
     for src_name, src_cfg in targets.items():
@@ -593,7 +596,10 @@ def ingest_wikidata_cmd(
         config=wiki_norm_cfg,
     )
     store = AuthorityStore(
-        cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
+        cfg.storage.authority_db,
+        cfg.storage.index_path,
+        dimension=embedder.dimension,
+        vector_engine_config=cfg.storage.vector_engine,
     )
 
     tracker = ProgressTracker(
@@ -640,7 +646,10 @@ def reconcile_cmd(
         config=rec_norm_cfg,
     )
     store = AuthorityStore(
-        cfg.storage.authority_db, cfg.storage.index_path, dimension=embedder.dimension
+        cfg.storage.authority_db,
+        cfg.storage.index_path,
+        dimension=embedder.dimension,
+        vector_engine_config=cfg.storage.vector_engine,
     )
 
     # Verify index metadata compatibility

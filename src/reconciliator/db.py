@@ -100,7 +100,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS vector_mappings (
-                faiss_id INTEGER PRIMARY KEY,
+                vector_id INTEGER PRIMARY KEY,
                 record_id INTEGER NOT NULL REFERENCES authority_records(id) ON DELETE CASCADE
             );
         """)

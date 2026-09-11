@@ -75,10 +75,10 @@ def test_short_circuit_with_volume_safeguard() -> None:
     cand_match = make_record("C1", "Sinuhe", volume="osa 1")
     cand_conflict = make_record("C2", "Sinuhe", volume="osa 2")
 
-    # High score with matching volume -> accepted tier2_dense_faiss
+    # High score with matching volume -> accepted tier2_dense
     m_pass = reranker.evaluate_candidate(target, cand_match, dense_score=0.99)
     assert m_pass.accepted
-    assert m_pass.match_tier == "tier2_dense_faiss"
+    assert m_pass.match_tier == "tier2_dense"
 
     # High score with conflicting volume -> disqualified!
     m_fail = reranker.evaluate_candidate(target, cand_conflict, dense_score=0.99)

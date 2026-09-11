@@ -132,7 +132,7 @@ class ReconciliationMatch(BaseModel):
 
     candidate_record_id: str
     source: str
-    match_tier: str  # "tier1_exact_id", "tier2_dense_faiss", "tier3_hybrid_rerank"
+    match_tier: str  # "tier1_exact_id", "tier2_dense", "tier3_hybrid_rerank"
     match_score: float
     dense_score: Optional[float] = None
     sparse_score: Optional[float] = None

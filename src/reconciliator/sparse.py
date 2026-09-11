@@ -116,7 +116,7 @@ class SparseReranker:
                 return ReconciliationMatch(
                     candidate_record_id=candidate_record.source_id,
                     source=candidate_record.source,
-                    match_tier="tier2_dense_faiss",
+                    match_tier="tier2_dense",
                     match_score=dense_score,
                     dense_score=dense_score,
                     sparse_score=None,
@@ -129,7 +129,7 @@ class SparseReranker:
             return ReconciliationMatch(
                 candidate_record_id=candidate_record.source_id,
                 source=candidate_record.source,
-                match_tier="tier2_dense_faiss",
+                match_tier="tier2_dense",
                 match_score=dense_score,
                 dense_score=dense_score,
                 sparse_score=None,
@@ -145,7 +145,7 @@ class SparseReranker:
             return ReconciliationMatch(
                 candidate_record_id=candidate_record.source_id,
                 source=candidate_record.source,
-                match_tier="tier2_dense_faiss",
+                match_tier="tier2_dense",
                 match_score=dense_score,
                 dense_score=dense_score,
                 sparse_score=None,

@@ -5,7 +5,11 @@ storage:
   authority_db: "data/authority.db"
   vocab_db: "data/vocab.db"
   progress_db: "data/progress.db"
-  index_path: "data/authority.faiss"
+  index_path: "data/authority.index"
+  vector_engine:
+    backend: "auto"       # "auto" | "faiss" | "torch" ("auto" selects torch on MPS/CUDA, faiss on CPU)
+    device: "auto"        # "auto" | "mps" | "cuda" | "cpu" (for torch backend)
+    threads: null         # Optional thread count override for FAISS OpenMP (defaults to 1 on macOS)
 
 # 2. Embedding Model, Serialization Template & Hardware Acceleration
 embedding:

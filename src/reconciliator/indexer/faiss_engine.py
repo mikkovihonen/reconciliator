@@ -1,31 +1,41 @@
-"""FAISS vector index manager for dense semantic search with metadata validation."""
+"""FAISS-backed vector indexing engine."""
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
 import faiss
 import numpy as np
 
-# Prevent OpenMP runtime collisions (e.g. between PyTorch and FAISS on macOS)
-try:
-    faiss.omp_set_num_threads(1)
-except Exception:
-    pass
 
-
-class FAISSIndexManager:
+class FAISSIndexEngine:
     """Manages dense FAISS vector index (IndexFlatIP) with L2 normalization and metadata persistence."""
 
-    def __init__(self, index_path: Path | str, dimension: int) -> None:
+    def __init__(
+        self,
+        index_path: Path | str,
+        dimension: int,
+        threads: Optional[int] = None,
+    ) -> None:
         self.index_path = Path(index_path)
         self.meta_path = Path(f"{index_path}.meta.json")
         self.dimension = dimension
 
+        if threads is not None:
+            faiss.omp_set_num_threads(threads)
+        elif sys.platform == "darwin":
+            # Avoid OpenMP thread collision with PyTorch on macOS by default
+            try:
+                faiss.omp_set_num_threads(1)
+            except Exception:
+                pass
+
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata: dict[str, Any] = {
+            "backend": "faiss",
             "dimension": dimension,
             "model_name": "",
             "template_hash": "",
@@ -121,6 +131,7 @@ class FAISSIndexManager:
 
         if metadata:
             self.metadata.update(metadata)
+        self.metadata["backend"] = "faiss"
         self.metadata["dimension"] = self.dimension
         self.metadata["total_vectors"] = self.index.ntotal
 
@@ -171,3 +182,4 @@ class FAISSIndexManager:
                     f"current template has '{expected_template_hash[:8]}...'. "
                     f"Set embedding.force_template = true to override."
                 )
+
