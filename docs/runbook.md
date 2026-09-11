@@ -107,14 +107,17 @@ To operate the solution, the following data inputs can be provided or downloaded
 
 ### Storage Section (`storage`)
 
-Defines file paths for persistent SQLite databases and the FAISS vector index.
+Defines file paths for persistent SQLite databases and the vector indexing engine.
 
 ```yaml
 storage:
   authority_db: "data/authority.db"      # Authority records and textual metadata
   vocab_db: "data/vocab.db"              # Value vocabulary concepts, migration tables, and aliases
   progress_db: "data/progress.db"        # Real-time task progress and telemetry
-  index_path: "data/authority.faiss"     # FAISS IndexFlatIP dense vector index
+  index_path: "data/authority.faiss"     # Vector index path (.faiss for FAISS, .safetensors for torch)
+  vector_engine:
+    backend: "auto"                      # "auto" | "faiss" | "torch"
+    device: "auto"                       # "auto" | "cpu" | "cuda" | "mps"
 ```
 
 | Parameter | Type | Default | Description |
@@ -122,7 +125,9 @@ storage:
 | `authority_db` | `Path` | `data/authority.db` | Path to SQLite authority database. |
 | `vocab_db` | `Path` | `data/vocab.db` | Path to dedicated value vocabularies database. |
 | `progress_db` | `Path` | `data/progress.db` | Path to progress and heartbeat tracking database. |
-| `index_path` | `Path` | `data/authority.faiss` | Path to serialized FAISS dense vector index. |
+| `index_path` | `Path` | `data/authority.faiss` | Path to serialized dense vector index (`.faiss` or `.safetensors`). |
+| `vector_engine.backend` | `Literal` | `auto` | Vector search engine backend: `auto` (detects hardware acceleration), `faiss`, or `torch`. |
+| `vector_engine.device` | `Literal` | `auto` | Computation device: `auto`, `cpu`, `cuda`, or `mps` (Apple Silicon Metal). |
 
 ---
 
@@ -212,17 +217,18 @@ ingest_vocab:
 
 ---
 
-### OAI-PMH & MARCXML Ingestion Section (`ingest_oai`)
+### OAI-PMH, ResourceSync & File Ingestion Section (`ingest_oai`)
 
-Configures harvesting or reading authority records from one or multiple OAI-PMH endpoints or local MARCXML files, generating dense FAISS embeddings with idempotent updates.
+Configures harvesting or reading authority records from one or multiple OAI-PMH endpoints, ResourceSync (ANSI/NISO Z39.99) repositories, or local MARCXML files, generating dense embeddings with idempotent updates.
 
 ```yaml
 ingest_oai:
   melinda:
     enabled: true
-    source_type: "oai"        # "oai" (OAI-PMH harvest) or "file" (local MARCXML)
-    input_path: null          # Path to local MARCXML file if source_type is "file"
+    source_type: "oai"        # "oai" (OAI-PMH harvest), "resourcesync", or "file" (local file)
+    input_path: null          # Path to local file if source_type is "file"
     oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
+    resourcesync_url: null    # Endpoint URL if source_type is "resourcesync"
     metadata_prefix: "marc21"
     set_spec: null            # Optional OAI set specifier
     id_source: "marc_001"     # "marc_001" | "oai_identifier" | "auto"
@@ -237,12 +243,13 @@ ingest_oai:
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `source_type` | `Literal` | `oai` | `oai` for live OAI-PMH harvest, `file` for local XML file. |
-| `input_path` | `Path` | `None` | Path to local MARCXML authority file if `source_type` is `file`. |
+| `source_type` | `Literal` | `oai` | Ingestion source: `oai` for live OAI-PMH, `resourcesync` for ResourceSync, or `file` for local files. |
+| `input_path` | `Path` | `None` | Path to local MARCXML/authority file if `source_type` is `file`. |
 | `oai_url` | `str` | `https://.../bib` | Endpoint URL for OAI-PMH service. |
-| `metadata_prefix`| `str` | `marc21` | OAI-PMH metadata format prefix. |
+| `resourcesync_url` | `str` | `None` | Endpoint URL for ResourceSync capability list or resource list. |
+| `metadata_prefix`| `str` | `marc21` | Metadata format prefix. |
 | `set_spec` | `str` | `None` | Optional OAI-PMH set filter. |
-| `workers` | `int` | `8` | Concurrency for chunked OAI-PMH downloads. |
+| `workers` | `int` | `8` | Concurrency for chunked downloads. |
 | `request_delay` | `float` | `0.1` | Rate limit pause per worker thread between consecutive requests. |
 | `from_date` | `str` | `None` | ISO date `YYYY-MM-DD` (auto-queries `Identify` endpoint if null). |
 | `until_date` | `str` | `None` | ISO date `YYYY-MM-DD` (defaults to current UTC date if null). |
@@ -272,15 +279,15 @@ ingest_wikidata:
 
 ### Reconciliation Section (`reconcile`)
 
-Defines target records, output formats, hybrid scoring, and report destinations.
+Defines target records, formats, declarative schema profiles, pluggable reranking, and report destinations.
 
 ```yaml
 reconcile:
   target_file: "data/target_records.xml"
-  target_format: "auto"        # "auto" | "marcxml" | "bibra"
+  format: "auto"               # "auto" | "marcxml" | "bibra" | "bibframe"
+  schema_profile: "bffi_1"     # Optional BIBFRAME profile: "bffi_1", "bibframe_2", "bibframe_3", or custom YAML
   output_file: "data/enriched_records.xml"
-  output_format: "auto"        # "auto" | "marcxml" | "bibra"
-  enrich: true                 # true: inject novel $0/$1 URIs; false: audit & report only
+  enrich: true                 # true: inject novel $0/$1 URIs or owl:sameAs; false: audit & report only
   fold_legacy: true            # true: modernize legacy thesauri headings via vocab.db
   threshold: 0.85              # Minimum acceptance score [0.0, 1.0]
 
@@ -295,6 +302,9 @@ reconcile:
   rerank:
     enabled: true              # Toggle reranking on/off
     engine: "bm25"             # Reranking engine: "bm25", "cross_encoder", "fuzzy", or "noop"
+    model_name: null           # HuggingFace model path (required when engine is "cross_encoder")
+    device: "auto"             # Device for neural rerankers: "auto", "cpu", "cuda", or "mps"
+    batch_size: 16             # Batch inference size for cross-encoder rerankers
     dense_weight: 0.6          # Dense semantic cosine weight [0.0, 1.0]
     rerank_weight: 0.4         # Reranking weight [0.0, 1.0] (must sum to 1.0)
     top_k: 50                  # Number of dense candidates retrieved
@@ -333,15 +343,22 @@ reconcile:
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `target_file` | `Path` | *Required* | Path to target records (MARCXML or BIBRA JSON/JSONL). |
-| `target_format` | `Literal` | `auto` | Format: `auto` (extension-based), `marcxml`, or `bibra`. |
-| `output_file` | `Path` | `None` | Optional path to write enriched records. |
-| `output_format` | `Literal` | `auto` | Output format: `auto`, `marcxml`, or `bibra`. |
-| `enrich` | `bool` | `true` | When true, injects missing authority `$0` and `$1` subfields. |
-| `fold_legacy` | `bool` | `true` | When true, modernizes legacy subject thesauri (YSA, Allars, etc.). |
+| `target_file` | `Path` | *Required* | Path to target records (MARCXML, BIBRA JSON/JSONL, or BIBFRAME RDF/JSON-LD). |
+| `format` | `Literal` | `auto` | Bibliographic format: `auto` (extension-based), `marcxml`, `bibra`, or `bibframe`. |
+| `schema_profile` | `Optional[str]` | `None` | Declarative BIBFRAME/BFFI profile name (`bffi_1`, `bibframe_2`, `bibframe_3`) or path to custom YAML. |
+| `output_file` | `Path` | `None` | Optional path to write in-place enriched records (same format as input). |
+| `enrich` | `bool` | `true` | When true, injects missing authority URIs (`$0`/`$1` in MARC/BIBRA, `owl:sameAs` in BIBFRAME). |
+| `fold_legacy` | `bool` | `true` | When true, modernizes legacy subject thesauri (YSA, Allars, etc.) to modern ontologies. |
 | `threshold` | `float` | `0.85` | Acceptance confidence threshold [0.0, 1.0]. |
 | `agent_reports` | `ReportSet`| *Required* | File paths for agent detailed and summary TSV reports. |
 | `subject_reports`| `ReportSet`| *Required* | File paths for subject detailed and summary TSV reports. |
+| `rerank.enabled` | `bool` | `true` | When true, applies reranking and hard metadata discriminators to candidates. |
+| `rerank.engine` | `Literal` | `bm25` | Reranker engine backend: `bm25`, `cross_encoder`, `fuzzy`, or `noop`. |
+| `rerank.model_name` | `Optional[str]` | `None` | Transformer model name when `engine: "cross_encoder"` (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`). |
+| `rerank.device` | `Literal` | `auto` | Device for cross-encoder inference (`auto`, `cpu`, `cuda`, `mps`). |
+| `rerank.dense_weight` | `float` | `0.6` | Weight of dense semantic cosine similarity [0.0, 1.0]. |
+| `rerank.rerank_weight` | `float` | `0.4` | Weight of reranker score [0.0, 1.0] (must sum to 1.0 with `dense_weight`). |
+| `rerank.top_k` | `int` | `50` | Number of dense vector nearest neighbors retrieved for reranking. |
 | `link_policy` | `Literal` | `priority_fallback` | `priority_fallback` links top-priority vocabulary; `all` links all verified URIs. |
 
 ---
@@ -698,26 +715,28 @@ reconciliator ingest-wikidata -c config.yaml
 
 ### `reconciliator reconcile`
 
-Performs offline reconciliation on a target bibliographic file (MARCXML or BIBRA JSON). Modernizes legacy subject headings, aligns agents, matches candidates via hybrid dense FAISS + sparse BM25 scoring, enriches records with `$0` and `$1` subfields, and writes comprehensive TSV reports.
+Performs offline reconciliation on a target bibliographic file (MARCXML, BIBRA JSON/JSONL, or BIBFRAME RDF/JSON-LD with declarative profiles such as Finnish BFFI 1.0). Modernizes legacy subject headings via ontology mapping tables, aligns personal and corporate agents, matches candidate records through hybrid dense vector search and pluggable reranking (`bm25`, `cross_encoder`, `fuzzy`, `noop`), enriches records in-place without format conversion (`$0`/`$1` subfields in MARC/BIBRA, `owl:sameAs` in BIBFRAME), and writes comprehensive dual TSV report sets.
 
 ```bash
 # 1. Standard reconciliation with enrichment and report generation
 reconciliator reconcile -c config.yaml
 
-# 2. Audit-only mode (reports generated, but target XML unmodified)
+# 2. Audit-only mode (reports generated, but target file unmodified)
 # Set 'enrich: false' in config.yaml, then run:
 reconciliator reconcile -c config.audit.yaml
 ```
 
 #### Generated Reports:
 1. **Agent Detailed TSV** (`agent_reports.detailed_file`):
-   - Row per agent occurrence: target record ID, field tag (100/700/110/710), raw name, normalized surname, role, matched candidate ID, candidate source, confidence score, injected `$0` / `$1` URIs, action (`injected`, `existing`, `unmatched`).
+   - Exact 21 tab-separated columns:
+     `target_record_id`, `target_title`, `target_year`, `target_isbn`, `field_tag`, `field_occurrence`, `subfield_code`, `target_heading`, `target_role`, `uri`, `vocabulary`, `authority_label`, `authority_record_id`, `authority_source`, `match_tier`, `match_score`, `dense_score`, `rerank_score`, `agent_name_score`, `action`, `is_novel`.
 2. **Agent Summary TSV** (`agent_reports.summary_file`):
-   - High-level KPIs: total records, total agents, matched percentage, break-down by vocabulary (KANTO, ISNI, VIAF, Wikidata).
+   - Tidy 5-column schema (`section`, `metric`, `value`, `percentage`, `description`) tracking KPIs across execution, records, fields, URIs, tiers, vocabularies, sources, and alignment quality.
 3. **Subject Detailed TSV** (`subject_reports.detailed_file`):
-   - Row per subject occurrence: source heading, source vocab (`ysa`, `allars`, `kaunokki`), target modern label, target vocab (`yso/fin`, `slm/fin`), target URI, mapping type (`exact_match`, `alias_match`, `existing_canonical`), tag change (`650` $\to$ `655`).
+   - Exact 16 tab-separated columns:
+     `target_record_id`, `target_title`, `source_field_tag`, `field_occurrence`, `source_heading`, `source_vocab`, `source_uri`, `language`, `target_field_tag`, `target_vocab`, `target_uri`, `target_pref_label`, `mapping_type`, `action`, `is_novel`, `tag_changed`.
 4. **Subject Summary TSV** (`subject_reports.summary_file`):
-   - Modernization KPIs: legacy headings folded, canonical terms retained, unmapped rate.
+   - Tidy 5-column schema tracking legacy headings folded (YSA, Allärs, Kaunokki, MUSA), canonical terms retained, and unmapped rates.
 
 ---
 
