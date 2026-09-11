@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -78,6 +79,7 @@ class ProgressTracker:
         self._status: TaskStatus = "running"
         self._metadata: dict[str, Any] = {}
         self._error_message: Optional[str] = None
+        self._lock = threading.Lock()
 
     def get_connection(self) -> sqlite3.Connection:
         return get_db_connection(self.db_path)
@@ -90,50 +92,51 @@ class ProgressTracker:
         metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """Start task and record initial row in progress.db."""
-        self._start_time_sec = time.time()
-        self._current_stage = stage
-        self._status = "running"
-        self._items_total = items_total
-        self._bytes_total = bytes_total
-        if metadata:
-            self._metadata.update(metadata)
+        with self._lock:
+            self._start_time_sec = time.time()
+            self._current_stage = stage
+            self._status = "running"
+            self._items_total = items_total
+            self._bytes_total = bytes_total
+            if metadata:
+                self._metadata.update(metadata)
 
-        now = _now_iso()
-        with self.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO task_progress (
-                    task_id, task_type, status, current_stage,
-                    items_processed, items_total, bytes_processed, bytes_total,
-                    rate_per_sec, percentage, start_time, last_heartbeat,
-                    error_message, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(task_id) DO UPDATE SET
-                    status = excluded.status,
-                    current_stage = excluded.current_stage,
-                    items_total = excluded.items_total,
-                    bytes_total = excluded.bytes_total,
-                    last_heartbeat = excluded.last_heartbeat,
-                    metadata_json = excluded.metadata_json;
-                """,
-                (
-                    self.task_id,
-                    self.task_type,
-                    self._status,
-                    self._current_stage,
-                    self._items_processed,
-                    self._items_total,
-                    self._bytes_processed,
-                    self._bytes_total,
-                    0.0,
-                    0.0,
-                    now,
-                    now,
-                    None,
-                    json.dumps(self._metadata, ensure_ascii=False),
-                ),
-            )
-        self._last_heartbeat_sec = time.time()
+            now = _now_iso()
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO task_progress (
+                        task_id, task_type, status, current_stage,
+                        items_processed, items_total, bytes_processed, bytes_total,
+                        rate_per_sec, percentage, start_time, last_heartbeat,
+                        error_message, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(task_id) DO UPDATE SET
+                        status = excluded.status,
+                        current_stage = excluded.current_stage,
+                        items_total = excluded.items_total,
+                        bytes_total = excluded.bytes_total,
+                        last_heartbeat = excluded.last_heartbeat,
+                        metadata_json = excluded.metadata_json;
+                    """,
+                    (
+                        self.task_id,
+                        self.task_type,
+                        self._status,
+                        self._current_stage,
+                        self._items_processed,
+                        self._items_total,
+                        self._bytes_processed,
+                        self._bytes_total,
+                        0.0,
+                        0.0,
+                        now,
+                        now,
+                        None,
+                        json.dumps(self._metadata, ensure_ascii=False),
+                    ),
+                )
+            self._last_heartbeat_sec = time.time()
 
     def update_progress(
         self,
@@ -147,26 +150,27 @@ class ProgressTracker:
         force: bool = False,
     ) -> None:
         """Update metrics and emit heartbeat if interval elapsed or forced."""
-        if stage:
-            self._current_stage = stage
-        if items_total is not None:
-            self._items_total = items_total
-        if bytes_total is not None:
-            self._bytes_total = bytes_total
-        if items_processed is not None:
-            self._items_processed = items_processed
-        else:
-            self._items_processed += items_increment
+        with self._lock:
+            if stage:
+                self._current_stage = stage
+            if items_total is not None:
+                self._items_total = items_total
+            if bytes_total is not None:
+                self._bytes_total = bytes_total
+            if items_processed is not None:
+                self._items_processed = items_processed
+            else:
+                self._items_processed += items_increment
 
-        if bytes_processed is not None:
-            self._bytes_processed = bytes_processed
+            if bytes_processed is not None:
+                self._bytes_processed = bytes_processed
 
-        if metadata:
-            self._metadata.update(metadata)
+            if metadata:
+                self._metadata.update(metadata)
 
-        now_sec = time.time()
-        if force or (now_sec - self._last_heartbeat_sec >= self.heartbeat_interval):
-            self._commit_heartbeat(now_sec)
+            now_sec = time.time()
+            if force or (now_sec - self._last_heartbeat_sec >= self.heartbeat_interval):
+                self._commit_heartbeat(now_sec)
 
     def _commit_heartbeat(self, now_sec: float) -> None:
         elapsed = max(now_sec - self._start_time_sec, 0.001)
@@ -211,22 +215,24 @@ class ProgressTracker:
 
     def complete_task(self, metadata: Optional[dict[str, Any]] = None) -> None:
         """Mark task completed with 100% progress."""
-        self._status = "completed"
-        self._current_stage = "completed"
-        if self._items_total and self._items_processed < self._items_total:
-            self._items_processed = self._items_total
-        if metadata:
-            self._metadata.update(metadata)
-        self._commit_heartbeat(time.time())
+        with self._lock:
+            self._status = "completed"
+            self._current_stage = "completed"
+            if self._items_total and self._items_processed < self._items_total:
+                self._items_processed = self._items_total
+            if metadata:
+                self._metadata.update(metadata)
+            self._commit_heartbeat(time.time())
 
     def fail_task(self, error_message: str, metadata: Optional[dict[str, Any]] = None) -> None:
         """Mark task failed with error details."""
-        self._status = "failed"
-        self._current_stage = "failed"
-        self._error_message = error_message
-        if metadata:
-            self._metadata.update(metadata)
-        self._commit_heartbeat(time.time())
+        with self._lock:
+            self._status = "failed"
+            self._current_stage = "failed"
+            self._error_message = error_message
+            if metadata:
+                self._metadata.update(metadata)
+            self._commit_heartbeat(time.time())
 
 
 def get_task_progress(db_path: Path | str, task_id: str) -> Optional[TaskProgress]:
@@ -285,6 +291,103 @@ def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
             )
             for r in rows
         ]
+
+
+def parse_duration_seconds(duration_str: str) -> float:
+    """Parse human-readable duration strings like '7d', '24h', '30m', '60s' into seconds."""
+    s = duration_str.strip().lower()
+    if not s:
+        raise ValueError("Duration string cannot be empty")
+    if s.endswith(("days", "day", "d")):
+        val = s.rstrip("days").rstrip("d")
+        return float(val) * 86400.0
+    elif s.endswith(("hours", "hour", "hrs", "hr", "h")):
+        val = s.rstrip("hours").rstrip("hrs").rstrip("h")
+        return float(val) * 3600.0
+    elif s.endswith(("minutes", "minute", "mins", "min", "m")):
+        val = s.rstrip("minutes").rstrip("mins").rstrip("m")
+        return float(val) * 60.0
+    elif s.endswith(("seconds", "second", "secs", "sec", "s")):
+        val = s.rstrip("seconds").rstrip("secs").rstrip("s")
+        return float(val)
+    else:
+        # Default numeric strings without unit to days
+        return float(s) * 86400.0
+
+
+def prune_tasks(
+    db_path: Path | str,
+    task_id: Optional[str] = None,
+    status: Optional[str] = None,
+    older_than_seconds: Optional[float] = None,
+    keep_last: Optional[int] = None,
+    include_running: bool = False,
+) -> int:
+    """Prune task telemetry records from progress.db.
+
+    Args:
+        db_path: Path to progress.db.
+        task_id: If specified, delete only this task ID.
+        status: If specified, filter by status ('completed', 'failed', 'running', or 'terminated' for both completed and failed).
+        older_than_seconds: If specified, delete tasks whose last_heartbeat is older than this many seconds.
+        keep_last: If specified, preserve the most recent N tasks.
+        include_running: If False, never delete tasks with status='running'.
+
+    Returns:
+        Number of deleted task records.
+    """
+    path = Path(db_path)
+    if not path.exists():
+        return 0
+
+    with get_db_connection(path) as conn:
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if not include_running:
+            conditions.append("status != 'running'")
+
+        if task_id:
+            conditions.append("task_id = ?")
+            params.append(task_id)
+
+        if status:
+            if status == "terminated":
+                conditions.append("status IN ('completed', 'failed')")
+            else:
+                conditions.append("status = ?")
+                params.append(status)
+
+        if older_than_seconds is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+            cutoff_iso = cutoff.isoformat()
+            conditions.append("last_heartbeat < ?")
+            params.append(cutoff_iso)
+
+        if keep_last is not None and keep_last > 0:
+            cursor = conn.execute(
+                "SELECT task_id FROM task_progress ORDER BY last_heartbeat DESC LIMIT ?;",
+                (keep_last,),
+            )
+            keep_ids = [row["task_id"] for row in cursor.fetchall()]
+            if keep_ids:
+                placeholders = ",".join("?" for _ in keep_ids)
+                conditions.append(f"task_id NOT IN ({placeholders})")
+                params.extend(keep_ids)
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        query = f"DELETE FROM task_progress{where_clause};"
+        cursor = conn.execute(query, params)
+        deleted_count = cursor.rowcount
+        conn.commit()
+
+        if deleted_count > 0:
+            try:
+                conn.execute("VACUUM;")
+            except Exception:
+                pass
+
+        return max(deleted_count, 0)
 
 
 def format_task_table(tasks: list[TaskProgress]) -> Table:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
 from reconciliator.config import MelindaIngestConfig
@@ -12,6 +14,8 @@ from reconciliator.models import BibliographicRecord
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import AuthorityStore
+
+logger = logging.getLogger(__name__)
 
 
 def stream_melinda_records(
@@ -29,8 +33,26 @@ def stream_melinda_records(
             endpoint_url=config.oai_url or "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib",
             metadata_prefix=config.metadata_prefix,
             set_spec=config.set_spec,
+            request_delay=config.request_delay,
         )
-        slices = partition_date_range(config.from_date, config.until_date, config.slice_days)
+
+        from_date = config.from_date
+        until_date = config.until_date
+
+        if config.workers > 1 and (not from_date or not until_date):
+            if not until_date:
+                until_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if not from_date:
+                discovered = harvester.get_earliest_datestamp()
+                from_date = discovered or "2000-01-01"
+                logger.info(
+                    "Auto-discovered date range for parallel harvesting (%d workers): %s to %s",
+                    config.workers,
+                    from_date,
+                    until_date,
+                )
+
+        slices = partition_date_range(from_date, until_date, config.slice_days)
 
         if len(slices) <= 1 or config.workers <= 1:
             for from_dt, until_dt in slices:
@@ -39,9 +61,11 @@ def stream_melinda_records(
                     yield raw_rec
         else:
             import queue
+            import threading
             from concurrent.futures import ThreadPoolExecutor
 
-            record_queue: queue.Queue[Any] = queue.Queue(maxsize=config.batch_size * 2)
+            queue_size = max(config.batch_size * config.workers * 2, 2000)
+            record_queue: queue.Queue[Any] = queue.Queue(maxsize=queue_size)
             sentinel = object()
             worker_error: list[BaseException] = []
 
@@ -53,18 +77,21 @@ def stream_melinda_records(
                         raw_rec = parse_marc_record_elem(elem, source="melinda")
                         record_queue.put(raw_rec)
                 except Exception as e:
+                    logger.error("Error harvesting partition %s to %s: %s", from_dt, until_dt, e)
                     worker_error.append(e)
 
             def dispatch() -> None:
-                with ThreadPoolExecutor(max_workers=config.workers) as executor:
-                    futures = [executor.submit(worker_task, f, u) for f, u in slices]
-                    for fut in futures:
-                        fut.result()
-                record_queue.put(sentinel)
+                try:
+                    with ThreadPoolExecutor(max_workers=config.workers) as executor:
+                        futures = [executor.submit(worker_task, f, u) for f, u in slices]
+                        for fut in futures:
+                            fut.result()
+                except Exception as exc:
+                    worker_error.append(exc)
+                finally:
+                    record_queue.put(sentinel)
 
             # Start background dispatcher thread
-            import threading
-
             dispatch_thread = threading.Thread(target=dispatch, daemon=True)
             dispatch_thread.start()
 

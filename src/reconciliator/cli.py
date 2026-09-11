@@ -38,6 +38,8 @@ from reconciliator.progress import (
     format_task_table,
     get_task_progress,
     list_tasks,
+    parse_duration_seconds,
+    prune_tasks,
     render_status_json,
     run_telemetry_tui,
 )
@@ -111,6 +113,9 @@ def status_cmd(
         None, "--interval", "-i", help="Watch polling interval in seconds"
     ),
     json_output: bool = typer.Option(False, "--json", help="Emit output as JSON"),
+    prune_completed: bool = typer.Option(
+        False, "--prune-completed", "--prune", help="Prune completed tasks after displaying status"
+    ),
 ) -> None:
     """Query real-time task progress and telemetry from progress.db."""
     cfg = load_config(config)
@@ -148,6 +153,118 @@ def status_cmd(
         else:
             table = format_task_table(tasks)
             console.print(table)
+
+        if prune_completed:
+            deleted = prune_tasks(progress_db, status="completed")
+            console.print(f"[green]Pruned {deleted} completed task(s) from progress.db.[/green]")
+
+
+@app.command("prune")
+def prune_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    task_id: Optional[str] = typer.Option(None, "--task-id", help="Prune specific task ID"),
+    completed: bool = typer.Option(False, "--completed", help="Prune completed tasks"),
+    failed: bool = typer.Option(False, "--failed", help="Prune failed tasks"),
+    older_than: Optional[str] = typer.Option(
+        None, "--older-than", help="Prune tasks older than duration (e.g. 7d, 24h, 30m, 60s)"
+    ),
+    keep_last: Optional[int] = typer.Option(None, "--keep-last", help="Keep the latest N tasks"),
+    all_tasks: bool = typer.Option(False, "--all", "-a", help="Prune all finished tasks"),
+    include_running: bool = typer.Option(
+        False, "--include-running", help="Include active running tasks in pruning"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
+) -> None:
+    """Prune telemetry tasks and monitoring records from progress.db."""
+    cfg = load_config(config)
+    progress_db = cfg.storage.progress_db
+
+    if completed and failed:
+        console.print(
+            "[red]Cannot specify both --completed and --failed. Use --all to prune all finished tasks.[/red]"
+        )
+        raise typer.BadParameter("Cannot specify both --completed and --failed")
+
+    status: Optional[str] = None
+    if completed:
+        status = "completed"
+    elif failed:
+        status = "failed"
+    elif all_tasks and not include_running:
+        status = "terminated"
+
+    if (
+        not task_id
+        and not completed
+        and not failed
+        and not older_than
+        and keep_last is None
+        and not all_tasks
+    ):
+        console.print(
+            "[yellow]No filter specified. Please specify --completed, --failed, --older-than, --keep-last, --task-id, or --all.[/yellow]"
+        )
+        raise typer.BadParameter("No prune filter specified")
+
+    older_than_seconds: Optional[float] = None
+    if older_than:
+        try:
+            older_than_seconds = parse_duration_seconds(older_than)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.BadParameter(str(exc))
+
+    if not yes:
+        confirm = typer.confirm(
+            "Are you sure you want to prune records from progress.db matching the criteria?"
+        )
+        if not confirm:
+            console.print("[yellow]Prune aborted.[/yellow]")
+            raise typer.Abort()
+
+    deleted = prune_tasks(
+        db_path=progress_db,
+        task_id=task_id,
+        status=status,
+        older_than_seconds=older_than_seconds,
+        keep_last=keep_last,
+        include_running=include_running,
+    )
+    console.print(f"[green]Successfully pruned {deleted} task(s) from progress.db.[/green]")
+
+
+@app.command("prune-telemetry", hidden=True)
+def prune_telemetry_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    task_id: Optional[str] = typer.Option(None, "--task-id", help="Prune specific task ID"),
+    completed: bool = typer.Option(False, "--completed", help="Prune completed tasks"),
+    failed: bool = typer.Option(False, "--failed", help="Prune failed tasks"),
+    older_than: Optional[str] = typer.Option(
+        None, "--older-than", help="Prune tasks older than duration (e.g. 7d, 24h, 30m, 60s)"
+    ),
+    keep_last: Optional[int] = typer.Option(None, "--keep-last", help="Keep the latest N tasks"),
+    all_tasks: bool = typer.Option(False, "--all", "-a", help="Prune all finished tasks"),
+    include_running: bool = typer.Option(
+        False, "--include-running", help="Include active running tasks in pruning"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
+) -> None:
+    """Alias for prune command."""
+    prune_cmd(
+        config=config,
+        task_id=task_id,
+        completed=completed,
+        failed=failed,
+        older_than=older_than,
+        keep_last=keep_last,
+        all_tasks=all_tasks,
+        include_running=include_running,
+        yes=yes,
+    )
 
 
 @app.command("download-finto")

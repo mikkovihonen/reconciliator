@@ -163,3 +163,131 @@ def test_harvest_partition_retry_exhausted() -> None:
         with patch("time.sleep"):
             with pytest.raises(httpx2.HTTPStatusError):
                 list(harvester.harvest_partition(from_date="2021-01-01"))
+
+
+def test_get_earliest_datestamp() -> None:
+    identify_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+      <responseDate>2026-09-11T08:00:00Z</responseDate>
+      <request verb="Identify">http://example.org/oai</request>
+      <Identify>
+        <repositoryName>Melinda</repositoryName>
+        <baseURL>http://example.org/oai</baseURL>
+        <protocolVersion>2.0</protocolVersion>
+        <earliestDatestamp>2005-06-15T00:00:00Z</earliestDatestamp>
+        <deletedRecord>no</deletedRecord>
+        <granularity>YYYY-MM-DDThh:mm:ssZ</granularity>
+      </Identify>
+    </OAI-PMH>
+    """
+    harvester = OAIPMHHarvester(endpoint_url="http://example.org/oai")
+    mock_resp = MagicMock()
+    mock_resp.content = identify_xml
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("httpx2.Client.get", return_value=mock_resp):
+        earliest = harvester.get_earliest_datestamp()
+        assert earliest == "2005-06-15"
+
+
+def test_harvest_partition_no_records_match() -> None:
+    no_records_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+      <responseDate>2026-09-11T08:00:00Z</responseDate>
+      <request verb="ListRecords" from="2001-01-01" until="2001-01-31">http://example.org/oai</request>
+      <error code="noRecordsMatch">No matching records found for date partition</error>
+    </OAI-PMH>
+    """
+    harvester = OAIPMHHarvester(endpoint_url="http://example.org/oai")
+    mock_resp = MagicMock()
+    mock_resp.content = no_records_xml
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("httpx2.Client.get", return_value=mock_resp):
+        records = list(harvester.harvest_partition(from_date="2001-01-01", until_date="2001-01-31"))
+        assert len(records) == 0
+
+
+def test_stream_melinda_records_parallel_date_partitioning() -> None:
+    from reconciliator.config import MelindaIngestConfig
+    from reconciliator.ingestion.melinda import stream_melinda_records
+
+    sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+      <ListRecords>
+        <record>
+          <metadata>
+            <record xmlns="http://www.loc.gov/MARC21/slim">
+              <controlfield tag="001">rec_001</controlfield>
+              <datafield tag="245" ind1="1" ind2="0">
+                <subfield code="a">Parallel Book</subfield>
+              </datafield>
+            </record>
+          </metadata>
+        </record>
+      </ListRecords>
+    </OAI-PMH>
+    """
+    config = MelindaIngestConfig(
+        source_type="oai",
+        workers=2,
+        from_date="2021-01-01",
+        until_date="2021-03-01",
+        slice_days=30,
+        batch_size=10,
+        request_delay=0.0,
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.content = sample_xml
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("httpx2.Client.get", return_value=mock_resp):
+        records = list(stream_melinda_records(config))
+        # 2 date slices, each returning 1 record -> 2 records yielded
+        assert len(records) == 2
+        assert records[0]["title"] == "Parallel Book"
+
+
+def test_stream_melinda_records_autodiscovery_parallel() -> None:
+    from reconciliator.config import MelindaIngestConfig
+    from reconciliator.ingestion.melinda import stream_melinda_records
+
+    sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+      <ListRecords>
+        <record>
+          <metadata>
+            <record xmlns="http://www.loc.gov/MARC21/slim">
+              <controlfield tag="001">rec_auto</controlfield>
+              <datafield tag="245" ind1="1" ind2="0">
+                <subfield code="a">Auto Book</subfield>
+              </datafield>
+            </record>
+          </metadata>
+        </record>
+      </ListRecords>
+    </OAI-PMH>
+    """
+    config = MelindaIngestConfig(
+        source_type="oai",
+        workers=2,
+        from_date=None,  # Should auto-discover
+        until_date="2000-02-15",
+        slice_days=30,
+        batch_size=10,
+        request_delay=0.0,
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.content = sample_xml
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch(
+        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
+        return_value="2000-01-01",
+    ):
+        with patch("httpx2.Client.get", return_value=mock_resp):
+            records = list(stream_melinda_records(config))
+            assert len(records) >= 1
+            assert records[0]["title"] == "Auto Book"

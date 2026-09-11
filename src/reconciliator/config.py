@@ -72,6 +72,7 @@ class MelindaIngestConfig(BaseModel):
     until_date: Optional[str] = None
     slice_days: int = 30
     batch_size: int = 500
+    request_delay: float = 0.1
 
 
 class WikidataIngestConfig(BaseModel):

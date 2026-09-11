@@ -30,12 +30,14 @@ This runbook provides complete operational guidance for system administrators an
    - [`reconciliator reconcile`](#reconciliator-reconcile)
    - [`reconciliator run`](#reconciliator-run)
    - [`reconciliator status`](#reconciliator-status)
+   - [`reconciliator prune`](#reconciliator-prune)
    - [`reconciliator reset`](#reconciliator-reset)
 4. [Standard Operational Workflows](#4-standard-operational-workflows)
    - [Workflow A: Cold-Start Bootstrapping](#workflow-a-cold-start-bootstrapping)
    - [Workflow B: Batch Production Reconciliation](#workflow-b-batch-production-reconciliation)
    - [Workflow C: Air-Gapped / Zero-Network Execution](#workflow-c-air-gapped--zero-network-execution)
    - [Workflow D: Quality Audit & Discrepancy Review](#workflow-d-quality-audit--discrepancy-review)
+   - [Workflow E: Telemetry Maintenance & Monitoring Database Pruning](#workflow-e-telemetry-maintenance--monitoring-database-pruning)
 5. [Diagnostics & Troubleshooting](#5-diagnostics--troubleshooting)
 
 ---
@@ -216,9 +218,10 @@ ingest_melinda:
   oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
   metadata_prefix: "marc21"
   set_spec: null            # Optional OAI set specifier
-  workers: 4                # Number of parallel workers for chunk harvesting
-  from_date: null           # "YYYY-MM-DD" selective harvest start date
-  until_date: null          # "YYYY-MM-DD" selective harvest end date
+  workers: 8                # Number of parallel workers for chunk harvesting (recommended: 8-16)
+  request_delay: 0.1        # Rate limit delay between requests per worker in seconds
+  from_date: null           # "YYYY-MM-DD" selective harvest start (auto-discovered via Identify if null)
+  until_date: null          # "YYYY-MM-DD" selective harvest end (defaults to current date if null)
   slice_days: 30            # Temporal slice window per worker in days
   batch_size: 500           # Authority database insertion batch size
 ```
@@ -230,17 +233,20 @@ ingest_melinda:
 | `oai_url` | `str` | `https://.../bib` | Endpoint URL for OAI-PMH service. |
 | `metadata_prefix`| `str` | `marc21` | OAI-PMH metadata format prefix. |
 | `set_spec` | `str` | `None` | Optional OAI-PMH set filter. |
-| `workers` | `int` | `4` | Concurrency for chunked OAI-PMH downloads. |
-| `from_date` | `str` | `None` | ISO date `YYYY-MM-DD` for incremental harvest start. |
-| `until_date` | `str` | `None` | ISO date `YYYY-MM-DD` for incremental harvest end. |
-| `slice_days` | `int` | `30` | Temporal chunk partition size in days. |
+| `workers` | `int` | `8` | Concurrency for chunked OAI-PMH downloads. |
+| `request_delay` | `float` | `0.1` | Rate limit pause per worker thread between consecutive requests. |
+| `from_date` | `str` | `None` | ISO date `YYYY-MM-DD` (auto-queries `Identify` endpoint if null). |
+| `until_date` | `str` | `None` | ISO date `YYYY-MM-DD` (defaults to current UTC date if null). |
+| `slice_days` | `int` | `30` | Temporal chunk partition size in days per worker. |
 | `batch_size` | `int` | `500` | Database insert batch size. |
 
 ---
 
 ### Wikidata Ingestion Section (`ingest_wikidata`)
 
-Configures streaming from official Wikidata JSON gzip dumps.
+Configures streaming from official Wikidata JSON gzip dumps (`latest-all.json.gz`). Operates in true $O(1)$ memory using two sequential streaming passes:
+1. **Pass 1 (Author Discovery)**: Scans the compressed dump and indexes author entities (humans, organizations, places) with their QID, family name, ISNI, VIAF, and Asteri ID into the local SQLite `wikidata_authors` table.
+2. **Pass 2 (Bibliographic Streaming & Hydration)**: Streams bibliographic records, hydra-populates author names and identifiers directly from SQLite, encodes dense embeddings, and inserts them into `authority.db` and FAISS.
 
 ```yaml
 ingest_wikidata:
@@ -535,11 +541,13 @@ reconciliator run -c config.yaml
 
 Queries task execution state, processed byte counts, records/sec throughput, and error telemetry recorded in `progress.db`.
 
+In `--watch` mode, `reconciliator status` launches an interactive, full-screen Terminal User Interface (TUI) utilizing Rich's alternate screen buffer. The dashboard displays live task stages, color-coded status badges (`● RUNNING`, `✔ COMPLETED`, `✖ FAILED`), progress percentages, items and megabytes processed/total, throughput rates (items/s), last heartbeat timestamps, aggregate processing rates, and an active diagnostics panel if any background pipeline encounters an error.
+
 ```bash
 # 1. Print snapshot table of current tasks
 reconciliator status -c config.yaml
 
-# 2. Live continuous monitoring (updates every second in terminal)
+# 2. Live full-screen TUI monitor (updates every second in terminal; press Ctrl+C to exit)
 reconciliator status -c config.yaml --watch
 
 # 3. Live monitor with custom polling frequency (every 0.5s)
@@ -550,6 +558,9 @@ reconciliator status -c config.yaml --json
 
 # 5. Query a specific task ID
 reconciliator status -c config.yaml --task-id reconciliation-1725969600
+
+# 6. Display status and immediately prune completed tasks from progress.db
+reconciliator status -c config.yaml --prune
 ```
 
 #### Terminal Dashboard Table Example:
@@ -562,6 +573,60 @@ reconciliator status -c config.yaml --task-id reconciliation-1725969600
 │ reconciliation-172596960 │ reconciliation │ running   │ reconciling      │ 78.4%      │ 00:01:15      │
 └──────────────────────────┴────────────────┴───────────┴──────────────────┴────────────┴───────────────┘
 ```
+
+#### Options:
+- `-c, --config PATH`: Path to YAML configuration file (default: `config.yaml`).
+- `--task-id TEXT`: Query status of a specific task ID.
+- `-w, --watch`: Launch continuous live full-screen TUI monitor (exits automatically when all tasks reach completed or failed state, or upon Ctrl+C).
+- `-i, --interval FLOAT`: Watch polling and screen refresh interval in seconds (defaults to `telemetry.watch_interval_seconds` from `config.yaml`).
+- `--json`: Emit output as raw JSON lines / objects.
+- `--prune, --prune-completed`: Prune completed tasks from `progress.db` after displaying status.
+
+---
+
+### `reconciliator prune`
+
+Prunes task telemetry records and pipeline run history from `progress.db` while safeguarding active running tasks. Automatically executes SQLite `VACUUM` when rows are deleted to reclaim disk space.
+
+```bash
+# 1. Prune all completed tasks (prompts for interactive confirmation [y/N])
+reconciliator prune -c config.yaml --completed
+
+# 2. Prune all completed tasks non-interactively (ideal for cron or scripts)
+reconciliator prune -c config.yaml --completed -y
+
+# 3. Prune failed tasks
+reconciliator prune -c config.yaml --failed -y
+
+# 4. Prune tasks older than 7 days (supports 7d, 24h, 30m, 60s, or bare numbers)
+reconciliator prune -c config.yaml --older-than 7d -y
+
+# 5. Keep the latest 10 tasks and purge all older history
+reconciliator prune -c config.yaml --keep-last 10 -y
+
+# 6. Prune all finished tasks (both completed and failed), safely leaving running tasks untouched
+reconciliator prune -c config.yaml --all -y
+
+# 7. Prune a specific task by its task ID
+reconciliator prune -c config.yaml --task-id oai_pmh_harvest-172596955 -y
+
+# 8. Override active-task safety guard to include running tasks (use with caution)
+reconciliator prune -c config.yaml --all --include-running -y
+```
+
+#### Options:
+- `-c, --config PATH`: Path to YAML configuration file (default: `config.yaml`).
+- `--task-id TEXT`: Prune a specific task ID.
+- `--completed`: Prune tasks with status `completed`.
+- `--failed`: Prune tasks with status `failed`.
+- `--older-than TEXT`: Prune tasks older than human-readable duration (e.g. `7d`, `24h`, `30m`, `60s`, or bare numeric days).
+- `--keep-last INTEGER`: Keep the most recent $N$ tasks, purging older entries.
+- `-a, --all`: Prune all finished tasks (`completed` and `failed`).
+- `--include-running`: Allow deletion of tasks currently in `running` state (defaults to `false` to safeguard ongoing harvests/reconciliations).
+- `-y, --yes`: Bypass interactive confirmation prompt.
+
+> [!NOTE]
+> `reconciliator prune-telemetry` is available as a hidden CLI alias providing identical functionality.
 
 ---
 
@@ -674,6 +739,42 @@ To run an audit report without modifying the original records:
 4. Filter detailed report for ambiguous or borderline matches (score between 0.85 and 0.90):
    ```bash
    awk -F'\t' '$8 >= 0.85 && $8 < 0.90 {print $1, $3, $7, $8}' data/reports/agent_reconciliation_uris.tsv
+   ```
+
+---
+
+### Workflow E: Telemetry Maintenance & Monitoring Database Pruning
+
+Over time, long-running ingestion harvests and batch reconciliation jobs accumulate telemetry task rows in `data/progress.db`. To maintain lean storage and fast status queries:
+
+1. **Check Current Status and Task History**:
+   ```bash
+   reconciliator status -c config.yaml
+   ```
+
+2. **Automated Maintenance via Periodic Job (Cron)**:
+   Add a periodic pruning job to retain the last 30 days of telemetry, automatically purging completed and failed runs without interrupting active pipelines:
+   ```bash
+   # Crontab entry: run every Sunday at 02:00 AM
+   0 2 * * 0 /opt/reconciliator/.venv/bin/reconciliator prune -c /opt/reconciliator/config.yaml --older-than 30d -y >> /var/log/reconciliator-prune.log 2>&1
+   ```
+
+3. **Post-Batch Cleanup**:
+   After verifying batch outputs and reports, prune finished tasks while retaining the 5 most recent runs:
+   ```bash
+   reconciliator prune -c config.yaml --keep-last 5 -y
+   ```
+
+4. **Quick Status & Inline Cleanup**:
+   Check pipeline status and immediately purge all completed tasks in one step:
+   ```bash
+   reconciliator status -c config.yaml --prune
+   ```
+
+5. **Troubleshooting Failed Pipeline State**:
+   If a pipeline failed due to a misconfiguration and has been re-run successfully, purge old error entries:
+   ```bash
+   reconciliator prune -c config.yaml --failed -y
    ```
 
 ---

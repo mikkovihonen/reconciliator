@@ -58,7 +58,7 @@ class OAIPMHHarvester:
         user_agent: Optional[str] = None,
         max_retries: int = 5,
         base_delay: float = 1.0,
-        request_delay: float = 0.5,
+        request_delay: float = 0.1,
     ) -> None:
         self.endpoint_url = endpoint_url
         self.metadata_prefix = metadata_prefix
@@ -107,6 +107,29 @@ class OAIPMHHarvester:
         # Unreachable, but satisfies type checker
         raise RuntimeError("Retry loop exited without returning or raising")  # pragma: no cover
 
+    def get_earliest_datestamp(self) -> Optional[str]:
+        """Discover the repository earliestDatestamp via OAI-PMH Identify verb."""
+        try:
+            client = httpx2.Client(
+                timeout=min(self.timeout, 15.0),
+                headers={"User-Agent": self.user_agent},
+                follow_redirects=True,
+            )
+            try:
+                resp = self._request_with_retry(client, {"verb": "Identify"})
+                root = etree.fromstring(resp.content)
+                elem = root.find(".//oai:earliestDatestamp", OAI_NS)
+                if elem is None:
+                    elem = root.find(".//earliestDatestamp")
+                if elem is not None and elem.text and elem.text.strip():
+                    raw = elem.text.strip()
+                    return str(raw[:10])
+            finally:
+                client.close()
+        except Exception as exc:
+            logger.debug("Failed to query OAI-PMH Identify for earliestDatestamp: %s", exc)
+        return None
+
     def harvest_partition(
         self,
         from_date: Optional[str] = None,
@@ -145,6 +168,25 @@ class OAIPMHHarvester:
                 resp = self._request_with_retry(client, req_params)
 
                 root = etree.fromstring(resp.content)
+
+                # Check for OAI-PMH error response (e.g. noRecordsMatch for empty date partitions)
+                error_elem = root.find(".//oai:error", OAI_NS)
+                if error_elem is None:
+                    error_elem = root.find(".//error")
+                if error_elem is not None:
+                    code = error_elem.get("code")
+                    if code == "noRecordsMatch":
+                        logger.debug("No records match partition %s - %s", from_date, until_date)
+                        break
+                    err_msg = error_elem.text or code or "Unknown error"
+                    logger.warning(
+                        "OAI-PMH response error for partition %s - %s: %s",
+                        from_date,
+                        until_date,
+                        err_msg,
+                    )
+                    break
+
                 records = root.findall(".//oai:record", OAI_NS)
                 if not records:
                     records = root.findall(".//record")

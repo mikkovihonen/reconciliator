@@ -10,6 +10,8 @@ from reconciliator.progress import (
     format_task_table,
     get_task_progress,
     list_tasks,
+    parse_duration_seconds,
+    prune_tasks,
     render_status_json,
     render_telemetry_tui,
     run_telemetry_tui,
@@ -193,3 +195,193 @@ telemetry:
     data = json.loads(result.output)
     assert len(data) == 1
     assert data[0]["task_id"] == "task-cli-json"
+
+
+def test_parse_duration_seconds() -> None:
+    assert parse_duration_seconds("7d") == 7 * 86400.0
+    assert parse_duration_seconds("2days") == 2 * 86400.0
+    assert parse_duration_seconds("1day") == 86400.0
+    assert parse_duration_seconds("24h") == 24 * 3600.0
+    assert parse_duration_seconds("2hours") == 7200.0
+    assert parse_duration_seconds("1hr") == 3600.0
+    assert parse_duration_seconds("30m") == 1800.0
+    assert parse_duration_seconds("15min") == 900.0
+    assert parse_duration_seconds("45minutes") == 2700.0
+    assert parse_duration_seconds("60s") == 60.0
+    assert parse_duration_seconds("10secs") == 10.0
+    assert parse_duration_seconds("5seconds") == 5.0
+    assert parse_duration_seconds("3") == 3 * 86400.0
+
+    with pytest.raises(ValueError):
+        parse_duration_seconds("")
+
+    with pytest.raises(ValueError):
+        parse_duration_seconds("invalid_str")
+
+
+def test_prune_tasks_filtering(progress_db: Path) -> None:
+    # 1. Test pruning non-existent DB
+    assert prune_tasks(progress_db / "non_existent.db") == 0
+
+    # 2. Setup 3 tasks: completed, failed, running
+    t_comp = ProgressTracker(progress_db, task_id="comp-1", task_type="reconciliation")
+    t_comp.start_task()
+    t_comp.complete_task()
+
+    t_fail = ProgressTracker(progress_db, task_id="fail-1", task_type="wikidata_ingest")
+    t_fail.start_task()
+    t_fail.fail_task("Fatal network error")
+
+    t_run = ProgressTracker(progress_db, task_id="run-1", task_type="oai_pmh_harvest")
+    t_run.start_task()
+
+    assert len(list_tasks(progress_db)) == 3
+
+    # Prune running without include_running should NOT prune anything
+    deleted = prune_tasks(progress_db, task_id="run-1", include_running=False)
+    assert deleted == 0
+    assert len(list_tasks(progress_db)) == 3
+
+    # Prune completed
+    deleted = prune_tasks(progress_db, status="completed")
+    assert deleted == 1
+    tasks = list_tasks(progress_db)
+    assert len(tasks) == 2
+    assert {t.task_id for t in tasks} == {"fail-1", "run-1"}
+
+    # Prune failed
+    deleted = prune_tasks(progress_db, status="failed")
+    assert deleted == 1
+    tasks = list_tasks(progress_db)
+    assert len(tasks) == 1
+    assert tasks[0].task_id == "run-1"
+
+    # Prune running with include_running=True
+    deleted = prune_tasks(progress_db, include_running=True)
+    assert deleted == 1
+    assert len(list_tasks(progress_db)) == 0
+
+
+def test_prune_tasks_older_than_and_keep_last(progress_db: Path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from reconciliator.db import get_db_connection
+
+    # Insert 4 completed tasks with manual timestamps
+    now = datetime.now(timezone.utc)
+    t1_time = (now - timedelta(days=10)).isoformat()
+    t2_time = (now - timedelta(days=5)).isoformat()
+    t3_time = (now - timedelta(days=2)).isoformat()
+    t4_time = (now - timedelta(hours=1)).isoformat()
+
+    with get_db_connection(progress_db) as conn:
+        from reconciliator.progress import init_progress_db
+
+        init_progress_db(conn)
+        for tid, hb in [("t1", t1_time), ("t2", t2_time), ("t3", t3_time), ("t4", t4_time)]:
+            conn.execute(
+                """
+                INSERT INTO task_progress (task_id, task_type, status, current_stage, start_time, last_heartbeat)
+                VALUES (?, 'reconciliation', 'completed', 'done', ?, ?);
+                """,
+                (tid, hb, hb),
+            )
+
+    assert len(list_tasks(progress_db)) == 4
+
+    # Prune older than 3 days: should delete t1 (10d) and t2 (5d)
+    deleted = prune_tasks(progress_db, older_than_seconds=3 * 86400)
+    assert deleted == 2
+    tasks = list_tasks(progress_db)
+    assert len(tasks) == 2
+    assert {t.task_id for t in tasks} == {"t3", "t4"}
+
+    # Insert t5 and t6
+    t5_time = (now - timedelta(minutes=10)).isoformat()
+    t6_time = now.isoformat()
+    with get_db_connection(progress_db) as conn:
+        for tid, hb in [("t5", t5_time), ("t6", t6_time)]:
+            conn.execute(
+                """
+                INSERT INTO task_progress (task_id, task_type, status, current_stage, start_time, last_heartbeat)
+                VALUES (?, 'reconciliation', 'completed', 'done', ?, ?);
+                """,
+                (tid, hb, hb),
+            )
+
+    assert len(list_tasks(progress_db)) == 4  # t3, t4, t5, t6
+
+    # Keep last 2: should delete t3 and t4, keeping t5 and t6
+    deleted = prune_tasks(progress_db, keep_last=2)
+    assert deleted == 2
+    tasks = list_tasks(progress_db)
+    assert len(tasks) == 2
+    assert {t.task_id for t in tasks} == {"t5", "t6"}
+
+
+def test_cli_prune_commands(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from reconciliator.cli import app
+
+    cfg_file = tmp_path / "config.yaml"
+    prog_db = tmp_path / "prog.db"
+    cfg_file.write_text(
+        f"""
+storage:
+  authority_db: "{tmp_path}/auth.db"
+  finto_db: "{tmp_path}/finto.db"
+  progress_db: "{prog_db}"
+  index_path: "{tmp_path}/auth.faiss"
+""",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+
+    # 1. No flags provided -> BadParameter
+    res = runner.invoke(app, ["prune", "--config", str(cfg_file)])
+    assert res.exit_code != 0
+    assert "No prune filter specified" in res.output
+
+    # 2. Both completed and failed -> BadParameter
+    res = runner.invoke(app, ["prune", "--config", str(cfg_file), "--completed", "--failed"])
+    assert res.exit_code != 0
+    assert "Cannot specify both --completed and --failed" in res.output
+
+    # 3. Invalid duration -> BadParameter
+    res = runner.invoke(
+        app, ["prune", "--config", str(cfg_file), "--older-than", "invalid_dur", "-y"]
+    )
+    assert res.exit_code != 0
+
+    # 4. Confirmation aborted
+    t_comp = ProgressTracker(prog_db, task_id="comp-cli", task_type="reconciliation")
+    t_comp.start_task()
+    t_comp.complete_task()
+    res = runner.invoke(app, ["prune", "--config", str(cfg_file), "--completed"], input="n\n")
+    assert res.exit_code != 0
+    assert "Prune aborted" in res.output
+
+    # 5. Successful prune with -y
+    res = runner.invoke(app, ["prune", "--config", str(cfg_file), "--completed", "-y"])
+    assert res.exit_code == 0
+    assert "Successfully pruned 1 task(s)" in res.output
+
+    # 6. Test prune-telemetry alias
+    t_comp = ProgressTracker(prog_db, task_id="comp-alias", task_type="reconciliation")
+    t_comp.start_task()
+    t_comp.complete_task()
+    res = runner.invoke(
+        app, ["prune-telemetry", "--config", str(cfg_file), "--task-id", "comp-alias", "-y"]
+    )
+    assert res.exit_code == 0
+    assert "Successfully pruned 1 task(s)" in res.output
+
+    # 7. Test status --prune
+    t_comp = ProgressTracker(prog_db, task_id="comp-status", task_type="reconciliation")
+    t_comp.start_task()
+    t_comp.complete_task()
+    res = runner.invoke(app, ["status", "--config", str(cfg_file), "--prune"])
+    assert res.exit_code == 0
+    assert "Pruned 1 completed task(s)" in res.output
