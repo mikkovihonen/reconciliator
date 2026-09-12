@@ -18,4 +18,3 @@ __all__ = [
     "create_rerank_scorer",
     "tokenize_text",
 ]
-

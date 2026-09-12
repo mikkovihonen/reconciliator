@@ -43,7 +43,11 @@ def stream_bibframe_records(
     path = Path(file_path)
     suffix = path.suffix.lower()
 
-    if format in ("json-ld", "jsonld", "json", "ndjson") or suffix in (".json", ".jsonld", ".ndjson"):
+    if format in ("json-ld", "jsonld", "json", "ndjson") or suffix in (
+        ".json",
+        ".jsonld",
+        ".ndjson",
+    ):
         yield from iter_jsonld_bibframe_records(path, profile=profile, source=source)
     else:
         yield from iter_bibframe_records(path, profile=profile, source=source, format=format)
@@ -64,4 +68,3 @@ __all__ = [
     "enrich_bibframe_graph",
     "enrich_bibframe_jsonld",
 ]
-

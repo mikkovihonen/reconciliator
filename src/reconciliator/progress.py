@@ -416,7 +416,10 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
                 pass
 
         if meta.get("harvested") is not None and meta.get("indexed") is not None:
-            count_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
+            if "skipped" in meta:
+                count_str = f"{meta['indexed']:,} indexed, {meta['skipped']:,} skipped ({meta['harvested']:,} fetched)"
+            else:
+                count_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
         else:
             total_str = f"{t.items_total:,}" if t.items_total is not None else "?"
             count_str = f"{t.items_processed:,} / {total_str}"
@@ -496,7 +499,10 @@ def render_telemetry_tui(
                     pass
 
             if meta.get("harvested") is not None and meta.get("indexed") is not None:
-                counts_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
+                if "skipped" in meta:
+                    counts_str = f"{meta['indexed']:,} indexed, {meta['skipped']:,} skipped ({meta['harvested']:,} fetched)"
+                else:
+                    counts_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
             elif t.items_total is not None or t.items_processed > 0:
                 tot_str = f"{t.items_total:,}" if t.items_total is not None else "?"
                 counts_str = f"{t.items_processed:,} / {tot_str}"
@@ -536,6 +542,15 @@ def render_telemetry_tui(
             padding=(1, 2),
         )
 
+    total_skipped = 0
+    for t in tasks:
+        if t.metadata_json:
+            try:
+                m = json.loads(t.metadata_json)
+                total_skipped += m.get("skipped", 0)
+            except Exception:
+                pass
+
     summary_text = Text()
     summary_text.append(
         f"Running: {running_count}  ", style="bold yellow" if running_count > 0 else "dim"
@@ -547,6 +562,8 @@ def render_telemetry_tui(
         f"Failed: {failed_count}  ", style="bold red" if failed_count > 0 else "dim"
     )
     summary_text.append(f"| Total Tasks: {len(tasks)}  ", style="dim")
+    if total_skipped > 0:
+        summary_text.append(f"| Skipped: {total_skipped:,}  ", style="bold cyan")
     summary_text.append(f"| Aggregate Throughput: {total_rate:,.1f} items/s", style="bold cyan")
 
     summary = Panel(summary_text, title="Telemetry Summary", style="dim")

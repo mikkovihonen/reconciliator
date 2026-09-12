@@ -7,7 +7,11 @@ melinda:
   metadata_prefix: "marc21"
   set_spec: null
   id_source: "marc_001"
-  workers: 8
+  workers: 8               # Number of concurrent harvest workers (>1 auto-slices across earliestDatestamp to today)
+  normalization_workers: 8 # Concurrent worker threads for record normalization
+  queue_size: null          # Decoupled raw harvest queue buffer capacity (null = auto: max(batch_size * 20, 10000))
+  batch_queue_size: 4       # Number of pre-normalized batches queued for embedding/indexing
+  checkpoint_interval: 50000 # Save vector index snapshot every N indexed records
   from_date: null
   until_date: null
   slice_days: 30

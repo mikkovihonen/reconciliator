@@ -35,4 +35,3 @@ def create_rerank_scorer(config: RerankConfig) -> RerankScorer:
             f"Unknown rerank engine: '{config.engine}'. "
             f"Expected one of 'bm25', 'cross_encoder', 'fuzzy', 'noop'."
         )
-

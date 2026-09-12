@@ -56,3 +56,36 @@ def test_short_circuit_threshold_range() -> None:
 def test_embedding_batch_size_positive() -> None:
     with pytest.raises(ValueError, match="batch_size must be a positive integer"):
         EmbeddingConfig(batch_size=0)
+
+
+def test_oai_ingest_config_workers_and_queue_defaults_and_validation() -> None:
+    from reconciliator.config import OAIIngestConfig
+
+    cfg = OAIIngestConfig()
+    assert cfg.workers == 4
+    assert cfg.normalization_workers == 4
+    assert cfg.queue_size is None
+    assert cfg.batch_queue_size == 4
+
+    custom = OAIIngestConfig(
+        workers=8,
+        normalization_workers=6,
+        queue_size=5000,
+        batch_queue_size=8,
+    )
+    assert custom.workers == 8
+    assert custom.normalization_workers == 6
+    assert custom.queue_size == 5000
+    assert custom.batch_queue_size == 8
+
+    with pytest.raises(ValueError, match="workers must be at least 1"):
+        OAIIngestConfig(workers=0)
+
+    with pytest.raises(ValueError, match="normalization_workers must be at least 1"):
+        OAIIngestConfig(normalization_workers=0)
+
+    with pytest.raises(ValueError, match="batch_queue_size must be at least 1"):
+        OAIIngestConfig(batch_queue_size=0)
+
+    with pytest.raises(ValueError, match="queue_size must be at least 1"):
+        OAIIngestConfig(queue_size=0)

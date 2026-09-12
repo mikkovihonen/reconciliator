@@ -50,4 +50,3 @@ class BM25Scorer:
         if not query or not documents:
             return [0.0] * len(documents)
         return [self.score(query, doc) for doc in documents]
-

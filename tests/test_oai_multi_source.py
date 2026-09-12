@@ -226,3 +226,32 @@ ingest_oai:
             assert res.exit_code == 0
             assert "source 'source_one'" in res.output
             assert "source 'source_two'" not in res.output
+
+            # Test --skip-existing / --resume flags (already ingested record should be skipped)
+            res = runner.invoke(
+                app,
+                [
+                    "ingest-oai",
+                    "--config",
+                    str(cfg_file),
+                    "--source",
+                    "source_one",
+                    "--skip-existing",
+                ],
+            )
+            assert res.exit_code == 0
+            assert "Successfully ingested 0 records from source 'source_one'" in res.output
+
+            res = runner.invoke(
+                app,
+                [
+                    "ingest-oai",
+                    "--config",
+                    str(cfg_file),
+                    "--source",
+                    "source_one",
+                    "--resume",
+                ],
+            )
+            assert res.exit_code == 0
+            assert "Successfully ingested 0 records from source 'source_one'" in res.output

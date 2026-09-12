@@ -9,7 +9,9 @@ from typing import Optional, Union
 import yaml
 from pydantic import BaseModel, Field
 
-_BUILTIN_PROFILES_DIR = Path(__file__).resolve().parent.parent.parent / "defaults" / "bibframe_profiles"
+_BUILTIN_PROFILES_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "defaults" / "bibframe_profiles"
+)
 
 
 class BIBFRAMESchemaProfile(BaseModel):
@@ -64,7 +66,7 @@ class BIBFRAMESchemaProfile(BaseModel):
             return ""
         for prefix, ns in self.namespaces.items():
             if uri.startswith(ns):
-                return f"{prefix}:{uri[len(ns):]}"
+                return f"{prefix}:{uri[len(ns) :]}"
         return uri
 
     @functools.cached_property
@@ -73,7 +75,9 @@ class BIBFRAMESchemaProfile(BaseModel):
 
     @functools.cached_property
     def expanded_expression_classes(self) -> set[str]:
-        return {self.expand_curie(c) for c in self.expression_classes} | set(self.expression_classes)
+        return {self.expand_curie(c) for c in self.expression_classes} | set(
+            self.expression_classes
+        )
 
     @functools.cached_property
     def expanded_instance_classes(self) -> set[str]:
@@ -103,19 +107,27 @@ class BIBFRAMESchemaProfile(BaseModel):
 
     @functools.cached_property
     def expanded_main_title_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.main_title_predicates} | set(self.main_title_predicates)
+        return {self.expand_curie(p) for p in self.main_title_predicates} | set(
+            self.main_title_predicates
+        )
 
     @functools.cached_property
     def expanded_subtitle_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.subtitle_predicates} | set(self.subtitle_predicates)
+        return {self.expand_curie(p) for p in self.subtitle_predicates} | set(
+            self.subtitle_predicates
+        )
 
     @functools.cached_property
     def expanded_part_name_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.part_name_predicates} | set(self.part_name_predicates)
+        return {self.expand_curie(p) for p in self.part_name_predicates} | set(
+            self.part_name_predicates
+        )
 
     @functools.cached_property
     def expanded_part_number_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.part_number_predicates} | set(self.part_number_predicates)
+        return {self.expand_curie(p) for p in self.part_number_predicates} | set(
+            self.part_number_predicates
+        )
 
     @functools.cached_property
     def expanded_contribution_predicates(self) -> set[str]:
@@ -133,11 +145,15 @@ class BIBFRAMESchemaProfile(BaseModel):
 
     @functools.cached_property
     def expanded_identifier_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.identifier_predicates} | set(self.identifier_predicates)
+        return {self.expand_curie(p) for p in self.identifier_predicates} | set(
+            self.identifier_predicates
+        )
 
     @functools.cached_property
     def expanded_subject_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.subject_predicates} | set(self.subject_predicates)
+        return {self.expand_curie(p) for p in self.subject_predicates} | set(
+            self.subject_predicates
+        )
 
     @functools.cached_property
     def expanded_provision_activity_predicates(self) -> set[str]:
@@ -147,7 +163,9 @@ class BIBFRAMESchemaProfile(BaseModel):
 
     @functools.cached_property
     def expanded_language_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.language_predicates} | set(self.language_predicates)
+        return {self.expand_curie(p) for p in self.language_predicates} | set(
+            self.language_predicates
+        )
 
     @functools.cached_property
     def expanded_music_performance_predicates(self) -> set[str]:
@@ -220,7 +238,9 @@ def detect_profile(
 
     # Check for Finnish BFFI signature (supports both colon and slash variants)
     bffi_uri = "http://urn.fi/URN:NBN:fi:schema:bffi"
-    if any(bffi_uri in ns for ns in ns_values) or any(bffi_uri in t or t.startswith("bffi:") for t in terms):
+    if any(bffi_uri in ns for ns in ns_values) or any(
+        bffi_uri in t or t.startswith("bffi:") for t in terms
+    ):
         return get_profile("bffi_1")
 
     # Check for BIBFRAME 3.0 (PMO / Hub / bflc)
@@ -237,4 +257,3 @@ def detect_profile(
 
     # Default to standard BIBFRAME 3.0 (modern standard)
     return get_profile("bibframe_3")
-

@@ -182,4 +182,3 @@ class FAISSIndexEngine:
                     f"current template has '{expected_template_hash[:8]}...'. "
                     f"Set embedding.force_template = true to override."
                 )
-

@@ -162,4 +162,3 @@ class CandidateEvaluator:
             year_diff=year_diff,
             accepted=accepted,
         )
-

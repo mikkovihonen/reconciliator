@@ -80,4 +80,6 @@ def create_vector_engine(
             threads=threads,
         )
 
-    raise ValueError(f"Unknown vector engine backend: '{backend}'. Expected 'auto', 'faiss', or 'torch'.")
+    raise ValueError(
+        f"Unknown vector engine backend: '{backend}'. Expected 'auto', 'faiss', or 'torch'."
+    )

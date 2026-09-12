@@ -61,7 +61,9 @@ class ResourceSyncHarvester:
             except (httpx2.HTTPStatusError, httpx2.TransportError) as exc:
                 if attempt == self.max_retries - 1:
                     raise
-                retry_after = getattr(getattr(exc, "response", None), "headers", {}).get("Retry-After")
+                retry_after = getattr(getattr(exc, "response", None), "headers", {}).get(
+                    "Retry-After"
+                )
                 if isinstance(retry_after, str) and retry_after.isdigit():
                     delay = float(retry_after)
                 else:
@@ -113,12 +115,18 @@ class ResourceSyncHarvester:
             lastmod_elem = u.find("sitemap:lastmod", RS_NAMESPACES)
             if lastmod_elem is None:
                 lastmod_elem = u.find("lastmod")
-            lastmod = lastmod_elem.text.strip() if (lastmod_elem is not None and lastmod_elem.text) else None
+            lastmod = (
+                lastmod_elem.text.strip()
+                if (lastmod_elem is not None and lastmod_elem.text)
+                else None
+            )
 
             rs_md = u.find("rs:md", RS_NAMESPACES)
             mime_type = rs_md.get("type") if rs_md is not None else None
             change = rs_md.get("change") if rs_md is not None else None
-            length = int(rs_md.get("length")) if (rs_md is not None and rs_md.get("length")) else None
+            length = (
+                int(rs_md.get("length")) if (rs_md is not None and rs_md.get("length")) else None
+            )
             hash_val = rs_md.get("hash") if rs_md is not None else None
 
             yield ResourceSyncItem(
@@ -151,4 +159,3 @@ class ResourceSyncHarvester:
                     time.sleep(self.request_delay)
                 resp = self._get_with_retry(client, item.loc)
                 yield item, resp.content
-

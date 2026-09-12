@@ -17,4 +17,3 @@ __all__ = [
     "VectorIndex",
     "create_vector_engine",
 ]
-

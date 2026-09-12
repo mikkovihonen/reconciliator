@@ -13,4 +13,3 @@ class NoOpScorer:
     def score_batch(self, query: str, documents: list[str]) -> list[float]:
         """Return list of 1.0 scores."""
         return [1.0] * len(documents)
-

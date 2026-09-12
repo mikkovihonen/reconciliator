@@ -233,6 +233,10 @@ ingest_oai:
     set_spec: null            # Optional OAI set specifier
     id_source: "marc_001"     # "marc_001" | "oai_identifier" | "auto"
     workers: 8                # Number of parallel workers for chunk harvesting (recommended: 8-16)
+    normalization_workers: 4  # Parallel worker threads for normalization & vocab folding (default: 4)
+    queue_size: null          # Max capacity for raw harvested record queue (null = auto: max(batch_size * workers * 2, 2000))
+    batch_queue_size: 4       # Max capacity for pre-normalized batches queued for embedding/indexing (default: 4)
+    checkpoint_interval: 50000 # Save vector index snapshot every N indexed records (default: 50000)
     request_delay: 0.1        # Rate limit delay between requests per worker in seconds
     from_date: null           # "YYYY-MM-DD" selective harvest start (auto-discovered via Identify if null)
     until_date: null          # "YYYY-MM-DD" selective harvest end (defaults to current date if null)
@@ -249,7 +253,11 @@ ingest_oai:
 | `resourcesync_url` | `str` | `None` | Endpoint URL for ResourceSync capability list or resource list. |
 | `metadata_prefix`| `str` | `marc21` | Metadata format prefix. |
 | `set_spec` | `str` | `None` | Optional OAI-PMH set filter. |
-| `workers` | `int` | `8` | Concurrency for chunked downloads. |
+| `workers` | `int` | `4` | Concurrency for chunked OAI-PMH harvesting. |
+| `normalization_workers` | `int` | `4` | Worker threads for parallel record normalization and vocab folding. |
+| `queue_size` | `Optional[int]` | `None` | Raw harvested record queue capacity (auto-sized to `max(batch_size * workers * 2, 2000)` if null). |
+| `batch_queue_size` | `int` | `4` | Max ready-to-embed batches buffered in memory between producer and consumer threads. |
+| `checkpoint_interval` | `int` | `50000` | Frequency (in indexed records) of saving intermediate vector index snapshots. |
 | `request_delay` | `float` | `0.1` | Rate limit pause per worker thread between consecutive requests. |
 | `from_date` | `str` | `None` | ISO date `YYYY-MM-DD` (auto-queries `Identify` endpoint if null). |
 | `until_date` | `str` | `None` | ISO date `YYYY-MM-DD` (defaults to current UTC date if null). |
@@ -689,6 +697,9 @@ reconciliator ingest-oai -c config.yaml -s melinda
 # Ingest all enabled sources in sequence
 reconciliator ingest-oai -c config.yaml --all
 
+# Resume harvest without re-embedding already indexed records
+reconciliator ingest-oai -c config.yaml -s melinda --resume
+
 # Override harvest date filters on CLI
 reconciliator ingest-oai -c config.yaml -s melinda --from 2024-01-01 --until 2024-06-01
 ```
@@ -699,6 +710,9 @@ reconciliator ingest-oai -c config.yaml -s melinda --from 2024-01-01 --until 202
 - `-a, --all`: Ingest all enabled sources declared under `ingest_oai`.
 - `--from TEXT`: Selective harvest start date (`YYYY-MM-DD`).
 - `--until TEXT`: Selective harvest end date (`YYYY-MM-DD`).
+- `-w, --workers INTEGER`: Override number of parallel harvest worker threads.
+- `--normalization-workers INTEGER`: Override number of parallel normalization workers.
+- `--skip-existing, --resume`: Skip normalization and embedding for records already indexed in the authority database and vector index. Instant bypass for previously harvested records.
 
 ---
 

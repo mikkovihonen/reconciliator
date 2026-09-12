@@ -287,10 +287,12 @@ class RecordNormalizer:
             for code, term in self.config.custom_relator_terms.items():
                 self.relator_registry.register(code, term)
 
-    def normalize(self, raw_data: dict[str, Any]) -> BibliographicRecord:
-        """Normalize raw extracted record dictionary into unified BibliographicRecord."""
+    def normalize_id(self, raw_id: Optional[str]) -> str:
+        """Normalize raw source ID using configured control number rules."""
+        if not raw_id:
+            return ""
         cfg = self.config
-        source_id = str(raw_data.get("source_id") or "")
+        source_id = str(raw_id).strip()
         if (
             cfg.control_number_prefix
             or cfg.control_number_pattern
@@ -305,8 +307,13 @@ class RecordNormalizer:
                 strip_prefixes=cfg.control_number_strip_prefixes,
             )
             if norm_id:
-                source_id = norm_id
+                return norm_id
+        return source_id
 
+    def normalize(self, raw_data: dict[str, Any]) -> BibliographicRecord:
+        """Normalize raw extracted record dictionary into unified BibliographicRecord."""
+        cfg = self.config
+        source_id = self.normalize_id(raw_data.get("source_id"))
         source = raw_data.get("source", "target")
 
         rec_lang = raw_data.get("language")

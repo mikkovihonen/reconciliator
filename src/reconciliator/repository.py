@@ -143,7 +143,9 @@ class AuthorityStore:
 
             # Clean existing child rows in batch for any re-inserted / updated records (using fast rowid for FTS5)
             rec_id_tuples = [(rid,) for rid in record_ids]
-            conn.executemany("DELETE FROM authority_identifiers WHERE record_id = ?;", rec_id_tuples)
+            conn.executemany(
+                "DELETE FROM authority_identifiers WHERE record_id = ?;", rec_id_tuples
+            )
             conn.executemany("DELETE FROM authority_agents WHERE record_id = ?;", rec_id_tuples)
             conn.executemany("DELETE FROM authority_fts WHERE rowid = ?;", rec_id_tuples)
             conn.executemany("DELETE FROM vector_mappings WHERE record_id = ?;", rec_id_tuples)
@@ -183,6 +185,55 @@ class AuthorityStore:
                 )
 
         return record_ids
+
+    def get_indexed_source_ids(self, source: str) -> set[str]:
+        """Return set of source_ids that are already stored in DB and active in the vector index."""
+        if self.indexer.total_vectors == 0:
+            return set()
+
+        valid_vector_ids: Optional[set[int]] = None
+        if hasattr(self.indexer, "_id_to_idx") and getattr(self.indexer, "_id_to_idx", None):
+            valid_vector_ids = set(self.indexer._id_to_idx.keys())
+        elif hasattr(self.indexer, "ids") and getattr(self.indexer, "ids", None) is not None:
+            ids_t = self.indexer.ids
+            if ids_t is not None and len(ids_t) > 0:
+                valid_vector_ids = set(
+                    ids_t.cpu().tolist() if hasattr(ids_t, "cpu") else list(ids_t)
+                )
+
+        indexed_ids: set[str] = set()
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT r.id, r.source_id
+                FROM authority_records r
+                JOIN vector_mappings v ON r.id = v.record_id
+                WHERE r.source = ?;
+                """,
+                (source,),
+            )
+            for row in cursor:
+                if valid_vector_ids is not None and row["id"] not in valid_vector_ids:
+                    continue
+                sid = row["source_id"]
+                if not sid:
+                    continue
+                indexed_ids.add(sid)
+
+                # Generate unprefixed, unpadded, and OAI URI variations for robust matching
+                core_id = sid
+                if sid.startswith("(") and ")" in sid:
+                    core_id = sid.split(")", 1)[1]
+                    indexed_ids.add(core_id)
+                unpadded = core_id.lstrip("0")
+                if unpadded and unpadded != core_id:
+                    indexed_ids.add(unpadded)
+                if source == "melinda" and core_id.isdigit():
+                    indexed_ids.add(f"oai:melinda.kansalliskirjasto.fi/bib/{core_id}")
+                    if unpadded:
+                        indexed_ids.add(f"oai:melinda.kansalliskirjasto.fi/bib/{unpadded}")
+
+        return indexed_ids
 
     def get_record_by_id(self, record_id: int) -> Optional[BibliographicRecord]:
         """Fetch full BibliographicRecord model from authority_records."""

@@ -120,3 +120,92 @@ def test_factory_auto_resolution(tmp_path: Path) -> None:
     else:
         assert isinstance(engine, FAISSIndexEngine)
 
+
+def test_torch_engine_preallocation_and_capacity_growth(tmp_path: Path) -> None:
+    dim = 32
+    engine = TorchVectorEngine(
+        tmp_path / "growth.index", dimension=dim, device="cpu", initial_capacity=1000
+    )
+    assert engine.total_vectors == 0
+    assert engine._capacity == 1000
+
+    # Ingest 3,000 vectors across 6 batches of 500
+    np.random.seed(42)
+    all_vecs = []
+    for i in range(6):
+        batch = np.random.randn(500, dim).astype(np.float32)
+        all_vecs.append(batch)
+        ids = list(range(i * 500, (i + 1) * 500))
+        assigned = engine.add_vectors(batch, ids=ids)
+        assert assigned == ids
+
+    assert engine.total_vectors == 3000
+    assert engine._capacity >= 3000
+
+    # Query first vector
+    scores, found = engine.search(all_vecs[0][0:1], top_k=3)
+    assert found[0][0] == 0
+    assert pytest.approx(float(scores[0][0]), abs=1e-4) == 1.0
+
+    # Save & reload
+    engine.save()
+    reloaded = TorchVectorEngine(tmp_path / "growth.index", dimension=dim, device="cpu")
+    assert reloaded.total_vectors == 3000
+    scores_r, found_r = reloaded.search(all_vecs[0][0:1], top_k=3)
+    assert found_r[0][0] == 0
+
+
+def test_torch_engine_in_place_id_updates(tmp_path: Path) -> None:
+    dim = 16
+    engine = TorchVectorEngine(tmp_path / "updates.index", dimension=dim, device="cpu")
+
+    v1 = np.ones((1, dim), dtype=np.float32)
+    v2 = np.ones((1, dim), dtype=np.float32) * 2.0
+    v3 = np.ones((1, dim), dtype=np.float32) * 3.0
+    batch1 = np.vstack([v1, v2, v3])
+
+    engine.add_vectors(batch1, ids=[10, 20, 30])
+    assert engine.total_vectors == 3
+
+    # Re-insert with id 20 and 30 updated, plus new id 40
+    v2_new = np.zeros((1, dim), dtype=np.float32)
+    v2_new[0, 0] = 99.0
+    v4 = np.ones((1, dim), dtype=np.float32) * 4.0
+    batch2 = np.vstack([v2_new, v4])
+
+    engine.add_vectors(batch2, ids=[20, 40])
+    assert engine.total_vectors == 4
+
+    # Search for v2_new
+    scores, found = engine.search(v2_new, top_k=1)
+    assert found[0][0] == 20
+    assert pytest.approx(float(scores[0][0]), abs=1e-4) == 1.0
+
+
+def test_torch_engine_zero_metal_leak_under_high_batch_churn(tmp_path: Path) -> None:
+    if not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        pytest.skip("Apple Silicon MPS hardware acceleration not available")
+
+    dim = 128
+    engine = TorchVectorEngine(tmp_path / "metal_leak.index", dimension=dim, device="mps")
+
+    # Ingest 30 batches of 500 vectors (15,000 vectors)
+    np.random.seed(123)
+    for i in range(30):
+        batch = np.random.randn(500, dim).astype(np.float32)
+        engine.add_vectors(batch, ids=list(range(i * 500, (i + 1) * 500)))
+
+    assert engine.total_vectors == 15000
+
+    # Metal driver allocated memory should remain strictly under base context (~9 MB) because vectors are stored on host RAM
+    if hasattr(torch.mps, "driver_allocated_memory"):
+        driver_mem = torch.mps.driver_allocated_memory()
+        # In the old code, this would have allocated > 2.6 GB. Now it stays strictly at the base context.
+        assert driver_mem < 25 * 1024 * 1024, (
+            f"Expected < 25 MB Metal driver memory, got {driver_mem / (1024 * 1024):.1f} MB"
+        )
+
+    # Search triggers MPS acceleration cleanly without leaking
+    q = np.random.randn(5, dim).astype(np.float32)
+    scores, found = engine.search(q, top_k=5)
+    assert found.shape == (5, 5)

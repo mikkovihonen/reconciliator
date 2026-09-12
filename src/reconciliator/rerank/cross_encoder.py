@@ -80,4 +80,3 @@ class CrossEncoderScorer:
         model = self._get_model()
         preds = model.predict(pairs, batch_size=self.batch_size)
         return [normalize_cross_encoder_score(float(p)) for p in preds]
-

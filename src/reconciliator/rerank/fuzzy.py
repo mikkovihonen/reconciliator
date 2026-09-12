@@ -20,4 +20,3 @@ class FuzzyScorer:
         if not query:
             return [0.0] * len(documents)
         return [self.score(query, doc) for doc in documents]
-

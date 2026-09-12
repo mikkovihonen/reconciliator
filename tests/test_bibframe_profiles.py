@@ -74,10 +74,7 @@ def test_curie_expansion_and_compaction() -> None:
     profile = get_profile("bffi_1")
     assert profile.expand_curie("bffi:Work") == "http://urn.fi/URN:NBN:fi:schema:bffi:Work"
     assert profile.expand_curie("bf:Work") == "http://id.loc.gov/ontologies/bibframe/Work"
-    assert (
-        profile.compact_uri("http://urn.fi/URN:NBN:fi:schema:bffi:Instance")
-        == "bffi:Instance"
-    )
+    assert profile.compact_uri("http://urn.fi/URN:NBN:fi:schema:bffi:Instance") == "bffi:Instance"
     # Unknown URI remains unchanged
     assert profile.compact_uri("http://unknown.org/foo") == "http://unknown.org/foo"
 
@@ -103,4 +100,3 @@ def test_detect_profile() -> None:
 def test_unknown_profile_raises() -> None:
     with pytest.raises(ValueError, match="Unknown BIBFRAME schema profile"):
         get_profile("non_existent_profile_xyz")
-

@@ -249,7 +249,9 @@ def parse_jsonld_dict(
                 continue
             title_objs = _extract_values(n, title_keys)
             for tobj in title_objs:
-                res_title = _resolve_node(tobj, node_index) or (tobj if isinstance(tobj, dict) else None)
+                res_title = _resolve_node(tobj, node_index) or (
+                    tobj if isinstance(tobj, dict) else None
+                )
                 if isinstance(tobj, str):
                     if not title:
                         title = tobj
@@ -275,7 +277,9 @@ def parse_jsonld_dict(
 
             if not title:
                 # Fallback to rdfs:label
-                labels = _get_string_values(n, ["rdfs:label", "http://www.w3.org/2000/01/rdf-schema#label", "label"])
+                labels = _get_string_values(
+                    n, ["rdfs:label", "http://www.w3.org/2000/01/rdf-schema#label", "label"]
+                )
                 if labels:
                     title = labels[0]
 
@@ -294,7 +298,15 @@ def parse_jsonld_dict(
             res_id = _resolve_node(id_val, node_index)
             if res_id:
                 types = _get_node_types(res_id)
-                vals = _get_string_values(res_id, ["rdf:value", "http://www.w3.org/1999/02/22-rdf-syntax-ns#value", "value", "rdfs:label"])
+                vals = _get_string_values(
+                    res_id,
+                    [
+                        "rdf:value",
+                        "http://www.w3.org/1999/02/22-rdf-syntax-ns#value",
+                        "value",
+                        "rdfs:label",
+                    ],
+                )
                 for v in vals:
                     if any("Isbn" in t for t in types) or "isbn" in v.lower():
                         if v not in isbns:
@@ -319,7 +331,9 @@ def parse_jsonld_dict(
                 urns.append(inst_id)
 
         # Source ID
-        source_id = inst_id or (urns[0] if urns else None) or (isbns[0] if isbns else None) or "bibframe-1"
+        source_id = (
+            inst_id or (urns[0] if urns else None) or (isbns[0] if isbns else None) or "bibframe-1"
+        )
 
         # Agents
         contrib_keys = (
@@ -349,7 +363,10 @@ def parse_jsonld_dict(
 
                 marc_key: Optional[str] = None
                 if profile.provenance_predicate:
-                    mk_keys = [profile.provenance_predicate, profile.provenance_predicate.split(":")[-1]]
+                    mk_keys = [
+                        profile.provenance_predicate,
+                        profile.provenance_predicate.split(":")[-1],
+                    ]
                     mks = _get_string_values(res_contrib, mk_keys)
                     if mks:
                         marc_key = mks[0]
@@ -362,7 +379,9 @@ def parse_jsonld_dict(
                         role = normalize_role_uri_or_label(role_val)
                     elif isinstance(role_val, dict):
                         res_role = _resolve_node(role_val, node_index) or role_val
-                        r_labels = _get_string_values(res_role, ["rdfs:label", "skos:prefLabel", "rdf:value", "label"])
+                        r_labels = _get_string_values(
+                            res_role, ["rdfs:label", "skos:prefLabel", "rdf:value", "label"]
+                        )
                         r_label = r_labels[0] if r_labels else None
                         r_id = res_role.get("@id")
                         if r_id:
@@ -377,7 +396,9 @@ def parse_jsonld_dict(
                         continue
 
                     types = _get_node_types(res_agent)
-                    is_personal = not any("Organization" in t or "Corporate" in t or "Meeting" in t for t in types)
+                    is_personal = not any(
+                        "Organization" in t or "Corporate" in t or "Meeting" in t for t in types
+                    )
 
                     names = _get_string_values(
                         res_agent,
@@ -492,7 +513,9 @@ def parse_jsonld_dict(
             if not res_prov:
                 continue
 
-            dates = _get_string_values(res_prov, ["bf:date", "date", "http://id.loc.gov/ontologies/bibframe/date"])
+            dates = _get_string_values(
+                res_prov, ["bf:date", "date", "http://id.loc.gov/ontologies/bibframe/date"]
+            )
             if dates and not pub_year:
                 pub_year = dates[0]
 
@@ -507,7 +530,13 @@ def parse_jsonld_dict(
                     if isinstance(res_ag, dict):
                         ag_names = _get_string_values(
                             res_ag,
-                            ["rdfs:label", "skos:prefLabel", "label", "bflc:name00MatchKey", "http://www.w3.org/2000/01/rdf-schema#label"],
+                            [
+                                "rdfs:label",
+                                "skos:prefLabel",
+                                "label",
+                                "bflc:name00MatchKey",
+                                "http://www.w3.org/2000/01/rdf-schema#label",
+                            ],
                         )
                         if ag_names:
                             publisher = ag_names[0]
@@ -529,7 +558,12 @@ def parse_jsonld_dict(
                     if isinstance(res_pl, dict):
                         pl_names = _get_string_values(
                             res_pl,
-                            ["rdfs:label", "skos:prefLabel", "label", "http://www.w3.org/2000/01/rdf-schema#label"],
+                            [
+                                "rdfs:label",
+                                "skos:prefLabel",
+                                "label",
+                                "http://www.w3.org/2000/01/rdf-schema#label",
+                            ],
                         )
                         if pl_names:
                             pub_place = pl_names[0]
@@ -599,7 +633,9 @@ def iter_jsonld_bibframe_records(
     if first_line:
         try:
             parsed = orjson.loads(first_line)
-            if isinstance(parsed, dict) and not (first_line.startswith(b"{") and b'"@graph"' in first_line):
+            if isinstance(parsed, dict) and not (
+                first_line.startswith(b"{") and b'"@graph"' in first_line
+            ):
                 # Check if there is a second line that parses as JSON
                 with open(path, "rb") as f2:
                     f2.readline()
@@ -625,10 +661,14 @@ def iter_jsonld_bibframe_records(
                 try:
                     data = orjson.loads(clean_l)
                     if isinstance(data, dict):
-                        for raw_rec, inst_node in parse_jsonld_dict(data, profile=profile, source=source):
+                        for raw_rec, inst_node in parse_jsonld_dict(
+                            data, profile=profile, source=source
+                        ):
                             yield raw_rec, current_offset, data
                 except Exception as e:
-                    logger.warning("Failed to parse JSON-LD line at offset %d: %s", current_offset, e)
+                    logger.warning(
+                        "Failed to parse JSON-LD line at offset %d: %s", current_offset, e
+                    )
     else:
         # Full file JSON-LD document
         with open(path, "rb") as f:

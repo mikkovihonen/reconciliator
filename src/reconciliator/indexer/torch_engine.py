@@ -14,19 +14,26 @@ from reconciliator.device import resolve_device
 
 
 class TorchVectorEngine:
-    """Manages dense vector index using PyTorch tensors with hardware acceleration (MPS/CUDA/CPU)."""
+    """Manages dense vector index using PyTorch tensors with hardware acceleration (MPS/CUDA/CPU).
+
+    Vectors are accumulated and stored in host RAM with geometric capacity pre-allocation to prevent
+    GPU driver memory fragmentation and out-of-memory kernel panics. Nearest neighbor search dispatches
+    to the configured hardware accelerator (MPS/CUDA/CPU) with chunking and cache cleanup.
+    """
 
     def __init__(
         self,
         index_path: Path | str,
         dimension: int,
         device: Literal["auto", "mps", "cuda", "cpu"] = "auto",
+        initial_capacity: int = 10000,
     ) -> None:
         self.index_path = Path(index_path)
         self.meta_path = Path(f"{index_path}.meta.json")
         self.dimension = dimension
         self.device_str = resolve_device(device)
         self.device = torch.device(self.device_str)
+        self.initial_capacity = max(1000, initial_capacity)
 
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata: dict[str, Any] = {
@@ -37,37 +44,94 @@ class TorchVectorEngine:
             "template_hash": "",
         }
 
-        self.vectors: Optional[torch.Tensor] = None
-        self.ids: Optional[torch.Tensor] = None
+        self._capacity: int = 0
+        self._size: int = 0
+        self._vectors: Optional[torch.Tensor] = None
+        self._ids: Optional[torch.Tensor] = None
+        self._id_to_idx: dict[int, int] = {}
 
         if self.index_path.exists():
             self.load()
+        else:
+            self._ensure_capacity(self.initial_capacity)
 
     @property
     def total_vectors(self) -> int:
         """Return current number of vectors in index."""
-        if self.vectors is None:
-            return 0
-        return int(self.vectors.shape[0])
+        return self._size
+
+    @property
+    def vectors(self) -> Optional[torch.Tensor]:
+        """Return active slice of vectors for inspection / backward compatibility."""
+        if self._vectors is None or self._size == 0:
+            return torch.empty((0, self.dimension), dtype=torch.float32, device="cpu")
+        return self._vectors[: self._size]
+
+    @property
+    def ids(self) -> Optional[torch.Tensor]:
+        """Return active slice of IDs for inspection / backward compatibility."""
+        if self._ids is None or self._size == 0:
+            return torch.empty((0,), dtype=torch.int64, device="cpu")
+        return self._ids[: self._size]
+
+    def _ensure_capacity(self, needed: int) -> None:
+        """Pre-allocate contiguous host memory geometrically to eliminate frequent reallocations."""
+        if self._vectors is None:
+            new_cap = max(self.initial_capacity, needed)
+            self._vectors = torch.empty(
+                (new_cap, self.dimension), dtype=torch.float32, device="cpu"
+            )
+            self._ids = torch.empty((new_cap,), dtype=torch.int64, device="cpu")
+            self._capacity = new_cap
+            self._size = 0
+            return
+
+        if needed <= self._capacity:
+            return
+
+        # Double capacity geometrically
+        new_cap = max(self._capacity * 2, needed)
+        new_vecs = torch.empty((new_cap, self.dimension), dtype=torch.float32, device="cpu")
+        new_ids = torch.empty((new_cap,), dtype=torch.int64, device="cpu")
+
+        if self._size > 0:
+            assert self._vectors is not None
+            assert self._ids is not None
+            new_vecs[: self._size] = self._vectors[: self._size]
+            new_ids[: self._size] = self._ids[: self._size]
+
+        self._vectors = new_vecs
+        self._ids = new_ids
+        self._capacity = new_cap
 
     def remove_ids(self, ids: list[int] | np.ndarray) -> int:
         """Remove vectors with the given IDs from the index."""
-        if self.total_vectors == 0 or len(ids) == 0:
+        if self._size == 0 or len(ids) == 0:
             return 0
 
-        target_ids = torch.as_tensor(ids, dtype=torch.int64, device=self.device)
-        if target_ids.ndim != 1:
-            target_ids = target_ids.flatten()
+        target_list = ids if isinstance(ids, list) else ids.tolist()
+        to_remove = set(target_list).intersection(self._id_to_idx.keys())
+        if not to_remove:
+            return 0
 
-        assert self.ids is not None
-        assert self.vectors is not None
+        assert self._ids is not None
+        assert self._vectors is not None
 
-        mask = torch.isin(self.ids, target_ids, invert=True)
-        num_removed = int((~mask).sum().item())
-        if num_removed > 0:
-            self.vectors = self.vectors[mask]
-            self.ids = self.ids[mask]
-        return num_removed
+        active_ids = self._ids[: self._size]
+        target_tensor = torch.as_tensor(list(to_remove), dtype=torch.int64, device="cpu")
+        mask = torch.isin(active_ids, target_tensor, invert=True)
+
+        kept_vecs = self._vectors[: self._size][mask]
+        kept_ids = active_ids[mask]
+        new_size = int(kept_ids.shape[0])
+
+        self._vectors[:new_size] = kept_vecs
+        self._ids[:new_size] = kept_ids
+        self._size = new_size
+
+        # Re-index remaining IDs
+        self._id_to_idx = {int(rid): i for i, rid in enumerate(kept_ids.tolist())}
+        return len(to_remove)
 
     def add_vectors(
         self, vectors: np.ndarray, ids: Optional[list[int] | np.ndarray] = None
@@ -81,8 +145,8 @@ class TorchVectorEngine:
                 f"Vector dimension mismatch: expected {self.dimension}, got {vectors.shape[1]}"
             )
 
-        new_vecs = torch.as_tensor(vectors, dtype=torch.float32, device=self.device)
-        # L2-normalize vectors for cosine similarity via inner product
+        # Normalize on CPU
+        new_vecs = torch.as_tensor(vectors, dtype=torch.float32, device="cpu")
         new_vecs = torch.nn.functional.normalize(new_vecs, p=2.0, dim=-1)
 
         if ids is not None:
@@ -93,27 +157,33 @@ class TorchVectorEngine:
                 raise ValueError(
                     f"Number of IDs ({len(id_arr)}) must match number of vectors ({len(vectors)})"
                 )
-            self.remove_ids(id_arr)
-            new_ids = torch.as_tensor(id_arr, dtype=torch.int64, device=self.device)
+            new_ids_list = [int(x) for x in id_arr]
+            # O(1) duplicate removal if any ID already exists in the index
+            duplicates = [x for x in new_ids_list if x in self._id_to_idx]
+            if duplicates:
+                self.remove_ids(duplicates)
         else:
-            start_id = self.total_vectors
-            new_ids = torch.arange(
-                start_id, start_id + len(vectors), dtype=torch.int64, device=self.device
-            )
+            start_id = self._size
+            new_ids_list = list(range(start_id, start_id + len(vectors)))
 
-        if self.vectors is None or self.vectors.shape[0] == 0:
-            self.vectors = new_vecs
-            self.ids = new_ids
-        else:
-            assert self.ids is not None
-            self.vectors = torch.cat([self.vectors, new_vecs], dim=0)
-            self.ids = torch.cat([self.ids, new_ids], dim=0)
+        n = len(new_vecs)
+        self._ensure_capacity(self._size + n)
+        assert self._vectors is not None
+        assert self._ids is not None
 
-        return [int(x) for x in new_ids.cpu().tolist()]
+        new_ids_tensor = torch.as_tensor(new_ids_list, dtype=torch.int64, device="cpu")
+        self._vectors[self._size : self._size + n] = new_vecs
+        self._ids[self._size : self._size + n] = new_ids_tensor
+
+        for offset, rid in enumerate(new_ids_list):
+            self._id_to_idx[rid] = self._size + offset
+
+        self._size += n
+        return new_ids_list
 
     def search(self, query_vectors: np.ndarray, top_k: int = 50) -> tuple[np.ndarray, np.ndarray]:
-        """Search top-k nearest neighbors for query vectors."""
-        if self.total_vectors == 0:
+        """Search top-k nearest neighbors for query vectors with chunking and accelerator cache cleanup."""
+        if self._size == 0:
             return np.empty((len(query_vectors), 0), dtype=np.float32), np.empty(
                 (len(query_vectors), 0), dtype=np.int64
             )
@@ -126,34 +196,81 @@ class TorchVectorEngine:
                 f"Query vector dimension mismatch: expected {self.dimension}, got {query_vectors.shape[1]}"
             )
 
-        q = torch.as_tensor(query_vectors, dtype=torch.float32, device=self.device)
-        q = torch.nn.functional.normalize(q, p=2.0, dim=-1)
+        assert self._vectors is not None
+        assert self._ids is not None
 
-        assert self.vectors is not None
-        assert self.ids is not None
+        active_vectors = self._vectors[: self._size]
+        active_ids = self._ids[: self._size]
+        k = min(top_k, self._size)
 
-        k = min(top_k, self.total_vectors)
-        # Inner product on normalized vectors = cosine similarity
-        scores = torch.mm(q, self.vectors.T)
-        top_scores, top_indices = torch.topk(scores, k=k, dim=-1)
-        top_ids = self.ids[top_indices]
+        # On CPU: run direct matrix multiplication with Accelerate BLAS
+        if self.device.type == "cpu":
+            q = torch.as_tensor(query_vectors, dtype=torch.float32, device="cpu")
+            q = torch.nn.functional.normalize(q, p=2.0, dim=-1)
+            scores = torch.mm(q, active_vectors.T)
+            top_scores, top_indices = torch.topk(scores, k=k, dim=-1)
+            top_ids = active_ids[top_indices]
+            return (
+                top_scores.numpy().astype(np.float32),
+                top_ids.numpy().astype(np.int64),
+            )
 
-        return (
-            top_scores.cpu().numpy().astype(np.float32),
-            top_ids.cpu().numpy().astype(np.int64),
-        )
+        # On accelerator (MPS or CUDA): run with bounded memory chunking
+        try:
+            q = torch.as_tensor(query_vectors, dtype=torch.float32, device=self.device)
+            q = torch.nn.functional.normalize(q, p=2.0, dim=-1)
+
+            chunk_size = 50000
+            if self._size <= chunk_size:
+                v_dev = active_vectors.to(self.device)
+                scores = torch.mm(q, v_dev.T)
+                top_scores, top_indices = torch.topk(scores, k=k, dim=-1)
+                top_ids = active_ids[top_indices.cpu()]
+                res_scores = top_scores.cpu().numpy().astype(np.float32)
+                res_ids = top_ids.numpy().astype(np.int64)
+                del v_dev, scores
+            else:
+                all_top_scores = []
+                all_top_indices = []
+                for c_start in range(0, self._size, chunk_size):
+                    c_end = min(c_start + chunk_size, self._size)
+                    chunk = active_vectors[c_start:c_end].to(self.device)
+                    c_scores = torch.mm(q, chunk.T)
+                    c_top_scores, c_top_idx = torch.topk(c_scores, k=min(k, chunk.shape[0]), dim=-1)
+                    all_top_scores.append(c_top_scores.cpu())
+                    all_top_indices.append((c_top_idx + c_start).cpu())
+                    del chunk, c_scores
+
+                cat_scores = torch.cat(all_top_scores, dim=-1)
+                cat_indices = torch.cat(all_top_indices, dim=-1)
+                final_scores, final_idx = torch.topk(cat_scores, k=k, dim=-1)
+                top_idx_merged = torch.gather(cat_indices, 1, final_idx)
+                top_ids = active_ids[top_idx_merged]
+                res_scores = final_scores.numpy().astype(np.float32)
+                res_ids = top_ids.numpy().astype(np.int64)
+        finally:
+            if (
+                self.device.type == "mps"
+                and hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+            ):
+                torch.mps.empty_cache()
+            elif self.device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        return res_scores, res_ids
 
     def save(self, metadata: Optional[dict[str, Any]] = None) -> None:
-        """Persist vectors and IDs to safetensors and metadata to JSON."""
+        """Persist vectors and IDs to safetensors directly from host RAM."""
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if self.vectors is None or self.vectors.shape[0] == 0:
+        if self._vectors is None or self._size == 0:
             v_save = torch.empty((0, self.dimension), dtype=torch.float32)
             id_save = torch.empty((0,), dtype=torch.int64)
         else:
-            assert self.ids is not None
-            v_save = self.vectors.contiguous().cpu()
-            id_save = self.ids.contiguous().cpu()
+            assert self._ids is not None
+            v_save = self._vectors[: self._size].contiguous()
+            id_save = self._ids[: self._size].contiguous()
 
         safetensors.torch.save_file(
             {"vectors": v_save, "ids": id_save},
@@ -171,15 +288,29 @@ class TorchVectorEngine:
             json.dump(self.metadata, f, indent=2)
 
     def load(self) -> None:
-        """Load tensors from safetensors and restore metadata."""
+        """Load tensors from safetensors into host memory and restore metadata."""
         if not self.index_path.exists():
             raise FileNotFoundError(f"Vector index file not found at: {self.index_path}")
 
-        tensors = safetensors.torch.load_file(str(self.index_path))
-        self.vectors = tensors["vectors"].to(self.device)
-        self.ids = tensors["ids"].to(self.device)
-        if self.vectors.shape[0] > 0:
-            self.dimension = int(self.vectors.shape[1])
+        tensors = safetensors.torch.load_file(str(self.index_path), device="cpu")
+        loaded_vecs = tensors["vectors"]
+        loaded_ids = tensors["ids"]
+
+        n = int(loaded_vecs.shape[0])
+        if n > 0:
+            self.dimension = int(loaded_vecs.shape[1])
+
+        self._capacity = max(self.initial_capacity, n * 2 if n > 0 else self.initial_capacity)
+        self._vectors = torch.empty(
+            (self._capacity, self.dimension), dtype=torch.float32, device="cpu"
+        )
+        self._ids = torch.empty((self._capacity,), dtype=torch.int64, device="cpu")
+
+        if n > 0:
+            self._vectors[:n] = loaded_vecs
+            self._ids[:n] = loaded_ids
+        self._size = n
+        self._id_to_idx = {int(rid): i for i, rid in enumerate(loaded_ids.tolist())}
 
         if self.meta_path.exists():
             with self.meta_path.open("r", encoding="utf-8") as f:
@@ -212,4 +343,3 @@ class TorchVectorEngine:
                     f"current template has '{expected_template_hash[:8]}...'. "
                     f"Set embedding.force_template = true to override."
                 )
-

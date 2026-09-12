@@ -63,4 +63,3 @@ class VectorIndex(Protocol):
     ) -> None:
         """Verify that index matches expected model, dimension, and template hash."""
         ...
-

@@ -167,4 +167,3 @@ def test_resourcesync_harvester() -> None:
         item, data = contents[0]
         assert item.loc == "http://example.org/records/1.ttl"
         assert b"@prefix bf:" in data
-

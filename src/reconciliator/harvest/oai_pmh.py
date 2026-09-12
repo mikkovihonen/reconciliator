@@ -112,16 +112,21 @@ class OAIPMHHarvester:
         """Discover the repository earliestDatestamp via OAI-PMH Identify verb."""
         try:
             client = httpx2.Client(
-                timeout=min(self.timeout, 15.0),
+                timeout=min(self.timeout, 10.0),
                 headers={"User-Agent": self.user_agent},
                 follow_redirects=True,
             )
             try:
-                resp = self._request_with_retry(client, {"verb": "Identify"})
+                resp = client.get(self.endpoint_url, params={"verb": "Identify"})
+                resp.raise_for_status()
                 root = etree.fromstring(resp.content)
                 elem = root.find(".//oai:earliestDatestamp", OAI_NS)
                 if elem is None:
                     elem = root.find(".//earliestDatestamp")
+                if elem is None:
+                    elem = root.find(".//oai:earliestTimestamp", OAI_NS)
+                if elem is None:
+                    elem = root.find(".//earliestTimestamp")
                 if elem is not None and elem.text and elem.text.strip():
                     raw = elem.text.strip()
                     return str(raw[:10])
@@ -194,10 +199,13 @@ class OAIPMHHarvester:
                     records = root.findall(".//record")
 
                 for rec in records:
-                    header_id: Optional[str] = None
                     hdr = rec.find("oai:header", OAI_NS)
                     if hdr is None:
                         hdr = rec.find(".//header")
+                    if hdr is not None and hdr.get("status") == "deleted":
+                        continue
+
+                    header_id: Optional[str] = None
                     if hdr is not None:
                         id_el = hdr.find("oai:identifier", OAI_NS)
                         if id_el is None:

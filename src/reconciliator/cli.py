@@ -502,6 +502,18 @@ def ingest_oai_cmd(
     until_date: Optional[str] = typer.Option(
         None, "--until", help="Override harvest end date (YYYY-MM-DD)"
     ),
+    workers: Optional[int] = typer.Option(
+        None, "--workers", "-w", help="Override number of harvest workers"
+    ),
+    normalization_workers: Optional[int] = typer.Option(
+        None, "--normalization-workers", help="Override number of normalization workers"
+    ),
+    skip_existing: bool = typer.Option(
+        False,
+        "--skip-existing",
+        "--resume",
+        help="Skip records that have already been embedded and indexed in authority storage",
+    ),
 ) -> None:
     """Harvest or read authority records from configured OAI-PMH/XML sources."""
     cfg = load_config(config)
@@ -546,10 +558,14 @@ def ingest_oai_cmd(
     )
 
     for src_name, src_cfg in targets.items():
-        if from_date:
+        if isinstance(from_date, str):
             src_cfg.from_date = from_date
-        if until_date:
+        if isinstance(until_date, str):
             src_cfg.until_date = until_date
+        if isinstance(workers, int):
+            src_cfg.workers = workers
+        if isinstance(normalization_workers, int):
+            src_cfg.normalization_workers = normalization_workers
 
         src_norm_cfg = src_cfg.normalization or cfg.normalization.record
         normalizer = RecordNormalizer(
@@ -573,6 +589,7 @@ def ingest_oai_cmd(
             normalizer=normalizer,
             embedder=embedder,
             tracker=tracker,
+            skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
         )
         console.print(
             f"[green]Successfully ingested {total} records from source '{src_name}'.[/green]"
@@ -695,7 +712,12 @@ def reconcile_cmd(
             try:
                 with open(r_cfg.target_file, "rb") as probe_f:
                     sample = probe_f.read(2048).decode("utf-8", errors="replace")
-                if "@context" in sample or "@graph" in sample or "http://id.loc.gov" in sample or "bffi" in sample:
+                if (
+                    "@context" in sample
+                    or "@graph" in sample
+                    or "http://id.loc.gov" in sample
+                    or "bffi" in sample
+                ):
                     target_format = "bibframe"
                 else:
                     target_format = "bibra"
@@ -739,9 +761,7 @@ def reconcile_cmd(
 
     active_graph: Optional[Graph] = None
 
-    def _iter_records() -> Iterator[
-        tuple[str, Any, dict[str, Any], int]
-    ]:
+    def _iter_records() -> Iterator[tuple[str, Any, dict[str, Any], int]]:
         nonlocal active_graph
         if target_format == "bibra":
             for raw_rec_item, b_offset, bib_item in iter_bibra_records(r_cfg.target_file):
@@ -946,7 +966,9 @@ def reconcile_cmd(
             # Mutate / serialize and stream write if output_file requested
             if out_f is not None:
                 if rec_fmt == "bibra":
-                    enriched_json = enrich_bibra_json(orig_payload, res, target_record=target_record)
+                    enriched_json = enrich_bibra_json(
+                        orig_payload, res, target_record=target_record
+                    )
                     out_f.write(json.dumps(enriched_json, ensure_ascii=False).encode("utf-8"))
                     out_f.write(b"\n")
                 elif rec_fmt == "bibframe_jsonld":

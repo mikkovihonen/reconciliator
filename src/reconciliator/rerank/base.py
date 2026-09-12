@@ -22,4 +22,3 @@ class RerankScorer(Protocol):
         Returns a list of scores in [0.0, 1.0].
         """
         ...
-

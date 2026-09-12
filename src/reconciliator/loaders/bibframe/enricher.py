@@ -40,7 +40,9 @@ def enrich_bibframe_graph(
     # 1. Enrich Agents
     # Collect all agent nodes linked via contributions
     agent_nodes: list[IdentifiedNode] = []
-    entity_nodes: list[IdentifiedNode] = [n for n in [work_node, expression_node, instance_node] if n is not None]
+    entity_nodes: list[IdentifiedNode] = [
+        n for n in [work_node, expression_node, instance_node] if n is not None
+    ]
 
     for enode in entity_nodes:
         for contrib_pred in p.expanded_contribution_predicates:
@@ -90,7 +92,13 @@ def enrich_bibframe_graph(
             # Inject target URI to work / expression subject
             subj_target_ref = URIRef(sub_item.uri)
             for target_node in [n for n in (work_node, expression_node) if n is not None]:
-                g.add((target_node, URIRef("http://id.loc.gov/ontologies/bibframe/subject"), subj_target_ref))
+                g.add(
+                    (
+                        target_node,
+                        URIRef("http://id.loc.gov/ontologies/bibframe/subject"),
+                        subj_target_ref,
+                    )
+                )
 
     return g
 
@@ -166,8 +174,12 @@ def enrich_bibframe_jsonld(
         "status": "matched" if result.accepted_candidates else "unmatched",
         "match_tier": best_match.match_tier if best_match else "unmatched",
         "match_score": best_match.match_score if best_match else 0.0,
-        "matched_authority_id": result.accepted_candidates[0].source_id if result.accepted_candidates else None,
-        "matched_authority_source": result.accepted_candidates[0].source if result.accepted_candidates else None,
+        "matched_authority_id": result.accepted_candidates[0].source_id
+        if result.accepted_candidates
+        else None,
+        "matched_authority_source": result.accepted_candidates[0].source
+        if result.accepted_candidates
+        else None,
         "agents": agent_reports,
     }
 

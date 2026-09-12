@@ -4883,13 +4883,19 @@ flowchart TD
 ##### 1. `StorageConfig`
 ```python
 class StorageConfig(BaseModel):
-    authority_db: Path = Path("data/authority.db")              # Canonical WEMI Authority SQLite DB
-    vocab_db: Path = Path("data/vocab.db")                      # Value Vocabularies SQLite DB
-    progress_db: Path = Path("data/progress.db")                # Task tracking & progress state
-    corpus_db: Path = Path("data/reconcile_corpus.db")          # Ephemeral Target Corpus Staging & Clustering DB
-    work_index: Path = Path("data/work.index")                  # Work Vector Index (Conceptual Tier)
-    expression_index: Optional[Path] = Path("data/expression.index") # Expression Vector Index (Realization Tier)
-    manifestation_index: Optional[Path] = Path("data/manifestation.index") # Manifestation Vector Index (Carrier Tier)
+    authority_db: Path = Path("data/authority.db")  # Canonical WEMI Authority SQLite DB
+    vocab_db: Path = Path("data/vocab.db")  # Value Vocabularies SQLite DB
+    progress_db: Path = Path("data/progress.db")  # Task tracking & progress state
+    corpus_db: Path = Path(
+        "data/reconcile_corpus.db"
+    )  # Ephemeral Target Corpus Staging & Clustering DB
+    work_index: Path = Path("data/work.index")  # Work Vector Index (Conceptual Tier)
+    expression_index: Optional[Path] = Path(
+        "data/expression.index"
+    )  # Expression Vector Index (Realization Tier)
+    manifestation_index: Optional[Path] = Path(
+        "data/manifestation.index"
+    )  # Manifestation Vector Index (Carrier Tier)
     vector_engine: VectorEngineConfig = Field(default_factory=VectorEngineConfig)
 ```
 
@@ -4897,7 +4903,9 @@ class StorageConfig(BaseModel):
 ```python
 class EmbeddingConfig(BaseModel):
     model_name: str = "TurkuNLP/sbert-cased-finnish-paraphrase"
-    template_path: Path = Path("reconciliator/templates/work_serialization.j2") # Pure Work template
+    template_path: Path = Path(
+        "reconciliator/templates/work_serialization.j2"
+    )  # Pure Work template
     device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
     batch_size: int = 64
     force_template: bool = False
@@ -4909,18 +4917,20 @@ class OAIIngestConfig(BaseModel):
     enabled: bool = True
     source_type: Literal["oai", "file", "resourcesync"] = "oai"
     format: Literal["marcxml", "bibframe"] = "marcxml"
-    schema_profile: Optional[str] = None                        # "bffi_1" | "bibframe_3" | "bibframe_2"
+    schema_profile: Optional[str] = None  # "bffi_1" | "bibframe_3" | "bibframe_2"
     input_path: Optional[Path] = None
     oai_url: Optional[str] = None
     resourcesync_url: Optional[str] = None
     metadata_prefix: str = "marc21"
     set_spec: Optional[str] = None
-    target_database: Literal["authority", "corpus"] = "authority" # Direct routing: authority.db vs reconcile_corpus.db
-    include_items: bool = False                                 # If True, extracts & lands Item entities (852 holdings, bf:Item). Disabled by default to prevent storage bloat.
+    target_database: Literal["authority", "corpus"] = (
+        "authority"  # Direct routing: authority.db vs reconcile_corpus.db
+    )
+    include_items: bool = False  # If True, extracts & lands Item entities (852 holdings, bf:Item). Disabled by default to prevent storage bloat.
     workers: int = 4
     from_date: Optional[str] = None
     until_date: Optional[str] = None
-    slice_days: int = 30                                         # Temporal partition chunk for parallel harvesting
+    slice_days: int = 30  # Temporal partition chunk for parallel harvesting
     batch_size: int = 500
     request_delay: float = 0.1
     timeout: float = 60.0
@@ -4932,8 +4942,8 @@ class OAIIngestConfig(BaseModel):
 class WikidataIngestConfig(BaseModel):
     dump_path: Path = Path("data/wikidata/latest-all.json.gz")
     batch_size: int = 1000
-    pass1_only: bool = False                                     # If true, terminates after agent pre-scan
-    extract_works: bool = True                                   # If true, runs Pass 2 WEMI decomposition & P629 linking
+    pass1_only: bool = False  # If true, terminates after agent pre-scan
+    extract_works: bool = True  # If true, runs Pass 2 WEMI decomposition & P629 linking
     normalization: Optional[RecordNormalizationConfig] = None
 ```
 
@@ -4941,38 +4951,52 @@ class WikidataIngestConfig(BaseModel):
 ```python
 class TemplateSetPathsConfig(BaseModel):
     """Paths to the WEMI Serialization Triad templates."""
+
     model_config = ConfigDict(extra="forbid")
     work: Path = Path("reconciliator/templates/work_serialization.j2")
     expression: Path = Path("reconciliator/templates/expression_serialization.j2")
     manifestation: Path = Path("reconciliator/templates/manifestation_serialization.j2")
 
+
 class MultiplexClusterThresholds(BaseModel):
     """Thresholds for the 3-layer multiplex graph clustering."""
+
     work: float = 0.85
     expression: float = 0.88
     manifestation: float = 0.92
 
+
 class ClusterConfig(BaseModel):
     """Configuration for intra-corpus multiplex graph clustering."""
+
     enabled: bool = True
     similarity_threshold: float = 0.85
     max_cluster_size: int = 2000
-    blocking_families: Union[list[str], Literal["all"]] = "all"  # Enable all 35 blocking families or subset
+    blocking_families: Union[list[str], Literal["all"]] = (
+        "all"  # Enable all 35 blocking families or subset
+    )
     thresholds: MultiplexClusterThresholds = Field(default_factory=MultiplexClusterThresholds)
-    message_passing: bool = True                                 # Enable upward enrichment & downward constraints
-    reconcile_items: bool = False                                # Special-case 4th tier: physical holding / sammelbände / copy provenance clustering
+    message_passing: bool = True  # Enable upward enrichment & downward constraints
+    reconcile_items: bool = (
+        False  # Special-case 4th tier: physical holding / sammelbände / copy provenance clustering
+    )
+
 
 class EnrichmentTogglesConfig(BaseModel):
     """Fine-grained toggles for native format tree mutation."""
-    inject_work_links: bool = True          # MARC 758 / bffi:workManifested / bf:instanceOf
-    inject_expression_links: bool = True    # MARC 758 / bffi:expressionManifested / RDA P30139
-    inject_hub_links: bool = True           # LC bflc:hasHub
-    inject_same_as: bool = True             # owl:sameAs for Wikidata QIDs / Asteri URNs
-    inject_component_links: bool = True     # Analytical 700 $t / 773 host item links
+
+    inject_work_links: bool = True  # MARC 758 / bffi:workManifested / bf:instanceOf
+    inject_expression_links: bool = True  # MARC 758 / bffi:expressionManifested / RDA P30139
+    inject_hub_links: bool = True  # LC bflc:hasHub
+    inject_same_as: bool = True  # owl:sameAs for Wikidata QIDs / Asteri URNs
+    inject_component_links: bool = True  # Analytical 700 $t / 773 host item links
     marc_predicate_profiles: list[Literal["bffi", "bibframe", "rda"]] = Field(
         default_factory=lambda: ["bffi", "rda"]
-    )                                       # One or more predicate profiles for MARC 758 $4
-    marc_predicate_mode: Literal["stacked", "distinct"] = "stacked"  # "stacked" (single 758 with multiple $4) or "distinct" (separate 758 per profile)
+    )  # One or more predicate profiles for MARC 758 $4
+    marc_predicate_mode: Literal["stacked", "distinct"] = (
+        "stacked"  # "stacked" (single 758 with multiple $4) or "distinct" (separate 758 per profile)
+    )
+
 
 class ReconcileConfig(BaseModel):
     target_file: Path
@@ -4982,7 +5006,7 @@ class ReconcileConfig(BaseModel):
     enrich: bool = True
     fold_legacy: bool = True
     threshold: float = 0.85
-    
+
     # WEMI Serialization Triad Templates
     templates: TemplateSetPathsConfig = Field(default_factory=TemplateSetPathsConfig)
 
@@ -4990,13 +5014,13 @@ class ReconcileConfig(BaseModel):
     work_reports: ReportSetPathsConfig = Field(
         default_factory=lambda: ReportSetPathsConfig(
             detailed_file=Path("data/reports/work_reconciliation_uris.tsv"),
-            summary_file=Path("data/reports/work_reconciliation_summary.tsv")
+            summary_file=Path("data/reports/work_reconciliation_summary.tsv"),
         )
     )
     expression_reports: ReportSetPathsConfig = Field(
         default_factory=lambda: ReportSetPathsConfig(
             detailed_file=Path("data/reports/expression_reconciliation_uris.tsv"),
-            summary_file=Path("data/reports/expression_reconciliation_summary.tsv")
+            summary_file=Path("data/reports/expression_reconciliation_summary.tsv"),
         )
     )
     agent_reports: ReportSetPathsConfig
@@ -5007,11 +5031,19 @@ class ReconcileConfig(BaseModel):
     rerank: RerankConfig = Field(default_factory=RerankConfig)
     link_policy: Literal["priority_fallback", "all"] = "priority_fallback"
     vocabularies: list[str] = Field(
-        default_factory=lambda: ["KANTO", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
+        default_factory=lambda: [
+            "KANTO",
+            "YSO",
+            "MUSO",
+            "KAUNO",
+            "SLM",
+            "SEKO",
+            "VIAF",
+            "ISNI",
+            "WIKIDATA",
+        ]
     )
-    agent_priority: list[str] = Field(
-        default_factory=lambda: ["KANTO", "ISNI", "VIAF", "WIKIDATA"]
-    )
+    agent_priority: list[str] = Field(default_factory=lambda: ["KANTO", "ISNI", "VIAF", "WIKIDATA"])
     subject_priority: list[str] = Field(
         default_factory=lambda: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO", "WIKIDATA"]
     )

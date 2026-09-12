@@ -157,7 +157,9 @@ def _extract_agents(
                     for role_obj in g.objects(contrib_obj, URIRef(role_pred)):
                         r_label = None
                         if isinstance(role_obj, IdentifiedNode):
-                            r_labels = _get_literals(g, role_obj, [str(RDFS.label), str(SKOS.prefLabel), str(RDF.value)])
+                            r_labels = _get_literals(
+                                g, role_obj, [str(RDFS.label), str(SKOS.prefLabel), str(RDF.value)]
+                            )
                             if r_labels:
                                 r_label = r_labels[0]
                         if isinstance(role_obj, URIRef):
@@ -206,7 +208,9 @@ def _extract_agents(
                         if isinstance(agent_obj, URIRef) and not str(agent_obj).startswith("_:"):
                             agent_uris.append(str(agent_obj))
                         # owl:sameAs or identifiedBy
-                        for same in g.objects(agent_obj, URIRef("http://www.w3.org/2002/07/owl#sameAs")):
+                        for same in g.objects(
+                            agent_obj, URIRef("http://www.w3.org/2002/07/owl#sameAs")
+                        ):
                             if isinstance(same, URIRef):
                                 agent_uris.append(str(same))
 
@@ -286,7 +290,9 @@ def _extract_subjects(
                         if isinstance(src_obj, Literal):
                             vocab = str(src_obj).strip()
                         elif isinstance(src_obj, IdentifiedNode):
-                            src_labels = _get_literals(g, src_obj, [str(RDFS.label), str(RDF.value), str(SKOS.prefLabel)])
+                            src_labels = _get_literals(
+                                g, src_obj, [str(RDFS.label), str(RDF.value), str(SKOS.prefLabel)]
+                            )
                             if src_labels:
                                 vocab = src_labels[0]
 
@@ -367,17 +373,27 @@ def _extract_identifiers(
             ]:
                 for s_obj in g.objects(id_obj, URIRef(s_pred)):
                     if isinstance(s_obj, IdentifiedNode):
-                        src_vals.extend(_get_literals(g, s_obj, [str(RDFS.label), str(SKOS.prefLabel), str(RDF.value)]))
+                        src_vals.extend(
+                            _get_literals(
+                                g, s_obj, [str(RDFS.label), str(SKOS.prefLabel), str(RDF.value)]
+                            )
+                        )
             is_isbn_source = any("isbn" in s.lower() for s in src_vals)
             is_issn_source = any("issn" in s.lower() for s in src_vals)
 
             for val in vals:
                 digits_only = val.replace("-", "").replace(" ", "").upper()
                 is_standard_isbn = (len(digits_only) == 10 or len(digits_only) == 13) and (
-                    digits_only[:-1].isdigit() and (digits_only[-1].isdigit() or digits_only[-1] == "X")
+                    digits_only[:-1].isdigit()
+                    and (digits_only[-1].isdigit() or digits_only[-1] == "X")
                 )
 
-                if any("Isbn" in t for t in types) or "isbn" in val.lower() or is_isbn_source or is_standard_isbn:
+                if (
+                    any("Isbn" in t for t in types)
+                    or "isbn" in val.lower()
+                    or is_isbn_source
+                    or is_standard_isbn
+                ):
                     if val not in isbns:
                         isbns.append(val)
                 elif any("Issn" in t for t in types) or "issn" in val.lower() or is_issn_source:
@@ -511,7 +527,9 @@ def parse_bibframe_graph(
     g: Graph,
     profile: Optional[BIBFRAMESchemaProfile] = None,
     source: str = "target",
-) -> Iterator[tuple[dict[str, Any], tuple[IdentifiedNode, Optional[IdentifiedNode], Optional[IdentifiedNode]]]]:
+) -> Iterator[
+    tuple[dict[str, Any], tuple[IdentifiedNode, Optional[IdentifiedNode], Optional[IdentifiedNode]]]
+]:
     """
     Parse an RDFLib Graph according to a BIBFRAME Schema Profile.
     Yields (raw_record, (instance_node, expression_node, work_node)).
@@ -546,7 +564,10 @@ def parse_bibframe_graph(
             for obj in g.objects(instance_node, URIRef(pred)):
                 if isinstance(obj, IdentifiedNode):
                     obj_types = {str(t) for t in g.objects(obj, RDF.type)}
-                    if any(t in profile.expanded_expression_classes for t in obj_types) or not expression_node:
+                    if (
+                        any(t in profile.expanded_expression_classes for t in obj_types)
+                        or not expression_node
+                    ):
                         expression_node = obj
                         break
             if expression_node:
@@ -568,7 +589,10 @@ def parse_bibframe_graph(
                 for obj in g.objects(instance_node, URIRef(pred)):
                     if isinstance(obj, IdentifiedNode):
                         obj_types = {str(t) for t in g.objects(obj, RDF.type)}
-                        if any(t in profile.expanded_work_classes for t in obj_types) or not work_node:
+                        if (
+                            any(t in profile.expanded_work_classes for t in obj_types)
+                            or not work_node
+                        ):
                             work_node = obj
                             break
                 if work_node:
@@ -586,7 +610,11 @@ def parse_bibframe_graph(
         if source_id.startswith("_:"):
             # Blank node: fallback to identifier or work URI
             isbns, issns, urns, other_ids = _extract_identifiers(g, instance_node, profile)
-            source_id = (urns[0] if urns else None) or (isbns[0] if isbns else None) or (str(work_node) if work_node else source_id)
+            source_id = (
+                (urns[0] if urns else None)
+                or (isbns[0] if isbns else None)
+                or (str(work_node) if work_node else source_id)
+            )
         else:
             isbns, issns, urns, other_ids = _extract_identifiers(g, instance_node, profile)
 
@@ -657,7 +685,13 @@ def iter_bibframe_records(
     profile: Optional[BIBFRAMESchemaProfile] = None,
     source: str = "target",
     format: Optional[str] = None,
-) -> Iterator[tuple[dict[str, Any], int, tuple[Graph, tuple[IdentifiedNode, Optional[IdentifiedNode], Optional[IdentifiedNode]]]]]:
+) -> Iterator[
+    tuple[
+        dict[str, Any],
+        int,
+        tuple[Graph, tuple[IdentifiedNode, Optional[IdentifiedNode], Optional[IdentifiedNode]]],
+    ]
+]:
     """Stream BIBFRAME records from an RDF file (Turtle, RDF/XML, JSON-LD, etc.)."""
     path = Path(file_path)
     if not path.exists():

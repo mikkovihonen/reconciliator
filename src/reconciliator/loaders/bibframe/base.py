@@ -169,4 +169,3 @@ def parse_agent_dict(
         "uri_subfield_0": final_u0,
         "uri_subfield_1": final_u1,
     }
-

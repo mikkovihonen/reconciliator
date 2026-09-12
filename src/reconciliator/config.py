@@ -234,9 +234,26 @@ class OAIIngestConfig(BaseModel):
     slice_days: int = 30
     batch_size: int = 500
     checkpoint_interval: int = 50000
+    normalization_workers: int = 4
+    queue_size: Optional[int] = None
+    batch_queue_size: int = 4
     request_delay: float = 0.1
     timeout: float = 60.0
     normalization: Optional[RecordNormalizationConfig] = None
+
+    @model_validator(mode="after")
+    def validate_workers_and_queues(self) -> OAIIngestConfig:
+        if self.workers < 1:
+            raise ValueError(f"workers must be at least 1, got {self.workers}")
+        if self.normalization_workers < 1:
+            raise ValueError(
+                f"normalization_workers must be at least 1, got {self.normalization_workers}"
+            )
+        if self.batch_queue_size < 1:
+            raise ValueError(f"batch_queue_size must be at least 1, got {self.batch_queue_size}")
+        if self.queue_size is not None and self.queue_size < 1:
+            raise ValueError(f"queue_size must be at least 1, got {self.queue_size}")
+        return self
 
 
 class WikidataIngestConfig(BaseModel):
