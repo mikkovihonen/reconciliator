@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
@@ -45,6 +47,8 @@ from reconciliator.normalizers.blocking import (
     compute_work_blocking_key,
 )
 from reconciliator.template import WEMISerializationEngine
+
+logger = logging.getLogger(__name__)
 
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}
 
@@ -969,7 +973,14 @@ def decompose_marc_wemi(
         relator_mappings=relator_mappings,
         vocab_store=vocab_store,
     )
-    source_id = parsed["source_id"] or "unknown_id"
+    source_id = parsed["source_id"]
+    if not source_id or source_id == "unknown_id":
+        source_id = f"unknown_id_{uuid.uuid4()}"
+        logger.warning(
+            "MARCXML record in source '%s' is missing an identifier; assigned unique fallback '%s'",
+            source,
+            source_id,
+        )
 
     engine = serialization_engine or WEMISerializationEngine()
 

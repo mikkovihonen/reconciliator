@@ -251,3 +251,21 @@ def test_build_target_record_from_marc():
     assert target.work_blocking_key is not None
     assert len(target.raw_payload) > 0
     assert "Sinuhe egyptiläinen" in target.serialized_work
+
+
+def test_decompose_marc_wemi_missing_id(caplog):
+    rec = _build_marc_record(
+        leader="00000cam a2200000 i 4500",
+        controlfields={},
+        datafields=[
+            ("245", "1", "0", [("a", "Nimetön kirja")]),
+        ],
+    )
+    with caplog.at_level("WARNING"):
+        work, expr, manif, *_ = decompose_marc_wemi(rec, source="fennica")
+
+    assert work.source_id.startswith("unknown_id_")
+    assert expr.source_id == work.source_id
+    assert manif.source_id == work.source_id
+    assert any("missing an identifier" in record.message for record in caplog.records)
+
