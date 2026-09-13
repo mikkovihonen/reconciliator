@@ -1,0 +1,964 @@
+# LoC MARC relator code → MTS role bridge with multilingual labels.
+#
+# Links Library of Congress MARC relator codes (<http://id.loc.gov/vocabulary/relators/{code}>)
+# to Finto Metatietosanasto (MTS) role concepts (<http://urn.fi/URN:NBN:fi:au:mts:{id}>).
+#
+# Parallel to vocab/loc-issuance-bridge.ttl, vocab/loc-countries-bridge.ttl, and
+# vocab/loc-languages-bridge.ttl.
+#
+# Source: Finto Metatietosanasto (MTS) RDA roles and LoC MARC Relators.
+#
+# Licence: CC0 (project bridge; MTS labels are NLF / Finto CC0).
+
+@prefix loc:  <http://id.loc.gov/vocabulary/relators/> .
+@prefix mts:  <http://urn.fi/URN:NBN:fi:au:mts:> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+@prefix bridge: <http://urn.fi/URN:NBN:fi:bib:bridge/loc-relators/> .
+
+bridge: a skos:ConceptScheme ;
+    rdfs:label "Local LoC MARC relator code ↔ MTS bridge"@en ;
+    rdfs:comment "Project-owned bridge linking LoC MARC relator codes to Finto Metatietosanasto (MTS) role concepts."@en .
+
+loc:act  skos:exactMatch mts:m1241 ;
+         skos:prefLabel  "näyttelijä"@fi,
+                         "skådespelare"@sv,
+                         "actor agent"@en ;
+         skos:notation   "act" .
+
+loc:adi  skos:exactMatch mts:m277 ;
+         skos:prefLabel  "lavastaja"@fi,
+                         "scenograf"@sv,
+                         "art director agent"@en ;
+         skos:notation   "adi" .
+
+loc:anl  skos:exactMatch mts:m2475 ;
+         skos:prefLabel  "analyytikko"@fi,
+                         "analytiker"@sv,
+                         "analyst"@en ;
+         skos:notation   "anl" .
+
+loc:anm  skos:exactMatch mts:m1189 ;
+         skos:prefLabel  "animaattori"@fi,
+                         "animatör"@sv,
+                         "animator agent"@en ;
+         skos:notation   "anm" .
+
+loc:ann  skos:exactMatch mts:m1758 ;
+         skos:prefLabel  "lisähuomautusten kirjoittaja"@fi,
+                         "författare till annotation"@sv,
+                         "annotator"@en ;
+         skos:notation   "ann" .
+
+loc:arc  skos:exactMatch mts:m713 ;
+         skos:prefLabel  "arkkitehti"@fi,
+                         "arkitekt"@sv,
+                         "architect agent"@en ;
+         skos:notation   "arc" .
+
+loc:arr  skos:exactMatch mts:m1205 ;
+         skos:prefLabel  "sovittaja"@fi,
+                         "arrangör av musikalisk komposition"@sv,
+                         "arranger agent of music"@en ;
+         skos:notation   "arr" .
+
+loc:art  skos:exactMatch mts:m511 ;
+         skos:prefLabel  "taiteilija"@fi,
+                         "konstnär"@sv,
+                         "artist agent"@en ;
+         skos:notation   "art" .
+
+loc:ato  skos:exactMatch mts:m1773 ;
+         skos:prefLabel  "nimikirjoituksen kirjoittaja"@fi,
+                         "signatur"@sv,
+                         "autographer"@en ;
+         skos:notation   "ato" .
+
+loc:aue  skos:exactMatch mts:m1480 ;
+         skos:prefLabel  "ääniteknikko"@fi,
+                         "ljudtekniker"@sv,
+                         "audio engineer agent"@en ;
+         skos:notation   "aue" .
+
+loc:aup  skos:exactMatch mts:m4460 ;
+         skos:prefLabel  "äänituottaja"@fi,
+                         "ljudproducent"@sv,
+                         "audio producer agent"@en ;
+         skos:notation   "aup" .
+
+loc:aus  skos:exactMatch mts:m79 ;
+         skos:prefLabel  "käsikirjoittaja"@fi,
+                         "manusförfattare"@sv,
+                         "screenwriter agent"@en ;
+         skos:notation   "aus" .
+
+loc:aut  skos:exactMatch mts:m552 ;
+         skos:prefLabel  "kirjoittaja"@fi,
+                         "författare"@sv,
+                         "author agent"@en ;
+         skos:notation   "aut" .
+
+loc:bka  skos:exactMatch mts:m1775 ;
+         skos:prefLabel  "kirjataiteilija"@fi,
+                         "bokkonstnär"@sv,
+                         "book artist agent"@en ;
+         skos:notation   "bka" .
+
+loc:bkd  skos:exactMatch mts:m1752 ;
+         skos:prefLabel  "graafinen suunnittelija"@fi,
+                         "grafisk formgivare"@sv,
+                         "book designer agent"@en ;
+         skos:notation   "bkd" .
+
+loc:bnd  skos:exactMatch mts:m1771 ;
+         skos:prefLabel  "sitoja"@fi,
+                         "bokbindare"@sv,
+                         "binder agent"@en ;
+         skos:notation   "bnd" .
+
+loc:brd  skos:exactMatch mts:m1750 ;
+         skos:prefLabel  "lähetyksestä vastaava toimija"@fi,
+                         "sändningsansvarig aktör"@sv,
+                         "broadcaster agent"@en ;
+         skos:notation   "brd" .
+
+loc:brl  skos:exactMatch mts:m1748 ;
+         skos:prefLabel  "pistekirjoituksen tekijä"@fi,
+                         "punktskriftspräglare"@sv,
+                         "braille embosser agent"@en ;
+         skos:notation   "brl" .
+
+loc:bsl  skos:exactMatch mts:m2437 ;
+         skos:prefLabel  "kirjakauppias"@fi,
+                         "bokhandlare"@sv,
+                         "bookseller"@en ;
+         skos:notation   "bsl" .
+
+loc:cad  skos:exactMatch mts:m3566 ;
+         skos:prefLabel  "roolittaja"@fi,
+                         "rollsättare"@sv,
+                         "casting director agent"@en ;
+         skos:notation   "cad" .
+
+loc:cas  skos:exactMatch mts:m1745 ;
+         skos:prefLabel  "valaja"@fi,
+                         "gjutare"@sv,
+                         "caster agent"@en ;
+         skos:notation   "cas" .
+
+loc:chr  skos:exactMatch mts:m25 ;
+         skos:prefLabel  "koreografi"@fi,
+                         "koreograf"@sv,
+                         "choreographer agent"@en ;
+         skos:notation   "chr" .
+
+loc:cll  skos:exactMatch mts:m1980 ;
+         skos:prefLabel  "kalligrafi"@fi,
+                         "kalligraf"@sv,
+                         "calligrapher agent"@en ;
+         skos:notation   "cll" .
+
+loc:clr  skos:exactMatch mts:m1682 ;
+         skos:prefLabel  "värittäjä"@fi,
+                         "färgläggare"@sv,
+                         "colourist agent"@en ;
+         skos:notation   "clr" .
+
+loc:clt  skos:exactMatch mts:m1753 ;
+         skos:prefLabel  "kollotypian valmistaja"@fi,
+                         "framställare av ljustryck"@sv,
+                         "collotyper agent"@en ;
+         skos:notation   "clt" .
+
+loc:cmm  skos:exactMatch mts:m595 ;
+         skos:prefLabel  "kommentaattori"@fi,
+                         "kommentator"@sv,
+                         "commentator agent"@en ;
+         skos:notation   "cmm" .
+
+loc:cmp  skos:exactMatch mts:m695 ;
+         skos:prefLabel  "säveltäjä"@fi,
+                         "kompositör"@sv,
+                         "composer"@en ;
+         skos:notation   "cmp" .
+
+loc:cnd  skos:exactMatch mts:m3589 ;
+         skos:prefLabel  "kapellimestari"@fi,
+                         "kapellmästare"@sv,
+                         "instrumental conductor agent"@en ;
+         skos:notation   "cnd" .
+
+loc:cns  skos:exactMatch mts:m3584 ;
+         skos:prefLabel  "sensori"@fi,
+                         "censor"@sv,
+                         "censor agent"@en ;
+         skos:notation   "cns" .
+
+loc:col  skos:exactMatch mts:m5494 ;
+         skos:prefLabel  "kokoelman muodostaja"@fi,
+                         "samlare"@sv,
+                         "collector agent"@en ;
+         skos:notation   "col" .
+
+loc:com  skos:exactMatch mts:m1037 ;
+         skos:prefLabel  "kokoaja"@fi,
+                         "sammanställare"@sv,
+                         "compiler agent"@en ;
+         skos:notation   "com" .
+
+loc:con  skos:exactMatch mts:m2502 ;
+         skos:prefLabel  "konservaattori"@fi,
+                         "konservator"@sv,
+                         "conservator"@en ;
+         skos:notation   "con" .
+
+loc:cor  skos:exactMatch mts:m5795 ;
+         skos:prefLabel  "kokoelman luetteloija"@fi,
+                         "samlingsregistrator"@sv,
+                         "collection registrar agent"@en ;
+         skos:notation   "cor" .
+
+loc:cou  skos:exactMatch mts:m1335 ;
+         skos:prefLabel  "sääntöjen ohjaama tuomioistuin"@fi,
+                         "behörig domstol"@sv,
+                         "court governed"@en ;
+         skos:notation   "cou" .
+
+loc:cre  skos:exactMatch mts:m5586 ;
+         skos:prefLabel  "aineiston tekijä"@fi,
+                         "skapare av material"@sv,
+                         "creator agent of manifestation"@en ;
+         skos:notation   "cre" .
+
+loc:crp  skos:exactMatch mts:m2917 ;
+         skos:prefLabel  "kirjeenvaihtaja"@fi,
+                         "korrespondent"@sv,
+                         "correspondent"@en ;
+         skos:notation   "crp" .
+
+loc:crt  skos:exactMatch mts:m156 ;
+         skos:prefLabel  "tuomioistuimen kirjuri"@fi,
+                         "domstolssekreterare"@sv,
+                         "court reporter agent"@en ;
+         skos:notation   "crt" .
+
+loc:csl  skos:exactMatch mts:m38 ;
+         skos:prefLabel  "asiantuntija"@fi,
+                         "expert"@sv,
+                         "consultant agent"@en ;
+         skos:notation   "csl" .
+
+loc:cst  skos:exactMatch mts:m4469 ;
+         skos:prefLabel  "säilyttäjä"@fi,
+                         "förvarare"@sv,
+                         "custodian agent"@en ;
+         skos:notation   "cst" .
+
+loc:ctb  skos:exactMatch mts:m5682 ;
+         skos:prefLabel  "musiikkiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till musik"@sv,
+                         "contributor agent of music"@en ;
+         skos:notation   "ctb" .
+
+loc:ctg  skos:exactMatch mts:m6 ;
+         skos:prefLabel  "teoksen kartantekijä"@fi,
+                         "kartograf för verk"@sv,
+                         "cartographer agent of work"@en ;
+         skos:notation   "ctg" .
+
+loc:cur  skos:exactMatch mts:m3577 ;
+         skos:prefLabel  "toimituspäällikkö"@fi,
+                         "redaktionschef"@sv,
+                         "editorial director agent"@en ;
+         skos:notation   "cur" .
+
+loc:dbd  skos:exactMatch mts:m3595 ;
+         skos:prefLabel  "dubbausohjaaja"@fi,
+                         "dubbningsregissör"@sv,
+                         "dubbing director agent"@en ;
+         skos:notation   "dbd" .
+
+loc:dgc  skos:exactMatch mts:m103 ;
+         skos:prefLabel  "opinnäytteen tarkastaja"@fi,
+                         "granskare av lärdomsprov"@sv,
+                         "degree committee member"@en ;
+         skos:notation   "dgc" .
+
+loc:dgg  skos:exactMatch mts:m352 ;
+         skos:prefLabel  "oppiarvon myöntävä yhteisö"@fi,
+                         "institution som beviljar lärdomsgrad"@sv,
+                         "degree granting institution"@en ;
+         skos:notation   "dgg" .
+
+loc:dgs  skos:exactMatch mts:m576 ;
+         skos:prefLabel  "opinnäytteen ohjaaja"@fi,
+                         "handledare för lärdomsprov"@sv,
+                         "degree supervisor"@en ;
+         skos:notation   "dgs" .
+
+loc:djo  skos:exactMatch mts:m278 ;
+         skos:prefLabel  "DJ"@fi,
+                         "DJ"@sv,
+                         "DJ agent"@en ;
+         skos:notation   "djo" .
+
+loc:dnc  skos:exactMatch mts:m1154 ;
+         skos:prefLabel  "tanssija"@fi,
+                         "dansare"@sv,
+                         "dancer agent"@en ;
+         skos:notation   "dnc" .
+
+loc:dnr  skos:exactMatch mts:m1769 ;
+         skos:prefLabel  "lahjoittaja"@fi,
+                         "donator"@sv,
+                         "donor agent"@en ;
+         skos:notation   "dnr" .
+
+loc:dpt  skos:exactMatch mts:m3583 ;
+         skos:prefLabel  "tallettaja"@fi,
+                         "deponerat av"@sv,
+                         "depositor agent"@en ;
+         skos:notation   "dpt" .
+
+loc:drm  skos:exactMatch mts:m1596 ;
+         skos:prefLabel  "piirtäjä"@fi,
+                         "ritare"@sv,
+                         "draftsman agent"@en ;
+         skos:notation   "drm" .
+
+loc:drt  skos:exactMatch mts:m397 ;
+         skos:prefLabel  "ohjaaja"@fi,
+                         "regissör"@sv,
+                         "director agent"@en ;
+         skos:notation   "drt" .
+
+loc:dsr  skos:exactMatch mts:m1486 ;
+         skos:prefLabel  "designer"@fi,
+                         "designer"@sv,
+                         "designer agent"@en ;
+         skos:notation   "dsr" .
+
+loc:dst  skos:exactMatch mts:m889 ;
+         skos:prefLabel  "jakelija"@fi,
+                         "distributör"@sv,
+                         "distributor agent"@en ;
+         skos:notation   "dst" .
+
+loc:dte  skos:exactMatch mts:m1765 ;
+         skos:prefLabel  "kappaleen omistuksen kohde"@fi,
+                         "exemplaret dedicerat till"@sv,
+                         "dedicatee agent of item"@en ;
+         skos:notation   "dte" .
+
+loc:dto  skos:exactMatch mts:m1760 ;
+         skos:prefLabel  "omistuksen tekijä"@fi,
+                         "dedikationsförfattare"@sv,
+                         "dedicator agent"@en ;
+         skos:notation   "dto" .
+
+loc:edd  skos:exactMatch mts:m3577 ;
+         skos:prefLabel  "toimituspäällikkö"@fi,
+                         "redaktionschef"@sv,
+                         "editorial director agent"@en ;
+         skos:notation   "edd" .
+
+loc:edm  skos:exactMatch mts:m1211 ;
+         skos:prefLabel  "leikkaaja"@fi,
+                         "klippare"@sv,
+                         "editor agent of moving image work"@en ;
+         skos:notation   "edm" .
+
+loc:edt  skos:exactMatch mts:m5656 ;
+         skos:prefLabel  "toimittaja"@fi,
+                         "redaktör"@sv,
+                         "editor agent"@en ;
+         skos:notation   "edt" .
+
+loc:egr  skos:exactMatch mts:m1741 ;
+         skos:prefLabel  "kaivertaja"@fi,
+                         "gravör"@sv,
+                         "engraver agent"@en ;
+         skos:notation   "egr" .
+
+loc:elg  skos:exactMatch mts:m3235 ;
+         skos:prefLabel  "sähköasentaja"@fi,
+                         "elektriker"@sv,
+                         "electrician"@en ;
+         skos:notation   "elg" .
+
+loc:eng  skos:exactMatch mts:m2644 ;
+         skos:prefLabel  "insinööri"@fi,
+                         "ingenjör"@sv,
+                         "engineer"@en ;
+         skos:notation   "eng" .
+
+loc:etr  skos:exactMatch mts:m1746 ;
+         skos:prefLabel  "etsaaja"@fi,
+                         "etsare"@sv,
+                         "etcher agent"@en ;
+         skos:notation   "etr" .
+
+loc:fds  skos:exactMatch mts:m1756 ;
+         skos:prefLabel  "elokuvan jakelija"@fi,
+                         "filmdistributör"@sv,
+                         "film distributor agent"@en ;
+         skos:notation   "fds" .
+
+loc:fmd  skos:exactMatch mts:m699 ;
+         skos:prefLabel  "elokuvaohjaaja"@fi,
+                         "filmregissör"@sv,
+                         "film director agent"@en ;
+         skos:notation   "fmd" .
+
+loc:fmk  skos:exactMatch mts:m986 ;
+         skos:prefLabel  "elokuvantekijä"@fi,
+                         "filmskapare"@sv,
+                         "filmmaker agent"@en ;
+         skos:notation   "fmk" .
+
+loc:fmo  skos:exactMatch mts:m1743 ;
+         skos:prefLabel  "aiempi omistaja"@fi,
+                         "tidigare ägare"@sv,
+                         "former owner agent"@en ;
+         skos:notation   "fmo" .
+
+loc:fmp  skos:exactMatch mts:m813 ;
+         skos:prefLabel  "elokuvatuottaja"@fi,
+                         "filmproducent"@sv,
+                         "film producer agent"@en ;
+         skos:notation   "fmp" .
+
+loc:fon  skos:exactMatch mts:m3581 ;
+         skos:prefLabel  "teoksen perustaja"@fi,
+                         "grundare av verk"@sv,
+                         "founder agent of work"@en ;
+         skos:notation   "fon" .
+
+loc:his  skos:exactMatch mts:m420 ;
+         skos:prefLabel  "isäntäorganisaatio"@fi,
+                         "värdorganisation"@sv,
+                         "hosting institution"@en ;
+         skos:notation   "his" .
+
+loc:hnr  skos:exactMatch mts:m2181 ;
+         skos:prefLabel  "teoksella kunnioitettu toimija"@fi,
+                         "verk tillägnat aktören"@sv,
+                         "honouree agent of work"@en ;
+         skos:notation   "hnr" .
+
+loc:hst  skos:exactMatch mts:m1407 ;
+         skos:prefLabel  "juontaja"@fi,
+                         "programledare"@sv,
+                         "host agent"@en ;
+         skos:notation   "hst" .
+
+loc:ill  skos:exactMatch mts:m2932 ;
+         skos:prefLabel  "kuvittaja"@fi,
+                         "illustratör"@sv,
+                         "illustrator"@en ;
+         skos:notation   "ill" .
+
+loc:ilu  skos:exactMatch mts:m1767 ;
+         skos:prefLabel  "illuminoinnin tekijä"@fi,
+                         "illuminator"@sv,
+                         "illuminator agent"@en ;
+         skos:notation   "ilu" .
+
+loc:ins  skos:exactMatch mts:m1757 ;
+         skos:prefLabel  "omistuskirjoituksen kirjoittaja"@fi,
+                         "dedikationsskrift av"@sv,
+                         "inscriber"@en ;
+         skos:notation   "ins" .
+
+loc:inv  skos:exactMatch mts:m1328 ;
+         skos:prefLabel  "keksijä"@fi,
+                         "uppfinnare"@sv,
+                         "inventor agent"@en ;
+         skos:notation   "inv" .
+
+loc:isb  skos:exactMatch mts:m518 ;
+         skos:prefLabel  "julkaisija"@fi,
+                         "utgivare"@sv,
+                         "issuing agent"@en ;
+         skos:notation   "isb" .
+
+loc:itr  skos:exactMatch mts:m779 ;
+         skos:prefLabel  "soittaja"@fi,
+                         "instrumentalist"@sv,
+                         "instrumentalist agent"@en ;
+         skos:notation   "itr" .
+
+loc:ive  skos:exactMatch mts:m1237 ;
+         skos:prefLabel  "guassi"@fi,
+                         "gouache"@sv,
+                         "gouache"@en ;
+         skos:notation   "ive" .
+
+loc:ivr  skos:exactMatch mts:m1238 ;
+         skos:prefLabel  "QuickTime"@fi,
+                         "QuickTime"@sv,
+                         "interviewer"@en ;
+         skos:notation   "ivr" .
+
+loc:jud  skos:exactMatch mts:m1259 ;
+         skos:prefLabel  "tuomari"@fi,
+                         "domare"@sv,
+                         "judge"@en ;
+         skos:notation   "jud" .
+
+loc:lbt  skos:exactMatch mts:m322 ;
+         skos:prefLabel  "libretisti"@fi,
+                         "librettist"@sv,
+                         "librettist agent"@en ;
+         skos:notation   "lbt" .
+
+loc:lgd  skos:exactMatch mts:m1193 ;
+         skos:prefLabel  "valosuunnittelija"@fi,
+                         "ljusdesigner"@sv,
+                         "lighting designer agent"@en ;
+         skos:notation   "lgd" .
+
+loc:lsa  skos:exactMatch mts:m1086 ;
+         skos:prefLabel  "maisema-arkkitehti"@fi,
+                         "landskapsarkitekt"@sv,
+                         "landscape architect agent"@en ;
+         skos:notation   "lsa" .
+
+loc:ltg  skos:exactMatch mts:m1744 ;
+         skos:prefLabel  "litografi"@fi,
+                         "litograf"@sv,
+                         "lithographer agent"@en ;
+         skos:notation   "ltg" .
+
+loc:ltr  skos:exactMatch mts:m158 ;
+         skos:prefLabel  "tekstaaja"@fi,
+                         "textare"@sv,
+                         "letterer agent"@en ;
+         skos:notation   "ltr" .
+
+loc:lyr  skos:exactMatch mts:m384 ;
+         skos:prefLabel  "sanoittaja"@fi,
+                         "sångtextförfattare"@sv,
+                         "lyricist agent"@en ;
+         skos:notation   "lyr" .
+
+loc:med  skos:exactMatch mts:m90 ;
+         skos:prefLabel  "meedio"@fi,
+                         "medium"@sv,
+                         "medium"@en ;
+         skos:notation   "med" .
+
+loc:mfr  skos:exactMatch mts:m148 ;
+         skos:prefLabel  "valmistaja"@fi,
+                         "tillverkare"@sv,
+                         "manufacturer agent"@en ;
+         skos:notation   "mfr" .
+
+loc:mka  skos:exactMatch mts:m1713 ;
+         skos:prefLabel  "maskeeraaja"@fi,
+                         "maskör"@sv,
+                         "makeup artist agent"@en ;
+         skos:notation   "mka" .
+
+loc:mod  skos:exactMatch mts:m3592 ;
+         skos:prefLabel  "moderoija"@fi,
+                         "moderator"@sv,
+                         "moderator agent"@en ;
+         skos:notation   "mod" .
+
+loc:msd  skos:exactMatch mts:m935 ;
+         skos:prefLabel  "musiikillinen johtaja"@fi,
+                         "musikalisk ledare"@sv,
+                         "musical director agent"@en ;
+         skos:notation   "msd" .
+
+loc:mtk  skos:exactMatch mts:m130 ;
+         skos:prefLabel  "pöytäkirjan laatija"@fi,
+                         "protokollförare"@sv,
+                         "minute taker agent"@en ;
+         skos:notation   "mtk" .
+
+loc:mup  skos:exactMatch mts:m3588 ;
+         skos:prefLabel  "musiikkiohjelmoija"@fi,
+                         "musikprogrammerare"@sv,
+                         "music programmer agent"@en ;
+         skos:notation   "mup" .
+
+loc:mus  skos:exactMatch mts:m2356 ;
+         skos:prefLabel  "muusikko"@fi,
+                         "musiker"@sv,
+                         "musician"@en ;
+         skos:notation   "mus" .
+
+loc:mxe  skos:exactMatch mts:m1354 ;
+         skos:prefLabel  "miksaaja"@fi,
+                         "mixer"@sv,
+                         "mixing engineer agent"@en ;
+         skos:notation   "mxe" .
+
+loc:nrt  skos:exactMatch mts:m1239 ;
+         skos:prefLabel  "Kirjasinkoko"@fi,
+                         "Teckenstorlek"@sv,
+                         "Font size"@en ;
+         skos:notation   "nrt" .
+
+loc:onp  skos:exactMatch mts:m3591 ;
+         skos:prefLabel  "liikkuvaan kuvaan osallistuja"@fi,
+                         "deltagare i rörlig bild"@sv,
+                         "onscreen participant agent"@en ;
+         skos:notation   "onp" .
+
+loc:orm  skos:exactMatch mts:m3569 ;
+         skos:prefLabel  "järjestäjä"@fi,
+                         "evenemangsarrangör"@sv,
+                         "organizer agent"@en ;
+         skos:notation   "orm" .
+
+loc:osp  skos:exactMatch mts:m3586 ;
+         skos:prefLabel  "esittelijä"@fi,
+                         "presentatör"@sv,
+                         "onscreen presenter agent"@en ;
+         skos:notation   "osp" .
+
+loc:oth  skos:exactMatch mts:m5810 ;
+         skos:prefLabel  "kappaleeseen liittyvä toimija"@fi,
+                         "aktör relaterad till exemplaret"@sv,
+                         "related agent of item"@en ;
+         skos:notation   "oth" .
+
+loc:own  skos:exactMatch mts:m4467 ;
+         skos:prefLabel  "omistaja"@fi,
+                         "ägare"@sv,
+                         "owner agent"@en ;
+         skos:notation   "own" .
+
+loc:pan  skos:exactMatch mts:m1118 ;
+         skos:prefLabel  "panelisti"@fi,
+                         "deltagare i paneldiskussion"@sv,
+                         "panelist agent"@en ;
+         skos:notation   "pan" .
+
+loc:pbl  skos:exactMatch mts:m3157 ;
+         skos:prefLabel  "julkaisija"@fi,
+                         "utgivare"@sv,
+                         "publisher"@en ;
+         skos:notation   "pbl" .
+
+loc:pht  skos:exactMatch mts:m1042 ;
+         skos:prefLabel  "teoksen valokuvaaja"@fi,
+                         "fotograf till verk"@sv,
+                         "photographer agent of work"@en ;
+         skos:notation   "pht" .
+
+loc:plt  skos:exactMatch mts:m1751 ;
+         skos:prefLabel  "painolaatan valmistaja"@fi,
+                         "tryckplåtstillverkare"@sv,
+                         "platemaker agent"@en ;
+         skos:notation   "plt" .
+
+loc:ppm  skos:exactMatch mts:m1742 ;
+         skos:prefLabel  "paperinvalmistaja"@fi,
+                         "papperstillverkare"@sv,
+                         "papermaker agent"@en ;
+         skos:notation   "ppm" .
+
+loc:ppt  skos:exactMatch mts:m1476 ;
+         skos:prefLabel  "nukettaja"@fi,
+                         "dockspelare"@sv,
+                         "puppeteer agent"@en ;
+         skos:notation   "ppt" .
+
+loc:pra  skos:exactMatch mts:m33 ;
+         skos:prefLabel  "preeses"@fi,
+                         "preses"@sv,
+                         "praeses"@en ;
+         skos:notation   "pra" .
+
+loc:pre  skos:exactMatch mts:m1622 ;
+         skos:prefLabel  "esittämisestä vastaava toimija"@fi,
+                         "ansvarig aktör för framförande"@sv,
+                         "presenter agent"@en ;
+         skos:notation   "pre" .
+
+loc:prf  skos:exactMatch mts:m4115 ;
+         skos:prefLabel  "esittäjä"@fi,
+                         "framförare"@sv,
+                         "performer"@en ;
+         skos:notation   "prf" .
+
+loc:prg  skos:exactMatch mts:m534 ;
+         skos:prefLabel  "ohjelmoija"@fi,
+                         "programmerare"@sv,
+                         "programmer agent"@en ;
+         skos:notation   "prg" .
+
+loc:prm  skos:exactMatch mts:m1747 ;
+         skos:prefLabel  "kuvalaatan valmistaja"@fi,
+                         "tryckmakare"@sv,
+                         "printmaker agent"@en ;
+         skos:notation   "prm" .
+
+loc:prn  skos:exactMatch mts:m253 ;
+         skos:prefLabel  "tuotantoyhtiö"@fi,
+                         "produktionsbolag"@sv,
+                         "production company"@en ;
+         skos:notation   "prn" .
+
+loc:pro  skos:exactMatch mts:m1298 ;
+         skos:prefLabel  "tuottaja"@fi,
+                         "producent"@sv,
+                         "producer agent"@en ;
+         skos:notation   "pro" .
+
+loc:prs  skos:exactMatch mts:m359 ;
+         skos:prefLabel  "tuotantosuunnittelija"@fi,
+                         "produktionsdesigner"@sv,
+                         "production designer agent"@en ;
+         skos:notation   "prs" .
+
+loc:prt  skos:exactMatch mts:m1755 ;
+         skos:prefLabel  "painaja"@fi,
+                         "tryckare"@sv,
+                         "printer agent"@en ;
+         skos:notation   "prt" .
+
+loc:rap  skos:exactMatch mts:m1762 ;
+         skos:prefLabel  "kokousten raportoija"@fi,
+                         "mötesrapportör"@sv,
+                         "rapporteur agent"@en ;
+         skos:notation   "rap" .
+
+loc:rcd  skos:exactMatch mts:m4891 ;
+         skos:prefLabel  "taltioija"@fi,
+                         "inspelande aktör"@sv,
+                         "recordist agent"@en ;
+         skos:notation   "rcd" .
+
+loc:rce  skos:exactMatch mts:m240 ;
+         skos:prefLabel  "äänittäjä"@fi,
+                         "inspelningstekniker"@sv,
+                         "recording engineer agent"@en ;
+         skos:notation   "rce" .
+
+loc:rcp  skos:exactMatch mts:m696 ;
+         skos:prefLabel  "vastaanottaja"@fi,
+                         "mottagare"@sv,
+                         "addressee agent"@en ;
+         skos:notation   "rcp" .
+
+loc:rdd  skos:exactMatch mts:m847 ;
+         skos:prefLabel  "radio-ohjaaja"@fi,
+                         "radioregissör"@sv,
+                         "radio director agent"@en ;
+         skos:notation   "rdd" .
+
+loc:res  skos:exactMatch mts:m3580 ;
+         skos:prefLabel  "tutkija"@fi,
+                         "forskare"@sv,
+                         "researcher agent"@en ;
+         skos:notation   "res" .
+
+loc:rpc  skos:exactMatch mts:m1216 ;
+         skos:prefLabel  "radiotuottaja"@fi,
+                         "radioproducent"@sv,
+                         "radio producer agent"@en ;
+         skos:notation   "rpc" .
+
+loc:rsp  skos:exactMatch mts:m1161 ;
+         skos:prefLabel  "respondentti"@fi,
+                         "respondent"@sv,
+                         "respondent"@en ;
+         skos:notation   "rsp" .
+
+loc:rsr  skos:exactMatch mts:m1761 ;
+         skos:prefLabel  "entisöijä (ekspressio)"@fi,
+                         "konservator (uttryck)"@sv,
+                         "restorationist agent of expression"@en ;
+         skos:notation   "rsr" .
+
+loc:rxa  skos:exactMatch mts:m1978 ;
+         skos:prefLabel  "uudelleenmiksaaja"@fi,
+                         "remixer"@sv,
+                         "remix artist agent"@en ;
+         skos:notation   "rxa" .
+
+loc:scl  skos:exactMatch mts:m555 ;
+         skos:prefLabel  "kuvanveistäjä"@fi,
+                         "skulptör"@sv,
+                         "sculptor agent"@en ;
+         skos:notation   "scl" .
+
+loc:sde  skos:exactMatch mts:m2601 ;
+         skos:prefLabel  "ääniteknikko"@fi,
+                         "ljudtekniker"@sv,
+                         "sound engineer"@en ;
+         skos:notation   "sde" .
+
+loc:sds  skos:exactMatch mts:m1310 ;
+         skos:prefLabel  "äänisuunnittelija"@fi,
+                         "ljuddesigner"@sv,
+                         "sound designer agent"@en ;
+         skos:notation   "sds" .
+
+loc:sec  skos:exactMatch mts:m2532 ;
+         skos:prefLabel  "sihteeri"@fi,
+                         "sekreterare"@sv,
+                         "secretary"@en ;
+         skos:notation   "sec" .
+
+loc:sfx  skos:exactMatch mts:m3587 ;
+         skos:prefLabel  "erikoistehosteiden tekijä"@fi,
+                         "skapare av specialeffekter"@sv,
+                         "special effects provider agent"@en ;
+         skos:notation   "sfx" .
+
+loc:sgd  skos:exactMatch mts:m1043 ;
+         skos:prefLabel  "näyttämöohjaaja"@fi,
+                         "scenregissör"@sv,
+                         "stage director agent"@en ;
+         skos:notation   "sgd" .
+
+loc:sll  skos:exactMatch mts:m1772 ;
+         skos:prefLabel  "myyjä"@fi,
+                         "säljare"@sv,
+                         "seller agent"@en ;
+         skos:notation   "sll" .
+
+loc:sng  skos:exactMatch mts:m527 ;
+         skos:prefLabel  "laulaja"@fi,
+                         "sångare"@sv,
+                         "singer agent"@en ;
+         skos:notation   "sng" .
+
+loc:spk  skos:exactMatch mts:m1201 ;
+         skos:prefLabel  "puhuja"@fi,
+                         "talare"@sv,
+                         "speaker agent"@en ;
+         skos:notation   "spk" .
+
+loc:spn  skos:exactMatch mts:m184 ;
+         skos:prefLabel  "teoksen sponsori"@fi,
+                         "sponsor av verk"@sv,
+                         "sponsoring agent of work"@en ;
+         skos:notation   "spn" .
+
+loc:srv  skos:exactMatch mts:m5369 ;
+         skos:prefLabel  "maanmittari"@fi,
+                         "lantmätare"@sv,
+                         "surveyor agent"@en ;
+         skos:notation   "srv" .
+
+loc:std  skos:exactMatch mts:m3161 ;
+         skos:prefLabel  "lavastaja"@fi,
+                         "scenograf"@sv,
+                         "set designer"@en ;
+         skos:notation   "std" .
+
+loc:stl  skos:exactMatch mts:m572 ;
+         skos:prefLabel  "tarinankertoja"@fi,
+                         "historieberättare"@sv,
+                         "storyteller agent"@en ;
+         skos:notation   "stl" .
+
+loc:stm  skos:exactMatch mts:m3088 ;
+         skos:prefLabel  "näyttämömestari"@fi,
+                         "scenmästare"@sv,
+                         "stage manager"@en ;
+         skos:notation   "stm" .
+
+loc:swd  skos:exactMatch mts:m3590 ;
+         skos:prefLabel  "ohjelmistokehittäjä"@fi,
+                         "programutvecklare"@sv,
+                         "software developer agent"@en ;
+         skos:notation   "swd" .
+
+loc:tch  skos:exactMatch mts:m1802 ;
+         skos:prefLabel  "opettaja"@fi,
+                         "lärare"@sv,
+                         "teacher"@en ;
+         skos:notation   "tch" .
+
+loc:tld  skos:exactMatch mts:m1423 ;
+         skos:prefLabel  "televisio-ohjaaja"@fi,
+                         "tv-regissör"@sv,
+                         "television director agent"@en ;
+         skos:notation   "tld" .
+
+loc:tlp  skos:exactMatch mts:m1170 ;
+         skos:prefLabel  "televisiotuottaja"@fi,
+                         "tv-producent"@sv,
+                         "television producer agent"@en ;
+         skos:notation   "tlp" .
+
+loc:trc  skos:exactMatch mts:m1096 ;
+         skos:prefLabel  "transkriboija"@fi,
+                         "transkriberare"@sv,
+                         "transcriber agent"@en ;
+         skos:notation   "trc" .
+
+loc:trl  skos:exactMatch mts:m23 ;
+         skos:prefLabel  "kääntäjä"@fi,
+                         "översättare"@sv,
+                         "translator agent"@en ;
+         skos:notation   "trl" .
+
+loc:vac  skos:exactMatch mts:m17 ;
+         skos:prefLabel  "ääninäyttelijä"@fi,
+                         "röstskådespelare"@sv,
+                         "voice actor agent"@en ;
+         skos:notation   "vac" .
+
+loc:vfx  skos:exactMatch mts:m171 ;
+         skos:prefLabel  "visuaalisten tehosteiden tekijä"@fi,
+                         "skapare av visuella effekter"@sv,
+                         "visual effects provider agent"@en ;
+         skos:notation   "vfx" .
+
+loc:wac  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "wac" .
+
+loc:wal  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "wal" .
+
+loc:wat  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "wat" .
+
+loc:waw  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "waw" .
+
+loc:wfw  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "wfw" .
+
+loc:win  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "win" .
+
+loc:wpr  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "wpr" .
+
+loc:wst  skos:exactMatch mts:m5305 ;
+         skos:prefLabel  "tekstiin osallinen toimija"@fi,
+                         "bidragsgivare (aktör) till text"@sv,
+                         "contributor agent of text"@en ;
+         skos:notation   "wst" .

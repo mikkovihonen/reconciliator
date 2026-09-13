@@ -175,6 +175,38 @@ def test_relator_term_to_code() -> None:
     }
     rec = normalizer.normalize(raw)
     assert len(rec.agents) == 3
-    assert rec.agents[0].role == "aut"
-    assert rec.agents[1].role == "ill"
-    assert rec.agents[2].role == "edt"
+    assert rec.agents[0].role_counts == {"aut": 1}
+    assert rec.agents[1].role_counts == {"ill": 1}
+    assert rec.agents[2].role_counts == {"edt": 1}
+
+
+def test_normalize_doi() -> None:
+    from reconciliator.normalizers.identifiers import normalize_doi
+
+    assert normalize_doi("https://doi.org/10.1000/182") == "10.1000/182"
+    assert normalize_doi("http://dx.doi.org/10.1000/182") == "10.1000/182"
+    assert normalize_doi("doi:10.1000/182") == "10.1000/182"
+    assert normalize_doi("  10.1000/182  ") == "10.1000/182"
+    assert normalize_doi("invalid doi string") is None
+    assert normalize_doi("") is None
+
+
+def test_record_normalizer_standard_identifiers() -> None:
+    from reconciliator.normalizers.record import RecordNormalizer
+
+    normalizer = RecordNormalizer()
+    raw = {
+        "source_id": "test_ids",
+        "title": "Title with IDs",
+        "identifiers": {
+            "isbn": ["978-951-0-12345-6", "951-0-12345-X (nid.)"],
+            "issn": ["12345679"],
+            "urn": ["URN:NBN:fi:jyu-20210101"],
+            "doi": ["https://doi.org/10.1234/test.5678", "doi:10.9999/other"],
+        },
+    }
+    rec = normalizer.normalize(raw)
+    assert "10.1234/test.5678" in rec.identifiers.doi
+    assert "10.9999/other" in rec.identifiers.doi
+    assert "urn:nbn:fi:jyu-20210101" in rec.identifiers.urn
+

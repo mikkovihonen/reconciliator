@@ -118,7 +118,7 @@ def test_record_normalizer_custom_config() -> None:
     assert prim_class[0].scheme == "dewey"
     assert prim_class[0].code == "863"
     # Custom relator term mapped to code
-    assert rec.agents[0].role == "aut"
+    assert rec.agents[0].role_counts == {"aut": 1}
 
 
 def test_clean_title_and_volume_options() -> None:
@@ -180,7 +180,7 @@ normalization:
     root_cfg_file.write_text(
         f"""
 storage:
-  authority_db: "data/auth.db"
+  data_dir: "data"
 ingest_oai:
   my_source: "{oai_file.as_posix()}"
 normalization:
@@ -197,8 +197,8 @@ normalization:
     assert src_cfg.normalization is not None
     assert src_cfg.normalization.control_number_prefix == "(EXT-SOURCE)"
     assert src_cfg.normalization.control_number_padding_digits == 6
-    # Relative path in root config resolved against tmp_path
-    assert loaded.storage.authority_db == (tmp_path / "data/auth.db").resolve()
+    # Relative data_dir resolved against tmp_path
+    assert loaded.storage.authority_db == (tmp_path / "data/authority.db").resolve()
 
 
 def test_custom_roman_numerals_and_relator_mappings() -> None:
@@ -224,8 +224,8 @@ def test_custom_roman_numerals_and_relator_mappings() -> None:
     }
     rec = normalizer.normalize(raw_data)
     assert rec.volume_designation == "osa 20"
-    assert rec.agents[0].role == "aut"
-    assert rec.agents[1].role == "edt"
+    assert rec.agents[0].role_counts == {"aut": 1}
+    assert rec.agents[1].role_counts == {"edt": 1}
 
 
 def test_clean_publisher_default_suffixes() -> None:
@@ -294,7 +294,7 @@ def test_load_config_with_external_and_omitted_normalization(tmp_path: Path) -> 
     cfg_file.write_text(
         """
 storage:
-  authority_db: "data/auth.db"
+  data_dir: "data"
 """,
         encoding="utf-8",
     )

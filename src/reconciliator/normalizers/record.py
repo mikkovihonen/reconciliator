@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import re
 from typing import Any, Optional
 
@@ -24,6 +25,7 @@ from reconciliator.models import (
 )
 from reconciliator.normalizers.agent import extract_surname, normalize_agent_name, parse_245c_agents
 from reconciliator.normalizers.identifiers import (
+    normalize_doi,
     normalize_isbn,
     normalize_issn,
     normalize_source_id,
@@ -33,6 +35,7 @@ from reconciliator.normalizers.linguistic import build_biographical_date_pattern
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.template import RecordTemplateEngine
 from reconciliator.vocab_folding import VocabFolder
+from reconciliator.vocabularies import extract_concept_id, normalize_subject_vocabulary
 
 
 def clean_title(
@@ -418,6 +421,15 @@ class RecordNormalizer:
 
         # Identifiers
         raw_ids = raw_data.get("identifiers", {})
+        id_rules = cfg.standard_identifier_rules or {}
+
+        urn_rule = id_rules.get("urn", {})
+        urn_pats = urn_rule.get("patterns") or cfg.urn_pattern
+
+        doi_rule = id_rules.get("doi", {})
+        doi_prefixes = doi_rule.get("strip_resolver_prefixes")
+        doi_pat = doi_rule.get("pattern")
+
         isbns: list[str] = []
         for raw_isbn in raw_ids.get("isbn", []):
             norm_isbn = normalize_isbn(raw_isbn)
@@ -432,13 +444,25 @@ class RecordNormalizer:
 
         urns: list[str] = []
         for raw_urn in raw_ids.get("urn", []):
-            norm_urn = normalize_urn(raw_urn, pattern=cfg.urn_pattern)
+            norm_urn = normalize_urn(raw_urn, pattern=urn_pats)
             if norm_urn and norm_urn not in urns:
                 urns.append(norm_urn)
 
+        dois: list[str] = []
+        for raw_doi in raw_ids.get("doi", []):
+            norm_doi = normalize_doi(
+                raw_doi,
+                strip_resolver_prefixes=doi_prefixes,
+                pattern=doi_pat,
+            )
+            if norm_doi and norm_doi not in dois:
+                dois.append(norm_doi)
+
         other_ids = [str(oid).strip() for oid in raw_ids.get("other_ids", []) if oid]
 
-        identifiers = RecordIdentifiers(isbn=isbns, issn=issns, urn=urns, other_ids=other_ids)
+        identifiers = RecordIdentifiers(
+            isbn=isbns, issn=issns, urn=urns, doi=dois, other_ids=other_ids
+        )
 
         # Agents
         agents: list[Agent] = []
@@ -456,22 +480,42 @@ class RecordNormalizer:
                 date_pattern=self.date_pattern,
             )
             if norm_name:
-                role_raw = raw_agent.get("role")
-                role = role_raw
-                if role_raw and len(role_raw) > 3:
-                    mapped = self.relator_registry.term_to_code(role_raw)
-                    if mapped:
-                        role = mapped
+                role_counts: dict[str, int] = {}
+                raw_rc = dict(raw_agent.get("role_counts", {}))
+                if not raw_rc and raw_agent.get("role"):
+                    raw_rc[str(raw_agent["role"]).strip()] = 1
+                for r_key, r_cnt in raw_rc.items():
+                    norm_r = self.relator_registry.normalize_role(r_key) or r_key
+                    role_counts[norm_r] = role_counts.get(norm_r, 0) + r_cnt
+
+                qual_counts = dict(raw_agent.get("qualifier_counts", {}))
+                if not qual_counts and raw_agent.get("qualifier"):
+                    qual_counts[str(raw_agent["qualifier"]).strip()] = 1
+
+                affil_counts = dict(raw_agent.get("affiliation_counts", {}))
+                if not affil_counts and raw_agent.get("affiliation"):
+                    affil_counts[str(raw_agent["affiliation"]).strip()] = 1
+
                 agents.append(
                     Agent(
                         name=norm_name,
                         surname=surname,
-                        role=role,
+                        dates=raw_agent.get("dates"),
+                        fuller_name=raw_agent.get("fuller_name"),
+                        birth_year=raw_agent.get("birth_year"),
+                        death_year=raw_agent.get("death_year"),
                         field_tag=raw_agent.get("field_tag"),
                         is_personal=is_personal,
                         is_fictional=is_fictional,
                         uri_subfield_0=list(raw_agent.get("uri_subfield_0", [])),
                         uri_subfield_1=list(raw_agent.get("uri_subfield_1", [])),
+                        orcid=raw_agent.get("orcid"),
+                        variant_names=list(raw_agent.get("variant_names", [])),
+                        qualifier_counts=qual_counts,
+                        affiliation_counts=affil_counts,
+                        role_counts=role_counts,
+                        language_counts=dict(raw_agent.get("language_counts", {})),
+                        subject_counts=dict(raw_agent.get("subject_counts", {})),
                     )
                 )
 
@@ -489,60 +533,40 @@ class RecordNormalizer:
                 s_name = extract_surname(n)
                 fict = any(q in n.lower() for q in cfg.fictional_qualifiers)
                 agents.append(
-                    Agent(name=n, surname=s_name, role="aut", field_tag="245", is_fictional=fict)
+                    Agent(
+                        name=n,
+                        surname=s_name,
+                        role_counts={"aut": 1},
+                        field_tag="245",
+                        is_fictional=fict,
+                    )
                 )
 
         # Subjects folding via VocabFolder
         raw_subjects = raw_data.get("subjects", {})
-        topical: list[SubjectItem] = []
-        genre_form: list[SubjectItem] = []
-        geographic: list[SubjectItem] = []
-        medium_of_perf: list[SubjectItem] = []
-
         rec_lang_folding = language or cfg.default_language
-        for item in raw_subjects.get("topical", []):
-            heading = item.get("heading") or item.get("pref_label", "")
-            field = item.get("field", "650")
-            vocab = item.get("vocabulary")
-            uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
-                heading=heading,
-                source_vocab=vocab,
-                source_field=field,
-                source_uri=uri,
-                lang=rec_lang_folding,
-            )
-            sub_item = SubjectItem(
-                uri=t_uri,
-                pref_label=t_label,
-                vocabulary=t_vocab,
-                source_field=field,
-                target_field=t_field,
-                source_vocab=vocab,
-                source_uri=uri,
-                source_heading=heading,
-                mapping_type=m_type,
-                wikidata_qid=qid,
-            )
-            if t_field == "655":
-                genre_form.append(sub_item)
-            else:
-                topical.append(sub_item)
 
-        for item in raw_subjects.get("genre_form", []):
-            heading = item.get("heading") or item.get("pref_label", "")
-            field = item.get("field", "655")
-            vocab = item.get("vocabulary")
-            uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
-                heading=heading,
-                source_vocab=vocab,
-                source_field=field,
-                source_uri=uri,
-                lang=rec_lang_folding,
-            )
-            genre_form.append(
-                SubjectItem(
+        field_to_cat = cfg.subject_field_category_map
+        cat_default_field = {cat: tag for tag, cat in field_to_cat.items()}
+        folded_categories: dict[str, list[SubjectItem]] = {
+            cat: [] for cat in field_to_cat.values()
+        }
+
+        for cat_name, items in raw_subjects.items():
+            fallback_field = cat_default_field.get(cat_name) or self.config.default_subject_field
+            for item in items:
+                heading = item.get("heading") or item.get("pref_label", "")
+                field = item.get("field", fallback_field)
+                vocab = item.get("vocabulary")
+                uri = item.get("uri")
+                t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
+                    heading=heading,
+                    source_vocab=vocab,
+                    source_field=field,
+                    source_uri=uri,
+                    lang=rec_lang_folding,
+                )
+                sub_item = SubjectItem(
                     uri=t_uri,
                     pref_label=t_label,
                     vocabulary=t_vocab,
@@ -554,68 +578,38 @@ class RecordNormalizer:
                     mapping_type=m_type,
                     wikidata_qid=qid,
                 )
-            )
-
-        for item in raw_subjects.get("geographic", []):
-            heading = item.get("heading") or item.get("pref_label", "")
-            field = item.get("field", "651")
-            vocab = item.get("vocabulary")
-            uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
-                heading=heading,
-                source_vocab=vocab,
-                source_field=field,
-                source_uri=uri,
-                lang=rec_lang_folding,
-            )
-            geographic.append(
-                SubjectItem(
-                    uri=t_uri,
-                    pref_label=t_label,
-                    vocabulary=t_vocab,
-                    source_field=field,
-                    target_field=t_field,
-                    source_vocab=vocab,
-                    source_uri=uri,
-                    source_heading=heading,
-                    mapping_type=m_type,
-                    wikidata_qid=qid,
+                target_cat = field_to_cat.get(
+                    t_field, cat_name if cat_name in folded_categories else "topical"
                 )
-            )
-
-        for item in raw_subjects.get("medium_of_performance", []):
-            heading = item.get("heading") or item.get("pref_label", "")
-            field = item.get("field", "382")
-            vocab = item.get("vocabulary")
-            uri = item.get("uri")
-            t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
-                heading=heading,
-                source_vocab=vocab,
-                source_field=field,
-                source_uri=uri,
-                lang=rec_lang_folding,
-            )
-            medium_of_perf.append(
-                SubjectItem(
-                    uri=t_uri,
-                    pref_label=t_label,
-                    vocabulary=t_vocab,
-                    source_field=field,
-                    target_field=t_field,
-                    source_vocab=vocab,
-                    source_uri=uri,
-                    source_heading=heading,
-                    mapping_type=m_type,
-                    wikidata_qid=qid,
-                )
-            )
+                folded_categories[target_cat].append(sub_item)
 
         subjects = SubjectsContainer(
-            topical=topical,
-            genre_form=genre_form,
-            geographic=geographic,
-            medium_of_performance=medium_of_perf,
+            topical=folded_categories["topical"],
+            genre_form=folded_categories["genre_form"],
+            geographic=folded_categories["geographic"],
+            chronological=folded_categories["chronological"],
+            medium_of_performance=folded_categories["medium_of_performance"],
         )
+
+        # Enrich agent subject_counts with canonical concept IDs resolved by VocabFolder
+        resolved_subject_keys: list[str] = []
+        for s_item in subjects.all_subjects():
+            if s_item.uri and s_item.vocabulary:
+                    norm_v = normalize_subject_vocabulary(
+                        s_item.vocabulary,
+                        uri=s_item.uri,
+                    )
+                    if not norm_v:
+                        continue
+                    cid = extract_concept_id(s_item.uri)
+                    if cid:
+                        resolved_subject_keys.append(f"{norm_v}:{cid.lower()}")
+
+        if resolved_subject_keys:
+            resolved_counts = dict(Counter(resolved_subject_keys))
+            for a in agents:
+                for k, v in resolved_counts.items():
+                    a.subject_counts[k] = max(a.subject_counts.get(k, 0), v)
 
         record = BibliographicRecord(
             source_id=source_id,

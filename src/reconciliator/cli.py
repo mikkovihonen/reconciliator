@@ -13,7 +13,14 @@ from rdflib import Graph
 from rich.console import Console
 from rich.table import Table
 
-from reconciliator.config import AppConfig, OAIIngestConfig, SkosmosDownloadConfig, load_config
+from reconciliator.clusterer import CorpusClusterer
+from reconciliator.config import (
+    AppConfig,
+    OAIIngestConfig,
+    SkosmosDownloadConfig,
+    configure_logging,
+    load_config,
+)
 from reconciliator.db import reset_all_storage
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
@@ -22,6 +29,7 @@ from reconciliator.ingestion.vocab import ingest_vocab_file
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
 from reconciliator.loaders.bibframe import (
     BIBFRAMESchemaProfile,
+    build_target_record_from_bibframe,
     enrich_bibframe_graph,
     enrich_bibframe_jsonld,
     get_profile,
@@ -33,12 +41,27 @@ from reconciliator.loaders.bibra import (
     iter_bibra_records,
 )
 from reconciliator.loaders.marcxml import (
+    build_target_record_from_marc,
     iter_marc_record_elements,
     parse_marc_record_elem,
 )
-from reconciliator.matcher import ReconciliationEngine
-from reconciliator.models import TaskProgress
+from reconciliator.matcher import ReconciliationEngine, WorkMatcher
+from reconciliator.models import (
+    CorpusLinkage,
+    ExpressionCluster,
+    ManifestationCluster,
+    TargetRecord,
+    TaskProgress,
+    WorkCluster,
+)
+from reconciliator.normalizers.blocking import (
+    compute_author_key,
+    compute_title_stem,
+    compute_work_blocking_key,
+)
 from reconciliator.normalizers.record import RecordNormalizer
+from reconciliator.indexer.ipc.client import DaemonLifecycleManager
+from reconciliator.indexer.ipc.protocol import get_default_socket_path
 from reconciliator.progress import (
     ProgressTracker,
     format_task_table,
@@ -47,10 +70,18 @@ from reconciliator.progress import (
     parse_duration_seconds,
     prune_tasks,
     render_status_json,
+    render_telemetry_tui,
+    render_vector_daemon_panel,
     run_telemetry_tui,
 )
-from reconciliator.reports import AgentReportRow, ReportGenerator, SubjectReportRow
-from reconciliator.repository import AuthorityStore
+from reconciliator.reports import (
+    AgentReportRow,
+    ExpressionReportRow,
+    ReportGenerator,
+    SubjectReportRow,
+    WorkReportRow,
+)
+from reconciliator.repository import AuthorityStore, CorpusRepository, WEMIRepository
 from reconciliator.vocab_folding import VocabFolder
 from reconciliator.vocab_store import VocabStore
 from reconciliator.vocabularies import detect_vocabulary
@@ -62,6 +93,14 @@ app = typer.Typer(
 console = Console()
 
 
+def _resolve_cli_config(config: Path | str) -> Path:
+    """Resolve config path, falling back to config.example.yaml if config.yaml is absent."""
+    p = Path(config)
+    if not p.exists() and p == Path("config.yaml") and Path("config.example.yaml").exists():
+        return Path("config.example.yaml")
+    return p
+
+
 @app.command("reset")
 def reset_cmd(
     config: Path = typer.Option(
@@ -71,27 +110,37 @@ def reset_cmd(
         False,
         "--all",
         "-a",
-        help="Reset all storage (authority.db, vocab.db, progress.db, vector index)",
+        help="Reset all storage (authority.db, vocab.db, progress.db, corpus_db, vector indices)",
     ),
     authority: bool = typer.Option(
-        False, "--authority", help="Reset authority.db and vector index only"
+        False, "--authority", help="Reset authority.db and vector indices only"
     ),
     vocab: bool = typer.Option(False, "--vocab", help="Reset vocab.db only"),
     progress: bool = typer.Option(False, "--progress", help="Reset progress.db only"),
+    corpus: bool = typer.Option(False, "--corpus", help="Reset corpus staging database only"),
+    daemon: bool = typer.Option(
+        False, "--daemon", help="Reset and terminate the vector daemon service"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
-    """Reset configured databases and vector index."""
-    cfg = load_config(config)
+    """Reset configured databases and vector indices."""
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
 
     # Determine which components to reset
-    if all_components or not (authority or vocab or progress):
+    if all_components or not (authority or vocab or progress or corpus or daemon):
         reset_auth = True
         reset_voc = True
         reset_prog = True
+        reset_corp = True
+        reset_daemon = True
     else:
         reset_auth = authority
         reset_voc = vocab
         reset_prog = progress
+        reset_corp = corpus
+        reset_daemon = daemon or authority
 
     if not yes:
         confirm = typer.confirm("Are you sure you want to reset the specified storage?")
@@ -104,12 +153,17 @@ def reset_cmd(
         reset_authority=reset_auth,
         reset_vocab=reset_voc,
         reset_progress=reset_prog,
+        reset_corpus=reset_corp,
+        reset_daemon=reset_daemon,
     )
     console.print("[green]Successfully reset specified storage.[/green]")
 
 
 @app.command("status")
 def status_cmd(
+    action: Optional[str] = typer.Argument(
+        None, help="Optional subcommand or alias like 'watch'"
+    ),
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
@@ -124,11 +178,29 @@ def status_cmd(
     prune_completed: bool = typer.Option(
         False, "--prune-completed", "--prune", help="Prune completed tasks after displaying status"
     ),
+    exit_when_done: bool = typer.Option(
+        False,
+        "--exit-when-done",
+        "--until-done",
+        help="Automatically exit watch monitor once all active tasks complete",
+    ),
 ) -> None:
     """Query real-time task progress and telemetry from progress.db."""
-    cfg = load_config(config)
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
     progress_db = cfg.storage.progress_db
     poll_interval = interval if interval is not None else cfg.telemetry.watch_interval_seconds
+    is_watch = watch or (action is not None and action.lower() == "watch")
+
+    daemon_status: Optional[dict[str, Any]] = None
+    lifecycle: Optional[DaemonLifecycleManager] = None
+    if cfg.storage.vector_engine.mode == "daemon":
+        sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
+            cfg.storage.authority_db.parent
+        )
+        lifecycle = DaemonLifecycleManager(sock_p)
+        daemon_status = lifecycle.query_status()
 
     def fetch_tasks() -> list[TaskProgress]:
         if task_id:
@@ -136,13 +208,14 @@ def status_cmd(
             return [t] if t else []
         return list_tasks(progress_db)
 
-    if watch:
+    if is_watch:
         if json_output:
             try:
                 while True:
                     tasks = fetch_tasks()
-                    console.print(render_status_json(tasks))
-                    if tasks and all(t.status in ("completed", "failed") for t in tasks):
+                    d_status = lifecycle.query_status() if lifecycle else None
+                    console.print(render_status_json(tasks, daemon_status=d_status))
+                    if exit_when_done and tasks and all(t.status in ("completed", "failed") for t in tasks):
                         break
                     time.sleep(poll_interval)
             except KeyboardInterrupt:
@@ -153,18 +226,111 @@ def status_cmd(
                 db_path=progress_db,
                 interval=poll_interval,
                 console=console,
+                show_vector_daemon=cfg.telemetry.show_vector_daemon,
+                get_daemon_status=lifecycle.query_status if lifecycle else None,
+                exit_when_done=exit_when_done,
             )
     else:
         tasks = fetch_tasks()
         if json_output:
-            console.print(render_status_json(tasks))
+            console.print(render_status_json(tasks, daemon_status=daemon_status))
         else:
+            if cfg.telemetry.show_vector_daemon and cfg.storage.vector_engine.mode == "daemon":
+                console.print(render_vector_daemon_panel(daemon_status))
             table = format_task_table(tasks)
             console.print(table)
 
         if prune_completed:
             deleted = prune_tasks(progress_db, status="completed")
             console.print(f"[green]Pruned {deleted} completed task(s) from progress.db.[/green]")
+
+
+daemon_app = typer.Typer(name="daemon", help="Manage singleton vector index service.")
+app.add_typer(daemon_app, name="daemon")
+
+
+@daemon_app.command("status")
+def daemon_status_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit status as JSON"),
+) -> None:
+    """Query real-time health and active indices of the vector daemon."""
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
+        cfg.storage.authority_db.parent
+    )
+    lifecycle = DaemonLifecycleManager(sock_p, config_path=resolved_config)
+    status = lifecycle.query_status()
+    if json_output:
+        import json as _json
+        console.print(_json.dumps(status or {"status": "stopped", "socket_path": str(sock_p)}, indent=2))
+    else:
+        console.print(render_vector_daemon_panel(status))
+
+
+@daemon_app.command("start")
+def daemon_start_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+) -> None:
+    """Start the vector daemon in the background if not already running."""
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
+        cfg.storage.authority_db.parent
+    )
+    lifecycle = DaemonLifecycleManager(sock_p, config_path=resolved_config, auto_start=True)
+    if lifecycle.is_running():
+        console.print(f"[yellow]Vector daemon is already running on {sock_p}.[/yellow]")
+        return
+
+    console.print(f"[cyan]Starting vector daemon on {sock_p}...[/cyan]")
+    lifecycle.ensure_running()
+    status = lifecycle.query_status()
+    pid = status.get("pid", "?") if status else "?"
+    console.print(f"[green]Vector daemon successfully started (PID {pid}).[/green]")
+
+
+@daemon_app.command("stop")
+def daemon_stop_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+) -> None:
+    """Gracefully flush indices and terminate the vector daemon."""
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
+        cfg.storage.authority_db.parent
+    )
+    lifecycle = DaemonLifecycleManager(sock_p, config_path=resolved_config)
+    if not lifecycle.is_running():
+        console.print(f"[yellow]Vector daemon is not running on {sock_p}.[/yellow]")
+        return
+
+    console.print(f"[cyan]Stopping vector daemon on {sock_p}...[/cyan]")
+    success = lifecycle.shutdown()
+    if success:
+        console.print("[green]Vector daemon stopped successfully.[/green]")
+    else:
+        console.print("[red]Failed to stop vector daemon cleanly.[/red]")
+
+
+@daemon_app.command("restart")
+def daemon_restart_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+) -> None:
+    """Restart the vector daemon."""
+    resolved_config = _resolve_cli_config(config)
+    daemon_stop_cmd(config=resolved_config)
+    time.sleep(0.5)
+    daemon_start_cmd(config=resolved_config)
 
 
 @app.command("prune")
@@ -187,6 +353,7 @@ def prune_cmd(
 ) -> None:
     """Prune telemetry tasks and monitoring records from progress.db."""
     cfg = load_config(config)
+    configure_logging(cfg.logging)
     progress_db = cfg.storage.progress_db
 
     if completed and failed:
@@ -363,6 +530,7 @@ def download_skosmos_cmd(
 ) -> None:
     """Download value vocabularies in SKOS Turtle format from Skosmos instances for offline use."""
     cfg = load_config(config) if config.exists() else AppConfig()
+    configure_logging(cfg.logging)
 
     if list_vocabs:
         effective_api_url = api_url
@@ -462,7 +630,9 @@ def ingest_vocab_cmd(
     ),
 ) -> None:
     """Ingest ontologies and legacy migration tables into dedicated vocab.db."""
-    cfg = load_config(config)
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
     if not cfg.ingest_vocab:
         console.print("[red]No ingest_vocab section found in configuration.[/red]")
         raise typer.Exit(code=1)
@@ -516,7 +686,9 @@ def ingest_oai_cmd(
     ),
 ) -> None:
     """Harvest or read authority records from configured OAI-PMH/XML sources."""
-    cfg = load_config(config)
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
     if not cfg.ingest_oai:
         console.print("[red]No ingest_oai section found in configuration.[/red]")
         raise typer.Exit(code=1)
@@ -582,15 +754,55 @@ def ingest_oai_cmd(
         )
 
         console.print(f"[cyan]Ingesting authority records from source '{src_name}'...[/cyan]")
-        total = ingest_oai_pipeline(
-            source_name=src_name,
-            config=src_cfg,
-            store=store,
-            normalizer=normalizer,
-            embedder=embedder,
-            tracker=tracker,
-            skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-        )
+        if src_cfg.target_database == "corpus" or (
+            isinstance(src_cfg.target_database, Path)
+            and src_cfg.target_database == cfg.storage.corpus_db
+        ):
+            from reconciliator.repository import CorpusRepository
+
+            corpus_repo = CorpusRepository(cfg.storage.corpus_db)
+            total = ingest_oai_pipeline(
+                source_name=src_name,
+                config=src_cfg,
+                store=corpus_repo,
+                tracker=tracker,
+                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
+            )
+        elif src_cfg.target_database == "authority" or (
+            isinstance(src_cfg.target_database, Path)
+            and src_cfg.target_database == cfg.storage.authority_db
+        ):
+            from reconciliator.repository import WEMIRepository
+
+            wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+            total = ingest_oai_pipeline(
+                source_name=src_name,
+                config=src_cfg,
+                store=wemi_repo,
+                tracker=tracker,
+                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
+            )
+        elif isinstance(src_cfg.target_database, Path):
+            from reconciliator.repository import CorpusRepository
+
+            corpus_repo = CorpusRepository(src_cfg.target_database)
+            total = ingest_oai_pipeline(
+                source_name=src_name,
+                config=src_cfg,
+                store=corpus_repo,
+                tracker=tracker,
+                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
+            )
+        else:
+            total = ingest_oai_pipeline(
+                source_name=src_name,
+                config=src_cfg,
+                store=store,
+                normalizer=normalizer,
+                embedder=embedder,
+                tracker=tracker,
+                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
+            )
         console.print(
             f"[green]Successfully ingested {total} records from source '{src_name}'.[/green]"
         )
@@ -603,29 +815,12 @@ def ingest_wikidata_cmd(
     ),
 ) -> None:
     """Stream gzipped Wikidata dump, extract entities, embed, and index."""
-    cfg = load_config(config)
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
     if not cfg.ingest_wikidata:
         console.print("[red]No ingest_wikidata section found in configuration.[/red]")
         raise typer.Exit(code=1)
-
-    vocab_store = VocabStore(cfg.storage.vocab_db)
-    vocab_cfg = (
-        cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
-    ) or cfg.normalization.vocab
-    vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
-    embedder = SentenceEmbedder(cfg.embedding)
-    wiki_norm_cfg = cfg.ingest_wikidata.normalization or cfg.normalization.record
-    normalizer = RecordNormalizer(
-        vocab_folder=vocab_folder,
-        template_engine=embedder.template_engine,
-        config=wiki_norm_cfg,
-    )
-    store = AuthorityStore(
-        cfg.storage.authority_db,
-        cfg.storage.index_path,
-        dimension=embedder.dimension,
-        vector_engine_config=cfg.storage.vector_engine,
-    )
 
     tracker = ProgressTracker(
         db_path=cfg.storage.progress_db,
@@ -634,11 +829,87 @@ def ingest_wikidata_cmd(
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
 
-    console.print("[cyan]Streaming Wikidata entities from compressed dump...[/cyan]")
-    total = ingest_wikidata_pipeline(
-        cfg.ingest_wikidata, store, normalizer, embedder, tracker=tracker
-    )
+    if cfg.ingest_wikidata.extract_works:
+        from reconciliator.repository import WEMIRepository
+
+        wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+        console.print("[cyan]Streaming Wikidata entities into WEMI authority repository...[/cyan]")
+        total = ingest_wikidata_pipeline(cfg.ingest_wikidata, wemi_repo, tracker=tracker)
+    else:
+        vocab_store = VocabStore(cfg.storage.vocab_db)
+        vocab_cfg = (
+            cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
+        ) or cfg.normalization.vocab
+        vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
+        embedder = SentenceEmbedder(cfg.embedding)
+        wiki_norm_cfg = cfg.ingest_wikidata.normalization or cfg.normalization.record
+        normalizer = RecordNormalizer(
+            vocab_folder=vocab_folder,
+            template_engine=embedder.template_engine,
+            config=wiki_norm_cfg,
+        )
+        store = AuthorityStore(
+            cfg.storage.authority_db,
+            cfg.storage.index_path,
+            dimension=embedder.dimension,
+            vector_engine_config=cfg.storage.vector_engine,
+        )
+        console.print("[cyan]Streaming Wikidata entities from compressed dump...[/cyan]")
+        total = ingest_wikidata_pipeline(
+            cfg.ingest_wikidata, store, normalizer, embedder, tracker=tracker
+        )
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
+
+
+def _to_target_record(
+    rec_fmt: str,
+    orig_payload: Any,
+    raw_rec: dict[str, Any],
+    profile: Optional[BIBFRAMESchemaProfile] = None,
+) -> TargetRecord:
+    """Decompose or map raw bibliographic items into normalized TargetRecord instances."""
+    try:
+        if rec_fmt == "marcxml":
+            return build_target_record_from_marc(orig_payload, source="target")
+        elif rec_fmt == "bibframe_rdf":
+            g, nodes = orig_payload
+            instance_node = nodes[0] if nodes else None
+            return build_target_record_from_bibframe(
+                g, instance_node=instance_node, profile=profile, source="target"
+            )
+        elif rec_fmt == "bibframe_jsonld":
+            g = Graph()
+            g.parse(data=json.dumps(orig_payload), format="json-ld")
+            return build_target_record_from_bibframe(g, profile=profile, source="target")
+    except Exception:
+        pass
+
+    source_id = raw_rec.get("source_id") or "unknown_target"
+    title = raw_rec.get("title") or ""
+    agents = raw_rec.get("agents") or []
+    author_name = agents[0].get("name") if agents else None
+    author_surname = agents[0].get("surname") if agents else None
+    author_key = compute_author_key(author_name, author_surname)
+    title_stem = compute_title_stem(title)
+    work_blocking_key = compute_work_blocking_key(author_key, title_stem)
+
+    if isinstance(orig_payload, (dict, list)):
+        raw_bytes = json.dumps(orig_payload, ensure_ascii=False).encode("utf-8")
+    elif hasattr(orig_payload, "tag"):
+        raw_bytes = etree.tostring(orig_payload, encoding="utf-8")
+    else:
+        raw_bytes = str(orig_payload).encode("utf-8")
+
+    return TargetRecord(
+        record_id=source_id,
+        format=rec_fmt,
+        work_type="text",
+        title=title,
+        title_stem=title_stem,
+        author_key=author_key,
+        work_blocking_key=work_blocking_key,
+        raw_payload=raw_bytes,
+    )
 
 
 @app.command("reconcile")
@@ -648,7 +919,9 @@ def reconcile_cmd(
     ),
 ) -> None:
     """Reconcile target MARCXML records offline, enrich URIs, and write dual TSV reports."""
-    cfg = load_config(config)
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
     if not cfg.reconcile:
         console.print("[red]No reconcile section found in configuration.[/red]")
         raise typer.Exit(code=1)
@@ -686,7 +959,19 @@ def reconcile_cmd(
             force_template=cfg.embedding.force_template,
         )
 
-    engine = ReconciliationEngine(authority_store=store, embedder=embedder, config=r_cfg)
+    agent_indexer = None
+    if r_cfg.fallback_agent_reconciliation and cfg.storage.agent_index.exists():
+        from reconciliator.indexer import create_vector_engine
+
+        agent_indexer = create_vector_engine(
+            cfg.storage.agent_index,
+            dimension=embedder.dimension,
+            config=cfg.storage.vector_engine,
+        )
+
+    engine = ReconciliationEngine(
+        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    )
     enricher = MARCXMLEnricher(vocab_folder=vocab_folder)
     reporter = ReportGenerator(config=cfg)
 
@@ -781,8 +1066,52 @@ def reconcile_cmd(
                     yield "bibframe_rdf", (g, nodes), raw_rec_item, b_offset
         else:
             for r_elem, b_offset in iter_marc_record_elements(r_cfg.target_file):
-                raw_rec_item = parse_marc_record_elem(r_elem, source="target")
+                raw_rec_item = parse_marc_record_elem(
+                    r_elem,
+                    source="target",
+                    supported_subject_vocabularies=getattr(vocab_cfg, "supported_subject_vocabularies", None),
+                    legacy_to_modern=getattr(vocab_cfg, "legacy_to_modern", None),
+                    relator_mappings=getattr(rec_norm_cfg, "relator_mappings", None),
+                    vocab_store=vocab_store,
+                )
                 yield "marcxml", r_elem, raw_rec_item, b_offset
+
+    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    work_matcher = WorkMatcher(wemi_repo=wemi_repo, embedder=embedder, config=r_cfg)
+
+    linkage_map: dict[str, CorpusLinkage] = {}
+    work_cluster_map: dict[str, WorkCluster] = {}
+    expression_cluster_map: dict[str, ExpressionCluster] = {}
+    manifestation_cluster_map: dict[str, ManifestationCluster] = {}
+
+    if r_cfg.cluster and r_cfg.cluster.enabled:
+        console.print(
+            "[cyan]Staging target records and running intra-corpus graph clusterer...[/cyan]"
+        )
+        corpus_repo = CorpusRepository(cfg.storage.corpus_db)
+        staged_targets: list[TargetRecord] = []
+        for rec_fmt_s, orig_payload_s, raw_rec_s, _ in _iter_records():
+            staged_targets.append(
+                _to_target_record(rec_fmt_s, orig_payload_s, raw_rec_s, bf_profile)
+            )
+
+        if staged_targets:
+            corpus_repo.insert_target_records_batch(staged_targets)
+            clusterer = CorpusClusterer(
+                corpus_repo=corpus_repo,
+                wemi_repo=wemi_repo,
+                matcher=work_matcher,
+                config=r_cfg.cluster,
+            )
+            clusterer.cluster_corpus()
+            for lnk in corpus_repo.get_all_corpus_linkages():
+                linkage_map[lnk.record_id] = lnk
+            for wc in corpus_repo.get_all_work_clusters():
+                work_cluster_map[wc.cluster_id] = wc
+            for ec in corpus_repo.get_all_expression_clusters():
+                expression_cluster_map[ec.cluster_id] = ec
+            for mc in corpus_repo.get_all_manifestation_clusters():
+                manifestation_cluster_map[mc.cluster_id] = mc
 
     total_records = 0
     try:
@@ -850,7 +1179,7 @@ def reconcile_cmd(
                             field_occurrence=idx + 1,
                             subfield_code=subfield_code,
                             target_heading=agent.name,
-                            target_role=agent.role,
+                            target_role=", ".join(agent.role_counts.keys()) if agent.role_counts else None,
                             uri=uri,
                             vocabulary=detect_vocabulary(uri) or "OTHER",
                             authority_label=agent.name,
@@ -895,7 +1224,7 @@ def reconcile_cmd(
                             field_occurrence=idx + 1,
                             subfield_code=subfield_code,
                             target_heading=agent.name,
-                            target_role=agent.role,
+                            target_role=", ".join(agent.role_counts.keys()) if agent.role_counts else None,
                             uri=uri,
                             vocabulary=detect_vocabulary(uri) or "OTHER",
                             authority_label=agent.name,
@@ -912,12 +1241,7 @@ def reconcile_cmd(
                     )
 
             # Record subject report rows
-            all_subjects = (
-                [("650", s) for s in target_record.subjects.topical]
-                + [("655", s) for s in target_record.subjects.genre_form]
-                + [("651", s) for s in target_record.subjects.geographic]
-                + [("382", s) for s in target_record.subjects.medium_of_performance]
-            )
+            all_subjects = target_record.subjects.all_items()
             for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
                 s_tag = sub_item.source_field or default_tag
                 t_tag = sub_item.target_field or default_tag
@@ -963,6 +1287,125 @@ def reconcile_cmd(
                     )
                 )
 
+            # Modern WEMI resolution and reporting
+            target_wemi = _to_target_record(rec_fmt, orig_payload, raw_rec, bf_profile)
+            wemi_res = work_matcher.match_target(target_wemi)
+
+            linkage = linkage_map.get(target_wemi.record_id)
+            w_cluster = work_cluster_map.get(linkage.work_cluster_id) if linkage else None
+            e_cluster = (
+                expression_cluster_map.get(linkage.expression_cluster_id) if linkage else None
+            )
+            m_cluster = (
+                manifestation_cluster_map.get(linkage.manifestation_cluster_id) if linkage else None
+            )
+
+            # Add WorkReportRow
+            is_clustered = linkage is not None and linkage.work_cluster_id is not None
+            matched_w_uri = (
+                (wemi_res.work_uri if wemi_res else None)
+                or (linkage.final_work_uri if linkage else None)
+                or (w_cluster.canonical_work_uri if w_cluster else None)
+            )
+            qid = (
+                wemi_res.matched_work.wikidata_qid if (wemi_res and wemi_res.matched_work) else None
+            ) or (w_cluster.wikidata_qid if w_cluster else None)
+            w_action = (
+                "injected"
+                if (r_cfg.enrich and matched_w_uri)
+                else ("proposed" if matched_w_uri else "unmatched")
+            )
+            if is_clustered and not (wemi_res and wemi_res.matched_work):
+                w_action = (
+                    "hoisted"
+                    if (
+                        w_cluster
+                        and w_cluster.canonical_work_uri
+                        and not w_cluster.canonical_work_uri.startswith("urn:reconciliator:")
+                    )
+                    else "minted"
+                )
+
+            reporter.add_work_row(
+                WorkReportRow(
+                    target_record_id=target_wemi.record_id,
+                    work_type=target_wemi.work_type,
+                    target_title=target_wemi.title,
+                    target_author=target_wemi.author_key,
+                    target_year=target_wemi.year,
+                    work_blocking_key=target_wemi.work_blocking_key,
+                    matched_work_uri=matched_w_uri,
+                    wikidata_qid=qid,
+                    match_tier=wemi_res.match_tier if wemi_res else "unmatched",
+                    funnel_used=wemi_res.funnel_used if wemi_res else "none",
+                    confidence_score=wemi_res.confidence_score if wemi_res else 0.0,
+                    is_clustered=is_clustered,
+                    cluster_id=linkage.work_cluster_id if linkage else None,
+                    action=w_action,
+                )
+            )
+
+            # Add ExpressionReportRow
+            matched_e_uri = (
+                (wemi_res.expression_uri if wemi_res else None)
+                or (linkage.final_expression_uri if linkage else None)
+                or (e_cluster.canonical_expression_uri if e_cluster else None)
+            )
+            e_action = (
+                "injected"
+                if (r_cfg.enrich and matched_e_uri)
+                else ("proposed" if matched_e_uri else "unmatched")
+            )
+            e_content_type = (
+                (
+                    wemi_res.matched_expression.content_type
+                    if (wemi_res and wemi_res.matched_expression)
+                    else None
+                )
+                or (e_cluster.content_type if e_cluster else None)
+                or "text"
+            )
+            e_lang = (
+                (
+                    wemi_res.matched_expression.language
+                    if (
+                        wemi_res
+                        and wemi_res.matched_expression
+                        and wemi_res.matched_expression.language
+                    )
+                    else None
+                )
+                or (e_cluster.language if e_cluster else None)
+                or target_wemi.language
+                or "und"
+            )
+            e_version = (
+                (
+                    wemi_res.matched_expression.version_designation
+                    if (wemi_res and wemi_res.matched_expression)
+                    else None
+                )
+                or (e_cluster.version_designation if e_cluster else None)
+                or target_wemi.volume_designation
+            )
+
+            reporter.add_expression_row(
+                ExpressionReportRow(
+                    target_record_id=target_wemi.record_id,
+                    work_uri=matched_w_uri,
+                    expression_uri=matched_e_uri,
+                    content_type=e_content_type,
+                    language=e_lang,
+                    version_designation=e_version,
+                    translators=None,
+                    performers=None,
+                    match_tier=wemi_res.match_tier if wemi_res else "unmatched",
+                    confidence_score=wemi_res.confidence_score if wemi_res else 0.0,
+                    cluster_id=linkage.expression_cluster_id if linkage else None,
+                    action=e_action,
+                )
+            )
+
             # Mutate / serialize and stream write if output_file requested
             if out_f is not None:
                 if rec_fmt == "bibra":
@@ -979,6 +1422,12 @@ def reconcile_cmd(
                         target_record=target_record,
                         enrich=r_cfg.enrich,
                         fold_legacy=r_cfg.fold_legacy,
+                        wemi_result=wemi_res,
+                        linkage=linkage,
+                        work_cluster=w_cluster,
+                        expression_cluster=e_cluster,
+                        manifestation_cluster=m_cluster,
+                        enrichment_config=r_cfg.enrichment_toggles,
                     )
                     out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
                     out_f.write(b"\n")
@@ -988,6 +1437,13 @@ def reconcile_cmd(
                         res,
                         enrich=r_cfg.enrich,
                         fold_legacy=r_cfg.fold_legacy,
+                        wemi_result=wemi_res,
+                        linkage=linkage,
+                        work_cluster=w_cluster,
+                        expression_cluster=e_cluster,
+                        manifestation_cluster=m_cluster,
+                        target_record=target_wemi,
+                        enrichment_config=r_cfg.enrichment_toggles,
                     )
                     out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
                     out_f.write(b"\n")
@@ -1001,6 +1457,12 @@ def reconcile_cmd(
                     target_record=target_record,
                     enrich=r_cfg.enrich,
                     fold_legacy=r_cfg.fold_legacy,
+                    wemi_result=wemi_res,
+                    linkage=linkage,
+                    work_cluster=w_cluster,
+                    expression_cluster=e_cluster,
+                    manifestation_cluster=m_cluster,
+                    enrichment_config=r_cfg.enrichment_toggles,
                 )
 
             tracker.update_progress(
@@ -1041,6 +1503,18 @@ def reconcile_cmd(
     reporter.write_subject_detailed_report(r_cfg.subject_reports.detailed_file)
     reporter.write_subject_summary_report(r_cfg.subject_reports.summary_file)
 
+    if r_cfg.work_reports:
+        reporter.write_work_report(r_cfg.work_reports.detailed_file)
+        if r_cfg.work_reports.summary_file:
+            reporter.write_wemi_summary_report(r_cfg.work_reports.summary_file)
+    if r_cfg.expression_reports:
+        reporter.write_expression_report(r_cfg.expression_reports.detailed_file)
+        if r_cfg.expression_reports.summary_file and (
+            not r_cfg.work_reports
+            or r_cfg.expression_reports.summary_file != r_cfg.work_reports.summary_file
+        ):
+            reporter.write_wemi_summary_report(r_cfg.expression_reports.summary_file)
+
     tracker.complete_task(
         metadata={
             "matched_records": reporter.matched_records,
@@ -1050,6 +1524,41 @@ def reconcile_cmd(
     console.print("[green]Reconciliation complete! Emitted dual TSV report sets.[/green]")
 
 
+@app.command("build-agent-index")
+def build_agent_index_cmd(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml"
+    ),
+    batch_size: int = typer.Option(128, "--batch-size", "-b", help="Encoding batch size"),
+) -> None:
+    """Build dedicated agent vector index (agent.index) using concise essential serialization."""
+    from reconciliator.indexer import create_vector_engine
+
+    cfg = load_config(config_path)
+    store = AuthorityStore(
+        db_path=cfg.storage.authority_db,
+        index_path=cfg.storage.index_path,
+        vector_engine_config=cfg.storage.vector_engine,
+    )
+    embedder = SentenceEmbedder(cfg.embedding)
+    agent_indexer = create_vector_engine(
+        cfg.storage.agent_index,
+        dimension=embedder.dimension,
+        config=cfg.storage.vector_engine,
+    )
+    console.print(f"[cyan]Building agent index at {cfg.storage.agent_index}...[/cyan]")
+    tpl_path = cfg.reconcile.templates.agent if cfg.reconcile else None
+    count = store.build_agent_index(
+        agent_indexer=agent_indexer,
+        embedder=embedder,
+        batch_size=batch_size,
+        template_path=tpl_path,
+    )
+    console.print(
+        f"[green]Successfully indexed {count} agents into {cfg.storage.agent_index}[/green]"
+    )
+
+
 @app.command("run")
 def run_cmd(
     config: Path = typer.Option(
@@ -1057,15 +1566,57 @@ def run_cmd(
     ),
 ) -> None:
     """Execute end-to-end pipeline configured in YAML."""
-    cfg = load_config(config)
+    import time
+
+    start_time = time.time()
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
+
+    steps: list[tuple[str, Any, dict[str, Any]]] = []
     if cfg.ingest_vocab:
-        ingest_vocab_cmd(config=config)
+        steps.append(("ingest-vocab", ingest_vocab_cmd, {"config": config}))
     if cfg.ingest_oai:
-        ingest_oai_cmd(config=config, all_sources=True)
+        steps.append(("ingest-oai", ingest_oai_cmd, {"config": config, "all_sources": True}))
     if cfg.ingest_wikidata:
-        ingest_wikidata_cmd(config=config)
+        steps.append(("ingest-wikidata", ingest_wikidata_cmd, {"config": config}))
     if cfg.reconcile:
-        reconcile_cmd(config=config)
+        steps.append(("reconcile", reconcile_cmd, {"config": config}))
+
+    if not steps:
+        console.print("[yellow]No pipeline steps enabled in configuration.[/yellow]")
+        return
+
+    console.print(
+        f"[bold blue]Starting end-to-end pipeline with {len(steps)} enabled step(s):[/bold blue] "
+        + ", ".join(f"[cyan]{s[0]}[/cyan]" for s in steps)
+    )
+
+    completed_steps: list[tuple[str, float]] = []
+    for idx, (step_name, step_fn, step_kwargs) in enumerate(steps, start=1):
+        step_start = time.time()
+        console.print(f"\n[bold green]=== Step {idx}/{len(steps)}: {step_name} ===[/bold green]")
+        try:
+            step_fn(**step_kwargs)
+            step_dur = time.time() - step_start
+            completed_steps.append((step_name, step_dur))
+            console.print(
+                f"[bold green]=== Step {idx}/{len(steps)}: {step_name} completed in {step_dur:.2f}s ===[/bold green]"
+            )
+        except Exception as e:
+            step_dur = time.time() - step_start
+            console.print(
+                f"\n[bold red]Pipeline failed at step {idx}/{len(steps)} ({step_name}) after {step_dur:.2f}s: {e}[/bold red]"
+            )
+            raise typer.Exit(code=1) from e
+
+    total_dur = time.time() - start_time
+    console.print(
+        f"\n[bold blue]Pipeline completed successfully![/bold blue] "
+        f"Ran {len(completed_steps)} step(s) in [bold green]{total_dur:.2f}s[/bold green]:"
+    )
+    for s_name, s_dur in completed_steps:
+        console.print(f"  - [cyan]{s_name}[/cyan]: {s_dur:.2f}s")
 
 
 def main() -> None:

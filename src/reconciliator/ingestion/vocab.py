@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
+from reconciliator.config import (
+    VocabIngestConfig,
+    get_bundled_vocab_defaults,
+    get_category_default_field_map,
+)
 from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab_store import VocabStore, is_language_allowed
 
 
-def parse_turtle_simple(content: str) -> tuple[list[VocabConcept], list[ConceptMapping]]:
+def parse_turtle_simple(
+    content: str,
+    pref_label_languages: Optional[Sequence[str] | str] = None,
+    alt_label_languages: Optional[Sequence[str] | str] = None,
+    vocab_target_fields: Optional[dict[str, str]] = None,
+) -> tuple[list[VocabConcept], list[ConceptMapping]]:
     """
     Fast regex-based parser for SKOS Turtle (.ttl) concepts and mappings.
     Extracts skos:Concept, prefLabels, altLabels, exactMatch, and isReplacedBy.
@@ -38,9 +48,9 @@ def parse_turtle_simple(content: str) -> tuple[list[VocabConcept], list[ConceptM
                 return base + raw[len(pfx) :]
         return raw
 
-    # Block split by concept definition
+    # Match each skos:Concept block
     blocks = re.split(
-        r"(?:^|\n)\s*(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+skos:Concept\b",
+        r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+skos:Concept\b",
         content,
     )
     if len(blocks) > 1:
@@ -53,6 +63,8 @@ def parse_turtle_simple(content: str) -> tuple[list[VocabConcept], list[ConceptM
                 lu = u.lower()
                 if "/yso-paikat/" in lu or ":yso-paikat:" in lu:
                     return "yso-paikat"
+                if "/yso-aika/" in lu or ":yso-aika:" in lu:
+                    return "yso-aika"
                 if "/kauno/" in lu or ":kauno:" in lu:
                     return "kauno"
                 if "/kaunokki/" in lu or ":kaunokki:" in lu:
@@ -86,42 +98,37 @@ def parse_turtle_simple(content: str) -> tuple[list[VocabConcept], list[ConceptM
 
             vocab = _detect_vocab(uri)
 
-            pref_fi = None
-            pref_sv = None
-            pref_en = None
-            m_fi = re.search(r'skos:prefLabel\s+"([^"]+)"@fi', body)
-            if m_fi:
-                pref_fi = m_fi.group(1)
-            m_sv = re.search(r'skos:prefLabel\s+"([^"]+)"@sv', body)
-            if m_sv:
-                pref_sv = m_sv.group(1)
-            m_en = re.search(r'skos:prefLabel\s+"([^"]+)"@en', body)
-            if m_en:
-                pref_en = m_en.group(1)
+            pref_matches = re.findall(r'skos:prefLabel\s+"([^"]+)"(?:@([a-zA-Z0-9_-]+))?', body)
+            pref_labels: dict[str, str] = {}
+            for lbl, lang in pref_matches:
+                lang_code = (lang or "und").lower()
+                if is_language_allowed(lang_code, pref_label_languages):
+                    pref_labels[lang_code] = lbl
 
-            alt_fi = re.findall(r'skos:altLabel\s+"([^"]+)"@fi', body)
-            alt_sv = re.findall(r'skos:altLabel\s+"([^"]+)"@sv', body)
+            alt_matches = re.findall(r'skos:altLabel\s+"([^"]+)"(?:@([a-zA-Z0-9_-]+))?', body)
+            alt_labels: dict[str, list[str]] = {}
+            for lbl, lang in alt_matches:
+                lang_code = (lang or "und").lower()
+                if is_language_allowed(lang_code, alt_label_languages):
+                    alt_labels.setdefault(lang_code, []).append(lbl)
 
             is_deprecated = bool(
                 re.search(r'owl:deprecated\s+(?:"true"\^\^xsd:boolean|true\b)', body, re.IGNORECASE)
             )
 
-            target_field = "650"
-            if vocab == "slm":
-                target_field = "655"
-            elif vocab == "seko":
-                target_field = "382"
-            elif vocab == "yso-paikat":
-                target_field = "651"
+            active_target_fields = (
+                vocab_target_fields
+                if vocab_target_fields is not None
+                else get_bundled_vocab_defaults().get("vocab_target_fields", {})
+            )
+            default_target_field = get_bundled_vocab_defaults()["default_vocab_target_field"]
+            target_field = active_target_fields.get(vocab, default_target_field)
 
             concept = VocabConcept(
                 uri=uri,
                 vocabulary=vocab,
-                pref_label_fi=pref_fi,
-                pref_label_sv=pref_sv,
-                pref_label_en=pref_en,
-                alt_labels_fi=alt_fi,
-                alt_labels_sv=alt_sv,
+                pref_labels=pref_labels,
+                alt_labels=alt_labels,
                 is_deprecated=is_deprecated,
                 target_field=target_field,
             )
@@ -135,20 +142,12 @@ def parse_turtle_simple(content: str) -> tuple[list[VocabConcept], list[ConceptM
             for raw_match in matches:
                 target_uri = _resolve_uri(raw_match)
                 target_v = _detect_vocab(target_uri)
-
-                t_field = "650"
-                if target_v == "slm":
-                    t_field = "655"
-                elif target_v == "seko":
-                    t_field = "382"
-                elif target_v == "yso-paikat":
-                    t_field = "651"
+                t_field = active_target_fields.get(target_v, default_target_field)
 
                 mapping = ConceptMapping(
                     legacy_uri=uri,
                     legacy_vocab=vocab,
-                    legacy_label_fi=pref_fi,
-                    legacy_label_sv=pref_sv,
+                    legacy_labels=pref_labels,
                     target_uri=target_uri,
                     target_vocab=target_v,
                     mapping_type="exact_match",
@@ -167,12 +166,17 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
 
     total_bridge_mappings: list[ConceptMapping] = []
     total_bridge_aliases: list[dict[str, Any]] = []
+    total_bridge_relators: list[dict[str, Any]] = []
+
+    cat_defaults = get_category_default_field_map()
+    geo_field = cat_defaults["geographic"]
+    topical_field = cat_defaults["topical"]
 
     for bf in bridge_files:
         stem = bf.stem.replace(".ttl", "")
         content = bf.read_text(encoding="utf-8")
         bridges = parse_bridge_turtle(content, bridge_vocab=stem)
-        target_field = "651" if "countries" in stem else "650"
+        target_field = geo_field if "countries" in stem else ("100" if "relators" in stem else topical_field)
 
         for b in bridges:
             source_uri = b["source_uri"]
@@ -182,18 +186,62 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
             pref_en = b.get("pref_label_en")
             notation = b.get("notation")
 
+            target_v = "mts" if "mts:" in target_uri or "/mts/" in target_uri else "yso"
+
+            legacy_labels: dict[str, str] = {}
+            if pref_fi:
+                legacy_labels["fi"] = pref_fi
+            if pref_sv:
+                legacy_labels["sv"] = pref_sv
+            if pref_en:
+                legacy_labels["en"] = pref_en
+
             total_bridge_mappings.append(
                 ConceptMapping(
                     legacy_uri=source_uri,
                     legacy_vocab=stem,
-                    legacy_label_fi=pref_fi,
-                    legacy_label_sv=pref_sv,
+                    legacy_labels=legacy_labels,
                     target_uri=target_uri,
-                    target_vocab="yso",
+                    target_vocab=target_v,
                     mapping_type="exact_match",
                     target_field=target_field,
                 )
             )
+            if "relators" in stem:
+                total_bridge_mappings.append(
+                    ConceptMapping(
+                        legacy_uri=target_uri,
+                        legacy_vocab=target_v,
+                        legacy_labels=legacy_labels,
+                        target_uri=source_uri,
+                        target_vocab="loc-relators",
+                        mapping_type="exact_match",
+                        target_field=target_field,
+                    )
+                )
+                for label, lang in ((pref_fi, "fi"), (pref_sv, "sv"), (pref_en, "en")):
+                    if label:
+                        folded = fold_label(label)
+                        if folded:
+                            total_bridge_relators.append(
+                                {
+                                    "folded_term": folded,
+                                    "raw_term": label,
+                                    "lang": lang,
+                                    "code": notation,
+                                    "uri": target_uri,
+                                }
+                            )
+                if notation:
+                    total_bridge_relators.append(
+                        {
+                            "folded_term": fold_label(notation),
+                            "raw_term": notation,
+                            "lang": "und",
+                            "code": notation,
+                            "uri": target_uri,
+                        }
+                    )
 
             for label, lang in ((pref_fi, "fi"), (pref_sv, "sv"), (pref_en, "en")):
                 if label:
@@ -206,7 +254,7 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
                                 "lang": lang,
                                 "concept_uri": target_uri,
                                 "wikidata_qid": None,
-                                "vocabulary": "yso",
+                                "vocabulary": target_v,
                                 "target_field": target_field,
                                 "is_preferred": 1,
                                 "source": "bridge",
@@ -221,7 +269,7 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
                         "lang": "und",
                         "concept_uri": target_uri,
                         "wikidata_qid": None,
-                        "vocabulary": "yso",
+                        "vocabulary": target_v,
                         "target_field": target_field,
                         "is_preferred": 0,
                         "source": "bridge",
@@ -232,6 +280,8 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
         vocab_store.insert_mappings(total_bridge_mappings)
     if total_bridge_aliases:
         vocab_store.insert_aliases(total_bridge_aliases)
+    if total_bridge_relators:
+        vocab_store.insert_relators(total_bridge_relators)
 
     return len(total_bridge_mappings)
 
@@ -240,6 +290,7 @@ def ingest_vocab_file(
     input_path: Path | str,
     vocab_store: VocabStore,
     tracker: Optional[ProgressTracker] = None,
+    config: Optional[VocabIngestConfig] = None,
 ) -> tuple[int, int]:
     """Ingest SKOS Turtle or mapping file(s) into vocab.db.
 
@@ -259,6 +310,22 @@ def ingest_vocab_file(
     else:
         files = [path]
 
+    pref_langs = (
+        config.pref_label_languages
+        if config and config.pref_label_languages is not None
+        else vocab_store.config.ingest_pref_label_languages
+    )
+    alt_langs = (
+        config.alt_label_languages
+        if config and config.alt_label_languages is not None
+        else vocab_store.config.ingest_alt_label_languages
+    )
+
+    vocab_target_fields = (
+        getattr(config, "vocab_target_fields", None)
+        or getattr(vocab_store.config, "vocab_target_fields", None)
+    )
+
     if tracker:
         tracker.start_task(stage="parsing_vocab")
 
@@ -267,7 +334,12 @@ def ingest_vocab_file(
 
     for file_path in files:
         content = file_path.read_text(encoding="utf-8")
-        concepts, mappings = parse_turtle_simple(content)
+        concepts, mappings = parse_turtle_simple(
+            content,
+            pref_label_languages=pref_langs,
+            alt_label_languages=alt_langs,
+            vocab_target_fields=vocab_target_fields,
+        )
         total_concepts.extend(concepts)
         total_mappings.extend(mappings)
 
@@ -282,19 +354,29 @@ def ingest_vocab_file(
     vocab_store.insert_mappings(total_mappings)
 
     # Ingest MTS contributor roles into relator_terms
+    mts_to_code: dict[str, str] = {}
+    for m in total_mappings:
+        if "id.loc.gov/vocabulary/relators/" in m.target_uri and ("mts:" in m.legacy_uri or "/mts/" in m.legacy_uri):
+            mts_to_code[m.legacy_uri] = m.target_uri.rstrip("/").split("/")[-1].lower()
+        elif "id.loc.gov/vocabulary/relators/" in m.legacy_uri and ("mts:" in m.target_uri or "/mts/" in m.target_uri):
+            mts_to_code[m.target_uri] = m.legacy_uri.rstrip("/").split("/")[-1].lower()
+
     mts_roles: list[dict[str, Any]] = []
     for c in total_concepts:
         if c.vocabulary == "mts":
-            for lbl, lang in (
-                (c.pref_label_fi, "fi"),
-                (c.pref_label_sv, "sv"),
-                (c.pref_label_en, "en"),
-            ):
+            code = mts_to_code.get(c.uri)
+            for lang, lbl in c.pref_labels.items():
                 if lbl:
                     folded = fold_label(lbl)
                     if folded:
                         mts_roles.append(
-                            {"folded_term": folded, "raw_term": lbl, "lang": lang, "uri": c.uri}
+                            {
+                                "folded_term": folded,
+                                "raw_term": lbl,
+                                "lang": lang,
+                                "code": code,
+                                "uri": c.uri,
+                            }
                         )
     if mts_roles:
         vocab_store.insert_relators(mts_roles)

@@ -402,7 +402,8 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
     table.add_column("Rate", justify="right")
     table.add_column("Last Heartbeat", style="dim")
 
-    for t in tasks:
+    pipeline_tasks = [t for t in tasks if t.task_type != "system"]
+    for t in pipeline_tasks:
         status_style = (
             "green" if t.status == "completed" else "yellow" if t.status == "running" else "red"
         )
@@ -439,24 +440,144 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
     return table
 
 
-def render_status_json(tasks: list[TaskProgress]) -> str:
+def render_vector_daemon_panel(status: Optional[dict[str, Any]] = None) -> Panel:
+    """Compose a Rich Panel displaying real-time vector daemon telemetry."""
+    if not status or status.get("status") != "running":
+        content = Text()
+        content.append("○ ", style="dim yellow")
+        content.append("Daemon Status: ", style="bold")
+        content.append("STANDBY", style="dim yellow")
+        content.append(" (Inactive — will auto-spawn on demand when vector queries execute)\n", style="dim")
+        content.append("Mode: ", style="bold dim")
+        content.append("IPC Singleton Service", style="cyan")
+        return Panel(content, title="[bold cyan]Vector Daemon Service[/]", style="dim", padding=(0, 1))
+
+    content = Text()
+    pid = status.get("pid", "?")
+    dev = str(status.get("device", "auto")).upper()
+    ram = status.get("host_ram_mb", 0.0)
+    uptime = int(status.get("uptime_seconds", 0))
+    idle = int(status.get("idle_seconds", 0))
+    idle_limit = status.get("idle_timeout_seconds")
+    clients = status.get("active_clients", 0)
+
+    # Line 1: Status badge, PID, Device, RAM, Clients
+    content.append("● ", style="bold green")
+    content.append("RUNNING ", style="bold green")
+    content.append(f"(PID {pid})   ", style="dim")
+    content.append("Device: ", style="bold white")
+    content.append(f"{dev}   ", style="bold cyan")
+    content.append("Host RAM: ", style="bold white")
+    content.append(f"{ram:.1f} MB   ", style="yellow")
+    content.append("Clients: ", style="bold white")
+    content.append(f"{clients}\n", style="cyan")
+
+    # Line 2: Uptime, Idle time / countdown
+    mins, secs = divmod(uptime, 60)
+    hrs, mins = divmod(mins, 60)
+    uptime_str = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    content.append("Uptime: ", style="dim")
+    content.append(f"{uptime_str}   ", style="white")
+
+    if idle_limit is not None and idle_limit > 0:
+        remain = max(0, idle_limit - idle)
+        rem_m, rem_s = divmod(remain, 60)
+        content.append("Idle Countdown: ", style="dim")
+        rem_style = "green" if remain > 120 else "bold red"
+        content.append(f"{rem_m}m {rem_s}s   ", style=rem_style)
+    else:
+        content.append("Idle Shutdown: ", style="dim")
+        content.append("Disabled   ", style="dim")
+
+    indices = status.get("indices", [])
+    content.append(f"Managed Indices: {len(indices)}\n", style="dim")
+
+    # Line 3+: Indices summary
+    if indices:
+        for idx in indices:
+            key_name = idx.get("key", "index")
+            tot = idx.get("total_vectors", 0)
+            dim = idx.get("dimension", "?")
+            dt = idx.get("dtype", "float32")
+            backend = idx.get("backend", "unknown")
+            searches = idx.get("searches_total", 0)
+            adds = idx.get("adds_total", 0)
+            content.append(f"  • {key_name}: ", style="bold white")
+            content.append(f"{tot:,} vectors ", style="bold green")
+            content.append(f"({dim}-d {dt}, {backend})", style="dim")
+            content.append(f" | Searches: {searches:,} | Added: {adds:,}", style="cyan")
+            if idx.get("is_dirty"):
+                content.append(" *UNSAVED", style="bold red")
+            content.append("\n")
+    else:
+        content.append("  No indices currently opened\n", style="dim italic")
+
+    return Panel(
+        content,
+        title="[bold cyan]Vector Daemon Service[/]",
+        style="cyan",
+        padding=(0, 1),
+    )
+
+
+def render_status_json(
+    tasks: list[TaskProgress],
+    daemon_status: Optional[dict[str, Any]] = None,
+) -> str:
     """Render task progress list as structured JSON."""
-    return json.dumps([t.model_dump() for t in tasks], indent=2, ensure_ascii=False)
+    task_dicts = [t.model_dump() for t in tasks]
+    if daemon_status and not any(d.get("task_id") == "system_vector_daemon" for d in task_dicts):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        task_dicts.append(
+            {
+                "task_id": "system_vector_daemon",
+                "task_type": "system",
+                "status": daemon_status.get("status", "running"),
+                "current_stage": f"{len(daemon_status.get('indices', []))} active index(es)",
+                "items_processed": sum(
+                    idx.get("total_vectors", 0) for idx in daemon_status.get("indices", [])
+                ),
+                "items_total": None,
+                "bytes_processed": 0,
+                "bytes_total": None,
+                "rate_per_sec": 0.0,
+                "percentage": 0.0,
+                "start_time": now_iso,
+                "last_heartbeat": now_iso,
+                "error_message": None,
+                "metadata_json": json.dumps(daemon_status, ensure_ascii=False),
+            }
+        )
+    return json.dumps(task_dicts, indent=2, ensure_ascii=False)
 
 
 def render_telemetry_tui(
     tasks: list[TaskProgress],
     db_path: Path | str = "progress.db",
     interval: float = 1.0,
+    daemon_status: Optional[dict[str, Any]] = None,
+    show_vector_daemon: bool = True,
 ) -> Group:
     """Compose a full rich TUI view for live task telemetry."""
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     path_name = Path(db_path).name
 
-    running_count = sum(1 for t in tasks if t.status == "running")
-    completed_count = sum(1 for t in tasks if t.status == "completed")
-    failed_count = sum(1 for t in tasks if t.status == "failed")
-    total_rate = sum(t.rate_per_sec for t in tasks if t.status == "running")
+    # Extract daemon status from system task if not passed directly
+    if daemon_status is None:
+        for t in tasks:
+            if t.task_id == "system_vector_daemon" and t.metadata_json:
+                try:
+                    daemon_status = json.loads(t.metadata_json)
+                except Exception:
+                    pass
+
+    # Filter out system daemon task from user pipeline execution table
+    pipeline_tasks = [t for t in tasks if t.task_id != "system_vector_daemon"]
+
+    running_count = sum(1 for t in pipeline_tasks if t.status == "running")
+    completed_count = sum(1 for t in pipeline_tasks if t.status == "completed")
+    failed_count = sum(1 for t in pipeline_tasks if t.status == "failed")
+    total_rate = sum(t.rate_per_sec for t in pipeline_tasks if t.status == "running")
 
     header_text = Text()
     header_text.append("RECONCILIATOR ", style="bold cyan")
@@ -468,7 +589,7 @@ def render_telemetry_tui(
         style="bright_blue",
     )
 
-    if tasks:
+    if pipeline_tasks:
         table = Table(title="Task Queue & Pipeline Execution", expand=True, show_lines=True)
         table.add_column("Task ID", style="cyan", no_wrap=True)
         table.add_column("Type", style="magenta")
@@ -479,7 +600,7 @@ def render_telemetry_tui(
         table.add_column("Throughput", justify="right")
         table.add_column("Last Heartbeat", style="dim", justify="right")
 
-        for t in tasks:
+        for t in pipeline_tasks:
             if t.status == "completed":
                 status_badge = "[bold green]✔ COMPLETED[/]"
             elif t.status == "running":
@@ -543,7 +664,7 @@ def render_telemetry_tui(
         )
 
     total_skipped = 0
-    for t in tasks:
+    for t in pipeline_tasks:
         if t.metadata_json:
             try:
                 m = json.loads(t.metadata_json)
@@ -561,16 +682,19 @@ def render_telemetry_tui(
     summary_text.append(
         f"Failed: {failed_count}  ", style="bold red" if failed_count > 0 else "dim"
     )
-    summary_text.append(f"| Total Tasks: {len(tasks)}  ", style="dim")
+    summary_text.append(f"| Total Tasks: {len(pipeline_tasks)}  ", style="dim")
     if total_skipped > 0:
         summary_text.append(f"| Skipped: {total_skipped:,}  ", style="bold cyan")
     summary_text.append(f"| Aggregate Throughput: {total_rate:,.1f} items/s", style="bold cyan")
 
     summary = Panel(summary_text, title="Telemetry Summary", style="dim")
 
-    elements: list[RenderableType] = [header, task_view, summary]
+    elements: list[RenderableType] = [header]
+    if show_vector_daemon:
+        elements.append(render_vector_daemon_panel(daemon_status))
+    elements.extend([task_view, summary])
 
-    failed_tasks = [t for t in tasks if t.status == "failed" and t.error_message]
+    failed_tasks = [t for t in pipeline_tasks if t.status == "failed" and t.error_message]
     if failed_tasks:
         error_lines = Text()
         for ft in failed_tasks:
@@ -591,12 +715,22 @@ def run_telemetry_tui(
     db_path: Path | str,
     interval: float = 1.0,
     console: Optional[Console] = None,
+    show_vector_daemon: bool = True,
+    get_daemon_status: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
+    exit_when_done: bool = False,
 ) -> None:
     """Run interactive full-screen Live TUI monitor."""
     c = console or Console()
     initial_tasks = fetch_tasks()
+    initial_d_status = get_daemon_status() if get_daemon_status else None
     with Live(
-        render_telemetry_tui(initial_tasks, db_path=db_path, interval=interval),
+        render_telemetry_tui(
+            initial_tasks,
+            db_path=db_path,
+            interval=interval,
+            daemon_status=initial_d_status,
+            show_vector_daemon=show_vector_daemon,
+        ),
         console=c,
         screen=c.is_terminal,
         refresh_per_second=max(1.0 / max(interval, 0.1), 1.0),
@@ -604,8 +738,25 @@ def run_telemetry_tui(
         try:
             while True:
                 tasks = fetch_tasks()
-                live.update(render_telemetry_tui(tasks, db_path=db_path, interval=interval))
-                if tasks and all(t.status in ("completed", "failed") for t in tasks):
+                d_status = get_daemon_status() if get_daemon_status else None
+                live.update(
+                    render_telemetry_tui(
+                        tasks,
+                        db_path=db_path,
+                        interval=interval,
+                        daemon_status=d_status,
+                        show_vector_daemon=show_vector_daemon,
+                    )
+                )
+                if (
+                    exit_when_done
+                    and tasks
+                    and all(
+                        t.status in ("completed", "failed")
+                        for t in tasks
+                        if t.task_id != "system_vector_daemon"
+                    )
+                ):
                     break
                 time.sleep(interval)
         except KeyboardInterrupt:

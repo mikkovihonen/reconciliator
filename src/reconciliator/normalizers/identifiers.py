@@ -77,16 +77,18 @@ def normalize_issn(raw_issn: str) -> Optional[str]:
     return f"{cleaned[:4]}-{cleaned[4:]}"
 
 
-def normalize_urn(raw_urn: str, pattern: Optional[str] = None) -> Optional[str]:
+def normalize_urn(raw_urn: str, pattern: Optional[str | Iterable[str]] = None) -> Optional[str]:
     """Normalize persistent URN string to lowercase canonical format."""
     if not raw_urn:
         return None
 
-    raw_clean = raw_urn.strip()
+    raw_clean = str(raw_urn).strip()
     if pattern:
-        match = re.search(pattern, raw_clean, re.IGNORECASE)
-        if match:
-            return (match.group(1) if match.groups() else match.group(0)).lower()
+        pats = [pattern] if isinstance(pattern, str) else list(pattern)
+        for pat in pats:
+            match = re.search(pat, raw_clean, re.IGNORECASE)
+            if match:
+                return (match.group(1) if match.groups() else match.group(0)).lower()
 
     match = re.search(r"(urn:nbn:[^\s]+)", raw_clean, re.IGNORECASE)
     if match:
@@ -96,6 +98,48 @@ def normalize_urn(raw_urn: str, pattern: Optional[str] = None) -> Optional[str]:
         return raw_clean.lower()
 
     return None
+
+
+def normalize_doi(
+    raw_doi: str,
+    strip_resolver_prefixes: Optional[Iterable[str]] = None,
+    pattern: Optional[str] = None,
+) -> Optional[str]:
+    """Extract and normalize DOI string to canonical format (e.g. 10.1234/example).
+
+    Strips web resolver prefixes (https://doi.org/, http://dx.doi.org/, doi:).
+    """
+    if not raw_doi:
+        return None
+    clean = str(raw_doi).strip()
+    if not clean:
+        return None
+
+    prefixes = (
+        list(strip_resolver_prefixes)
+        if strip_resolver_prefixes is not None
+        else [
+            "https://doi.org/",
+            "http://doi.org/",
+            "https://dx.doi.org/",
+            "http://dx.doi.org/",
+            "doi:",
+        ]
+    )
+    for p in sorted(prefixes, key=len, reverse=True):
+        if clean.lower().startswith(p.lower()):
+            clean = clean[len(p):].strip()
+
+    pat = pattern or r"(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)"
+    m = re.search(pat, clean, re.IGNORECASE)
+    if m:
+        return (m.group(1) if m.groups() else m.group(0)).strip()
+
+    if clean.startswith("10.") and "/" in clean:
+        return clean
+
+    return None
+
 
 
 def normalize_source_id(
@@ -168,5 +212,6 @@ __all__ = [
     "normalize_isbn",
     "normalize_issn",
     "normalize_urn",
+    "normalize_doi",
     "normalize_source_id",
 ]

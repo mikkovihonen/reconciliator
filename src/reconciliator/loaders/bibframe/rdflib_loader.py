@@ -8,6 +8,10 @@ from typing import Any, Iterator, Optional, Union
 
 from rdflib import RDF, RDFS, SKOS, Graph, IdentifiedNode, Literal, URIRef
 
+from reconciliator.config import (
+    get_category_default_field_map,
+    get_subject_field_category_map,
+)
 from reconciliator.loaders.bibframe.base import (
     bibframe_to_raw_record,
     extract_provenance_tag,
@@ -18,11 +22,9 @@ from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
 )
+from reconciliator.vocabularies import detect_vocabulary
 
 logger = logging.getLogger(__name__)
-
-# Standard relator namespace
-MARC_RELATORS_NS = "http://id.loc.gov/vocabulary/relators/"
 
 
 def _guess_rdf_format(file_path: Path) -> str:
@@ -95,9 +97,8 @@ def _extract_title(
                 else:
                     variant_titles.append(str(title_obj).strip())
             elif isinstance(title_obj, IdentifiedNode):
-                # Check types of title_obj (bf:Title, bf:VariantTitle, bf:KeyTitle, etc.)
                 types = {str(t) for t in g.objects(title_obj, RDF.type)}
-                is_variant = any("Variant" in t or "KeyTitle" in t for t in types)
+                is_variant = bool(profile.expanded_title_variant_classes.intersection(types))
 
                 m_titles = _get_literals(g, title_obj, profile.expanded_main_title_predicates)
                 s_titles = _get_literals(g, title_obj, profile.expanded_subtitle_predicates)
@@ -143,13 +144,13 @@ def _extract_agents(
                 if not isinstance(contrib_obj, IdentifiedNode):
                     continue
 
-                # Check for bffi:marcKey on contribution node
+                # Check for provenance literal on contribution node
                 marc_key = None
                 if profile.expanded_provenance_predicate:
                     mk_lits = _get_literals(g, contrib_obj, [profile.expanded_provenance_predicate])
                     if mk_lits:
                         marc_key = mk_lits[0]
-                tag = extract_provenance_tag(marc_key)
+                tag = extract_provenance_tag(marc_key, profile=profile)
 
                 # Extract role
                 role: Optional[str] = None
@@ -163,7 +164,7 @@ def _extract_agents(
                             if r_labels:
                                 r_label = r_labels[0]
                         if isinstance(role_obj, URIRef):
-                            role = normalize_role_uri_or_label(str(role_obj), label=r_label)
+                            role = normalize_role_uri_or_label(str(role_obj), label=r_label, profile=profile)
                         elif isinstance(role_obj, Literal):
                             role = str(role_obj).strip()
                         elif r_label:
@@ -175,27 +176,16 @@ def _extract_agents(
                         if not isinstance(agent_obj, IdentifiedNode):
                             continue
 
-                        # Determine if personal or organization/meeting
+                        # Determine if personal or organization/meeting from configuration
                         agent_types = {str(t) for t in g.objects(agent_obj, RDF.type)}
-                        is_personal = True
-                        if any(
-                            "Organization" in t or "Corporate" in t or "Meeting" in t
-                            for t in agent_types
-                        ):
-                            is_personal = False
+                        is_personal = not bool(profile.expanded_agent_corporate_classes.intersection(agent_types))
 
-                        # Agent name: prefer rdfs:label, skos:prefLabel, bflc:name00MatchKey
-                        names = _get_literals(
-                            g,
-                            agent_obj,
-                            [
-                                str(RDFS.label),
-                                str(SKOS.prefLabel),
-                                "http://id.loc.gov/ontologies/bflc/name00MatchKey",
-                                "http://id.loc.gov/ontologies/bflc/name10MatchKey",
-                                "http://id.loc.gov/ontologies/bflc/name11MatchKey",
-                            ],
+                        # Agent name: prefer label predicates and match keys from profile
+                        name_preds = (
+                            profile.expanded_agent_label_predicates
+                            | profile.expanded_agent_match_key_predicates
                         )
+                        names = _get_literals(g, agent_obj, name_preds)
                         if not names:
                             continue
                         name = names[0]
@@ -207,10 +197,9 @@ def _extract_agents(
                         agent_uris: list[str] = []
                         if isinstance(agent_obj, URIRef) and not str(agent_obj).startswith("_:"):
                             agent_uris.append(str(agent_obj))
-                        # owl:sameAs or identifiedBy
-                        for same in g.objects(
-                            agent_obj, URIRef("http://www.w3.org/2002/07/owl#sameAs")
-                        ):
+                        # owl:sameAs or configured same_as_predicate
+                        same_pred = profile.expand_curie(profile.same_as_predicate)
+                        for same in g.objects(agent_obj, URIRef(same_pred)):
                             if isinstance(same, URIRef):
                                 agent_uris.append(str(same))
 
@@ -230,6 +219,7 @@ def _extract_agents(
                                 role=role,
                                 uri_subfield_0=agent_uris,
                                 uri_subfield_1=[],
+                                profile=profile,
                             )
                         )
     return agents
@@ -238,14 +228,21 @@ def _extract_agents(
 def _extract_subjects(
     g: Graph, nodes: list[IdentifiedNode], profile: BIBFRAMESchemaProfile
 ) -> dict[str, list[dict[str, Any]]]:
-    """Extract topical, genre/form, geographic, and medium of performance subjects."""
+    """Extract categorized subjects driven by configuration and BIBFRAME profile."""
+    field_category_map = get_subject_field_category_map()
+    cat_default_field = get_category_default_field_map()
+    default_target_field = (
+        profile.default_subject_field
+        or cat_default_field["topical"]
+    )
+    default_category = field_category_map[default_target_field]
     subjects: dict[str, list[dict[str, Any]]] = {
-        "topical": [],
-        "genre_form": [],
-        "geographic": [],
-        "medium_of_performance": [],
+        cat: [] for cat in field_category_map.values()
     }
     seen_uris: set[str] = set()
+
+    type_to_field = profile.subject_type_fields
+    source_preds = profile.expanded_source_predicates
 
     for node in nodes:
         # Subject predicates
@@ -257,35 +254,26 @@ def _extract_subjects(
                 uri: Optional[str] = str(subj_obj) if isinstance(subj_obj, URIRef) else None
                 types = {str(t) for t in g.objects(subj_obj, RDF.type)}
 
-                headings = _get_literals(g, subj_obj, [str(RDFS.label), str(SKOS.prefLabel)])
+                headings = _get_literals(g, subj_obj, profile.expanded_subject_label_predicates)
                 heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
                 if not heading:
                     continue
 
-                # Determine category
-                is_genre = any("GenreForm" in t for t in types)
-                is_geo = any("Place" in t or "Geographic" in t for t in types)
-                is_music = any("Music" in t or "mediumOfPerformance" in t for t in types)
+                # Determine target field from configured RDF types
+                target_field = default_target_field
+                for type_sub, f_tag in type_to_field.items():
+                    if any(type_sub in t for t in types):
+                        target_field = f_tag
+                        break
 
-                # Vocabulary detection from URI or bf:source
+                # Vocabulary detection from URI or configured source predicates
                 vocab: Optional[str] = None
                 if uri:
-                    u_lower = uri.lower()
-                    if "finto.fi/yso" in u_lower:
-                        vocab = "yso"
-                    elif "finto.fi/kauno" in u_lower:
-                        vocab = "kauno"
-                    elif "finto.fi/muso" in u_lower:
-                        vocab = "muso"
-                    elif "finto.fi/slm" in u_lower:
-                        vocab = "slm"
-                    elif "finto.fi/seko" in u_lower:
-                        vocab = "seko"
+                    detected_v = detect_vocabulary(uri)
+                    if detected_v:
+                        vocab = detected_v.lower()
 
-                for src_pred in [
-                    "http://urn.fi/URN:NBN:fi:schema:bffi:source",
-                    "http://id.loc.gov/ontologies/bibframe/source",
-                ]:
+                for src_pred in source_preds:
                     for src_obj in g.objects(subj_obj, URIRef(src_pred)):
                         if isinstance(src_obj, Literal):
                             vocab = str(src_obj).strip()
@@ -296,7 +284,7 @@ def _extract_subjects(
                             if src_labels:
                                 vocab = src_labels[0]
 
-                item_key = f"{heading}:{uri}"
+                item_key = (heading, vocab or "", target_field)
                 if item_key in seen_uris:
                     continue
                 seen_uris.add(item_key)
@@ -305,22 +293,14 @@ def _extract_subjects(
                     "heading": heading,
                     "vocabulary": vocab,
                     "uri": uri,
+                    "field": target_field,
                 }
-
-                if is_genre:
-                    item["field"] = "655"
-                    subjects["genre_form"].append(item)
-                elif is_geo:
-                    item["field"] = "651"
-                    subjects["geographic"].append(item)
-                elif is_music:
-                    item["field"] = "382"
-                    subjects["medium_of_performance"].append(item)
-                else:
-                    item["field"] = "650"
-                    subjects["topical"].append(item)
+                category = field_category_map.get(target_field, default_category)
+                subjects[category].append(item)
 
     # Medium of performance predicates
+    mop_field = cat_default_field["medium_of_performance"]
+    mop_category = field_category_map[mop_field]
     for node in nodes:
         for mop_pred in profile.expanded_music_performance_predicates:
             for mop_obj in g.objects(node, URIRef(mop_pred)):
@@ -331,11 +311,15 @@ def _extract_subjects(
                 heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
                 if not heading:
                     continue
-                subjects["medium_of_performance"].append(
+                vocab = None
+                if uri:
+                    detected_v = detect_vocabulary(uri)
+                    vocab = detected_v.lower() if detected_v else profile.default_music_vocabulary
+                subjects[mop_category].append(
                     {
                         "heading": heading,
-                        "field": "382",
-                        "vocabulary": "muso",
+                        "field": mop_field,
+                        "vocabulary": vocab,
                         "uri": uri,
                     }
                 )
@@ -346,11 +330,16 @@ def _extract_subjects(
 def _extract_identifiers(
     g: Graph, instance_node: IdentifiedNode, profile: BIBFRAMESchemaProfile
 ) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Extract (isbns, issns, urns, other_ids) from an Instance node."""
+    """Extract (isbns, issns, urns, other_ids) from an Instance node using profile-driven schemes."""
     isbns: list[str] = []
     issns: list[str] = []
     urns: list[str] = []
     other_ids: list[str] = []
+
+    scheme_map = profile.expanded_identifier_scheme_mappings
+    isbn_cands = scheme_map.get("isbn", set())
+    issn_cands = scheme_map.get("issn", set())
+    urn_cands = scheme_map.get("urn", set())
 
     for id_pred in profile.expanded_identifier_predicates:
         for id_obj in g.objects(instance_node, URIRef(id_pred)):
@@ -359,27 +348,27 @@ def _extract_identifiers(
 
             types = {str(t) for t in g.objects(id_obj, RDF.type)}
             vals = _get_literals(g, id_obj, [str(RDF.value), str(RDFS.label)])
-            src_vals = _get_literals(
-                g,
-                id_obj,
-                [
-                    "http://urn.fi/URN:NBN:fi:schema:bffi:source",
-                    "http://id.loc.gov/ontologies/bibframe/source",
-                ],
-            )
-            for s_pred in [
-                "http://urn.fi/URN:NBN:fi:schema:bffi:source",
-                "http://id.loc.gov/ontologies/bibframe/source",
-            ]:
+            src_vals = _get_literals(g, id_obj, profile.expanded_source_predicates)
+            for s_pred in profile.expanded_source_predicates:
                 for s_obj in g.objects(id_obj, URIRef(s_pred)):
                     if isinstance(s_obj, IdentifiedNode):
                         src_vals.extend(
                             _get_literals(
-                                g, s_obj, [str(RDFS.label), str(SKOS.prefLabel), str(RDF.value)]
+                                g,
+                                s_obj,
+                                [str(RDFS.label), str(SKOS.prefLabel), str(RDF.value)],
                             )
                         )
-            is_isbn_source = any("isbn" in s.lower() for s in src_vals)
-            is_issn_source = any("issn" in s.lower() for s in src_vals)
+
+            is_isbn = bool(types.intersection(isbn_cands)) or any(
+                cand.lower() in s.lower() for cand in isbn_cands for s in src_vals
+            )
+            is_issn = bool(types.intersection(issn_cands)) or any(
+                cand.lower() in s.lower() for cand in issn_cands for s in src_vals
+            )
+            is_urn = bool(types.intersection(urn_cands)) or any(
+                cand.lower() in s.lower() for cand in urn_cands for s in src_vals
+            )
 
             for val in vals:
                 digits_only = val.replace("-", "").replace(" ", "").upper()
@@ -388,18 +377,13 @@ def _extract_identifiers(
                     and (digits_only[-1].isdigit() or digits_only[-1] == "X")
                 )
 
-                if (
-                    any("Isbn" in t for t in types)
-                    or "isbn" in val.lower()
-                    or is_isbn_source
-                    or is_standard_isbn
-                ):
+                if is_isbn or is_standard_isbn:
                     if val not in isbns:
                         isbns.append(val)
-                elif any("Issn" in t for t in types) or "issn" in val.lower() or is_issn_source:
+                elif is_issn:
                     if val not in issns:
                         issns.append(val)
-                elif any("Urn" in t for t in types) or val.lower().startswith("urn:"):
+                elif is_urn or val.lower().startswith("urn:"):
                     if val not in urns:
                         urns.append(val)
                 else:
@@ -409,7 +393,7 @@ def _extract_identifiers(
     # Check instance URI itself for URN
     if isinstance(instance_node, URIRef):
         u = str(instance_node)
-        if "urn:nbn:fi" in u.lower() or "urn.fi" in u.lower():
+        if any(cand.lower() in u.lower() for cand in urn_cands) or u.lower().startswith("urn:"):
             if u not in urns:
                 urns.append(u)
 
@@ -430,42 +414,27 @@ def _extract_provision_activity(
                 continue
 
             # Date / year
-            dates = _get_literals(
-                g,
-                prov_obj,
-                [
-                    "http://urn.fi/URN:NBN:fi:schema:bffi:date",
-                    "http://urn.fi/URN:NBN:fi:schema:bffi:simpleDate",
-                    "http://id.loc.gov/ontologies/bibframe/date",
-                    "http://id.loc.gov/ontologies/bflc/simpleDate",
-                    "http://purl.org/dc/terms/date",
-                    "http://purl.org/dc/terms/issued",
-                ],
-            )
+            dates = _get_literals(g, prov_obj, profile.expanded_provision_date_predicates)
             if dates and not year:
                 year = dates[0]
 
             # Agent / publisher
             if not publisher:
-                agent_preds = profile.expanded_agent_predicates | {
-                    "http://id.loc.gov/ontologies/bibframe/agent",
-                    "http://purl.org/dc/elements/1.1/publisher",
-                }
+                agent_preds = (
+                    profile.expanded_provision_publisher_predicates
+                    | profile.expanded_agent_predicates
+                )
                 for agent_pred in agent_preds:
                     for ag_obj in g.objects(prov_obj, URIRef(agent_pred)):
                         if isinstance(ag_obj, Literal):
                             publisher = str(ag_obj).strip()
                             break
                         elif isinstance(ag_obj, IdentifiedNode):
-                            ag_labels = _get_literals(
-                                g,
-                                ag_obj,
-                                [
-                                    str(RDFS.label),
-                                    str(SKOS.prefLabel),
-                                    "http://id.loc.gov/ontologies/bflc/name00MatchKey",
-                                ],
+                            name_preds = (
+                                profile.expanded_agent_label_predicates
+                                | profile.expanded_agent_match_key_predicates
                             )
+                            ag_labels = _get_literals(g, ag_obj, name_preds)
                             if ag_labels:
                                 publisher = ag_labels[0]
                                 break
@@ -474,34 +443,23 @@ def _extract_provision_activity(
 
             # Fallback direct literal on prov_obj
             if not publisher:
-                publishers = _get_literals(
-                    g,
-                    prov_obj,
-                    [
-                        "http://id.loc.gov/ontologies/bibframe/agent",
-                        str(RDFS.label),
-                        str(SKOS.prefLabel),
-                    ],
+                name_preds = (
+                    profile.expanded_provision_publisher_predicates
+                    | profile.expanded_agent_label_predicates
                 )
+                publishers = _get_literals(g, prov_obj, name_preds)
                 if publishers:
                     publisher = publishers[0]
 
             # Place
             if not place:
-                for pl_pred in [
-                    "http://id.loc.gov/ontologies/bibframe/place",
-                    "http://urn.fi/URN:NBN:fi:schema:bffi:place",
-                ]:
+                for pl_pred in profile.expanded_provision_place_predicates:
                     for pl_obj in g.objects(prov_obj, URIRef(pl_pred)):
                         if isinstance(pl_obj, Literal):
                             place = str(pl_obj).strip()
                             break
                         elif isinstance(pl_obj, IdentifiedNode):
-                            pl_labels = _get_literals(
-                                g,
-                                pl_obj,
-                                [str(RDFS.label), str(SKOS.prefLabel)],
-                            )
+                            pl_labels = _get_literals(g, pl_obj, profile.expanded_agent_label_predicates)
                             if pl_labels:
                                 place = pl_labels[0]
                                 break
@@ -512,10 +470,7 @@ def _extract_provision_activity(
                 places = _get_literals(
                     g,
                     prov_obj,
-                    [
-                        "http://id.loc.gov/ontologies/bibframe/place",
-                        str(RDFS.label),
-                    ],
+                    profile.expanded_provision_place_predicates | profile.expanded_agent_label_predicates,
                 )
                 if places:
                     place = places[0]

@@ -273,13 +273,11 @@ def test_cli_download_skosmos_single_and_ingest(tmp_path: Path) -> None:
     """Test CLI download-skosmos command for a single source with --vocab and --ingest flags."""
     config_file = tmp_path / "config.yaml"
     vocab_db = tmp_path / "vocab.db"
-    progress_db = tmp_path / "progress.db"
     out_dir = tmp_path / "finto_data"
 
     config_yaml = f"""
 storage:
-  vocab_db: "{vocab_db}"
-  progress_db: "{progress_db}"
+  data_dir: "{tmp_path}"
 download_skosmos:
   finto:
     enabled: true
@@ -336,6 +334,8 @@ def test_cli_download_skosmos_all_sources(tmp_path: Path) -> None:
     out_dir_agrovoc = tmp_path / "agrovoc_dumps"
 
     config_yaml = f"""
+storage:
+  data_dir: "{tmp_path}"
 download_skosmos:
   finto:
     enabled: true

@@ -140,8 +140,10 @@ class OAIPMHHarvester:
         self,
         from_date: Optional[str] = None,
         until_date: Optional[str] = None,
+        resumption_token: Optional[str] = None,
         tracker: Optional[ProgressTracker] = None,
         on_record_harvested: Optional[Callable[[], None]] = None,
+        on_resumption_token: Optional[Callable[[Optional[str]], None]] = None,
     ) -> Iterator[etree._Element]:
         """Harvest records for a given date slice, following resumptionTokens."""
         client = httpx2.Client(
@@ -160,7 +162,7 @@ class OAIPMHHarvester:
         if until_date:
             params["until"] = until_date
 
-        resumption_token: Optional[str] = None
+        resumption_token = resumption_token
 
         try:
             while True:
@@ -241,7 +243,11 @@ class OAIPMHHarvester:
 
                 if token_elem is not None and token_elem.text and token_elem.text.strip():
                     resumption_token = token_elem.text.strip()
+                    if on_resumption_token:
+                        on_resumption_token(resumption_token)
                 else:
+                    if on_resumption_token:
+                        on_resumption_token(None)
                     break
 
                 # Rate limiting between pagination requests

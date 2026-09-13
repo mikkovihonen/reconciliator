@@ -5,31 +5,25 @@ from __future__ import annotations
 from typing import Optional
 
 from reconciliator.config import VocabNormalizationConfig
+from reconciliator.models import VocabConcept
 from reconciliator.normalizers.linguistic import build_biographical_date_pattern, fold_label
 from reconciliator.vocab_store import VocabStore
+from reconciliator.vocabularies import strip_vocabulary_subcode
 
 
 def format_target_vocab(
     target_vocab: str,
     source_vocab: Optional[str] = None,
-    lang: str = "fi",
+    lang: Optional[str] = None,
     config: Optional[VocabNormalizationConfig] = None,
 ) -> str:
     """Format vocabulary code with compliant language suffix (e.g. yso/fin, yso/swe)."""
+    cfg = config or VocabNormalizationConfig()
     raw_source = (source_vocab or "").strip().lower()
-    base_vocab = target_vocab.split("/")[0].strip()
+    base_vocab = strip_vocabulary_subcode(target_vocab)
 
-    # Subcode vocabularies
-    subcode_vocabs = (
-        set(config.language_subcode_vocabularies.keys())
-        if config
-        else {"yso", "yso-paikat", "kauno", "muso", "slm"}
-    )
-    if not subcode_vocabs:
-        subcode_vocabs = {"yso", "yso-paikat", "kauno", "muso", "slm"}
-    else:
-        subcode_vocabs.update({"yso", "yso-paikat", "kauno", "muso", "slm"})
-
+    # Subcode vocabularies from configuration
+    subcode_vocabs = set(cfg.language_subcode_vocabularies.keys())
     if base_vocab not in subcode_vocabs:
         return base_vocab
 
@@ -40,25 +34,18 @@ def format_target_vocab(
         if suffix:
             return f"{base_vocab}/{suffix}"
 
-    # 2. Known legacy sources
-    thes_langs = (
-        config.thesaurus_languages
-        if config
-        else {
-            "ysa": "fi",
-            "allars": "sv",
-            "kaunokki": "fi",
-            "bella": "sv",
-            "musa": "fi",
-            "cilla": "sv",
-        }
-    )
-    if raw_source in thes_langs:
-        mapped_l = thes_langs[raw_source]
-        return f"{base_vocab}/{'swe' if mapped_l in ('sv', 'swe') else 'fin'}"
+    default_subcode = cfg.language_subcode_vocabularies.get(base_vocab, "fin")
 
-    # 3. For standard vocabularies, attach language suffix
-    lang_suffix = "swe" if lang in ("sv", "swe") else "fin"
+    # 2. Known legacy sources from configuration
+    thes_langs = cfg.thesaurus_languages
+    if raw_source in thes_langs:
+        mapped_l = thes_langs[raw_source].strip().lower()
+        subcode = cfg.language_subcode_suffixes.get(mapped_l, default_subcode)
+        return f"{base_vocab}/{subcode}"
+
+    # 3. For standard vocabularies, attach language suffix based on record language
+    effective_lang = (lang or cfg.default_language).strip().lower()
+    lang_suffix = cfg.language_subcode_suffixes.get(effective_lang, default_subcode)
     return f"{base_vocab}/{lang_suffix}"
 
 
@@ -80,13 +67,77 @@ class VocabFolder:
             custom_pattern=self.config.biographical_date_pattern,
         )
 
+    def _resolve_target_field(
+        self,
+        vocab: str,
+        current_field: str,
+        concept_target_field: Optional[str] = None,
+    ) -> str:
+        """Determine target MARC field based on concept metadata or configured vocab_target_fields."""
+        if concept_target_field:
+            return concept_target_field
+        return self.config.vocab_target_fields.get(vocab, current_field)
+
+    def _enforce_valid_field_vocab(self, target_field: str, target_vocab: str) -> str:
+        """Ensure target_vocab is allowed in target_field, falling back to field default if prohibited."""
+        if target_field == self.config.default_vocab_target_field:
+            return target_vocab
+        allowed = self.config.field_to_vocabularies.get(target_field)
+        if allowed and target_vocab not in allowed:
+            return self.config.default_field_vocabularies.get(target_field, target_vocab)
+        return target_vocab
+
+    def _get_default_target_vocab(self, source_field: str, norm_vocab: str) -> str:
+        """Get default target vocabulary from legacy mapping, field defaults, or source vocab."""
+        if norm_vocab and norm_vocab in self.config.legacy_to_modern:
+            return self.config.legacy_to_modern[norm_vocab]
+        if source_field in self.config.default_field_vocabularies:
+            return self.config.default_field_vocabularies[source_field]
+        default_topical = self.config.default_vocab_target_field
+        if default_topical in self.config.default_field_vocabularies:
+            return norm_vocab or self.config.default_field_vocabularies[default_topical]
+        if self.config.default_field_vocabularies:
+            return norm_vocab or next(iter(self.config.default_field_vocabularies.values()))
+        return norm_vocab
+
+    def _select_pref_label(
+        self,
+        concept: VocabConcept,
+        lang: Optional[str],
+        fallback_heading: str,
+    ) -> str:
+        """Select preferred label from concept based on requested language and configured priority."""
+        req_lang = (lang or self.config.default_language).strip().lower()
+        norm_req = self.config.language_code_map.get(req_lang, req_lang)
+
+        priority: list[str] = [norm_req]
+        for pref in self.config.preferred_label_languages:
+            norm_pref = self.config.language_code_map.get(
+                pref.strip().lower(), pref.strip().lower()
+            )
+            if norm_pref not in priority:
+                priority.append(norm_pref)
+
+        for lang_code in priority:
+            label = concept.pref_labels.get(lang_code)
+            if not label:
+                label = getattr(concept, f"pref_label_{lang_code}", None)
+            if label and isinstance(label, str):
+                return label
+
+        for label in concept.pref_labels.values():
+            if label and isinstance(label, str):
+                return label
+
+        return fallback_heading
+
     def fold_subject_heading(
         self,
         heading: str,
         source_vocab: Optional[str] = None,
-        source_field: str = "650",
+        source_field: Optional[str] = None,
         source_uri: Optional[str] = None,
-        lang: str = "fi",
+        lang: Optional[str] = None,
     ) -> tuple[str, str, str, str, str, Optional[str]]:
         """
         Reconcile a subject heading to canonical modern ontology.
@@ -94,26 +145,19 @@ class VocabFolder:
         Returns:
             (target_field, target_vocab, target_uri, target_pref_label, mapping_type, wikidata_qid)
         """
+        source_field = source_field or self.config.default_vocab_target_field
         clean_heading = heading.strip().rstrip(".,; ")
+        effective_lang = (lang or self.config.default_language).strip().lower()
         raw_vocab = (source_vocab or "").strip().lower()
         # Strip language suffix like /fin, /swe, /eng (e.g. yso/fin -> yso, slm/fin -> slm)
-        norm_vocab = raw_vocab.split("/")[0].strip()
+        norm_vocab = strip_vocabulary_subcode(raw_vocab)
 
         # If already canonical modern ontology URI/code and no vocab_store
         if self.vocab_store is None:
             # Fallback heuristic if vocab_store is not populated
-            if norm_vocab and norm_vocab in self.config.legacy_to_modern:
-                target_vocab = self.config.legacy_to_modern[norm_vocab]
-            elif source_field in self.config.default_field_vocabularies:
-                target_vocab = self.config.default_field_vocabularies[source_field]
-            else:
-                target_vocab = norm_vocab or "yso"
-
-            target_field = source_field
-            if target_vocab == "slm":
-                target_field = "655"
-            elif target_vocab == "seko":
-                target_field = "382"
+            target_vocab = self._get_default_target_vocab(source_field, norm_vocab)
+            target_field = self._resolve_target_field(target_vocab, source_field)
+            target_vocab = self._enforce_valid_field_vocab(target_field, target_vocab)
 
             formatted_vocab = format_target_vocab(
                 target_vocab, source_vocab, lang=lang, config=self.config
@@ -125,20 +169,17 @@ class VocabFolder:
             mapping = self.vocab_store.find_legacy_mapping_by_uri(source_uri)
             if mapping:
                 concept = self.vocab_store.find_concept_by_uri(mapping.target_uri)
-                pref_label = clean_heading
-                if concept:
-                    pref_label = (
-                        (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
-                        or concept.pref_label_fi
-                        or concept.pref_label_en
-                        or clean_heading
-                    )
-                target_field = mapping.target_field or source_field
-                # Enforce: 655 is SLM
-                if target_field == "655" and mapping.target_vocab == "kauno":
-                    mapping.target_vocab = "slm"
+                pref_label = (
+                    self._select_pref_label(concept, lang, clean_heading)
+                    if concept
+                    else clean_heading
+                )
+                target_field = self._resolve_target_field(
+                    mapping.target_vocab, source_field, mapping.target_field
+                )
+                tgt_v = self._enforce_valid_field_vocab(target_field, mapping.target_vocab)
                 target_vocab = format_target_vocab(
-                    mapping.target_vocab, source_vocab, lang=lang, config=self.config
+                    tgt_v, source_vocab, lang=lang, config=self.config
                 )
                 return (
                     target_field,
@@ -152,17 +193,13 @@ class VocabFolder:
             # Check if source_uri is already a modern canonical concept URI
             concept = self.vocab_store.find_concept_by_uri(source_uri)
             if concept:
-                pref_label = (
-                    (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
-                    or concept.pref_label_fi
-                    or concept.pref_label_en
-                    or clean_heading
+                pref_label = self._select_pref_label(concept, lang, clean_heading)
+                target_field = self._resolve_target_field(
+                    concept.vocabulary, source_field, concept.target_field
                 )
-                target_field = concept.target_field or source_field
-                if concept.vocabulary == "slm" and target_field == "650":
-                    target_field = "655"
+                tgt_v = self._enforce_valid_field_vocab(target_field, concept.vocabulary)
                 target_vocab = format_target_vocab(
-                    concept.vocabulary, source_vocab, lang=lang, config=self.config
+                    tgt_v, source_vocab, lang=lang, config=self.config
                 )
                 return (
                     target_field,
@@ -174,32 +211,24 @@ class VocabFolder:
                 )
 
         # 2. Check legacy label in concept_mappings if source_vocab is an explicit legacy thesaurus
-        legacy_sources = set(self.config.legacy_to_modern.keys()) | {
-            "ysa",
-            "allars",
-            "kaunokki",
-            "bella",
-            "musa",
-            "cilla",
-        }
+        legacy_sources = set(self.config.legacy_to_modern.keys())
         if norm_vocab in legacy_sources:
             mapping = self.vocab_store.find_legacy_mapping_by_label(
-                clean_heading, legacy_vocab=norm_vocab, lang=lang
+                clean_heading, legacy_vocab=norm_vocab, lang=effective_lang
             )
             if mapping:
                 concept = self.vocab_store.find_concept_by_uri(mapping.target_uri)
-                pref_label = clean_heading
-                if concept:
-                    pref_label = (
-                        (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
-                        or concept.pref_label_fi
-                        or clean_heading
-                    )
-                target_field = mapping.target_field or source_field
-                if target_field == "655" and mapping.target_vocab == "kauno":
-                    mapping.target_vocab = "slm"
+                pref_label = (
+                    self._select_pref_label(concept, lang, clean_heading)
+                    if concept
+                    else clean_heading
+                )
+                target_field = self._resolve_target_field(
+                    mapping.target_vocab, source_field, mapping.target_field
+                )
+                tgt_v = self._enforce_valid_field_vocab(target_field, mapping.target_vocab)
                 target_vocab = format_target_vocab(
-                    mapping.target_vocab, source_vocab, lang=lang, config=self.config
+                    tgt_v, source_vocab, lang=lang, config=self.config
                 )
                 return (
                     target_field,
@@ -218,20 +247,13 @@ class VocabFolder:
         )
         concept, qid = self.vocab_store.find_concept_by_alias(folded, target_field=source_field)
         if concept:
-            pref_label = (
-                (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
-                or concept.pref_label_fi
-                or concept.pref_label_sv
-                or clean_heading
+            pref_label = self._select_pref_label(concept, lang, clean_heading)
+            target_field = self._resolve_target_field(
+                concept.vocabulary, source_field, concept.target_field
             )
-            target_field = concept.target_field or source_field
-            if concept.vocabulary == "slm" and target_field == "650":
-                target_field = "655"
-            elif concept.vocabulary == "seko" and target_field == "650":
-                target_field = "382"
-
+            tgt_v = self._enforce_valid_field_vocab(target_field, concept.vocabulary)
             target_vocab = format_target_vocab(
-                concept.vocabulary, source_vocab, lang=lang, config=self.config
+                tgt_v, source_vocab, lang=lang, config=self.config
             )
             return (
                 target_field,
@@ -244,22 +266,21 @@ class VocabFolder:
 
         # 4. Fallback legacy mapping lookup without legacy_vocab filter
         mapping = self.vocab_store.find_legacy_mapping_by_label(
-            clean_heading, legacy_vocab=norm_vocab or None, lang=lang
+            clean_heading, legacy_vocab=norm_vocab or None, lang=effective_lang
         )
         if mapping:
             concept = self.vocab_store.find_concept_by_uri(mapping.target_uri)
-            pref_label = clean_heading
-            if concept:
-                pref_label = (
-                    (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
-                    or concept.pref_label_fi
-                    or clean_heading
-                )
-            target_field = mapping.target_field or source_field
-            if target_field == "655" and mapping.target_vocab == "kauno":
-                mapping.target_vocab = "slm"
+            pref_label = (
+                self._select_pref_label(concept, lang, clean_heading)
+                if concept
+                else clean_heading
+            )
+            target_field = self._resolve_target_field(
+                mapping.target_vocab, source_field, mapping.target_field
+            )
+            tgt_v = self._enforce_valid_field_vocab(target_field, mapping.target_vocab)
             target_vocab = format_target_vocab(
-                mapping.target_vocab, source_vocab, lang=lang, config=self.config
+                tgt_v, source_vocab, lang=lang, config=self.config
             )
             return (
                 target_field,
@@ -273,14 +294,10 @@ class VocabFolder:
         # 5. Direct lookup in concepts
         candidate_vocabs = list(self.config.field_to_vocabularies.get(source_field, []))
         if not candidate_vocabs:
-            if source_field == "655":
-                candidate_vocabs = ["slm"]
-            elif source_field == "382":
-                candidate_vocabs = ["seko"]
-            elif source_field == "651":
-                candidate_vocabs = ["yso-paikat", "yso"]
+            if source_field in self.config.default_field_vocabularies:
+                candidate_vocabs = [self.config.default_field_vocabularies[source_field]]
             else:
-                candidate_vocabs = ["yso", "kauno", "muso"]
+                candidate_vocabs = list(dict.fromkeys(self.config.default_field_vocabularies.values()))
 
         mapped_target = self.config.legacy_to_modern.get(norm_vocab)
         if mapped_target and mapped_target in candidate_vocabs:
@@ -288,24 +305,15 @@ class VocabFolder:
             candidate_vocabs.insert(0, mapped_target)
 
         for v in candidate_vocabs:
-            concept = self.vocab_store.find_concept_by_label(clean_heading, vocabulary=v, lang=lang)
+            concept = self.vocab_store.find_concept_by_label(clean_heading, vocabulary=v, lang=effective_lang)
             if concept:
-                pref_label = (
-                    (concept.pref_label_sv if lang in ("sv", "swe") else concept.pref_label_fi)
-                    or concept.pref_label_fi
-                    or clean_heading
+                pref_label = self._select_pref_label(concept, lang, clean_heading)
+                target_field = self._resolve_target_field(
+                    concept.vocabulary, source_field, concept.target_field
                 )
-                target_field = source_field
-                # If term has a designated target_field (e.g. SLM genre term discovered in 650)
-                if concept.target_field:
-                    target_field = concept.target_field
-                elif concept.vocabulary == "slm":
-                    target_field = "655"
-                elif concept.vocabulary == "seko":
-                    target_field = "382"
-
+                tgt_v = self._enforce_valid_field_vocab(target_field, concept.vocabulary)
                 target_vocab = format_target_vocab(
-                    concept.vocabulary, source_vocab, lang=lang, config=self.config
+                    tgt_v, source_vocab, lang=lang, config=self.config
                 )
                 return (
                     target_field,
@@ -317,13 +325,9 @@ class VocabFolder:
                 )
 
         # 6. Fallback if not found: keep as is
-        if norm_vocab and norm_vocab in self.config.legacy_to_modern:
-            default_target_vocab = self.config.legacy_to_modern[norm_vocab]
-        elif source_field in self.config.default_field_vocabularies:
-            default_target_vocab = self.config.default_field_vocabularies[source_field]
-        else:
-            default_target_vocab = norm_vocab or "yso"
-
+        default_target_vocab = self._get_default_target_vocab(source_field, norm_vocab)
+        target_field = self._resolve_target_field(default_target_vocab, source_field)
+        default_target_vocab = self._enforce_valid_field_vocab(target_field, default_target_vocab)
         formatted_default = format_target_vocab(
             default_target_vocab, source_vocab, lang=lang, config=self.config
         )

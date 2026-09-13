@@ -1,0 +1,665 @@
+# defaults.yaml - Canonical Package Defaults for Reconciliator
+#
+# Single Source of Truth for baseline linguistic rules, controlled vocabularies,
+# record normalization heuristics, and native format enrichment settings.
+
+linguistic:
+  default_language: "fi"
+  preserved_diacritics: "åäöÅÄÖ"
+  biographical_dates:
+    prefixes:
+      - "ca."
+      - "circa"
+      - "n."
+      - "s."
+      - "f."
+      - "b."
+      - "k."
+      - "d."
+      - "fl."
+      - "floruit"
+      - "born"
+      - "died"
+      - "död"
+      - "syntynyt"
+      - "kuollut"
+    era_bc:
+      - "eaa."
+      - "ekr."
+      - "f.kr."
+      - "bc"
+      - "bce"
+    era_ad:
+      - "jaa."
+      - "jkr."
+      - "ad"
+    century_suffixes:
+      - "luku"
+      - "talet"
+      - "l."
+      - "t."
+    pattern: null
+
+vocabularies:
+  agent_priority:
+    - "KANTO"
+    - "ISNI"
+    - "VIAF"
+    - "WIKIDATA"
+
+  subject_priority:
+    - "YSO"
+    - "YSO-AIKA"
+    - "KAUNO"
+    - "MUSO"
+    - "SLM"
+    - "SEKO"
+    - "WIKIDATA"
+
+  entity_vocabularies:
+    - "WIKIDATA"
+
+  supported_subjects:
+    - "yso"
+    - "yso-aika"
+    - "yso-paikat"
+    - "kauno"
+    - "muso"
+    - "slm"
+    - "seko"
+    - "koko"
+    - "wikidata"
+
+  download_list:
+    - "yso"
+    - "yso-paikat"
+    - "kauno"
+    - "muso"
+    - "slm"
+    - "seko"
+
+  legacy_to_modern:
+    ysa: "yso"
+    allars: "yso"
+    kaunokki: "kauno"
+    bella: "kauno"
+    musa: "muso"
+    cilla: "seko"
+
+  thesaurus_languages:
+    ysa: "fi"
+    allars: "sv"
+    kaunokki: "fi"
+    bella: "sv"
+    musa: "fi"
+    cilla: "sv"
+
+  language_subcode_vocabularies:
+    yso: "fin"
+    yso-paikat: "fin"
+    kauno: "fin"
+    muso: "fin"
+    slm: "fin"
+
+  language_subcode_suffixes:
+    fi: "fin"
+    fin: "fin"
+    sv: "swe"
+    swe: "swe"
+    en: "eng"
+    eng: "eng"
+
+  preferred_label_languages:
+    - "fi"
+    - "sv"
+    - "en"
+
+  language_code_map:
+    fi: "fi"
+    fin: "fi"
+    sv: "sv"
+    swe: "sv"
+    en: "en"
+    eng: "en"
+
+  ingest_pref_label_languages: null
+  ingest_alt_label_languages: null
+
+  subject_fields:
+    "648":
+      category: "chronological"
+      default_vocab: "yso-aika"
+      allowed_vocabs: ["yso-aika", "yso"]
+    "650":
+      category: "topical"
+      default_vocab: "yso"
+      allowed_vocabs: ["yso", "kauno", "muso", "slm", "seko"]
+    "651":
+      category: "geographic"
+      default_vocab: "yso-paikat"
+      allowed_vocabs: ["yso-paikat", "yso"]
+    "655":
+      category: "genre_form"
+      default_vocab: "slm"
+      allowed_vocabs: ["slm", "seko"]
+    "382":
+      category: "medium_of_performance"
+      default_vocab: "seko"
+      allowed_vocabs: ["seko", "muso", "yso"]
+
+  vocabulary_patterns:
+    KANTO:
+      - "urn.fi/urn:nbn:fi:au:pn:"
+      - "(fi-asteri-n)"
+      - "(fi-kanto)"
+      - "asteri"
+      - "kanto:"
+    YSO:
+      - "yso.fi/onto/yso/"
+      - "(fi-yso)"
+      - "yso:"
+    YSO-AIKA:
+      - "yso.fi/onto/yso-aika/"
+      - "(fi-yso-aika)"
+      - "yso-aika:"
+    MUSO:
+      - "yso.fi/onto/muso/"
+      - "(fi-muso)"
+      - "muso:"
+    KAUNO:
+      - "yso.fi/onto/kauno/"
+      - "(fi-kauno)"
+      - "kauno:"
+    SLM:
+      - "urn.fi/urn:nbn:fi:au:slm:"
+      - "(fi-slm)"
+      - "slm:"
+    SEKO:
+      - "urn.fi/urn:nbn:fi:au:seko:"
+      - "(fi-seko)"
+      - "seko:"
+    MTS:
+      - "urn.fi/urn:nbn:fi:au:mts:"
+      - "finto.fi/mts"
+      - "(fi-mts)"
+      - "mts:"
+    VIAF:
+      - "viaf.org/viaf/"
+      - "(viaf)"
+      - "viaf:"
+    ISNI:
+      - "isni.org/isni/"
+      - "(isni)"
+      - "isni:"
+    WIKIDATA:
+      - "wikidata.org/entity/"
+      - "wikidata.org/wiki/"
+      - "wikidata:"
+
+  concept_id_rules:
+    KANTO:
+      prefix: "kanto"
+      uri_template: "https://urn.fi/URN:NBN:fi:au:pn:{id}"
+      id_patterns:
+        - '(?i)au:pn:(\d+)'
+        - '(?i)\(fi-asteri-n\)(\d+)'
+        - '(?i)\(fi-kanto\)(\d+)'
+        - '(?i)(?:^|:)kanto:(\d+)'
+        - '^(\d{9})$'
+      canonical_id_case: "preserve"
+    YSO:
+      prefix: "yso"
+      uri_template: "http://www.yso.fi/onto/yso/{id}"
+      id_patterns:
+        - '(?i)onto/yso/(p\d+)'
+        - '(?i)\(fi-yso\)(p\d+)'
+        - '(?i)(?:^|:)yso:(p\d+)'
+        - '^(p\d+)$'
+      canonical_id_case: "lower"
+    YSO-AIKA:
+      prefix: "yso-aika"
+      uri_template: "http://www.yso.fi/onto/yso-aika/{id}"
+      id_patterns:
+        - '(?i)onto/yso-aika/(p\d+)'
+        - '(?i)\(fi-yso-aika\)(p\d+)'
+        - '(?i)(?:^|:)yso-aika:(p\d+)'
+        - '^(p\d+)$'
+      canonical_id_case: "lower"
+    MUSO:
+      prefix: "muso"
+      uri_template: "http://www.yso.fi/onto/muso/{id}"
+      id_patterns:
+        - '(?i)onto/muso/(p\d+)'
+        - '(?i)\(fi-muso\)(p\d+)'
+        - '(?i)(?:^|:)muso:(p\d+)'
+        - '^(p\d+)$'
+      canonical_id_case: "lower"
+    KAUNO:
+      prefix: "kauno"
+      uri_template: "http://www.yso.fi/onto/kauno/{id}"
+      id_patterns:
+        - '(?i)onto/kauno/(k\d+)'
+        - '(?i)\(fi-kauno\)(k\d+)'
+        - '(?i)(?:^|:)kauno:(k\d+)'
+        - '^(k\d+)$'
+      canonical_id_case: "lower"
+    SLM:
+      prefix: "slm"
+      uri_template: "http://urn.fi/URN:NBN:fi:au:slm:{id}"
+      id_patterns:
+        - '(?i)au:slm:(s\d+)'
+        - '(?i)\(fi-slm\)(s\d+)'
+        - '(?i)(?:^|:)slm:(s\d+)'
+        - '^(s\d+)$'
+      canonical_id_case: "lower"
+    SEKO:
+      prefix: "seko"
+      uri_template: "http://urn.fi/URN:NBN:fi:au:seko:{id}"
+      id_patterns:
+        - '(?i)au:seko:(s\d+)'
+        - '(?i)\(fi-seko\)(s\d+)'
+        - '(?i)(?:^|:)seko:(s\d+)'
+        - '^(s\d+)$'
+      canonical_id_case: "lower"
+    MTS:
+      prefix: "mts"
+      uri_template: "http://urn.fi/URN:NBN:fi:au:mts:{id}"
+      id_patterns:
+        - '(?i)au:mts:(m\d+)'
+        - '(?i)\(fi-mts\)(m\d+)'
+        - '(?i)(?:^|:)mts:(m\d+)'
+        - '^(m\d+)$'
+      canonical_id_case: "lower"
+    WIKIDATA:
+      prefix: "wikidata"
+      uri_template: "http://www.wikidata.org/entity/{id}"
+      id_patterns:
+        - '(?i)entity/(Q\d+)'
+        - '(?i)wiki/(Q\d+)'
+        - '(?i)(?:^|:)wikidata:(Q\d+)'
+        - '^(Q\d+)$'
+      canonical_id_case: "upper"
+    VIAF:
+      prefix: "viaf"
+      uri_template: "http://viaf.org/viaf/{id}"
+      id_patterns:
+        - '(?i)viaf/(\d+)'
+        - '(?i)\(viaf\)(\d+)'
+        - '(?i)(?:^|:)viaf:(\d+)'
+        - '^(\d+)$'
+      canonical_id_case: "preserve"
+    ISNI:
+      prefix: "isni"
+      uri_template: "http://isni.org/isni/{id}"
+      id_patterns:
+        - '(?i)isni/([0-9X]{16})'
+        - '(?i)\(isni\)([0-9X]{16})'
+        - '(?i)(?:^|:)isni:([0-9X]{16})'
+        - '^([0-9X]{16})$'
+      canonical_id_case: "upper"
+    ORCID:
+      prefix: "orcid"
+      uri_template: "https://orcid.org/{id}"
+      id_patterns:
+        - '(?i)orcid\.org/([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])'
+        - '(?i)(?:^|:)orcid:([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])'
+        - '^([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])$'
+      canonical_id_case: "preserve"
+    SERIES:
+      prefix: "series"
+      uri_template: "urn:reconciliator:series:{id}"
+      id_patterns:
+        - '(?i)urn:reconciliator:series:(.+)'
+        - '(?i)(?:^|:)series:(.+)'
+      canonical_id_case: "preserve"
+
+  wikidata_author_properties:
+    kanto: "P3595"
+    isni: "P213"
+    viaf: "P214"
+    gnd: "P227"
+    lcnaf: "P244"
+    selibr: "P906"
+    orcid: "P496"
+
+record_normalization:
+  non_filing_articles:
+    fi: ["yksi ", "eräs "]
+    sv: ["en ", "ett ", "den ", "det ", "de "]
+    en: ["the ", "a ", "an "]
+    de: ["der ", "die ", "das ", "ein ", "eine "]
+    fr: ["le ", "la ", "les ", "un ", "une ", "l'"]
+
+  publisher_suffixes:
+    - "oy"
+    - "oyj"
+    - "ab"
+    - "abp"
+    - "ltd"
+    - "inc"
+    - "corp"
+    - "gmbh"
+    - "kustannus"
+    - "kustannusosakeyhtiö"
+    - "förlag"
+    - "publishing"
+
+  volume_prefixes:
+    - "osa"
+    - "del"
+    - "vol"
+    - "volume"
+    - "bd"
+    - "band"
+    - "tome"
+    - "t"
+    - "v"
+    - "nro"
+    - "no"
+    - "nide"
+
+  volume_suffixes:
+    - "osa"
+    - "del"
+    - "vol"
+    - "kokoelma"
+    - "painos"
+    - "nide"
+    - "band"
+
+  volume_format_template: "osa {num}"
+
+  fictional_qualifiers:
+    - "fiktiivinen"
+    - "fiktiv"
+    - "fictitious"
+    - "(fiktiivinen hahmo)"
+    - "(fiktiv gestalt)"
+    - "(fictitious character)"
+    - "(fiktiivinen paikka)"
+    - "(fiktiv plats)"
+    - "(fictitious place)"
+    - "(fiktiivinen yhteisö)"
+    - "(fiktiv organisation)"
+    - "(fictitious organization)"
+    - "(fiktiivinen esine)"
+    - "(fiktivt föremål)"
+    - "(fiktiivinen alus)"
+
+  responsibility_prefixes:
+    - "kirjoittanut"
+    - "toimittanut"
+    - "suomentanut"
+    - "kuvittanut"
+    - "toim."
+    - "kirj."
+    - "suom."
+    - "kuv."
+    - "tekijä"
+    - "författare"
+    - "redaktör"
+    - "redigerad av"
+    - "av"
+    - "by"
+    - "edited by"
+    - "illustrated by"
+    - "translated by"
+
+  responsibility_conjunctions:
+    - "ja"
+    - "sekä"
+    - "och"
+    - "and"
+    - "und"
+    - "et"
+    - "&"
+
+  classification_priority:
+    - "ykl"
+    - "udk"
+    - "dewey"
+    - "lc"
+
+  default_classification_scheme: "ykl"
+
+  control_number_prefix: null
+  control_number_pattern: null
+  control_number_padding_digits: null
+  control_number_strip_prefixes: null
+
+  urn_pattern: "(urn:nbn:[^\\s]+)"
+
+  source_identifier_templates:
+    melinda: "oai:melinda.kansalliskirjasto.fi/bib/{id}"
+
+  standard_identifier_rules:
+    isbn:
+      normalize_to_13: true
+      validate_checksum: false
+      qualifiers_to_strip:
+        - "nid."
+        - "sid."
+        - "pbk."
+        - "hbk."
+        - "hardcover"
+        - "softcover"
+      wikidata_properties: ["P212", "P957"]
+    issn:
+      format_hyphenated: true
+      wikidata_properties: ["P236", "P7363"]
+    doi:
+      strip_resolver_prefixes:
+        - "https://doi.org/"
+        - "http://doi.org/"
+        - "https://dx.doi.org/"
+        - "http://dx.doi.org/"
+        - "doi:"
+      pattern: '(?i)(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)'
+      wikidata_properties: ["P356"]
+    urn:
+      patterns:
+        - '(?i)(urn:nbn:[^\s]+)'
+        - '(?i)(urn:[a-z0-9][a-z0-9-]{0,31}:[^\s]+)'
+
+  roman_numerals:
+    i: 1
+    ii: 2
+    iii: 3
+    iv: 4
+    v: 5
+    vi: 6
+    vii: 7
+    viii: 8
+    ix: 9
+    x: 10
+    xi: 11
+    xii: 12
+
+  relator_mappings:
+    kirjoittaja: "aut"
+    toimittaja: "edt"
+    kuvittaja: "ill"
+    kääntäjä: "trl"
+    suomentaja: "trl"
+    säveltäjä: "cmp"
+    sovittaja: "arr"
+    sanoittaja: "lyr"
+    ohjaaja: "drt"
+    tuottaja: "pro"
+    näyttelijä: "act"
+    esiintyjä: "prf"
+    esittäjä: "prf"
+    laulaja: "sng"
+    laulu: "sng"
+    muusikko: "mus"
+    valokuvaaja: "pht"
+    käsikirjoittaja: "aus"
+    tutkija: "res"
+    kustantaja: "pbl"
+    haastattelija: "ivr"
+    haastateltava: "ive"
+    kertoja: "nrt"
+    taiteilija: "art"
+    taittaja: "bkd"
+    graafikko: "art"
+    kartantekijä: "ctg"
+    kartograafi: "ctg"
+    puheenjohtaja: "pbd"
+    selostaja: "cmm"
+    juontaja: "ann"
+    kuraattori: "cur"
+    libretisti: "lbt"
+    kapellimestari: "cnd"
+    johtaja: "cnd"
+    kirj.: "aut"
+    toim.: "edt"
+    kuv.: "ill"
+    suom.: "trl"
+    käänt.: "trl"
+    säv.: "cmp"
+    sov.: "arr"
+    san.: "lyr"
+    esitt.: "prf"
+    ohj.: "drt"
+    valok.: "pht"
+    käsik.: "aus"
+    näytt.: "act"
+    tait.: "art"
+    author: "aut"
+    editor: "edt"
+    illustrator: "ill"
+    translator: "trl"
+    composer: "cmp"
+    arranger: "arr"
+    lyricist: "lyr"
+    director: "drt"
+    producer: "pro"
+    actor: "act"
+    performer: "prf"
+    singer: "sng"
+    musician: "mus"
+    photographer: "pht"
+    screenwriter: "aus"
+    researcher: "res"
+    publisher: "pbl"
+    interviewer: "ivr"
+    interviewee: "ive"
+    narrator: "nrt"
+    artist: "art"
+    conductor: "cnd"
+    librettist: "lbt"
+    curator: "cur"
+    cartographer: "ctg"
+    ed.: "edt"
+    trans.: "trl"
+    comp.: "cmp"
+    författare: "aut"
+    redaktör: "edt"
+    illustratör: "ill"
+    översättare: "trl"
+    utgivare: "pbl"
+    tonsättare: "cmp"
+    musiker: "mus"
+    sångare: "sng"
+    skådespelare: "act"
+    regissör: "drt"
+    producent: "pro"
+    fotograf: "pht"
+    forskare: "res"
+    berättare: "nrt"
+    konstnär: "art"
+    förf.: "aut"
+    red.: "edt"
+    övers.: "trl"
+    ill.: "ill"
+    komp.: "cmp"
+    arr.: "arr"
+
+  custom_relator_terms: {}
+
+enrichment:
+  inject_work_links: true
+  inject_expression_links: true
+  inject_hub_links: true
+  inject_same_as: true
+  inject_component_links: true
+  marc_predicate_mode: "stacked"
+  active_profiles:
+    - "bibframe"
+    - "bffi"
+    - "rda"
+
+  predicate_profiles:
+    bffi:
+      work: ["http://urn.fi/URN:NBN:fi:schema:bffi:workManifested", "bffi"]
+      expression: ["http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested", "bffi"]
+    bibframe:
+      work: ["http://id.loc.gov/ontologies/bibframe/instanceOf", "lcba"]
+      expression: ["http://id.loc.gov/ontologies/bibframe/expressionOf", "lcba"]
+    rda:
+      work: ["http://rdaregistry.info/Elements/m/P30135", "rda"]
+      expression: ["http://rdaregistry.info/Elements/m/P30139", "rda"]
+
+  thesis_institution_uri: "http://urn.fi/URN:NBN:fi:au:pn:dgg_institution"
+
+  surrogate_title_keywords:
+    - "surrogate"
+    - "näköispainos"
+    - "faksimile"
+    - "faksimil"
+
+  schemes:
+    fingerprint:
+      default: "feigb"
+      accepted: ["feigb", "stcn", "fingb"]
+    web_harvest:
+      default: "memento"
+      accepted: ["memento", "wayback", "archive-it"]
+    manuscript_fragment:
+      default: "fragmenta"
+      accepted: ["fragmenta", "fragmentarium"]
+    geodata_spatial:
+      default: "epsg"
+      accepted: ["epsg", "wgs84", "etrs89"]
+    numismatics:
+      default: "km"
+      accepted: ["km", "michel", "scott", "ric"]
+
+  domain_concepts:
+    ephemera: "slm:s1492"
+    thesis_relator: "mts:m352"
+    tactile_concept: "yso:p19350"
+    tactile_genre: "slm:s1422"
+
+  accessibility:
+    tactile:
+      content_summary: "tactileText"
+      mode: "braille"
+      notes:
+        fi: "Saavutettava aineisto / Pistekirjoitus"
+        sv: "Tillgängligt material / Punktskrift"
+        en: "Accessible resource / Braille"
+
+  linking_labels:
+    fi:
+      work_manifested: "Ilmentymän teos"
+      expression_manifested: "Ilmentymän ekspressio"
+      host_item: "Sisältyy julkaisuun"
+      other_manifestation: "Toinen ilmentymä"
+      reproduction: "Säilytyskopio tai digitaalinen kaksonen"
+      bound_with: "Sidottu yhteen"
+    sv:
+      work_manifested: "Manifesterat verk"
+      expression_manifested: "Manifesterat uttryck"
+      host_item: "Ingår i"
+      other_manifestation: "Annan manifestation"
+      reproduction: "Bevarandeexemplar eller digital tvilling"
+      bound_with: "Inbunden med"
+    en:
+      work_manifested: "Work manifested"
+      expression_manifested: "Expression manifested"
+      host_item: "Contained in"
+      other_manifestation: "Other edition"
+      reproduction: "Preservation copy or digital surrogate"
+      bound_with: "Bound with"
+

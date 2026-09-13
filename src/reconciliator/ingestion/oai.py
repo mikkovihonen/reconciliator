@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, Union
 
 from lxml import etree
 from rdflib import Graph
@@ -19,15 +19,22 @@ from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.harvest.resourcesync import ResourceSyncHarvester
 from reconciliator.loaders.bibframe import (
     BIBFRAMESchemaProfile,
+    build_target_record_from_bibframe,
+    decompose_bibframe_work,
     get_profile,
     parse_bibframe_graph,
     stream_bibframe_records,
 )
-from reconciliator.loaders.marcxml import iter_marcxml_records, parse_marc_record_elem
-from reconciliator.models import BibliographicRecord
+from reconciliator.loaders.marcxml import (
+    build_target_record_from_marc,
+    decompose_marc_wemi,
+    iter_marcxml_records,
+    parse_marc_record_elem,
+)
+from reconciliator.models import BibliographicRecord, HarvestState, TargetRecord
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
-from reconciliator.repository import AuthorityStore
+from reconciliator.repository import AuthorityStore, CorpusRepository, WEMIRepository
 
 logger = logging.getLogger(__name__)
 
@@ -226,16 +233,334 @@ def stream_oai_records(
                 continue
 
 
+def stream_oai_raw_elements(
+    source_name: str,
+    config: OAIIngestConfig,
+    initial_resumption_token: Optional[str] = None,
+    tracker: Optional[ProgressTracker] = None,
+    on_record_harvested: Optional[Callable[[], None]] = None,
+    on_resumption_token: Optional[Callable[[Optional[str]], None]] = None,
+) -> Iterator[Any]:
+    """Yield raw MARCXML etree elements or RDF graphs from local file, ResourceSync, or OAI-PMH harvest."""
+    if config.source_type == "file":
+        if not config.input_path:
+            raise ValueError(
+                f"input_path must be specified for source '{source_name}' when source_type is 'file'"
+            )
+        if config.format == "bibframe":
+            profile = get_profile(config.schema_profile) if config.schema_profile else None
+            for _raw_rec, _offset, orig_doc in stream_bibframe_records(
+                config.input_path, profile=profile, source=source_name
+            ):
+                if isinstance(orig_doc, Graph):
+                    yield orig_doc
+                else:
+                    g = Graph()
+                    import orjson
+
+                    g.parse(data=orjson.dumps(orig_doc).decode("utf-8"), format="json-ld")
+                    yield g
+        else:
+            path = str(config.input_path)
+            if path.endswith(".gz"):
+                import gzip
+
+                f_in = gzip.open(path, "rb")
+            else:
+                f_in = open(path, "rb")
+            try:
+                context = etree.iterparse(f_in, events=("end",))
+                for _, elem in context:
+                    tag = elem.tag
+                    if tag.endswith("record") and not tag.endswith("collection"):
+                        yield elem
+                        elem.clear()
+            finally:
+                f_in.close()
+        return
+
+    if config.source_type == "resourcesync":
+        url = config.resourcesync_url or config.oai_url
+        if not url:
+            raise ValueError(
+                f"resourcesync_url or oai_url must be specified for source '{source_name}' when source_type is 'resourcesync'"
+            )
+        rs_harvester = ResourceSyncHarvester(
+            endpoint_url=url,
+            timeout=config.timeout,
+            request_delay=config.request_delay,
+        )
+        for item, payload in rs_harvester.harvest_contents():
+            if on_record_harvested is not None:
+                on_record_harvested()
+            elif tracker is not None:
+                tracker.update_progress(items_increment=1)
+
+            g = Graph()
+            fmt = "turtle"
+            if item.mime_type:
+                if "json" in item.mime_type:
+                    fmt = "json-ld"
+                elif "xml" in item.mime_type or "rdf" in item.mime_type:
+                    fmt = "xml"
+            elif item.loc.endswith(".json") or item.loc.endswith(".jsonld"):
+                fmt = "json-ld"
+            elif item.loc.endswith(".rdf") or item.loc.endswith(".xml"):
+                fmt = "xml"
+
+            try:
+                g.parse(data=payload.decode("utf-8", errors="replace"), format=fmt)
+                yield g
+            except Exception as exc:
+                logger.warning("Failed to parse ResourceSync payload from %s: %s", item.loc, exc)
+        return
+
+    # OAI-PMH source
+    if not config.oai_url:
+        raise ValueError(
+            f"oai_url must be specified for source '{source_name}' when source_type is 'oai'"
+        )
+
+    harvester = OAIPMHHarvester(
+        endpoint_url=config.oai_url,
+        metadata_prefix=config.metadata_prefix,
+        set_spec=config.set_spec,
+        request_delay=config.request_delay,
+        timeout=config.timeout,
+    )
+
+    from_date = config.from_date
+    until_date = config.until_date
+
+    for elem in harvester.harvest_partition(
+        from_date=from_date,
+        until_date=until_date,
+        resumption_token=initial_resumption_token,
+        tracker=tracker if on_record_harvested is None else None,
+        on_record_harvested=on_record_harvested,
+        on_resumption_token=on_resumption_token,
+    ):
+        if config.format == "bibframe":
+            raw_xml = etree.tostring(elem, encoding="utf-8")
+            g = Graph()
+            g.parse(data=raw_xml.decode("utf-8"), format="xml")
+            yield g
+        else:
+            yield elem
+
+
+def ingest_oai_wemi_pipeline(
+    source_name: str,
+    config: OAIIngestConfig,
+    wemi_repo: Optional[WEMIRepository] = None,
+    corpus_repo: Optional[CorpusRepository] = None,
+    tracker: Optional[ProgressTracker] = None,
+    relator_mappings: Optional[dict[str, str]] = None,
+    vocab_store: Optional[Any] = None,
+) -> int:
+    """Run WEMI authority ingestion (authority.db) or target corpus staging (reconcile_corpus.db) with checkpointing."""
+    if corpus_repo is None and config.target_database is not None:
+        corpus_repo = CorpusRepository(config.target_database)
+
+    is_target = corpus_repo is not None
+    repo: Union[CorpusRepository, WEMIRepository]
+    if is_target:
+        assert corpus_repo is not None
+        repo = corpus_repo
+    elif wemi_repo is not None:
+        repo = wemi_repo
+    else:
+        raise ValueError(
+            "Either wemi_repo or corpus_repo (or config.target_database) must be provided."
+        )
+
+    existing_state = repo.get_harvest_state(source_name)
+    initial_resumption_token: Optional[str] = None
+    records_already_harvested = 0
+    if existing_state:
+        if existing_state.status == "in_progress" and existing_state.resumption_token:
+            initial_resumption_token = existing_state.resumption_token
+            records_already_harvested = existing_state.records_harvested
+            logger.info(
+                "Source '%s': resuming harvest from token '%s' (previously harvested: %d)",
+                source_name,
+                initial_resumption_token,
+                records_already_harvested,
+            )
+        elif (
+            existing_state.status == "completed"
+            and not config.from_date
+            and existing_state.last_harvest_until
+        ):
+            config = config.model_copy(update={"from_date": existing_state.last_harvest_until})
+            logger.info(
+                "Source '%s': incremental harvest from %s",
+                source_name,
+                config.from_date,
+            )
+
+    total_ingested = 0
+    cur_token = initial_resumption_token
+
+    def _save_checkpoint(status: str = "in_progress", token: Optional[str] = None) -> None:
+        nonlocal cur_token
+        cur_token = token
+        state = HarvestState(
+            source_id=source_name,
+            source_type=config.source_type,
+            metadata_prefix=config.metadata_prefix,
+            set_spec=config.set_spec,
+            last_harvest_from=config.from_date,
+            last_harvest_until=config.until_date,
+            resumption_token=token,
+            records_harvested=records_already_harvested + total_ingested,
+            status=status,
+        )
+        repo.save_harvest_state(state)
+
+    if tracker:
+        tracker.start_task(
+            stage="harvest_wemi", metadata={"source": source_name, "target_routing": is_target}
+        )
+
+    target_records_batch: list[TargetRecord] = []
+    works_batch = []
+    expressions_batch = []
+    manifestations_batch = []
+    items_batch = []
+    agents_batch = []
+    contributions_batch = []
+    relationships_batch = []
+    identifiers_batch = []
+    associations_batch = []
+    mediums_batch = []
+
+    def _flush_batches() -> None:
+        nonlocal total_ingested
+        if is_target and target_records_batch:
+            assert corpus_repo is not None
+            corpus_repo.insert_target_records_batch(target_records_batch)
+            total_ingested += len(target_records_batch)
+            target_records_batch.clear()
+            _save_checkpoint(status="in_progress", token=cur_token)
+        elif not is_target and works_batch:
+            assert wemi_repo is not None
+            wemi_repo.insert_wemi_batch(
+                works=works_batch,
+                expressions=expressions_batch,
+                manifestations=manifestations_batch,
+                items=items_batch,
+                agents=agents_batch,
+                relationships=relationships_batch,
+                identifiers=identifiers_batch,
+                manifestation_expressions=associations_batch,
+                mediums_of_performance=mediums_batch,
+                contributions=contributions_batch,
+            )
+            total_ingested += len(works_batch)
+            works_batch.clear()
+            expressions_batch.clear()
+            manifestations_batch.clear()
+            items_batch.clear()
+            agents_batch.clear()
+            contributions_batch.clear()
+            relationships_batch.clear()
+            identifiers_batch.clear()
+            associations_batch.clear()
+            mediums_batch.clear()
+            _save_checkpoint(status="in_progress", token=cur_token)
+
+    try:
+        for item in stream_oai_raw_elements(
+            source_name=source_name,
+            config=config,
+            initial_resumption_token=initial_resumption_token,
+            tracker=tracker,
+            on_resumption_token=lambda tok: _save_checkpoint(status="in_progress", token=tok),
+        ):
+            if is_target:
+                if isinstance(item, Graph):
+                    rec = build_target_record_from_bibframe(item, source=source_name)
+                else:
+                    rec = build_target_record_from_marc(
+                        item,
+                        source=source_name,
+                        id_source=config.id_source,
+                        relator_mappings=relator_mappings,
+                        vocab_store=vocab_store,
+                    )
+                target_records_batch.append(rec)
+                if len(target_records_batch) >= config.batch_size:
+                    _flush_batches()
+            else:
+                if isinstance(item, Graph):
+                    w, e, m, itms, agts, rels, idents, assoc, mops, contribs = (
+                        decompose_bibframe_work(item, source=source_name)
+                    )
+                else:
+                    w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+                        item,
+                        source=source_name,
+                        id_source=config.id_source,
+                        include_items=config.include_items,
+                        relator_mappings=relator_mappings,
+                        vocab_store=vocab_store,
+                    )
+                works_batch.append(w)
+                expressions_batch.append(e)
+                manifestations_batch.append(m)
+                items_batch.extend(itms)
+                agents_batch.extend(agts)
+                contributions_batch.extend(contribs)
+                relationships_batch.extend(rels)
+                identifiers_batch.extend(idents)
+                associations_batch.extend(assoc)
+                mediums_batch.extend(mops)
+                if len(works_batch) >= config.batch_size:
+                    _flush_batches()
+
+        _flush_batches()
+        _save_checkpoint(status="completed", token=None)
+        if tracker:
+            tracker.complete_task(
+                metadata={"total_ingested": total_ingested, "source": source_name}
+            )
+    except Exception as exc:
+        if tracker:
+            tracker.fail_task(error_message=str(exc))
+        raise
+
+    return total_ingested
+
+
 def ingest_oai_pipeline(
     source_name: str,
     config: OAIIngestConfig,
-    store: AuthorityStore,
-    normalizer: RecordNormalizer,
-    embedder: SentenceEmbedder,
+    store: Union[AuthorityStore, WEMIRepository, CorpusRepository],
+    normalizer: Optional[RecordNormalizer] = None,
+    embedder: Optional[SentenceEmbedder] = None,
     tracker: Optional[ProgressTracker] = None,
     skip_existing: bool = False,
 ) -> int:
     """Run full authority ingestion, embedding, and storage indexing for a configured OAI/file source."""
+    if isinstance(store, (WEMIRepository, CorpusRepository)) or config.target_database is not None:
+        w_repo = store if isinstance(store, WEMIRepository) else None
+        c_repo = store if isinstance(store, CorpusRepository) else None
+        r_mappings = getattr(getattr(normalizer, "config", None), "relator_mappings", None)
+        v_store = getattr(getattr(normalizer, "vocab_folder", None), "vocab_store", None)
+        return ingest_oai_wemi_pipeline(
+            source_name=source_name,
+            config=config,
+            wemi_repo=w_repo,
+            corpus_repo=c_repo,
+            tracker=tracker,
+            relator_mappings=r_mappings,
+            vocab_store=v_store,
+        )
+
+    if normalizer is None or embedder is None:
+        raise ValueError("normalizer and embedder required for AuthorityStore ingestion")
+
     is_oai = config.source_type != "file"
     stage_name = "harvest_and_index" if is_oai else "indexing"
 

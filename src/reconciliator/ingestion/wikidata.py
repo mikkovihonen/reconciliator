@@ -7,21 +7,46 @@ Pass 2: Stream bibliographic entities, hydrating authors from SQLite for true O(
 from __future__ import annotations
 
 import gzip
+import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, Union
 
 import orjson
 
-from reconciliator.config import WikidataIngestConfig
+from reconciliator.config import (
+    WikidataIngestConfig,
+    get_bundled_record_defaults,
+    get_bundled_vocab_defaults,
+    get_category_default_field_map,
+    get_subject_field_category_map,
+    get_wikidata_author_properties,
+)
+from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 from reconciliator.embedder import SentenceEmbedder
-from reconciliator.models import BibliographicRecord
+from reconciliator.models import (
+    AgentEntity,
+    BibliographicRecord,
+    CarrierType,
+    ContributionEntity,
+    ExpressionEntity,
+    IdentifierEntity,
+    ItemEntity,
+    ManifestationEntity,
+    ManifestationExpressionAssociation,
+    MediumOfPerformance,
+    WorkEntity,
+    WorkRelationship,
+    WorkType,
+)
+from reconciliator.normalizers.blocking import compute_title_stem
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
-from reconciliator.repository import AuthorityStore
+from reconciliator.repository import AuthorityStore, WEMIRepository
+from reconciliator.template import WEMISerializationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +75,26 @@ BIB_INDICATORS = (
     b'"Q47461344"',
     b'"Q2085381"',
     b'"P1476"',
+)
+
+AUTHOR_INDICATORS = (
+    b'"Q5"',
+    b'"Q170574"',
+    b'"Q2085381"',
+    b'"Q4830453"',
+    b'"Q43229"',
+    b'"Q515"',
+    b'"Q6256"',
+    b'"P3595"',
+    b'"P213"',
+    b'"P214"',
+    b'"P227"',
+    b'"P244"',
+    b'"P906"',
+    b'"P496"',
+    b'"P50"',
+    b'"P98"',
+    b'"P86"',
 )
 
 _HUMAN_AND_ENTITY_TYPES = {"Q5", "Q2085381", "Q4830453", "Q43229", "Q515", "Q6256"}
@@ -107,8 +152,23 @@ def _has_bib_indicator(line: bytes) -> bool:
     return any(indicator in line for indicator in BIB_INDICATORS)
 
 
+def _has_author_indicator(line: bytes) -> bool:
+    """Fast byte-level pre-filter for lines likely containing author, contributor, or agent entities."""
+    return any(indicator in line for indicator in AUTHOR_INDICATORS)
+
+
 def _extract_author_data(
     entity: dict[str, Any],
+    require_authority_id: bool = True,
+    authority_properties: tuple[str, ...] | list[str] = (
+        "P3595",
+        "P213",
+        "P214",
+        "P227",
+        "P244",
+        "P906",
+        "P496",
+    ),
 ) -> Optional[dict[str, Any]]:
     """Extract author/entity metadata from a Wikidata entity if it matches criteria.
 
@@ -121,9 +181,12 @@ def _extract_author_data(
     instance_of = get_claim_qids(claims, "P31")
     is_human = "Q5" in instance_of
     is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
-    has_auth_ids = "P3595" in claims or "P213" in claims or "P214" in claims
+    has_auth_ids = any(prop in claims for prop in authority_properties)
 
-    if not (is_human or is_org_or_place or has_auth_ids):
+    if require_authority_id and is_human:
+        if not has_auth_ids:
+            return None
+    elif not (is_human or is_org_or_place or has_auth_ids):
         return None
 
     name_val = ""
@@ -132,23 +195,123 @@ def _extract_author_data(
             name_val = labels[lang].get("value", "")
             if name_val:
                 break
+    if not name_val and labels:
+        first_label = next(iter(labels.values()), None)
+        if isinstance(first_label, dict):
+            name_val = first_label.get("value", "")
+        elif isinstance(first_label, str):
+            name_val = first_label
+
     fam_name = ""
     fam_qids = get_claim_qids(claims, "P734")
     if fam_qids:
         fam_name = fam_qids[0]
 
-    asteri_id = get_claim_snak_value(claims, "P3595")
-    isni = get_claim_snak_value(claims, "P213")
-    viaf = get_claim_snak_value(claims, "P214")
+    author_props = get_wikidata_author_properties()
+    identifiers: dict[str, str] = {}
+    for scheme, prop in author_props.items():
+        val = get_claim_snak_value(claims, prop)
+        if val is not None:
+            val_str = str(val).strip()
+            if val_str:
+                identifiers[scheme] = val_str
 
-    if name_val or asteri_id or isni or viaf:
+    # Extract birth / death years
+    birth_year: Optional[int] = None
+    b_val = get_claim_snak_value(claims, "P569")
+    if isinstance(b_val, dict) and "time" in b_val:
+        m_b = re.search(r"[+-]?(\d{4})", str(b_val["time"]))
+        if m_b:
+            birth_year = int(m_b.group(1))
+
+    death_year: Optional[int] = None
+    d_val = get_claim_snak_value(claims, "P570")
+    if isinstance(d_val, dict) and "time" in d_val:
+        m_d = re.search(r"[+-]?(\d{4})", str(d_val["time"]))
+        if m_d:
+            death_year = int(m_d.group(1))
+
+    occupations = get_claim_qids(claims, "P106")
+    fields_of_work = get_claim_qids(claims, "P101")
+    affiliations = get_claim_qids(claims, "P108") + get_claim_qids(claims, "P1416")
+
+    # Extract aliases / variant names
+    aliases_list: list[str] = []
+    aliases_dict = entity.get("aliases", {})
+    if isinstance(aliases_dict, dict):
+        for lang in ("fi", "sv", "en"):
+            if lang in aliases_dict:
+                for a_item in aliases_dict[lang]:
+                    val = a_item.get("value") if isinstance(a_item, dict) else None
+                    if val and val not in aliases_list:
+                        aliases_list.append(val)
+
+    # Extract descriptions (qualifier)
+    desc_val: Optional[str] = None
+    descriptions = entity.get("descriptions", {})
+    if isinstance(descriptions, dict):
+        for lang in ("fi", "sv", "en"):
+            if lang in descriptions:
+                d_item = descriptions[lang]
+                if isinstance(d_item, dict) and d_item.get("value"):
+                    desc_val = d_item["value"]
+                    break
+
+    # Extract languages (P1412)
+    language_counts: dict[str, int] = {}
+    for l_qid in get_claim_qids(claims, "P1412"):
+        mapped_lang = WIKIDATA_LANG_MAP.get(l_qid, l_qid.lower())
+        language_counts[mapped_lang] = language_counts.get(mapped_lang, 0) + 1
+
+    # Extract ORCID
+    orcid: Optional[str] = identifiers.get("orcid")
+
+    # Build count distributions
+    qualifier_counts: dict[str, int] = {}
+    if desc_val:
+        qualifier_counts[desc_val] = 1
+    for occ in occupations:
+        qualifier_counts[occ] = qualifier_counts.get(occ, 0) + 1
+
+    affiliation_counts: dict[str, int] = {}
+    for aff in affiliations:
+        affiliation_counts[aff] = affiliation_counts.get(aff, 0) + 1
+
+    meta_dict: dict[str, Any] = {}
+    if aliases_list:
+        meta_dict["aliases"] = aliases_list
+        meta_dict["variant_names"] = aliases_list
+    if desc_val:
+        meta_dict["description"] = desc_val
+    if qualifier_counts:
+        meta_dict["qualifier_counts"] = qualifier_counts
+    if affiliation_counts:
+        meta_dict["affiliation_counts"] = affiliation_counts
+    if language_counts:
+        meta_dict["language_counts"] = language_counts
+    if orcid:
+        meta_dict["orcid"] = orcid
+
+    main_subjects = get_claim_qids(claims, "P921")
+    subject_counts: dict[str, int] = {}
+    for fow in fields_of_work + main_subjects:
+        subj_key = f"wikidata:{fow}"
+        subject_counts[subj_key] = subject_counts.get(subj_key, 0) + 1
+    if subject_counts:
+        meta_dict["subject_counts"] = subject_counts
+
+    if name_val or has_auth_ids or identifiers:
         return {
             "qid": qid,
             "name": name_val,
             "family_name": fam_name,
-            "asteri_id": asteri_id,
-            "isni": isni,
-            "viaf": viaf,
+            "identifiers": identifiers,
+            "birth_year": birth_year,
+            "death_year": death_year,
+            "occupations": json.dumps(occupations, ensure_ascii=False) if occupations else None,
+            "fields_of_work": json.dumps(fields_of_work, ensure_ascii=False) if fields_of_work else None,
+            "affiliations": json.dumps(affiliations, ensure_ascii=False) if affiliations else None,
+            "metadata_json": json.dumps(meta_dict, ensure_ascii=False) if meta_dict else None,
         }
     return None
 
@@ -348,31 +511,39 @@ def parse_wikidata_entity(
                 )
 
     # Identifiers
+    id_rules = get_bundled_record_defaults().get("standard_identifier_rules", {})
+    isbn_props = id_rules.get("isbn", {}).get("wikidata_properties", ["P212", "P957"])
+    issn_props = id_rules.get("issn", {}).get("wikidata_properties", ["P236", "P7363"])
+    doi_props = id_rules.get("doi", {}).get("wikidata_properties", ["P356"])
+
     isbns: list[str] = []
-    for stmt in claims.get("P212", []):
-        val = stmt.get("mainsnak", {}).get("datavalue", {}).get("value")
-        if val:
-            isbns.append(str(val))
-    for stmt in claims.get("P957", []):
-        val = stmt.get("mainsnak", {}).get("datavalue", {}).get("value")
-        if val:
-            isbns.append(str(val))
+    for prop in isbn_props:
+        for stmt in claims.get(prop, []):
+            val = stmt.get("mainsnak", {}).get("datavalue", {}).get("value")
+            if val:
+                isbns.append(str(val))
 
     issns: list[str] = []
-    for stmt in claims.get("P236", []):
-        val = stmt.get("mainsnak", {}).get("datavalue", {}).get("value")
-        if val:
-            issns.append(str(val))
+    for prop in issn_props:
+        for stmt in claims.get(prop, []):
+            val = stmt.get("mainsnak", {}).get("datavalue", {}).get("value")
+            if val:
+                issns.append(str(val))
 
     urns: list[str] = []
     p1184 = get_claim_snak_value(claims, "P1184")
     if p1184:
         urns.append(str(p1184))
 
+    dois: list[str] = []
+    for prop in doi_props:
+        p_doi = get_claim_snak_value(claims, prop)
+        if p_doi:
+            dois.append(str(p_doi))
+
     other_ids: list[str] = [qid]
-    p356 = get_claim_snak_value(claims, "P356")
-    if p356:
-        other_ids.append(f"doi:{p356}")
+    for d in dois:
+        other_ids.append(f"doi:{d}")
 
     # Agents — hydrate from SQLite
     agents: list[dict[str, Any]] = []
@@ -384,14 +555,14 @@ def parse_wikidata_entity(
             qual_name = extract_claim_qualifier_string(claims, prop)
             name = author_info.get("name") or qual_name or a_qid
             u0: list[str] = []
-            if author_info.get("asteri_id"):
-                u0.append(f"https://urn.fi/URN:NBN:fi:au:pn:{author_info['asteri_id']}")
-            if author_info.get("isni"):
-                u0.append(f"http://isni.org/isni/{author_info['isni']}")
-            if author_info.get("viaf"):
-                u0.append(f"http://viaf.org/viaf/{author_info['viaf']}")
+            for id_scheme, id_val in author_info.get("identifiers", {}).items():
+                if not id_val:
+                    continue
+                uri = concept_id_to_uri(f"{id_scheme}:{id_val}")
+                if uri:
+                    u0.append(uri)
 
-            u1 = [f"http://www.wikidata.org/entity/{a_qid}"]
+            u1 = [format_wikidata_uri(a_qid)]
 
             agents.append(
                 {
@@ -420,31 +591,35 @@ def parse_wikidata_entity(
                 )
 
     # Subjects — hydrate names from SQLite
+    cat_defaults = get_category_default_field_map()
+    field_to_cat = get_subject_field_category_map()
     subjects: dict[str, list[dict[str, Any]]] = {
-        "topical": [],
-        "genre_form": [],
-        "geographic": [],
-        "medium_of_performance": [],
+        cat: [] for cat in field_to_cat.values()
     }
+    topical_field = cat_defaults["topical"]
+    genre_field = cat_defaults["genre_form"]
+    geo_field = cat_defaults["geographic"]
+    mop_field = cat_defaults["medium_of_performance"]
+
     for s_qid in get_claim_qids(claims, "P921"):
         s_heading = _lookup_entity_name(s_qid, store) or s_qid
         subjects["topical"].append(
-            {"heading": s_heading, "field": "650", "vocabulary": "yso", "uri": None}
+            {"heading": s_heading, "field": topical_field, "vocabulary": "yso", "uri": None}
         )
     for g_qid in get_claim_qids(claims, "P136"):
         g_heading = _lookup_entity_name(g_qid, store) or g_qid
         subjects["genre_form"].append(
-            {"heading": g_heading, "field": "655", "vocabulary": "slm", "uri": None}
+            {"heading": g_heading, "field": genre_field, "vocabulary": "slm", "uri": None}
         )
     for geo_qid in get_claim_qids(claims, "P840"):
         geo_heading = _lookup_entity_name(geo_qid, store) or geo_qid
         subjects["geographic"].append(
-            {"heading": geo_heading, "field": "651", "vocabulary": "yso", "uri": None}
+            {"heading": geo_heading, "field": geo_field, "vocabulary": "yso", "uri": None}
         )
     for mus_qid in get_claim_qids(claims, "P870"):
         mus_heading = _lookup_entity_name(mus_qid, store) or mus_qid
         subjects["medium_of_performance"].append(
-            {"heading": mus_heading, "field": "382", "vocabulary": "seko", "uri": None}
+            {"heading": mus_heading, "field": mop_field, "vocabulary": "seko", "uri": None}
         )
 
     return {
@@ -469,6 +644,7 @@ def parse_wikidata_entity(
             "isbn": isbns,
             "issn": issns,
             "urn": urns,
+            "doi": dois,
             "other_ids": other_ids,
         },
         "agents": agents,
@@ -478,8 +654,9 @@ def parse_wikidata_entity(
 
 def _prescan_authors(
     path: Path,
-    store: Optional[AuthorityStore],
+    store: Optional[Union[AuthorityStore, WEMIRepository]],
     tracker: Optional[ProgressTracker],
+    config: Optional[WikidataIngestConfig] = None,
 ) -> int:
     """Pass 1: Stream the Wikidata dump and persist all author/org/place entities to SQLite.
 
@@ -488,10 +665,16 @@ def _prescan_authors(
     """
     author_batch: list[dict[str, Any]] = []
     total_authors = 0
+    require_auth_id = True if config is None else config.require_author_authority_id
+    auth_props = (
+        ("P3595", "P213", "P214", "P227", "P244", "P906", "P496")
+        if config is None
+        else tuple(config.author_authority_properties)
+    )
 
     with gzip.open(path, "rb") as f:
         for line in f:
-            if not _has_bib_indicator(line):
+            if not _has_author_indicator(line):
                 continue
 
             clean_line = line.strip().rstrip(b",")
@@ -503,7 +686,11 @@ def _prescan_authors(
             except Exception:
                 continue
 
-            author_data = _extract_author_data(entity)
+            author_data = _extract_author_data(
+                entity,
+                require_authority_id=require_auth_id,
+                authority_properties=auth_props,
+            )
             if author_data:
                 author_batch.append(author_data)
                 if len(author_batch) >= 500:
@@ -566,6 +753,7 @@ def stream_wikidata_dump(
     dump_path: Path | str,
     store: Optional[AuthorityStore] = None,
     tracker: Optional[ProgressTracker] = None,
+    config: Optional[WikidataIngestConfig] = None,
 ) -> Iterator[dict[str, Any]]:
     """Two-pass Wikidata streaming: pre-scan authors into SQLite, then extract books.
 
@@ -586,7 +774,7 @@ def stream_wikidata_dump(
     logger.info("Pass 1/2: Pre-scanning author entities into SQLite...")
     if tracker:
         tracker.start_task(stage="wikidata_prescan", bytes_total=total_bytes)
-    _prescan_authors(path, store, tracker)
+    _prescan_authors(path, store, tracker, config=config)
     if tracker:
         tracker.complete_task(metadata={"stage": "prescan"})
 
@@ -597,21 +785,530 @@ def stream_wikidata_dump(
     yield from _stream_bibliographic_entities(path, store, tracker)
 
 
-def ingest_wikidata_pipeline(
+def decompose_wikidata_entity(
+    entity: dict[str, Any],
+    store: Optional[Union[AuthorityStore, WEMIRepository]] = None,
+    serialization_engine: Optional[WEMISerializationEngine] = None,
+) -> Optional[
+    tuple[
+        WorkEntity,
+        ExpressionEntity,
+        ManifestationEntity,
+        list[ItemEntity],
+        list[AgentEntity],
+        list[WorkRelationship],
+        list[IdentifierEntity],
+        list[ManifestationExpressionAssociation],
+        list[MediumOfPerformance],
+    ]
+]:
+    """Decompose a raw Wikidata entity dictionary into normalized WEMI domain entities.
+
+    Distinguishes Abstract Works from Editions/Manifestations (P629).
+    Hydrates author/creator names from SQLite for O(1) memory consumption.
+    """
+    qid = entity.get("id", "")
+    claims = entity.get("claims", {})
+    labels = entity.get("labels", {})
+
+    # Check if this is a human/org/place entity — skip bibliographic processing
+    instance_of = get_claim_qids(claims, "P31")
+    is_human = "Q5" in instance_of
+    is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
+    if is_human or is_org_or_place:
+        return None
+
+    # Check bibliographic / creative work criteria
+    is_book = any(k in instance_of for k in _BOOK_TYPES)
+    has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
+    has_p629 = bool(get_claim_qids(claims, "P629"))
+    is_edition = has_p629 or "Q3331189" in instance_of
+    is_creative_work = is_book or any(
+        k in instance_of
+        for k in {
+            "Q7725634",
+            "Q571",
+            "Q47461344",
+            "Q2188189",
+            "Q11424",
+            "Q40063",
+            "Q1004",
+            "Q7889",
+            "Q131436",
+        }
+    )
+
+    if not (is_edition or is_creative_work or has_bib_ids):
+        return None
+
+    # Title extraction
+    title = ""
+    p1476_val = get_claim_snak_value(claims, "P1476")
+    if isinstance(p1476_val, dict):
+        title = p1476_val.get("text", "")
+    elif isinstance(p1476_val, str):
+        title = p1476_val
+
+    if not title:
+        for lang_code in ("fi", "sv", "en"):
+            if lang_code in labels:
+                title = labels[lang_code].get("value", "")
+                if title:
+                    break
+    if not title:
+        return None
+
+    # Subtitle
+    subtitle = None
+    p1680_val = get_claim_snak_value(claims, "P1680")
+    if isinstance(p1680_val, dict):
+        subtitle = p1680_val.get("text")
+    elif isinstance(p1680_val, str):
+        subtitle = p1680_val
+
+    # Publication Year
+    pub_year_int: Optional[int] = None
+    pub_time = get_claim_snak_value(claims, "P577")
+    if isinstance(pub_time, dict) and "time" in pub_time:
+        m = re.search(r"\+(\d{4})", pub_time["time"])
+        if m:
+            pub_year_int = int(m.group(1))
+    if not pub_year_int:
+        inc_time = get_claim_snak_value(claims, "P571")
+        if isinstance(inc_time, dict) and "time" in inc_time:
+            m = re.search(r"\+(\d{4})", inc_time["time"])
+            if m:
+                pub_year_int = int(m.group(1))
+
+    # Publisher
+    publisher = extract_claim_qualifier_string(claims, "P123")
+    if not publisher:
+        pub_qids = get_claim_qids(claims, "P123")
+        if pub_qids:
+            publisher = _lookup_entity_name(pub_qids[0], store)
+    if publisher and re.match(r"^Q\d+$", publisher.strip()):
+        publisher = None
+
+    # Publication Place
+    publication_place = extract_claim_qualifier_string(claims, "P291")
+    if not publication_place:
+        place_qids = get_claim_qids(claims, "P291")
+        if place_qids:
+            publication_place = _lookup_entity_name(place_qids[0], store)
+    if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
+        publication_place = None
+
+    # Languages
+    language: Optional[str] = None
+    lang_qids = get_claim_qids(claims, "P407")
+    if lang_qids and lang_qids[0] in WIKIDATA_LANG_MAP:
+        language = WIKIDATA_LANG_MAP[lang_qids[0]]
+
+    original_language: Optional[str] = None
+    orig_lang_qids = get_claim_qids(claims, "P364")
+    if orig_lang_qids and orig_lang_qids[0] in WIKIDATA_LANG_MAP:
+        original_language = WIKIDATA_LANG_MAP[orig_lang_qids[0]]
+    if not original_language and language:
+        original_language = language
+
+    # Work type
+    work_type: WorkType = "text"
+    if any(k in instance_of for k in {"Q2188189", "Q7366", "Q105543609", "Q134556"}):
+        work_type = "music"
+    elif any(k in instance_of for k in {"Q11424", "Q5398426"}):
+        work_type = "moving_image"
+    elif "Q40063" in instance_of:
+        work_type = "drama"
+    elif any(k in instance_of for k in {"Q1004", "Q8274"}):
+        work_type = "comic"
+    elif any(k in instance_of for k in {"Q131569", "Q3284440"}):
+        work_type = "statute"
+    elif "Q7889" in instance_of:
+        work_type = "game"
+    elif "Q131436" in instance_of:
+        work_type = "board_game"
+
+    # Edition statement & extent
+    edition_statement: Optional[str] = None
+    p393 = get_claim_snak_value(claims, "P393")
+    if p393:
+        edition_statement = str(p393)
+
+    extent_str: Optional[str] = None
+    p1104 = get_claim_snak_value(claims, "P1104")
+    if p1104:
+        extent_str = f"{p1104} s."
+
+    # Carriers
+    carrier: CarrierType = "volume"
+    p437_qids = get_claim_qids(claims, "P437")
+    if any(k in p437_qids for k in {"Q134900", "Q178659"}):
+        carrier = "audio_disc"
+    elif any(k in p437_qids for k in {"Q136822", "Q1028781"}):
+        carrier = "online_resource"
+    elif any(k in p437_qids for k in {"Q251"}):
+        carrier = "videodisc"
+
+    # WEMI IDs
+    engine = serialization_engine or WEMISerializationEngine()
+    agents_map: dict[str, AgentEntity] = {}
+    contributions: list[ContributionEntity] = []
+
+    # Creators
+    creator_props = (
+        ("P50", "aut"),
+        ("P86", "cmp"),
+        ("P57", "drt"),
+        ("P170", "cre"),
+        ("P287", "dsr"),
+        ("P178", "prg"),
+        ("P84", "arc"),
+    )
+    # Realizers
+    realizer_props = (
+        ("P655", "trl"),
+        ("P110", "ill"),
+        ("P98", "edt"),
+        ("P175", "prf"),
+        ("P345", "nrt"),
+    )
+
+    work_qid = get_claim_qids(claims, "P629")[0] if has_p629 else qid
+    work_uri = format_wikidata_uri(work_qid)
+    qid_uri = format_wikidata_uri(qid)
+    expr_uri = f"{qid_uri}#exp-{language or 'und'}"
+    manif_uri = qid_uri
+
+    primary_creator_name: Optional[str] = None
+    for prop, role in creator_props:
+        for c_qid in get_claim_qids(claims, prop):
+            c_name = _lookup_entity_name(c_qid, store) or c_qid
+            if not primary_creator_name and not re.match(r"^Q\d+$", c_name):
+                primary_creator_name = c_name
+            agent_uri = format_wikidata_uri(c_qid)
+            author_data = store.get_wikidata_author(c_qid) if store else None
+            c_meta: dict[str, Any] = {}
+            if author_data and author_data.get("metadata_json"):
+                try:
+                    c_meta = json.loads(author_data["metadata_json"])
+                except Exception:
+                    c_meta = {}
+            agent = AgentEntity(
+                agent_uri=agent_uri,
+                name=c_name,
+                name_normalized=c_name.strip().lower(),
+                surname=author_data.get("family_name") if author_data else None,
+                birth_year=author_data.get("birth_year") if author_data else None,
+                death_year=author_data.get("death_year") if author_data else None,
+                source="wikidata",
+                wikidata_qid=c_qid,
+                orcid=c_meta.get("orcid"),
+                variant_names=c_meta.get("variant_names", []),
+                qualifier_counts=c_meta.get("qualifier_counts", {}),
+                affiliation_counts=c_meta.get("affiliation_counts", {}),
+                language_counts=c_meta.get("language_counts", {}),
+                subject_counts=c_meta.get("subject_counts", {}),
+                metadata_json=author_data.get("metadata_json") if author_data else None,
+            )
+            agents_map[c_qid] = agent
+            contributions.append(
+                ContributionEntity(
+                    entity_type="work",
+                    entity_id=0,
+                    agent_id=0,
+                    role=role,
+                    is_primary=(primary_creator_name == c_name),
+                )
+            )
+
+    for prop, role in realizer_props:
+        for r_qid in get_claim_qids(claims, prop):
+            r_name = _lookup_entity_name(r_qid, store) or r_qid
+            agent_uri = format_wikidata_uri(r_qid)
+            author_data = store.get_wikidata_author(r_qid) if store else None
+            r_meta: dict[str, Any] = {}
+            if author_data and author_data.get("metadata_json"):
+                try:
+                    r_meta = json.loads(author_data["metadata_json"])
+                except Exception:
+                    r_meta = {}
+            agent = AgentEntity(
+                agent_uri=agent_uri,
+                name=r_name,
+                name_normalized=r_name.strip().lower(),
+                surname=author_data.get("family_name") if author_data else None,
+                birth_year=author_data.get("birth_year") if author_data else None,
+                death_year=author_data.get("death_year") if author_data else None,
+                source="wikidata",
+                wikidata_qid=r_qid,
+                orcid=r_meta.get("orcid"),
+                variant_names=r_meta.get("variant_names", []),
+                qualifier_counts=r_meta.get("qualifier_counts", {}),
+                affiliation_counts=r_meta.get("affiliation_counts", {}),
+                language_counts=r_meta.get("language_counts", {}),
+                subject_counts=r_meta.get("subject_counts", {}),
+                metadata_json=author_data.get("metadata_json") if author_data else None,
+            )
+            agents_map[r_qid] = agent
+            contributions.append(
+                ContributionEntity(
+                    entity_type="expression",
+                    entity_id=0,
+                    agent_id=0,
+                    role=role,
+                    is_primary=False,
+                )
+            )
+
+    # Identifiers
+    identifiers: list[IdentifierEntity] = []
+    id_claims = (
+        ("P212", "isbn"),
+        ("P957", "isbn"),
+        ("P236", "issn"),
+        ("P356", "doi"),
+        ("P243", "oclc"),
+        ("P345", "imdb"),
+        ("P8383", "bgg"),
+    )
+    for prop, scheme in id_claims:
+        for stmt in claims.get(prop, []):
+            mainsnak = stmt.get("mainsnak", {})
+            val = mainsnak.get("datavalue", {}).get("value")
+            if val and isinstance(val, str):
+                v_clean = val.strip()
+                v_norm = re.sub(r"[^0-9a-zA-Z]", "", v_clean).lower()
+                identifiers.append(
+                    IdentifierEntity(
+                        entity_type="manifestation"
+                        if scheme in ("isbn", "issn", "doi", "oclc")
+                        else "work",
+                        entity_id=0,
+                        scheme=scheme,
+                        value=v_clean,
+                        value_normalized=v_norm,
+                    )
+                )
+
+    # Relationships
+    relationships: list[WorkRelationship] = []
+    rel_claims = (
+        ("P144", "adaptation_of"),
+        ("P179", "series_member_of"),
+        ("P155", "continues"),
+        ("P156", "continued_by"),
+        ("P527", "has_series_member"),
+        ("P361", "series_member_of"),
+    )
+    for prop, rel_type in rel_claims:
+        for target_qid in get_claim_qids(claims, prop):
+            relationships.append(
+                WorkRelationship(
+                    source_work_id=0,
+                    target_work_id=0,
+                    relationship_type=rel_type,
+                )
+            )
+
+    work = WorkEntity(
+        work_uri=work_uri,
+        title=title,
+        title_normalized=compute_title_stem(title, lang=original_language),
+        original_language=original_language,
+        work_type=work_type,
+        source="wikidata",
+        source_id=qid,
+        wikidata_qid=work_qid if has_p629 else qid,
+    )
+    work.serialized_text = engine.render_work(
+        work,
+        authors=[{"name": primary_creator_name}] if primary_creator_name else [],
+    )
+
+    expression = ExpressionEntity(
+        work_id=0,
+        expression_uri=expr_uri,
+        title=title,
+        content_type="audio_music" if work_type == "music" else "text",
+        language=language or "und",
+        source="wikidata",
+        source_id=qid,
+        wikidata_qid=qid,
+    )
+    expression.serialized_text = engine.render_expression(
+        expression,
+        work_title=work.title,
+    )
+
+    manifestation = ManifestationEntity(
+        work_id=0,
+        manifestation_uri=manif_uri,
+        title=title,
+        subtitle=subtitle,
+        title_normalized=compute_title_stem(title, lang=language),
+        carrier_type=carrier,
+        edition_statement=edition_statement,
+        publication_year=pub_year_int,
+        publisher=publisher,
+        publication_place=publication_place,
+        extent=extent_str,
+        source="wikidata",
+        source_id=qid,
+    )
+    manifestation.serialized_text = engine.render_manifestation(manifestation)
+
+    associations = [
+        ManifestationExpressionAssociation(
+            manifestation_id=0,
+            expression_id=0,
+            is_primary=True,
+        )
+    ]
+
+    return (
+        work,
+        expression,
+        manifestation,
+        [],
+        list(agents_map.values()),
+        relationships,
+        identifiers,
+        associations,
+        [],
+        contributions,
+    )
+
+
+def ingest_wikidata_wemi_pipeline(
     config: WikidataIngestConfig,
-    store: AuthorityStore,
-    normalizer: RecordNormalizer,
-    embedder: SentenceEmbedder,
+    wemi_repo: WEMIRepository,
     tracker: Optional[ProgressTracker] = None,
 ) -> int:
-    """Run streaming Wikidata dump ingestion with batch embedding and indexing."""
+    """Run two-pass streaming Wikidata ingestion landing into WEMIRepository."""
+    path = Path(config.dump_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Wikidata dump not found: {path}")
+
+    total_bytes = os.path.getsize(path)
+
+    # Pass 1: Scan author entities into SQLite wikidata_authors & agents
+    logger.info("Pass 1/2: Pre-scanning author entities into SQLite...")
+    if tracker:
+        tracker.start_task(stage="wikidata_prescan", bytes_total=total_bytes)
+    _prescan_authors(path, wemi_repo, tracker, config=config)
+    if tracker:
+        tracker.complete_task(metadata={"stage": "prescan"})
+
+    if config.pass1_only:
+        return 0
+
+    # Pass 2: Stream bibliographic entities and insert into WEMIRepository
+    logger.info("Pass 2/2: Decomposing bibliographic entities into WEMI...")
+    if tracker:
+        tracker.start_task(stage="wikidata_wemi", bytes_total=total_bytes)
+
+    total_ingested = 0
+    engine = WEMISerializationEngine()
+    works_batch = []
+    expressions_batch = []
+    manifestations_batch = []
+    items_batch = []
+    agents_batch = []
+    relationships_batch = []
+    identifiers_batch = []
+    associations_batch = []
+    mediums_batch = []
+    contributions_batch = []
+
+    def _flush_batch() -> None:
+        nonlocal total_ingested
+        if works_batch:
+            wemi_repo.insert_wemi_batch(
+                works=works_batch,
+                expressions=expressions_batch,
+                manifestations=manifestations_batch,
+                items=items_batch,
+                agents=agents_batch,
+                relationships=relationships_batch,
+                identifiers=identifiers_batch,
+                manifestation_expressions=associations_batch,
+                mediums_of_performance=mediums_batch,
+                contributions=contributions_batch,
+            )
+            total_ingested += len(works_batch)
+            works_batch.clear()
+            expressions_batch.clear()
+            manifestations_batch.clear()
+            items_batch.clear()
+            agents_batch.clear()
+            relationships_batch.clear()
+            identifiers_batch.clear()
+            associations_batch.clear()
+            mediums_batch.clear()
+            contributions_batch.clear()
+            if tracker:
+                tracker.update_progress(stage="wikidata_wemi", items_processed=total_ingested)
+
+    with gzip.open(path, "rb") as f:
+        for line in f:
+            if not _has_bib_indicator(line):
+                continue
+            clean_line = line.strip().rstrip(b",")
+            if not clean_line or clean_line in (b"[", b"]"):
+                continue
+            try:
+                entity = orjson.loads(clean_line)
+            except Exception:
+                continue
+
+            decomp = decompose_wikidata_entity(entity, store=wemi_repo, serialization_engine=engine)
+            if decomp:
+                w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decomp
+                works_batch.append(w)
+                expressions_batch.append(e)
+                manifestations_batch.append(m)
+                items_batch.extend(itms)
+                agents_batch.extend(agts)
+                relationships_batch.extend(rels)
+                identifiers_batch.extend(idents)
+                associations_batch.extend(assoc)
+                mediums_batch.extend(mops)
+                contributions_batch.extend(contribs)
+
+                if len(works_batch) >= config.batch_size:
+                    _flush_batch()
+
+    _flush_batch()
+
+    if tracker:
+        tracker.complete_task(metadata={"total_ingested": total_ingested})
+
+    return total_ingested
+
+
+def ingest_wikidata_pipeline(
+    config: WikidataIngestConfig,
+    store: Union[AuthorityStore, WEMIRepository],
+    normalizer: Optional[RecordNormalizer] = None,
+    embedder: Optional[SentenceEmbedder] = None,
+    tracker: Optional[ProgressTracker] = None,
+) -> int:
+    """Run streaming Wikidata dump ingestion with batch embedding or WEMI storage."""
+    if isinstance(store, WEMIRepository) or (normalizer is None and embedder is None):
+        if isinstance(store, WEMIRepository):
+            return ingest_wikidata_wemi_pipeline(config=config, wemi_repo=store, tracker=tracker)
+
+    if normalizer is None or embedder is None:
+        raise ValueError("normalizer and embedder required for AuthorityStore ingestion")
     batch: list[BibliographicRecord] = []
     total_ingested = 0
     last_checkpoint = 0
     checkpoint_interval = 5000
 
     try:
-        for raw_data in stream_wikidata_dump(config.dump_path, store=store, tracker=tracker):
+        for raw_data in stream_wikidata_dump(
+            config.dump_path, store=store, tracker=tracker, config=config
+        ):
             record = normalizer.normalize(raw_data)
             batch.append(record)
 
@@ -673,7 +1370,8 @@ def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]
     yso_str = str(yso_id).strip()
     if not yso_str.startswith("http"):
         yso_uri = (
-            f"http://www.yso.fi/onto/yso/{yso_str if yso_str.startswith('p') else 'p' + yso_str}"
+            concept_id_to_uri(f"yso:{yso_str}")
+            or f"http://www.yso.fi/onto/yso/{yso_str if yso_str.startswith('p') else 'p' + yso_str}"
         )
     else:
         yso_uri = yso_str
@@ -682,7 +1380,8 @@ def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]
     is_place = any(
         k in instance_of for k in ("Q515", "Q6256", "Q532", "Q15284", "Q486970", "Q1048835")
     )
-    target_field = "651" if is_place else "650"
+    cat_defaults = get_category_default_field_map()
+    target_field = cat_defaults["geographic"] if is_place else cat_defaults["topical"]
 
     aliases: list[dict[str, Any]] = []
     labels = entity.get("labels", {})

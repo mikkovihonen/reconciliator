@@ -28,7 +28,7 @@ def test_bibframe_ingest_and_reconcile_e2e(tmp_path: Path) -> None:
 
     config_yaml = f"""
 storage:
-  authority_db: "{db_path}"
+  data_dir: "{tmp_path}"
   index_path: "{index_path}"
 
 embedding:
@@ -149,7 +149,7 @@ def test_bibframe_jsonld_native_reconciliation(tmp_path: Path) -> None:
 
     config_yaml = f"""
 storage:
-  authority_db: "{db_path}"
+  data_dir: "{tmp_path}"
   index_path: "{index_path}"
 
 embedding:

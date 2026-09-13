@@ -167,3 +167,37 @@ def test_resourcesync_harvester() -> None:
         item, data = contents[0]
         assert item.loc == "http://example.org/records/1.ttl"
         assert b"@prefix bf:" in data
+
+
+def test_temporal_chronological_subjects_parsing() -> None:
+    """Verify that temporal/chronological subjects (MARC 648 / YSO-AIKA) are automatically parsed."""
+    ttl_data = """
+    @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+    @prefix madsrdf: <http://www.loc.gov/mads/rdf/v1#> .
+    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+    <http://example.org/inst1> a bf:Instance ;
+        bf:instanceOf <http://example.org/work1> .
+
+    <http://example.org/work1> a bf:Work ;
+        bf:title [ a bf:Title ; bf:mainTitle "Historical Era" ] ;
+        bf:subject <http://www.yso.fi/onto/yso/p25530> .
+
+    <http://www.yso.fi/onto/yso/p25530> a bf:Temporal ;
+        madsrdf:authoritativeLabel "1900-luku"@fi .
+    """
+    g = Graph()
+    g.parse(data=ttl_data, format="turtle")
+
+    records = list(parse_bibframe_graph(g, source="melinda"))
+    assert len(records) == 1
+    rec, _ = records[0]
+
+    assert "chronological" in rec["subjects"]
+    assert len(rec["subjects"]["chronological"]) == 1
+    chrono_subj = rec["subjects"]["chronological"][0]
+    assert chrono_subj["heading"] == "1900-luku"
+    assert chrono_subj["field"] == "648"
+    assert chrono_subj["vocabulary"] == "yso"
+    assert chrono_subj["uri"] == "http://www.yso.fi/onto/yso/p25530"

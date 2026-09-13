@@ -14,12 +14,12 @@ from reconciliator.indexer import (
 )
 
 
-@pytest.mark.parametrize("backend", ["faiss", "torch"])
+@pytest.mark.parametrize("backend", ["faiss", "torch", "usearch"])
 def test_engine_basic_lifecycle(tmp_path: Path, backend: str) -> None:
     index_path = tmp_path / f"index_{backend}.bin"
     dim = 32
 
-    cfg = VectorEngineConfig(backend=backend, device="cpu")  # type: ignore[arg-type]
+    cfg = VectorEngineConfig(backend=backend, device="cpu", mode="embedded")  # type: ignore[arg-type]
     engine = create_vector_engine(index_path, dimension=dim, config=cfg)
     assert engine.total_vectors == 0
 
@@ -209,3 +209,80 @@ def test_torch_engine_zero_metal_leak_under_high_batch_churn(tmp_path: Path) -> 
     q = np.random.randn(5, dim).astype(np.float32)
     scores, found = engine.search(q, top_k=5)
     assert found.shape == (5, 5)
+
+
+def test_torch_engine_float16_and_mmap(tmp_path: Path) -> None:
+    dim = 32
+    index_path = tmp_path / "f16.index"
+    engine = TorchVectorEngine(index_path, dimension=dim, device="cpu", dtype="float16")
+    assert engine.torch_dtype == torch.float16
+    assert engine.metadata["dtype"] == "float16"
+
+    vecs = np.random.randn(20, dim).astype(np.float32)
+    engine.add_vectors(vecs, ids=list(range(20)))
+    assert engine.total_vectors == 20
+    assert engine.vectors.dtype == torch.float16
+
+    scores, found = engine.search(vecs[0:1], top_k=3)
+    assert found[0][0] == 0
+    assert pytest.approx(float(scores[0][0]), abs=1e-3) == 1.0
+
+    engine.save()
+
+    # Load with mmap=True
+    mmap_engine = TorchVectorEngine(
+        index_path, dimension=dim, device="cpu", dtype="float16", mmap=True
+    )
+    assert mmap_engine.total_vectors == 20
+    scores_m, found_m = mmap_engine.search(vecs[0:1], top_k=3)
+    assert found_m[0][0] == 0
+    assert pytest.approx(float(scores_m[0][0]), abs=1e-3) == 1.0
+
+
+def test_faiss_engine_sq8_and_mmap(tmp_path: Path) -> None:
+    dim = 32
+    index_path = tmp_path / "sq8.index"
+    engine = FAISSIndexEngine(index_path, dimension=dim, index_type="sq8")
+    assert engine.index_type == "sq8"
+
+    vecs = np.random.randn(50, dim).astype(np.float32)
+    engine.add_vectors(vecs, ids=list(range(50)))
+    assert engine.total_vectors == 50
+
+    scores, found = engine.search(vecs[0:1], top_k=3)
+    assert found[0][0] == 0
+
+    engine.save()
+
+    # Load with mmap=True
+    mmap_engine = FAISSIndexEngine(index_path, dimension=dim, index_type="sq8", mmap=True)
+    assert mmap_engine.total_vectors == 50
+    scores_m, found_m = mmap_engine.search(vecs[0:1], top_k=3)
+    assert found_m[0][0] == 0
+
+
+def test_factory_nested_config_propagation(tmp_path: Path) -> None:
+    from reconciliator.config import FAISSEngineConfig, TorchEngineConfig
+
+    cfg = VectorEngineConfig(
+        backend="torch",
+        device="cpu",
+        mode="embedded",
+        torch=TorchEngineConfig(dtype="float16", chunk_size=25000, initial_capacity=5000),
+    )
+    t_engine = create_vector_engine(tmp_path / "cfg_torch.index", dimension=16, config=cfg)
+    assert isinstance(t_engine, TorchVectorEngine)
+    assert t_engine.torch_dtype == torch.float16
+    assert t_engine.chunk_size == 25000
+    assert t_engine.initial_capacity == 5000
+
+    cfg_faiss = VectorEngineConfig(
+        backend="faiss",
+        mode="embedded",
+        faiss=FAISSEngineConfig(index_type="sq8", mmap=True, nprobe=8),
+    )
+    f_engine = create_vector_engine(tmp_path / "cfg_faiss.index", dimension=16, config=cfg_faiss)
+    assert isinstance(f_engine, FAISSIndexEngine)
+    assert f_engine.index_type == "sq8"
+    assert f_engine.mmap is True
+    assert f_engine.nprobe == 8

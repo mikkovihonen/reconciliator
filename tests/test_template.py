@@ -123,3 +123,76 @@ def test_custom_filters() -> None:
     assert primary_code(classes) == "82-3"
     assert join_classifications(classes, scheme="ykl") == "84.2"
     assert collapse_ws("  Hello   \n\t world!  ") == "Hello world!"
+
+
+def test_wemi_serialization_engine() -> None:
+    from reconciliator.models import ExpressionEntity, ManifestationEntity, WorkEntity
+    from reconciliator.template import WEMISerializationEngine
+
+    engine = WEMISerializationEngine()
+
+    # 1. Test Work rendering
+    work = WorkEntity(
+        work_uri="urn:work:1",
+        source="melinda",
+        source_id="w1",
+        title="Sinuhe egyptiläinen",
+        title_normalized="sinuhe egyptilainen",
+        original_language="fin",
+        work_type="text",
+        subjects_json=["muinainen egypti", "historia"],
+        ykl_class="84.2",
+    )
+    work_str = engine.render_work(
+        work,
+        authors=[{"name": "Waltari, Mika"}],
+    )
+    assert "Nimeke: Sinuhe egyptiläinen" in work_str
+    assert "Tekijät: Waltari, Mika" in work_str
+    assert "Tyyppi: text" in work_str
+    assert "Kieli: fin" in work_str
+    assert "Aiheet: muinainen egypti, historia" in work_str
+    assert "Luokitus: 84.2" in work_str
+
+    # 2. Test Expression rendering
+    exp = ExpressionEntity(
+        work_id=1,
+        expression_uri="urn:exp:1",
+        source="melinda",
+        source_id="e1",
+        language="swe",
+        content_type="text",
+        title="Sinuhe egyptiern",
+        version_designation="2. rev. uppl.",
+    )
+    exp_str = engine.render_expression(
+        exp,
+        work_title="Sinuhe egyptiläinen",
+        translators=[{"name": "Enckell, Thomas"}],
+    )
+    assert "Teos: Sinuhe egyptiläinen" in exp_str
+    assert "Ilmiasu: Sinuhe egyptiern [Kieli: swe]" in exp_str
+    assert "Kääntäjä: Enckell, Thomas" in exp_str
+    assert "Versio: 2. rev. uppl." in exp_str
+
+    # 3. Test Manifestation rendering
+    manif = ManifestationEntity(
+        work_id=1,
+        source="melinda",
+        source_id="m1",
+        title="Sinuhe egyptiern",
+        title_normalized="sinuhe egyptiern",
+        publisher="Schildts",
+        publication_place="Helsingfors",
+        publication_year=1946,
+        edition_statement="2. uppl.",
+        carrier_type="volume",
+        extent="680 s.",
+    )
+    manif_str = engine.render_manifestation(manif)
+    assert "Nimeke: Sinuhe egyptiern" in manif_str
+    assert "Julkaisija: Schildts (Helsingfors)" in manif_str
+    assert "Vuosi: 1946" in manif_str
+    assert "Painos: 2. uppl." in manif_str
+    assert "Muoto: volume" in manif_str
+    assert "Laajuus: 680 s." in manif_str

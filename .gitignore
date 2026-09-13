@@ -101,6 +101,8 @@ ehthumbs.db
 *.sublime-workspace
 *.sublime-project
 
+dumps/
+dumps/*
 *.gz
 *.tar.gz
 *.gz.aria2

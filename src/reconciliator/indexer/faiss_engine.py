@@ -19,10 +19,18 @@ class FAISSIndexEngine:
         index_path: Path | str,
         dimension: int,
         threads: Optional[int] = None,
+        index_type: Literal["flat", "sq8"] = "flat",
+        mmap: bool = False,
+        nprobe: int = 16,
+        nlist: int = 2048,
     ) -> None:
         self.index_path = Path(index_path)
         self.meta_path = Path(f"{index_path}.meta.json")
         self.dimension = dimension
+        self.index_type = (index_type or "flat").lower()
+        self.mmap = mmap
+        self.nprobe = nprobe
+        self.nlist = nlist
 
         if threads is not None:
             faiss.omp_set_num_threads(threads)
@@ -37,6 +45,7 @@ class FAISSIndexEngine:
         self.metadata: dict[str, Any] = {
             "backend": "faiss",
             "dimension": dimension,
+            "index_type": self.index_type,
             "model_name": "",
             "template_hash": "",
         }
@@ -45,7 +54,12 @@ class FAISSIndexEngine:
         if self.index_path.exists():
             self.load()
         else:
-            self._base_index = faiss.IndexFlatIP(dimension)
+            if self.index_type == "sq8":
+                self._base_index = faiss.IndexScalarQuantizer(
+                    dimension, faiss.ScalarQuantizer.QT_8bit, faiss.METRIC_INNER_PRODUCT
+                )
+            else:
+                self._base_index = faiss.IndexFlatIP(dimension)
             self.index: faiss.Index = faiss.IndexIDMap2(self._base_index)
 
     @property
@@ -85,6 +99,10 @@ class FAISSIndexEngine:
         # L2-normalize vectors for cosine similarity via Inner Product
         faiss.normalize_L2(vectors)
 
+        # Automatically train index if not yet trained (e.g. for IndexScalarQuantizer)
+        if not self.index.is_trained:
+            self.index.train(vectors)
+
         if ids is not None:
             id_arr = np.ascontiguousarray(ids, dtype=np.int64)
             if id_arr.ndim != 1:
@@ -120,6 +138,13 @@ class FAISSIndexEngine:
             )
 
         faiss.normalize_L2(query_vectors)
+
+        # Apply nprobe if supported (e.g. on IVF indexes)
+        if hasattr(self.index, "nprobe"):
+            self.index.nprobe = self.nprobe
+        elif hasattr(self._base_index, "nprobe") and self._base_index is not None:
+            self._base_index.nprobe = self.nprobe
+
         k = min(top_k, self.index.ntotal)
         scores, indices = self.index.search(query_vectors, k)
         return scores, indices
@@ -133,6 +158,7 @@ class FAISSIndexEngine:
             self.metadata.update(metadata)
         self.metadata["backend"] = "faiss"
         self.metadata["dimension"] = self.dimension
+        self.metadata["index_type"] = self.index_type
         self.metadata["total_vectors"] = self.index.ntotal
 
         with self.meta_path.open("w", encoding="utf-8") as f:
@@ -144,7 +170,8 @@ class FAISSIndexEngine:
             raise FileNotFoundError(f"FAISS index file not found at: {self.index_path}")
 
         self._base_index = None
-        loaded_index = faiss.read_index(str(self.index_path))
+        flags = faiss.IO_FLAG_MMAP if self.mmap else 0
+        loaded_index = faiss.read_index(str(self.index_path), flags)
         if not isinstance(loaded_index, (faiss.IndexIDMap, faiss.IndexIDMap2)):
             self._base_index = loaded_index
             loaded_index = faiss.IndexIDMap2(self._base_index)
@@ -154,6 +181,8 @@ class FAISSIndexEngine:
         if self.meta_path.exists():
             with self.meta_path.open("r", encoding="utf-8") as f:
                 self.metadata = json.load(f)
+                if "index_type" in self.metadata:
+                    self.index_type = self.metadata["index_type"]
 
     def verify_metadata(
         self,

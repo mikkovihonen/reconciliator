@@ -155,3 +155,48 @@ def test_wikidata_composer_and_author_string_and_publisher(tmp_path: Path) -> No
     assert len(rec2["agents"]) == 1
     assert rec2["agents"][0]["name"] == "Kirjailija X"
     assert rec2["agents"][0]["role"] == "aut"
+
+
+def test_wikidata_author_authority_filtering(tmp_path: Path) -> None:
+    from reconciliator.config import WikidataIngestConfig
+    from reconciliator.ingestion.wikidata import _extract_author_data
+
+    # Human with no authority IDs (e.g. footballer)
+    athlete = {
+        "id": "Q1001",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+        },
+        "labels": {"en": {"value": "Random Athlete"}},
+    }
+
+    # Human with VIAF (P214)
+    author_viaf = {
+        "id": "Q1002",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+            "P214": [{"mainsnak": {"datavalue": {"value": "12345678"}}}],
+        },
+        "labels": {"en": {"value": "VIAF Author"}},
+    }
+
+    # Human with GND (P227)
+    author_gnd = {
+        "id": "Q1003",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+            "P227": [{"mainsnak": {"datavalue": {"value": "118540238"}}}],
+        },
+        "labels": {"de": {"value": "Goethe"}},
+    }
+
+    # By default (require_authority_id=True), athlete is skipped
+    assert _extract_author_data(athlete, require_authority_id=True) is None
+    # VIAF and GND authors are kept
+    assert _extract_author_data(author_viaf, require_authority_id=True) is not None
+    assert _extract_author_data(author_gnd, require_authority_id=True) is not None
+
+    # When require_authority_id=False, athlete is also kept
+    res = _extract_author_data(athlete, require_authority_id=False)
+    assert res is not None
+    assert res["name"] == "Random Athlete"

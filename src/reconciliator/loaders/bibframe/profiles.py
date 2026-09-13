@@ -42,9 +42,51 @@ class BIBFRAMESchemaProfile(BaseModel):
 
     identifier_predicates: list[str] = Field(default_factory=list)
     subject_predicates: list[str] = Field(default_factory=list)
+    source_predicates: list[str] = Field(default_factory=list)
+    default_subject_field: Optional[str] = None
+    subject_type_fields: dict[str, str] = Field(default_factory=dict)
+    subject_label_predicates: list[str] = Field(default_factory=list)
     provision_activity_predicates: list[str] = Field(default_factory=list)
     language_predicates: list[str] = Field(default_factory=list)
     music_performance_predicates: list[str] = Field(default_factory=list)
+
+    agent_personal_classes: list[str] = Field(default_factory=list)
+    agent_corporate_classes: list[str] = Field(default_factory=list)
+    agent_match_key_predicates: list[str] = Field(default_factory=list)
+    agent_default_tags: dict[str, str] = Field(default_factory=dict)
+    agent_primary_contribution_classes: list[str] = Field(default_factory=list)
+    agent_label_predicates: list[str] = Field(default_factory=list)
+    agent_simple_predicates: list[str] = Field(default_factory=list)
+
+    work_creator_roles: list[str] = Field(default_factory=list)
+    expression_realizer_roles: list[str] = Field(default_factory=list)
+    role_uri_prefixes: list[str] = Field(default_factory=list)
+    role_label_mappings: dict[str, str] = Field(default_factory=dict)
+
+    title_variant_classes: list[str] = Field(default_factory=list)
+    identifier_scheme_mappings: dict[str, list[str]] = Field(default_factory=dict)
+
+    provision_date_predicates: list[str] = Field(default_factory=list)
+    provision_publisher_predicates: list[str] = Field(default_factory=list)
+    provision_place_predicates: list[str] = Field(default_factory=list)
+    provision_edition_predicates: list[str] = Field(default_factory=list)
+    provision_extent_predicates: list[str] = Field(default_factory=list)
+
+    carrier_type_mappings: dict[str, list[str]] = Field(default_factory=dict)
+    item_predicates: list[str] = Field(default_factory=list)
+    item_barcode_predicates: list[str] = Field(default_factory=list)
+    item_shelfmark_predicates: list[str] = Field(default_factory=list)
+    item_holding_predicates: list[str] = Field(default_factory=list)
+
+    relationship_predicates: dict[str, str] = Field(default_factory=dict)
+    work_type_classes: dict[str, str] = Field(default_factory=dict)
+    pmo_performance_classes: list[str] = Field(default_factory=list)
+    pmo_performed_work_predicates: list[str] = Field(default_factory=list)
+
+    same_as_predicate: str = "http://www.w3.org/2002/07/owl#sameAs"
+    default_music_vocabulary: Optional[str] = None
+    synthesize_missing_expression: bool = False
+    provenance_regex: str = r"^(\d{3})([0-9\s]{2})(.*)$"
 
     provenance_predicate: Optional[str] = None
 
@@ -156,6 +198,18 @@ class BIBFRAMESchemaProfile(BaseModel):
         )
 
     @functools.cached_property
+    def expanded_subject_label_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.subject_label_predicates} | set(
+            self.subject_label_predicates
+        )
+
+    @functools.cached_property
+    def expanded_source_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.source_predicates} | set(
+            self.source_predicates
+        )
+
+    @functools.cached_property
     def expanded_provision_activity_predicates(self) -> set[str]:
         return {self.expand_curie(p) for p in self.provision_activity_predicates} | set(
             self.provision_activity_predicates
@@ -178,6 +232,127 @@ class BIBFRAMESchemaProfile(BaseModel):
         if not self.provenance_predicate:
             return None
         return self.expand_curie(self.provenance_predicate)
+
+    @functools.cached_property
+    def expanded_agent_personal_classes(self) -> set[str]:
+        return {self.expand_curie(c) for c in self.agent_personal_classes} | set(
+            self.agent_personal_classes
+        )
+
+    @functools.cached_property
+    def expanded_agent_corporate_classes(self) -> set[str]:
+        return {self.expand_curie(c) for c in self.agent_corporate_classes} | set(
+            self.agent_corporate_classes
+        )
+
+    @functools.cached_property
+    def expanded_agent_match_key_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.agent_match_key_predicates} | set(
+            self.agent_match_key_predicates
+        )
+
+    @functools.cached_property
+    def expanded_agent_primary_contribution_classes(self) -> set[str]:
+        return {self.expand_curie(c) for c in self.agent_primary_contribution_classes} | set(
+            self.agent_primary_contribution_classes
+        )
+
+    @functools.cached_property
+    def expanded_agent_label_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.agent_label_predicates} | set(
+            self.agent_label_predicates
+        )
+
+    @functools.cached_property
+    def expanded_agent_simple_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.agent_simple_predicates} | set(
+            self.agent_simple_predicates
+        )
+
+    @functools.cached_property
+    def expanded_title_variant_classes(self) -> set[str]:
+        return {self.expand_curie(c) for c in self.title_variant_classes} | set(
+            self.title_variant_classes
+        )
+
+    @functools.cached_property
+    def expanded_provision_date_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.provision_date_predicates} | set(
+            self.provision_date_predicates
+        )
+
+    @functools.cached_property
+    def expanded_provision_publisher_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.provision_publisher_predicates} | set(
+            self.provision_publisher_predicates
+        )
+
+    @functools.cached_property
+    def expanded_provision_place_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.provision_place_predicates} | set(
+            self.provision_place_predicates
+        )
+
+    @functools.cached_property
+    def expanded_provision_edition_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.provision_edition_predicates} | set(
+            self.provision_edition_predicates
+        )
+
+    @functools.cached_property
+    def expanded_provision_extent_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.provision_extent_predicates} | set(
+            self.provision_extent_predicates
+        )
+
+    @functools.cached_property
+    def expanded_item_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.item_predicates} | set(self.item_predicates)
+
+    @functools.cached_property
+    def expanded_item_barcode_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.item_barcode_predicates} | set(
+            self.item_barcode_predicates
+        )
+
+    @functools.cached_property
+    def expanded_item_shelfmark_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.item_shelfmark_predicates} | set(
+            self.item_shelfmark_predicates
+        )
+
+    @functools.cached_property
+    def expanded_item_holding_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.item_holding_predicates} | set(
+            self.item_holding_predicates
+        )
+
+    @functools.cached_property
+    def expanded_relationship_predicates(self) -> dict[str, str]:
+        return {self.expand_curie(k): v for k, v in self.relationship_predicates.items()}
+
+    @functools.cached_property
+    def expanded_work_type_classes(self) -> dict[str, str]:
+        return {k: self.expand_curie(v) for k, v in self.work_type_classes.items()}
+
+    @functools.cached_property
+    def expanded_pmo_performance_classes(self) -> set[str]:
+        return {self.expand_curie(c) for c in self.pmo_performance_classes} | set(
+            self.pmo_performance_classes
+        )
+
+    @functools.cached_property
+    def expanded_pmo_performed_work_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.pmo_performed_work_predicates} | set(
+            self.pmo_performed_work_predicates
+        )
+
+    @functools.cached_property
+    def expanded_identifier_scheme_mappings(self) -> dict[str, set[str]]:
+        return {
+            scheme: {self.expand_curie(cand) for cand in candidates} | set(candidates)
+            for scheme, candidates in self.identifier_scheme_mappings.items()
+        }
 
 
 @functools.lru_cache(maxsize=32)

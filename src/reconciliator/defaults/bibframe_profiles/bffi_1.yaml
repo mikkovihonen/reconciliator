@@ -11,7 +11,9 @@ namespaces:
   skos: "http://www.w3.org/2004/02/skos/core#"
   owl: "http://www.w3.org/2002/07/owl#"
   dct: "http://purl.org/dc/terms/"
+  dcterms: "http://purl.org/dc/terms/"
   madsrdf: "http://www.loc.gov/mads/rdf/v1#"
+  pmo: "http://performedmusicontology.org/ontology/"
 
 work_classes:
   - "bffi:Work"
@@ -85,6 +87,26 @@ subject_predicates:
   - "bffi:subject"
   - "bffi:genreForm"
 
+source_predicates:
+  - "bffi:source"
+  - "bf:source"
+
+default_subject_field: "650"
+
+subject_type_fields:
+  GenreForm: "655"
+  Place: "651"
+  Geographic: "651"
+  Temporal: "648"
+  Chronological: "648"
+  Music: "382"
+  mediumOfPerformance: "382"
+
+subject_label_predicates:
+  - "rdfs:label"
+  - "skos:prefLabel"
+  - "madsrdf:authoritativeLabel"
+
 provision_activity_predicates:
   - "bffi:provisionActivity"
 
@@ -97,4 +119,203 @@ music_performance_predicates:
   - "bffi:musicMedium"
   - "bffi:musicMediumOfRepresentativeExpression"
 
+agent_personal_classes:
+  - "bf:Person"
+  - "bffi:Person"
+  - "madsrdf:PersonalName"
+
+agent_corporate_classes:
+  - "bf:Organization"
+  - "bf:Corporate"
+  - "bf:Meeting"
+  - "bf:Jurisdiction"
+  - "bffi:CorporateName"
+  - "bffi:MeetingName"
+  - "madsrdf:CorporateName"
+
+agent_match_key_predicates:
+  - "bflc:name00MatchKey"
+  - "bflc:name10MatchKey"
+  - "bflc:name11MatchKey"
+
+agent_default_tags:
+  personal: "100"
+  corporate: "110"
+  meeting: "111"
+
+agent_primary_contribution_classes:
+  - "bffi:PrimaryContribution"
+  - "bflc:PrimaryContribution"
+
+agent_label_predicates:
+  - "rdfs:label"
+  - "skos:prefLabel"
+  - "bffi:label"
+  - "bffi:name"
+
+agent_simple_predicates:
+  - "bffi:simpleAgent"
+  - "bf:simpleAgent"
+
+work_creator_roles:
+  - "aut"
+  - "cre"
+  - "cmp"
+  - "drt"
+  - "art"
+  - "inv"
+  - "dsr"
+  - "arc"
+  - "ctg"
+  - "prg"
+  - "mod"
+
+expression_realizer_roles:
+  - "trl"
+  - "edt"
+  - "ill"
+  - "nrt"
+  - "cnd"
+  - "prf"
+  - "arr"
+  - "cwt"
+  - "mus"
+  - "sng"
+  - "act"
+  - "cst"
+
+role_uri_prefixes:
+  - "http://id.loc.gov/vocabulary/relators/"
+  - "http://urn.fi/URN:NBN:fi:au:mts:"
+  - "urn:nbn:fi:au:mts:"
+  - "https://finto.fi/mts/"
+  - "http://finto.fi/mts/"
+
+role_label_mappings:
+  kirjoittaja: "aut"
+  tekijä: "aut"
+  säveltäjä: "cmp"
+  kääntäjä: "trl"
+  toimittaja: "edt"
+  kuvittaja: "ill"
+  lukija: "nrt"
+  sovittaja: "arr"
+  johtaja: "cnd"
+  esittäjä: "prf"
+  ohjaaja: "drt"
+  valokuvaaja: "pht"
+  käsikirjoittaja: "aus"
+  laatija: "com"
+  sanoittaja: "lyr"
+  taiteilija: "art"
+  kustantaja: "pbl"
+
+title_variant_classes:
+  - "bf:VariantTitle"
+  - "bf:KeyTitle"
+  - "bffi:VariantTitle"
+  - "bffi:KeyTitle"
+
+identifier_scheme_mappings:
+  isbn: ["bf:Isbn", "bffi:Isbn", "isbn"]
+  issn: ["bf:Issn", "bffi:Issn", "issn"]
+  ismn: ["bf:Ismn", "bffi:Ismn", "ismn"]
+  isrc: ["bf:Isrc", "bffi:Isrc", "isrc"]
+  doi: ["bf:Doi", "bffi:Doi", "doi"]
+  urn: ["bf:Urn", "bffi:Urn", "urn"]
+  barcode: ["bf:Barcode", "bffi:Barcode", "barcode"]
+
+provision_date_predicates:
+  - "bffi:date"
+  - "bffi:simpleDate"
+  - "bf:date"
+  - "bflc:simpleDate"
+  - "dcterms:date"
+  - "dcterms:issued"
+  - "dct:date"
+  - "dct:issued"
+  - "http://purl.org/dc/terms/date"
+  - "http://purl.org/dc/terms/issued"
+
+provision_publisher_predicates:
+  - "bf:agent"
+  - "bffi:agent"
+  - "http://purl.org/dc/elements/1.1/publisher"
+
+provision_place_predicates:
+  - "bf:place"
+  - "bffi:place"
+  - "bflc:simplePlace"
+
+provision_edition_predicates:
+  - "bf:editionStatement"
+  - "bffi:editionStatement"
+
+provision_extent_predicates:
+  - "bf:extent"
+  - "bffi:extent"
+
+carrier_type_mappings:
+  volume: ["nc", "volume", "rdacarrier:nc", "bffi:Volume"]
+  audio_disc: ["sd", "audio disc", "sound disc", "rdacarrier:sd"]
+  online_resource: ["cr", "online", "rdacarrier:cr"]
+  videodisc: ["vd", "videodisc", "rdacarrier:vd"]
+
+item_predicates:
+  - "bf:hasItem"
+  - "bf:item"
+  - "bffi:item"
+  - "bffi:hasItem"
+
+item_barcode_predicates:
+  - "bf:barcode"
+  - "bffi:barcode"
+
+item_shelfmark_predicates:
+  - "bf:shelfMark"
+  - "bffi:shelfMark"
+  - "bf:sublocation"
+
+item_holding_predicates:
+  - "bf:heldBy"
+  - "bffi:owner"
+  - "bffi:holdingInstitution"
+
+relationship_predicates:
+  bf:translationOf: "translation_of"
+  bf:hasTranslation: "translation_of"
+  bf:precededBy: "continues"
+  bf:succeededBy: "continued_by"
+  bf:partOf: "series_member_of"
+  bf:hasPart: "has_series_member"
+  bf:hasSeries: "series_member_of"
+  bf:supplement: "has_series_member"
+  bf:supplementTo: "series_member_of"
+  bf:reproductionOf: "reproduction_of"
+  bf:hasReproduction: "has_reproduction"
+  bf:derivativeOf: "adaptation_of"
+  bf:hasDerivative: "adaptation_of"
+  bffi:continues: "continues"
+  bffi:continuedBy: "continued_by"
+  bffi:adaptationOf: "adaptation_of"
+  bffi:basedOn: "adaptation_of"
+
+work_type_classes:
+  music: "bf:MusicNotation"
+  cartography: "bf:Cartographic"
+  moving_image: "bf:MovingImage"
+  software: "bf:Electronic"
+  ai_model: "bf:Electronic"
+
+pmo_performance_classes:
+  - "pmo:Performance"
+  - "pmo:LivePerformance"
+
+pmo_performed_work_predicates:
+  - "pmo:performedWork"
+
+same_as_predicate: "owl:sameAs"
+default_music_vocabulary: "seko"
+synthesize_missing_expression: true
+provenance_regex: "^(\\d{3})([0-9\\s]{2})(.*)$"
 provenance_predicate: "bffi:marcKey"

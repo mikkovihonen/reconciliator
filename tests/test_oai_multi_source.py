@@ -169,10 +169,7 @@ def test_cli_ingest_oai_options(tmp_path: Path) -> None:
     cfg_file.write_text(
         f"""
 storage:
-  authority_db: "{tmp_path}/authority.db"
-  vocab_db: "{tmp_path}/vocab.db"
-  progress_db: "{tmp_path}/progress.db"
-  index_path: "{tmp_path}/authority.faiss"
+  data_dir: "{tmp_path}"
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"

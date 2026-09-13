@@ -121,6 +121,7 @@ def test_run_telemetry_tui(progress_db: Path) -> None:
         db_path=progress_db,
         interval=0.1,
         console=console,
+        exit_when_done=True,
     )
     output = console.export_text()
     assert "RECONCILIATOR" in output
@@ -136,10 +137,8 @@ def test_cli_status_watch_tui(tmp_path: Path) -> None:
     cfg_file.write_text(
         f"""
 storage:
-  authority_db: "{tmp_path}/auth.db"
-  vocab_db: "{tmp_path}/vocab.db"
+  data_dir: "{tmp_path}"
   progress_db: "{tmp_path}/prog.db"
-  index_path: "{tmp_path}/auth.faiss"
 telemetry:
   watch_interval_seconds: 0.1
 """,
@@ -156,7 +155,39 @@ telemetry:
     tracker.complete_task()
 
     runner = CliRunner()
-    result = runner.invoke(app, ["status", "--config", str(cfg_file), "--watch"])
+    result = runner.invoke(app, ["status", "--config", str(cfg_file), "--watch", "--exit-when-done"])
+    assert result.exit_code == 0
+    assert "RECONCILIATOR" in result.output
+    assert "TASK TELEMETRY MONITOR" in result.output
+
+
+def test_cli_status_watch_alias(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from reconciliator.cli import app
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        f"""
+storage:
+  data_dir: "{tmp_path}"
+  progress_db: "{tmp_path}/prog.db"
+telemetry:
+  watch_interval_seconds: 0.1
+""",
+        encoding="utf-8",
+    )
+
+    tracker = ProgressTracker(
+        db_path=tmp_path / "prog.db",
+        task_id="task-cli-watch-alias",
+        task_type="reconciliation",
+    )
+    tracker.start_task(items_total=10)
+    tracker.complete_task()
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["status", "watch", "--config", str(cfg_file), "--exit-when-done"])
     assert result.exit_code == 0
     assert "RECONCILIATOR" in result.output
     assert "TASK TELEMETRY MONITOR" in result.output
@@ -171,10 +202,8 @@ def test_cli_status_watch_json(tmp_path: Path) -> None:
     cfg_file.write_text(
         f"""
 storage:
-  authority_db: "{tmp_path}/auth.db"
-  vocab_db: "{tmp_path}/vocab.db"
+  data_dir: "{tmp_path}"
   progress_db: "{tmp_path}/prog.db"
-  index_path: "{tmp_path}/auth.faiss"
 telemetry:
   watch_interval_seconds: 0.1
 """,
@@ -190,7 +219,7 @@ telemetry:
     tracker.complete_task()
 
     runner = CliRunner()
-    result = runner.invoke(app, ["status", "--config", str(cfg_file), "--watch", "--json"])
+    result = runner.invoke(app, ["status", "--config", str(cfg_file), "--watch", "--json", "--exit-when-done"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert len(data) == 1
@@ -329,10 +358,8 @@ def test_cli_prune_commands(tmp_path: Path) -> None:
     cfg_file.write_text(
         f"""
 storage:
-  authority_db: "{tmp_path}/auth.db"
-  vocab_db: "{tmp_path}/vocab.db"
+  data_dir: "{tmp_path}"
   progress_db: "{prog_db}"
-  index_path: "{tmp_path}/auth.faiss"
 """,
         encoding="utf-8",
     )
@@ -449,3 +476,37 @@ def test_telemetry_skipped_display(progress_db: Path) -> None:
     tui_text = console.export_text()
     assert "1,000 indexed, 450 skipped (1,500 fetched)" in tui_text
     assert "Skipped: 450" in tui_text
+
+
+def test_render_vector_daemon_panel_unsaved_rendering() -> None:
+    from rich.console import Console
+
+    from reconciliator.progress import render_vector_daemon_panel
+
+    status = {
+        "status": "running",
+        "pid": 12345,
+        "device": "mps",
+        "host_ram_mb": 512.0,
+        "uptime_seconds": 120,
+        "idle_seconds": 10,
+        "active_clients": 1,
+        "indices": [
+            {
+                "key": "authority",
+                "total_vectors": 1000,
+                "dimension": 768,
+                "dtype": "float32",
+                "backend": "torch",
+                "searches_total": 5,
+                "adds_total": 10,
+                "is_dirty": True,
+            }
+        ],
+    }
+    panel = render_vector_daemon_panel(status)
+    console = Console(record=True, width=120)
+    console.print(panel)
+    text = console.export_text()
+    assert "*UNSAVED" in text
+    assert "[bold red]" not in text

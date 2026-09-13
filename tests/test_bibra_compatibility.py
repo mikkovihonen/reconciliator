@@ -258,10 +258,7 @@ def test_offline_reconciliation_bibra_e2e(tmp_path: Path) -> None:
 
     config_yaml = f"""
 storage:
-  authority_db: "{tmp_path}/authority.db"
-  vocab_db: "{tmp_path}/vocab.db"
-  progress_db: "{tmp_path}/progress.db"
-  index_path: "{tmp_path}/authority.faiss"
+  data_dir: "{tmp_path}"
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"

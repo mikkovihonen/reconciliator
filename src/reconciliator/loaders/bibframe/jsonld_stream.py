@@ -8,6 +8,10 @@ from typing import Any, Iterator, Optional, Union
 
 import orjson
 
+from reconciliator.config import (
+    get_category_default_field_map,
+    get_subject_field_category_map,
+)
 from reconciliator.loaders.bibframe.base import (
     bibframe_to_raw_record,
     extract_provenance_tag,
@@ -18,6 +22,7 @@ from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
 )
+from reconciliator.vocabularies import detect_vocabulary
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +266,8 @@ def parse_jsonld_dict(
                     m_titles = _get_string_values(res_title, main_title_keys)
                     s_titles = _get_string_values(res_title, subtitle_keys)
                     types = _get_node_types(res_title)
-                    is_variant = any("Variant" in t or "KeyTitle" in t for t in types)
+                    variant_classes = profile.expanded_title_variant_classes | set(profile.title_variant_classes) | {c.split(":")[-1] for c in profile.title_variant_classes}
+                    is_variant = bool(types.intersection(variant_classes))
 
                     if m_titles:
                         mt = m_titles[0]
@@ -276,9 +282,14 @@ def parse_jsonld_dict(
                                 variant_titles.append(mt)
 
             if not title:
-                # Fallback to rdfs:label
+                # Fallback to label predicates
                 labels = _get_string_values(
-                    n, ["rdfs:label", "http://www.w3.org/2000/01/rdf-schema#label", "label"]
+                    n,
+                    list(
+                        profile.expanded_agent_label_predicates
+                        | set(profile.agent_label_predicates)
+                        | {p.split(":")[-1] for p in profile.agent_label_predicates}
+                    ),
                 )
                 if labels:
                     title = labels[0]
@@ -294,39 +305,46 @@ def parse_jsonld_dict(
         urns: list[str] = []
         other_ids: list[str] = []
 
+        scheme_map = profile.expanded_identifier_scheme_mappings
+        isbn_cands = scheme_map.get("isbn", set()) | {c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("isbn", [])}
+        issn_cands = scheme_map.get("issn", set()) | {c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("issn", [])}
+        urn_cands = scheme_map.get("urn", set()) | {c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("urn", [])}
+
         for id_val in _extract_values(inst, id_keys):
             res_id = _resolve_node(id_val, node_index)
             if res_id:
                 types = _get_node_types(res_id)
-                vals = _get_string_values(
-                    res_id,
-                    [
-                        "rdf:value",
-                        "http://www.w3.org/1999/02/22-rdf-syntax-ns#value",
-                        "value",
-                        "rdfs:label",
-                    ],
-                )
+                val_keys = list(profile.expanded_agent_label_predicates | {"rdf:value", "value"})
+                vals = _get_string_values(res_id, val_keys)
+                is_isbn = bool(types.intersection(isbn_cands))
+                is_issn = bool(types.intersection(issn_cands))
+                is_urn = bool(types.intersection(urn_cands))
+
                 for v in vals:
-                    if any("Isbn" in t for t in types) or "isbn" in v.lower():
+                    digits_only = v.replace("-", "").replace(" ", "").upper()
+                    is_std_isbn = (len(digits_only) == 10 or len(digits_only) == 13) and (
+                        digits_only[:-1].isdigit()
+                        and (digits_only[-1].isdigit() or digits_only[-1] == "X")
+                    )
+                    if is_isbn or is_std_isbn:
                         if v not in isbns:
                             isbns.append(v)
-                    elif any("Issn" in t for t in types) or "issn" in v.lower():
+                    elif is_issn:
                         if v not in issns:
                             issns.append(v)
-                    elif any("Urn" in t for t in types) or v.lower().startswith("urn:"):
+                    elif is_urn or v.lower().startswith("urn:"):
                         if v not in urns:
                             urns.append(v)
                     else:
                         if v not in other_ids:
                             other_ids.append(v)
             elif isinstance(id_val, str):
-                if id_val.lower().startswith("urn:"):
+                if id_val.lower().startswith("urn:") or any(cand.lower() in id_val.lower() for cand in urn_cands):
                     urns.append(id_val)
                 else:
                     other_ids.append(id_val)
 
-        if inst_id and ("urn:nbn:fi" in inst_id.lower() or "urn.fi" in inst_id.lower()):
+        if inst_id and (any(cand.lower() in inst_id.lower() for cand in urn_cands) or inst_id.lower().startswith("urn:")):
             if inst_id not in urns:
                 urns.append(inst_id)
 
@@ -370,13 +388,13 @@ def parse_jsonld_dict(
                     mks = _get_string_values(res_contrib, mk_keys)
                     if mks:
                         marc_key = mks[0]
-                tag = extract_provenance_tag(marc_key)
+                tag = extract_provenance_tag(marc_key, profile=profile)
 
                 # Extract role
                 role: Optional[str] = None
                 for role_val in _extract_values(res_contrib, role_keys):
                     if isinstance(role_val, str):
-                        role = normalize_role_uri_or_label(role_val)
+                        role = normalize_role_uri_or_label(role_val, profile=profile)
                     elif isinstance(role_val, dict):
                         res_role = _resolve_node(role_val, node_index) or role_val
                         r_labels = _get_string_values(
@@ -385,7 +403,7 @@ def parse_jsonld_dict(
                         r_label = r_labels[0] if r_labels else None
                         r_id = res_role.get("@id")
                         if r_id:
-                            role = normalize_role_uri_or_label(r_id, label=r_label)
+                            role = normalize_role_uri_or_label(r_id, label=r_label, profile=profile)
                         elif r_label:
                             role = r_label
 
@@ -396,24 +414,22 @@ def parse_jsonld_dict(
                         continue
 
                     types = _get_node_types(res_agent)
-                    is_personal = not any(
-                        "Organization" in t or "Corporate" in t or "Meeting" in t for t in types
+                    corp_classes = (
+                        profile.expanded_agent_corporate_classes
+                        | set(profile.agent_corporate_classes)
+                        | {c.split(":")[-1] for c in profile.agent_corporate_classes}
                     )
+                    is_personal = not bool(types.intersection(corp_classes))
 
-                    names = _get_string_values(
-                        res_agent,
-                        [
-                            "rdfs:label",
-                            "http://www.w3.org/2000/01/rdf-schema#label",
-                            "skos:prefLabel",
-                            "http://www.w3.org/2004/02/skos/core#prefLabel",
-                            "bflc:name00MatchKey",
-                            "name00MatchKey",
-                            "bflc:name10MatchKey",
-                            "name10MatchKey",
-                            "label",
-                        ],
+                    ag_name_keys = (
+                        profile.expanded_agent_label_predicates
+                        | profile.expanded_agent_match_key_predicates
+                        | set(profile.agent_label_predicates)
+                        | {p.split(":")[-1] for p in profile.agent_label_predicates}
+                        | set(profile.agent_match_key_predicates)
+                        | {p.split(":")[-1] for p in profile.agent_match_key_predicates}
                     )
+                    names = _get_string_values(res_agent, list(ag_name_keys))
                     if not names:
                         continue
                     name = names[0]
@@ -434,6 +450,7 @@ def parse_jsonld_dict(
                             role=role,
                             uri_subfield_0=agent_uris,
                             uri_subfield_1=[],
+                            profile=profile,
                         )
                     )
 
@@ -443,12 +460,23 @@ def parse_jsonld_dict(
             | set(profile.subject_predicates)
             | {p.split(":")[-1] for p in profile.subject_predicates}
         )
+        field_category_map = get_subject_field_category_map()
+        cat_default_field = get_category_default_field_map()
+        default_target_field = (
+            profile.default_subject_field
+            or cat_default_field["topical"]
+        )
+        default_category = field_category_map[default_target_field]
         subjects: dict[str, list[dict[str, Any]]] = {
-            "topical": [],
-            "genre_form": [],
-            "geographic": [],
-            "medium_of_performance": [],
+            cat: [] for cat in field_category_map.values()
         }
+
+        type_to_field = profile.subject_type_fields
+        src_keys = (
+            profile.expanded_source_predicates
+            | set(profile.source_predicates)
+            | {p.split(":")[-1] for p in profile.source_predicates}
+        )
 
         for n in entity_nodes:
             for s_val in _extract_values(n, subj_keys):
@@ -457,7 +485,12 @@ def parse_jsonld_dict(
                     continue
 
                 types = _get_node_types(res_subj)
-                headings = _get_string_values(res_subj, ["rdfs:label", "skos:prefLabel", "label"])
+                subj_label_keys = list(
+                    profile.expanded_subject_label_predicates
+                    | set(profile.subject_label_predicates)
+                    | {p.split(":")[-1] for p in profile.subject_label_predicates}
+                )
+                headings = _get_string_values(res_subj, subj_label_keys)
                 s_id = res_subj.get("@id")
                 heading = headings[0] if headings else (s_id.split("/")[-1] if s_id else "")
                 if not heading:
@@ -465,38 +498,31 @@ def parse_jsonld_dict(
 
                 vocab = None
                 if s_id:
-                    s_lower = s_id.lower()
-                    if "finto.fi/yso" in s_lower:
-                        vocab = "yso"
-                    elif "finto.fi/kauno" in s_lower:
-                        vocab = "kauno"
-                    elif "finto.fi/muso" in s_lower:
-                        vocab = "muso"
-                    elif "finto.fi/slm" in s_lower:
-                        vocab = "slm"
-                    elif "finto.fi/seko" in s_lower:
-                        vocab = "seko"
+                    detected_v = detect_vocabulary(s_id)
+                    if detected_v:
+                        vocab = detected_v.lower()
 
                 src_vals = _get_string_values(
                     res_subj,
-                    ["bf:source", "source", "http://id.loc.gov/ontologies/bibframe/source"],
+                    list(src_keys),
                 )
                 if src_vals and not vocab:
                     vocab = src_vals[0]
 
-                item = {"heading": heading, "vocabulary": vocab, "uri": s_id}
-                if any("GenreForm" in t for t in types):
-                    item["field"] = "655"
-                    subjects["genre_form"].append(item)
-                elif any("Place" in t or "Geographic" in t for t in types):
-                    item["field"] = "651"
-                    subjects["geographic"].append(item)
-                elif any("Music" in t or "mediumOfPerformance" in t for t in types):
-                    item["field"] = "382"
-                    subjects["medium_of_performance"].append(item)
-                else:
-                    item["field"] = "650"
-                    subjects["topical"].append(item)
+                target_field = default_target_field
+                for type_sub, f_tag in type_to_field.items():
+                    if any(type_sub in t for t in types):
+                        target_field = f_tag
+                        break
+
+                category = field_category_map.get(target_field, default_category)
+                item = {
+                    "heading": heading,
+                    "vocabulary": vocab,
+                    "uri": s_id,
+                    "field": target_field,
+                }
+                subjects[category].append(item)
 
         # Provision Activity
         prov_keys = (
@@ -513,31 +539,34 @@ def parse_jsonld_dict(
             if not res_prov:
                 continue
 
-            dates = _get_string_values(
-                res_prov, ["bf:date", "date", "http://id.loc.gov/ontologies/bibframe/date"]
+            prov_date_keys = (
+                profile.expanded_provision_date_predicates
+                | set(profile.provision_date_predicates)
+                | {p.split(":")[-1] for p in profile.provision_date_predicates}
             )
+            dates = _get_string_values(res_prov, list(prov_date_keys))
             if dates and not pub_year:
                 pub_year = dates[0]
 
             if not publisher:
                 ag_keys = (
-                    profile.expanded_agent_predicates
-                    | set(profile.agent_predicates)
-                    | {"bf:agent", "agent", "http://id.loc.gov/ontologies/bibframe/agent"}
+                    profile.expanded_provision_publisher_predicates
+                    | profile.expanded_agent_predicates
+                    | set(profile.provision_publisher_predicates)
+                    | {p.split(":")[-1] for p in profile.provision_publisher_predicates}
+                )
+                ag_name_keys = (
+                    profile.expanded_agent_label_predicates
+                    | profile.expanded_agent_match_key_predicates
+                    | set(profile.agent_label_predicates)
+                    | {p.split(":")[-1] for p in profile.agent_label_predicates}
+                    | set(profile.agent_match_key_predicates)
+                    | {p.split(":")[-1] for p in profile.agent_match_key_predicates}
                 )
                 for ag_v in _extract_values(res_prov, ag_keys):
                     res_ag = _resolve_node(ag_v, node_index)
                     if isinstance(res_ag, dict):
-                        ag_names = _get_string_values(
-                            res_ag,
-                            [
-                                "rdfs:label",
-                                "skos:prefLabel",
-                                "label",
-                                "bflc:name00MatchKey",
-                                "http://www.w3.org/2000/01/rdf-schema#label",
-                            ],
-                        )
+                        ag_names = _get_string_values(res_ag, list(ag_name_keys))
                         if ag_names:
                             publisher = ag_names[0]
                             break
@@ -546,25 +575,20 @@ def parse_jsonld_dict(
                         break
 
             if not pub_place:
-                pl_keys = {
-                    "bf:place",
-                    "bffi:place",
-                    "place",
-                    "http://id.loc.gov/ontologies/bibframe/place",
-                    "http://urn.fi/URN:NBN:fi:schema:bffi:place",
-                }
+                pl_keys = (
+                    profile.expanded_provision_place_predicates
+                    | set(profile.provision_place_predicates)
+                    | {p.split(":")[-1] for p in profile.provision_place_predicates}
+                )
+                pl_name_keys = (
+                    profile.expanded_agent_label_predicates
+                    | set(profile.agent_label_predicates)
+                    | {p.split(":")[-1] for p in profile.agent_label_predicates}
+                )
                 for pl_v in _extract_values(res_prov, pl_keys):
                     res_pl = _resolve_node(pl_v, node_index)
                     if isinstance(res_pl, dict):
-                        pl_names = _get_string_values(
-                            res_pl,
-                            [
-                                "rdfs:label",
-                                "skos:prefLabel",
-                                "label",
-                                "http://www.w3.org/2000/01/rdf-schema#label",
-                            ],
-                        )
+                        pl_names = _get_string_values(res_pl, list(pl_name_keys))
                         if pl_names:
                             pub_place = pl_names[0]
                             break

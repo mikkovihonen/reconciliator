@@ -37,7 +37,7 @@
     bffi:contribution [
         a bffi:Contribution ;
         bffi:marcKey "1001 $aWaltari, Mika,$d1908-1979,$ewriter" ;
-        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m16> ;
+        bffi:role <http://urn.fi/URN:NBN:fi:au:mts:m552> ;
         bffi:agent <http://urn.fi/URN:NBN:fi:au:pn:000123456>
     ] ;
     bffi:subject <http://www.yso.fi/onto/yso/p1234> .
@@ -52,5 +52,5 @@
         rdfs:label "yso"
     ] .
 
-<http://urn.fi/URN:NBN:fi:au:mts:m16> a bffi:Role ;
+<http://urn.fi/URN:NBN:fi:au:mts:m552> a bffi:Role ;
     rdfs:label "kirjoittaja" .

@@ -1,5 +1,4 @@
-"""Unit tests for configuration loading and Pydantic validation."""
-
+import logging
 from pathlib import Path
 
 import pytest
@@ -7,8 +6,10 @@ import pytest
 from reconciliator.config import (
     AppConfig,
     EmbeddingConfig,
+    LoggingConfig,
     RerankConfig,
     ShortCircuitConfig,
+    configure_logging,
     load_config,
 )
 
@@ -89,3 +90,78 @@ def test_oai_ingest_config_workers_and_queue_defaults_and_validation() -> None:
 
     with pytest.raises(ValueError, match="queue_size must be at least 1"):
         OAIIngestConfig(queue_size=0)
+
+
+def test_logging_config_defaults_and_validation() -> None:
+    cfg = LoggingConfig()
+    assert cfg.level == "INFO"
+    assert cfg.log_file is None
+    assert cfg.capture_warnings is False
+    assert "%(levelname)s" in cfg.format
+    assert "%Y-%m-%d" in cfg.date_format
+
+    # Case-insensitive normalization
+    cfg_debug = LoggingConfig(level="debug")  # type: ignore[arg-type]
+    assert cfg_debug.level == "DEBUG"
+
+    cfg_warn = LoggingConfig(level="warn")  # type: ignore[arg-type]
+    assert cfg_warn.level == "WARNING"
+
+    with pytest.raises(ValueError):
+        LoggingConfig(level="INVALID_LEVEL")  # type: ignore[arg-type]
+
+
+def test_logging_config_yaml_loading_and_path_resolution(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "app_config.yaml"
+    cfg_file.write_text(
+        """
+storage:
+  data_dir: "data"
+logging:
+  level: "DEBUG"
+  format: "[%(levelname)s] %(name)s: %(message)s"
+  date_format: "%H:%M:%S"
+  log_file: "logs/reconciliator.log"
+  capture_warnings: true
+""",
+        encoding="utf-8",
+    )
+
+    loaded = load_config(cfg_file)
+    assert loaded.logging.level == "DEBUG"
+    assert loaded.logging.format == "[%(levelname)s] %(name)s: %(message)s"
+    assert loaded.logging.date_format == "%H:%M:%S"
+    assert loaded.logging.capture_warnings is True
+    assert loaded.logging.log_file is not None
+    assert loaded.logging.log_file.is_absolute()
+    assert loaded.logging.log_file == (tmp_path / "logs" / "reconciliator.log").resolve()
+
+
+def test_configure_logging(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    log_file = tmp_path / "test_output.log"
+    cfg = LoggingConfig(
+        level="DEBUG",
+        format="[TEST_LOG] %(message)s",
+        log_file=log_file,
+    )
+
+    try:
+        configure_logging(cfg)
+        test_logger = logging.getLogger("test_subsystem")
+        test_logger.debug("Hello debug logging world")
+
+        # Root level verified
+        assert logging.getLogger().level == logging.DEBUG
+
+        # Log file written
+        assert log_file.exists()
+        content = log_file.read_text(encoding="utf-8")
+        assert "[TEST_LOG] Hello debug logging world" in content
+
+        # Pytest caplog handler preserved
+        with caplog.at_level(logging.DEBUG):
+            test_logger.debug("Testing caplog preservation")
+            assert "Testing caplog preservation" in caplog.text
+    finally:
+        # Reset logging back to clean state
+        configure_logging(LoggingConfig(level="INFO"))

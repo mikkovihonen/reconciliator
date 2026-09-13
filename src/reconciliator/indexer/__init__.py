@@ -6,6 +6,7 @@ from reconciliator.indexer.base import VectorIndex
 from reconciliator.indexer.factory import create_vector_engine
 from reconciliator.indexer.faiss_engine import FAISSIndexEngine
 from reconciliator.indexer.torch_engine import TorchVectorEngine
+from reconciliator.indexer.usearch_engine import USearchVectorEngine
 
 # Alias for compatibility with previous FAISSIndexManager class name if referenced
 FAISSIndexManager = FAISSIndexEngine
@@ -14,6 +15,7 @@ __all__ = [
     "FAISSIndexEngine",
     "FAISSIndexManager",
     "TorchVectorEngine",
+    "USearchVectorEngine",
     "VectorIndex",
     "create_vector_engine",
 ]

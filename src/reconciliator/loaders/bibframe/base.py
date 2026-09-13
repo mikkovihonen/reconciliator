@@ -5,64 +5,71 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from reconciliator.constants import FICTIONAL_QUALIFIERS
-from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile
-
-# Mapping of Metatietosanasto (MTS, finto.fi/mts/) role URIs/codes to MARC relator codes
-MTS_ROLE_MAP: dict[str, str] = {
-    "m16": "aut",  # kirjoittaja
-    "m18": "trl",  # kääntäjä
-    "m20": "ill",  # kuvittaja
-    "m22": "cmp",  # säveltäjä
-    "m24": "arr",  # sovittaja
-    "m26": "edt",  # toimittaja
-    "m28": "lyr",  # sanoittaja
-    "m30": "pht",  # valokuvaaja
-    "m32": "art",  # taiteilija
-    "m71": "drt",  # ohjaaja
-    "m155": "prf",  # esittäjä
-    "m156": "act",  # näyttelijä
-    "m157": "sng",  # laulaja
-    "m158": "mus",  # muusikko
-    "m493": "pbl",  # julkaisija
-    "m494": "prt",  # painaja
-    "m495": "dst",  # jakelija
-}
+from reconciliator.config import (
+    DEFAULT_FICTIONAL_QUALIFIERS,
+    get_subject_field_category_map,
+)
+from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
+from reconciliator.vocab.bridges import get_mts_role_map
+from reconciliator.vocabularies import get_vocabulary_patterns
 
 
-def normalize_role_uri_or_label(role_str: str, label: Optional[str] = None) -> Optional[str]:
-    """Normalize a role URI (LOC relator or MTS) or label into a standard role code/string."""
+def normalize_role_uri_or_label(
+    role_str: str,
+    label: Optional[str] = None,
+    profile: Optional[BIBFRAMESchemaProfile] = None,
+) -> Optional[str]:
+    """Normalize a role URI or label into a standard role code/string driven by configuration."""
     clean = role_str.strip() if role_str else ""
-    if not clean and label:
-        return label.strip()
+    lbl = label.strip() if label else ""
+
+    p = profile or get_profile()
+
+    # 1. Match against configured label mappings if label provided
+    if lbl and lbl.lower() in p.role_label_mappings:
+        return p.role_label_mappings[lbl.lower()]
+
     if not clean:
-        return None
+        return lbl or None
 
-    # 1. Check MTS URN / URL pattern
     c_lower = clean.lower()
-    if "urn:nbn:fi:au:mts:" in c_lower or "finto.fi/mts" in c_lower:
-        token = clean.rstrip("/").split(":")[-1].split("/")[-1].lower()
-        if token in MTS_ROLE_MAP:
-            return MTS_ROLE_MAP[token]
 
-    # 2. Check LOC relators
-    if "id.loc.gov/vocabulary/relators/" in clean:
-        return clean.rstrip("/").split("/")[-1]
+    # 2. Check configured role URI prefixes
+    for prefix in p.role_uri_prefixes:
+        pref_lower = prefix.lower()
+        if pref_lower in c_lower:
+            token = clean[c_lower.find(pref_lower) + len(pref_lower) :].strip("/").split(":")[-1].split("/")[-1].lower()
+            mts_map = get_mts_role_map()
+            if token in mts_map:
+                return mts_map[token]
+            if token in p.role_label_mappings:
+                return p.role_label_mappings[token]
+            return token
 
-    # 3. Use label if present
-    if label and label.strip():
-        return label.strip()
+    # 3. If label exists and not mapped yet
+    if lbl:
+        return lbl
 
+    # 4. Fall back to URI fragment or tail
     if "#" in clean:
-        return clean.split("#")[-1]
-    return clean.rstrip("/").split("/")[-1]
+        tail = clean.split("#")[-1].lower()
+    else:
+        tail = clean.rstrip("/").split("/")[-1].lower()
+
+    if tail in p.role_label_mappings:
+        return p.role_label_mappings[tail]
+    return tail
 
 
-def extract_provenance_tag(marc_key: Optional[str]) -> Optional[str]:
-    """Extract 3-digit MARC field tag from bffi:marcKey if present (e.g. '1001 $a...' -> '100')."""
+def extract_provenance_tag(
+    marc_key: Optional[str],
+    profile: Optional[BIBFRAMESchemaProfile] = None,
+) -> Optional[str]:
+    """Extract 3-digit MARC field tag from provenance literal string using configured regex."""
     if not marc_key:
         return None
-    match = re.match(r"^(\d{3})", marc_key.strip())
+    p = profile or get_profile()
+    match = re.match(p.provenance_regex, marc_key.strip())
     return match.group(1) if match else None
 
 
@@ -94,12 +101,14 @@ def bibframe_to_raw_record(
     profile: Optional[BIBFRAMESchemaProfile] = None,
 ) -> dict[str, Any]:
     """Build a standard Reconciliator raw record dictionary from parsed BIBFRAME fields."""
-    subs = subjects or {
-        "topical": [],
-        "genre_form": [],
-        "geographic": [],
-        "medium_of_performance": [],
-    }
+    cat_keys = list(get_subject_field_category_map().values())
+    subs: dict[str, list[dict[str, Any]]] = {cat: [] for cat in cat_keys}
+    if subjects:
+        for k, v in subjects.items():
+            if k in subs:
+                subs[k].extend(v)
+            else:
+                subs[k] = list(v)
 
     return {
         "source_id": source_id,
@@ -138,17 +147,22 @@ def parse_agent_dict(
     role: Optional[str] = None,
     uri_subfield_0: Optional[list[str]] = None,
     uri_subfield_1: Optional[list[str]] = None,
+    profile: Optional[BIBFRAMESchemaProfile] = None,
 ) -> dict[str, Any]:
     """Helper to construct an agent dict compatible with Reconciliator pipeline."""
-    is_fictional = any(q in name.lower() for q in FICTIONAL_QUALIFIERS)
+    is_fictional = any(q in name.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
     u0 = [u for u in (uri_subfield_0 or []) if u]
     u1 = [u for u in (uri_subfield_1 or []) if u]
 
-    # Clean Wikidata URIs to subfield_1
+    p = profile or get_profile()
+    vocab_pats = get_vocabulary_patterns()
+    wikidata_patterns = vocab_pats.get("WIKIDATA", ["wikidata.org"])
+
     final_u0: list[str] = []
     final_u1: list[str] = []
     for u in u0:
-        if "wikidata.org" in u.lower():
+        u_low = u.lower()
+        if any(pat in u_low for pat in wikidata_patterns):
             if u not in final_u1:
                 final_u1.append(u)
         else:
@@ -158,7 +172,11 @@ def parse_agent_dict(
         if u not in final_u1:
             final_u1.append(u)
 
-    tag = field_tag or ("100" if is_personal else "110")
+    tag = field_tag or (
+        p.agent_default_tags.get("personal")
+        if is_personal
+        else p.agent_default_tags.get("corporate")
+    )
 
     return {
         "field_tag": tag,

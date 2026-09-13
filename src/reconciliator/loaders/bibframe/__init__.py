@@ -10,6 +10,11 @@ from reconciliator.loaders.bibframe.base import (
     extract_provenance_tag,
     parse_agent_dict,
 )
+from reconciliator.loaders.bibframe.decomposition import (
+    build_target_record_from_bibframe,
+    decompose_bibframe_work,
+    extract_marc_key_components,
+)
 from reconciliator.loaders.bibframe.enricher import (
     enrich_bibframe_graph,
     enrich_bibframe_jsonld,
@@ -67,4 +72,7 @@ __all__ = [
     "stream_bibframe_records",
     "enrich_bibframe_graph",
     "enrich_bibframe_jsonld",
+    "decompose_bibframe_work",
+    "build_target_record_from_bibframe",
+    "extract_marc_key_components",
 ]

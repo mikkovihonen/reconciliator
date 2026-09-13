@@ -8,24 +8,13 @@
 # time this file was written, so it stays useful even when Fuseki is
 # offline at Skosify time).
 #
-# Coverage: every LoC MARC country code observed in the Helmet
-# 500-sample as of 2026-06-09 (21 codes) plus a generous "common
-# countries" set seeded from YSO. Extend by adding more rows as
-# missing codes surface in a run — the
-# `_synthesise_country_labels` Skosify pass is data-driven; no code
-# change needed.
+# Source: LoC MARC country code list (https://www.loc.gov/marc/countries/cou_home.html)
+# and YSO / YSO-paikat.
 #
-# Per-code research source: LoC MARC country code list
-# (https://www.loc.gov/marc/countries/cou_home.html — codes are
-# 2-3 chars, not ISO 3166); YSO concept URI + prefLabels via the
-# loaded `<http://www.yso.fi/onto/yso/>` Fuseki graph.
-#
-# License: CC0 (this bridge is our own contribution; YSO labels are
-# Finto-curated under their own CC0 release).
+# License: CC0 (project bridge; YSO labels are Finto-curated CC0).
 
 @prefix bridge: <http://urn.fi/URN:NBN:fi:bib:bridge/loc-countries/> .
 @prefix loc:    <http://id.loc.gov/vocabulary/countries/> .
-@prefix owl:    <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
 @prefix yso:    <http://www.yso.fi/onto/yso/> .
@@ -36,226 +25,1078 @@ bridge: a skos:ConceptScheme ;
     rdfs:label "Local LoC MARC country code ↔ YSO bridge"@en ;
     rdfs:comment "Project-owned bridge — see docs/bffi_limitations.md L-12."@en .
 
-# === Countries observed in the 500-record sample ===
+loc:aa  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "aa" .
 
-loc:ch  skos:exactMatch yso:p104984 ;
-        skos:prefLabel  "Kiina"@fi, "Kina"@sv, "China"@en ;
-        skos:notation   "ch" .
+loc:abc  skos:exactMatch yso:p235036 ;
+         skos:prefLabel  "Illyria"@fi, "Illyrien"@sv, "Illyria"@en ;
+         skos:notation   "abc" .
 
-loc:dk  skos:exactMatch yso:p94439 ;
-        skos:prefLabel  "Tanska"@fi, "Danmark"@sv, "Denmark"@en ;
-        skos:notation   "dk" .
+loc:ae  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ae" .
 
-loc:er  skos:exactMatch yso:p104987 ;
-        skos:prefLabel  "Viro"@fi, "Estland"@sv, "Estonia"@en ;
-        skos:notation   "er" .
-
-loc:fi  skos:exactMatch yso:p94426 ;
-        skos:prefLabel  "Suomi"@fi, "Finland"@sv, "Finland"@en ;
-        skos:notation   "fi" .
-
-loc:fr  skos:exactMatch yso:p104968 ;
-        skos:prefLabel  "Ranska"@fi, "Frankrike"@sv, "France"@en ;
-        skos:notation   "fr" .
-
-loc:gr  skos:exactMatch yso:p105037 ;
-        skos:prefLabel  "Kreikka"@fi, "Grekland"@sv, "Greece"@en ;
-        skos:notation   "gr" .
-
-loc:gw  skos:exactMatch yso:p105087 ;
-        skos:prefLabel  "Saksa"@fi, "Tyskland"@sv, "Germany"@en ;
-        skos:notation   "gw" .
-
-loc:ir  skos:exactMatch yso:p105280 ;
-        skos:prefLabel  "Iran"@fi, "Iran"@sv, "Iran"@en ;
-        skos:notation   "ir" .
-
-loc:it  skos:exactMatch yso:p105111 ;
-        skos:prefLabel  "Italia"@fi, "Italien"@sv, "Italy"@en ;
-        skos:notation   "it" .
-
-loc:lv  skos:exactMatch yso:p94259 ;
-        skos:prefLabel  "Latvia"@fi, "Lettland"@sv, "Latvia"@en ;
-        skos:notation   "lv" .
-
-loc:ne  skos:exactMatch yso:p105190 ;
-        skos:prefLabel  "Alankomaat"@fi, "Nederländerna"@sv, "Netherlands"@en ;
-        skos:notation   "ne" .
-
-loc:ru  skos:exactMatch yso:p94479 ;
-        skos:prefLabel  "Venäjä"@fi, "Ryssland"@sv, "Russia"@en ;
-        skos:notation   "ru" .
-
-loc:si  skos:exactMatch yso:p105234 ;
-        skos:prefLabel  "Singapore"@fi, "Singapore"@sv, "Singapore"@en ;
-        skos:notation   "si" .
-
-loc:sp  skos:exactMatch yso:p105209 ;
-        skos:prefLabel  "Espanja"@fi, "Spanien"@sv, "Spain"@en ;
-        skos:notation   "sp" .
-
-loc:sw  skos:exactMatch yso:p94383 ;
-        skos:prefLabel  "Ruotsi"@fi, "Sverige"@sv, "Sweden"@en ;
-        skos:notation   "sw" .
-
-loc:th  skos:exactMatch yso:p105243 ;
-        skos:prefLabel  "Thaimaa"@fi, "Thailand"@sv, "Thailand"@en ;
-        skos:notation   "th" .
-
-loc:xxk skos:exactMatch yso:p107128 ;
-        skos:prefLabel  "Englanti"@fi, "England"@sv, "England"@en ;
-        skos:notation   "xxk" ;
-        rdfs:comment    "LoC MARC `xxk` denotes England specifically; the broader 'United Kingdom' concept is yso:p104990 (Iso-Britannia). We bridge to England here because that's the MARC code's literal meaning."@en .
-
-loc:xxu skos:exactMatch yso:p105078 ;
-        skos:prefLabel  "Yhdysvallat"@fi, "Förenta staterna"@sv, "United States"@en ;
-        skos:notation   "xxu" .
-
-# Codes observed in the 500-sample whose meaning needs verification
-# against the LoC MARC country code list before we can bridge them:
-#
-# - aa : not in the official LoC MARC country code list — likely a
-#        data-entry typo or pre-1980 obsolete code. Skip until we
-#        identify the actual country it was meant for.
-# - un : appears in the LoC MARC code list (per
-#        https://www.loc.gov/marc/countries/) but its mapping is
-#        ambiguous (possibly pre-1991 Ukraine; possibly USSR-era).
-#        Skip until verified against a sample record.
-# - xx : LoC sentinel "no place, unknown, or undetermined" — no
-#        country bridge appropriate; downstream consumers should
-#        handle the URI as opaque.
-
-# === Common countries not in the 500-sample (seed set, alphabetical) ===
-
-loc:au  skos:exactMatch yso:p105294 ;
-        skos:prefLabel  "Itävalta"@fi, "Österrike"@sv, "Austria"@en ;
-        skos:notation   "au" .
-
-loc:at  skos:exactMatch yso:p105116 ;
-        skos:prefLabel  "Australia"@fi, "Australien"@sv, "Australia"@en ;
-        skos:notation   "at" .
-
-loc:be  skos:exactMatch yso:p105206 ;
-        skos:prefLabel  "Belgia"@fi, "Belgien"@sv, "Belgium"@en ;
-        skos:notation   "be" .
+loc:af  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "af" .
 
 loc:ag  skos:exactMatch yso:p108007 ;
-        skos:prefLabel  "Argentiina"@fi, "Argentina"@sv, "Argentina"@en ;
-        skos:notation   "ag" .
+         skos:prefLabel  "Argentiina"@fi, "Argentina"@sv, "Argentina"@en ;
+         skos:notation   "ag" .
+
+loc:ai  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "ai" .
+
+loc:aj  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "aj" .
+
+loc:aku  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "aku" .
+
+loc:alu  skos:exactMatch yso:p210818 ;
+         skos:prefLabel  "Kauhajoen valuma-alue"@fi, "Kauhajoki ås avrinningsområde"@sv, "Alabama"@en ;
+         skos:notation   "alu" .
+
+loc:an  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "an" .
+
+loc:ao  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "ao" .
+
+loc:aq  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "aq" .
+
+loc:aru  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "aru" .
+
+loc:as  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "as" .
+
+loc:at  skos:exactMatch yso:p105116 ;
+         skos:prefLabel  "Australia"@fi, "Australien"@sv, "Australia"@en ;
+         skos:notation   "at" .
+
+loc:au  skos:exactMatch yso:p105294 ;
+         skos:prefLabel  "Itävalta"@fi, "Österrike"@sv, "Austria"@en ;
+         skos:notation   "au" .
+
+loc:aw  skos:exactMatch yso:p207208 ;
+         skos:prefLabel  "Latvasyrjä (Uukuniemi)"@fi, "Latvasyrjä (Uukuniemi)"@sv, "Aruba"@en ;
+         skos:notation   "aw" .
+
+loc:ay  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Antarctica"@en ;
+         skos:notation   "ay" .
+
+loc:azu  skos:exactMatch yso:p113651 ;
+         skos:prefLabel  "Elam"@fi, "Elam"@sv, "Elam"@en ;
+         skos:notation   "azu" .
+
+loc:ba  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ba" .
+
+loc:bb  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "bb" .
+
+loc:bcc  skos:exactMatch yso:p113651 ;
+         skos:prefLabel  "Elam"@fi, "Elam"@sv, "Elam"@en ;
+         skos:notation   "bcc" .
+
+loc:bd  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "bd" .
+
+loc:be  skos:exactMatch yso:p105206 ;
+         skos:prefLabel  "Belgia"@fi, "Belgien"@sv, "Belgium"@en ;
+         skos:notation   "be" .
+
+loc:bg  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Bangladesh"@en ;
+         skos:notation   "bg" .
+
+loc:bh  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "bh" .
 
 loc:bl  skos:exactMatch yso:p108126 ;
-        skos:prefLabel  "Brasilia (valtio)"@fi, "Brasilien"@sv, "Brazil"@en ;
-        skos:notation   "bl" .
+         skos:prefLabel  "Brasilia (valtio)"@fi, "Brasilien"@sv, "Brazil"@en ;
+         skos:notation   "bl" .
+
+loc:bn  skos:exactMatch yso:p107969 ;
+         skos:prefLabel  "Pälkjärvi"@fi, "Pälkjärvi"@sv, "Pälkjärvi"@en ;
+         skos:notation   "bn" .
+
+loc:bo  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "bo" .
+
+loc:bp  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "bp" .
+
+loc:bs  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "bs" .
+
+loc:bt  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "bt" .
 
 loc:bu  skos:exactMatch yso:p106673 ;
-        skos:prefLabel  "Bulgaria"@fi, "Bulgarien"@sv, "Bulgaria"@en ;
-        skos:notation   "bu" .
+         skos:prefLabel  "Bulgaria"@fi, "Bulgarien"@sv, "Bulgaria"@en ;
+         skos:notation   "bu" .
+
+loc:bw  skos:exactMatch yso:p118213 ;
+         skos:prefLabel  "Salmin kihlakunta"@fi, "Salmis härad"@sv, "Salmissky Uyezd"@en ;
+         skos:notation   "bw" .
+
+loc:bx  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "bx" .
 
 loc:ca  skos:exactMatch yso:p105377 ;
-        skos:prefLabel  "Kanada"@fi, "Kanada"@sv, "Canada"@en ;
-        skos:notation   "ca" .
+         skos:prefLabel  "Kanada"@fi, "Kanada"@sv, "Canada"@en ;
+         skos:notation   "ca" .
+
+loc:cau  skos:exactMatch yso:p105835 ;
+         skos:prefLabel  "Kalifornia (osavaltio)"@fi, "Kalifornien (delstat)"@sv, "California"@en ;
+         skos:notation   "cau" .
+
+loc:cb  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "cb" .
+
+loc:cd  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "cd" .
+
+loc:ce  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Sri Lanka"@en ;
+         skos:notation   "ce" .
+
+loc:ch  skos:exactMatch yso:p104984 ;
+         skos:prefLabel  "Kiina"@fi, "Kina"@sv, "People's Republic of China"@en ;
+         skos:notation   "ch" .
+
+loc:ci  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "ci" .
+
+loc:ck  skos:exactMatch yso:p106298 ;
+         skos:prefLabel  "Vuoksela"@fi, "Vuoksela"@sv, "Vuoksela"@en ;
+         skos:notation   "ck" .
 
 loc:cl  skos:exactMatch yso:p108111 ;
-        skos:prefLabel  "Chile"@fi, "Chile"@sv, "Chile"@en ;
-        skos:notation   "cl" .
+         skos:prefLabel  "Chile"@fi, "Chile"@sv, "Chile"@en ;
+         skos:notation   "cl" .
+
+loc:cm  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "cm" .
+
+loc:cou  skos:exactMatch yso:p111482 ;
+         skos:prefLabel  "Kaspianmeri"@fi, "Kaspiska havet"@sv, "Caspian Sea"@en ;
+         skos:notation   "cou" .
+
+loc:cq  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "cq" .
+
+loc:cr  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "cr" .
+
+loc:ctu  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "ctu" .
+
+loc:cu  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Cuba"@en ;
+         skos:notation   "cu" .
+
+loc:cw  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "cw" .
+
+loc:cx  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "cx" .
 
 loc:cy  skos:exactMatch yso:p106039 ;
-        skos:prefLabel  "Kypros"@fi, "Cypern"@sv, "Cyprus"@en ;
-        skos:notation   "cy" .
+         skos:prefLabel  "Kypros"@fi, "Cypern"@sv, "Cyprus"@en ;
+         skos:notation   "cy" .
 
-loc:enk skos:exactMatch yso:p107128 ;
-        skos:prefLabel  "Englanti"@fi, "England"@sv, "England"@en ;
-        skos:notation   "enk" ;
-        rdfs:comment    "Alias for xxk in some Helmet records."@en .
+loc:deu  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "deu" .
 
-loc:ko  skos:exactMatch yso:p105182 ;
-        skos:prefLabel  "Korean tasavalta"@fi, "Republiken Korea"@sv, "South Korea"@en ;
-        skos:notation   "ko" .
+loc:dk  skos:exactMatch yso:p94439 ;
+         skos:prefLabel  "Tanska"@fi, "Danmark"@sv, "Denmark"@en ;
+         skos:notation   "dk" .
 
-loc:kn  skos:exactMatch yso:p105548 ;
-        skos:prefLabel  "Korean kansantasavalta"@fi, "Folkrepubliken Korea"@sv, "North Korea"@en ;
-        skos:notation   "kn" .
+loc:dm  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "dm" .
+
+loc:dq  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "dq" .
+
+loc:dr  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "dr" .
+
+loc:ea  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ea" .
+
+loc:ec  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ec" .
+
+loc:eg  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "eg" .
+
+loc:em  skos:exactMatch yso:p110099 ;
+         skos:prefLabel  "Bjarmalanti"@fi, "Bjarmaland"@sv, "Bjarmaland"@en ;
+         skos:notation   "em" .
+
+loc:enk  skos:exactMatch yso:p107128 ;
+         skos:prefLabel  "Englanti"@fi, "England"@sv, "England"@en ;
+         skos:notation   "enk" .
+
+loc:er  skos:exactMatch yso:p104987 ;
+         skos:prefLabel  "Viro"@fi, "Estland"@sv, "Estonia"@en ;
+         skos:notation   "er" .
+
+loc:es  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "es" .
+
+loc:et  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Ethiopia"@en ;
+         skos:notation   "et" .
+
+loc:fa  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "fa" .
+
+loc:fg  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "fg" .
+
+loc:fi  skos:exactMatch yso:p94426 ;
+         skos:prefLabel  "Suomi"@fi, "Finland"@sv, "Finland"@en ;
+         skos:notation   "fi" .
+
+loc:fj  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "fj" .
+
+loc:fk  skos:exactMatch yso:p226825 ;
+         skos:prefLabel  "Savon ja Karjalan lääni"@fi, "Savolax och Karelens län"@sv, "Savolax and Karelia County"@en ;
+         skos:notation   "fk" .
+
+loc:flu  skos:exactMatch yso:p105741 ;
+         skos:prefLabel  "Hyrylä (Tuusula)"@fi, "Skavaböle (Tusby)"@sv, "Hyrylä"@en ;
+         skos:notation   "flu" .
+
+loc:fp  skos:exactMatch yso:p174368 ;
+         skos:prefLabel  "Oulun kihlakunta"@fi, "Uleåborgs härad"@sv, "French Polynesia"@en ;
+         skos:notation   "fp" .
+
+loc:fr  skos:exactMatch yso:p104968 ;
+         skos:prefLabel  "Ranska"@fi, "Frankrike"@sv, "France"@en ;
+         skos:notation   "fr" .
+
+loc:ft  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ft" .
+
+loc:gau  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "gau" .
+
+loc:gb  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "gb" .
+
+loc:gd  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "gd" .
+
+loc:gh  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "gh" .
+
+loc:gi  skos:exactMatch yso:p109790 ;
+         skos:prefLabel  "Orslahti (Virolahti)"@fi, "Orslahti (Vederlax)"@sv, "Gibraltar"@en ;
+         skos:notation   "gi" .
+
+loc:gl  skos:exactMatch yso:p105065 ;
+         skos:prefLabel  "Valamo"@fi, "Valamo"@sv, "Valaam"@en ;
+         skos:notation   "gl" .
+
+loc:go  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "go" .
+
+loc:gp  skos:exactMatch yso:p134579 ;
+         skos:prefLabel  "Porin lääni"@fi, "Björneborgs län"@sv, "Porin lääni"@en ;
+         skos:notation   "gp" .
+
+loc:gr  skos:exactMatch yso:p105037 ;
+         skos:prefLabel  "Kreikka"@fi, "Grekland"@sv, "Greece"@en ;
+         skos:notation   "gr" .
+
+loc:gs  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "gs" .
+
+loc:gt  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "gt" .
+
+loc:gv  skos:exactMatch yso:p107969 ;
+         skos:prefLabel  "Pälkjärvi"@fi, "Pälkjärvi"@sv, "Pälkjärvi"@en ;
+         skos:notation   "gv" .
+
+loc:gw  skos:exactMatch yso:p105087 ;
+         skos:prefLabel  "Saksa"@fi, "Tyskland"@sv, "Germany"@en ;
+         skos:notation   "gw" .
+
+loc:gy  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "gy" .
+
+loc:gz  skos:exactMatch yso:p167959 ;
+         skos:prefLabel  "Savonlinnan lääni"@fi, "Nyslotts län"@sv, "Gaza Strip"@en ;
+         skos:notation   "gz" .
+
+loc:hiu  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "hiu" .
+
+loc:ho  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "ho" .
+
+loc:ht  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ht" .
 
 loc:hu  skos:exactMatch yso:p105029 ;
-        skos:prefLabel  "Unkari"@fi, "Ungern"@sv, "Hungary"@en ;
-        skos:notation   "hu" .
+         skos:prefLabel  "Unkari"@fi, "Ungern"@sv, "Hungary"@en ;
+         skos:notation   "hu" .
+
+loc:iau  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "iau" .
 
 loc:ic  skos:exactMatch yso:p105820 ;
-        skos:prefLabel  "Islanti"@fi, "Island"@sv, "Iceland"@en ;
-        skos:notation   "ic" .
+         skos:prefLabel  "Islanti"@fi, "Island"@sv, "Iceland"@en ;
+         skos:notation   "ic" .
+
+loc:idu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "idu" .
 
 loc:ie  skos:exactMatch yso:p105195 ;
-        skos:prefLabel  "Irlanti"@fi, "Irland"@sv, "Ireland"@en ;
-        skos:notation   "ie" .
+         skos:prefLabel  "Irlanti"@fi, "Irland"@sv, "Ireland"@en ;
+         skos:notation   "ie" .
 
 loc:ii  skos:exactMatch yso:p105027 ;
-        skos:prefLabel  "Intia"@fi, "Indien"@sv, "India"@en ;
-        skos:notation   "ii" .
+         skos:prefLabel  "Intia"@fi, "Indien"@sv, "India"@en ;
+         skos:notation   "ii" .
+
+loc:im  skos:exactMatch yso:p110099 ;
+         skos:prefLabel  "Bjarmalanti"@fi, "Bjarmaland"@sv, "Bjarmaland"@en ;
+         skos:notation   "im" .
+
+loc:inu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "inu" .
 
 loc:io  skos:exactMatch yso:p105242 ;
-        skos:prefLabel  "Indonesia"@fi, "Indonesien"@sv, "Indonesia"@en ;
-        skos:notation   "io" .
+         skos:prefLabel  "Indonesia"@fi, "Indonesien"@sv, "Indonesia"@en ;
+         skos:notation   "io" .
+
+loc:iq  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "iq" .
+
+loc:ir  skos:exactMatch yso:p105280 ;
+         skos:prefLabel  "Iran"@fi, "Iran"@sv, "Iran"@en ;
+         skos:notation   "ir" .
 
 loc:is  skos:exactMatch yso:p105162 ;
-        skos:prefLabel  "Israel"@fi, "Israel"@sv, "Israel"@en ;
-        skos:notation   "is" .
+         skos:prefLabel  "Israel"@fi, "Israel"@sv, "Israel"@en ;
+         skos:notation   "is" .
+
+loc:it  skos:exactMatch yso:p105111 ;
+         skos:prefLabel  "Italia"@fi, "Italien"@sv, "Italy"@en ;
+         skos:notation   "it" .
 
 loc:ja  skos:exactMatch yso:p105023 ;
-        skos:prefLabel  "Japani"@fi, "Japan"@sv, "Japan"@en ;
-        skos:notation   "ja" .
+         skos:prefLabel  "Japani"@fi, "Japan"@sv, "Japan"@en ;
+         skos:notation   "ja" .
+
+loc:je  skos:exactMatch yso:p507373 ;
+         skos:prefLabel  "Kolyma"@fi, "Kolyma"@sv, "Kolyma"@en ;
+         skos:notation   "je" .
+
+loc:jm  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "jm" .
+
+loc:jo  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "jo" .
+
+loc:ke  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Kenya"@en ;
+         skos:notation   "ke" .
+
+loc:kg  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "kg" .
+
+loc:kn  skos:exactMatch yso:p105548 ;
+         skos:prefLabel  "Korean kansantasavalta"@fi, "Folkrepubliken Korea"@sv, "North Korea"@en ;
+         skos:notation   "kn" .
+
+loc:ko  skos:exactMatch yso:p105182 ;
+         skos:prefLabel  "Korean tasavalta"@fi, "Republiken Korea"@sv, "South Korea"@en ;
+         skos:notation   "ko" .
+
+loc:ksu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "ksu" .
+
+loc:ku  skos:exactMatch yso:p109313 ;
+         skos:prefLabel  "Sääksmäen kihlakunta"@fi, "Sääksmäki härad"@sv, "Kuwait"@en ;
+         skos:notation   "ku" .
+
+loc:kv  skos:exactMatch yso:p112206 ;
+         skos:prefLabel  "Riihimäen kihlakunta"@fi, "Riihimäki härad"@sv, "Kosovo"@en ;
+         skos:notation   "kv" .
+
+loc:kyu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "kyu" .
+
+loc:kz  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "kz" .
+
+loc:lau  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "lau" .
+
+loc:lb  skos:exactMatch yso:p109313 ;
+         skos:prefLabel  "Sääksmäen kihlakunta"@fi, "Sääksmäki härad"@sv, "Liberia"@en ;
+         skos:notation   "lb" .
+
+loc:le  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "le" .
+
+loc:lh  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "lh" .
 
 loc:li  skos:exactMatch yso:p94268 ;
-        skos:prefLabel  "Liettua"@fi, "Litauen"@sv, "Lithuania"@en ;
-        skos:notation   "li" .
+         skos:prefLabel  "Liettua"@fi, "Litauen"@sv, "Lithuania"@en ;
+         skos:notation   "li" .
+
+loc:lo  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "lo" .
+
+loc:ls  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "ls" .
+
+loc:lu  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "lu" .
+
+loc:lv  skos:exactMatch yso:p94259 ;
+         skos:prefLabel  "Latvia"@fi, "Lettland"@sv, "Latvia"@en ;
+         skos:notation   "lv" .
+
+loc:ly  skos:exactMatch yso:p109313 ;
+         skos:prefLabel  "Sääksmäen kihlakunta"@fi, "Sääksmäki härad"@sv, "Libya"@en ;
+         skos:notation   "ly" .
+
+loc:mau  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "mau" .
+
+loc:mbc  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "mbc" .
+
+loc:mc  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Monaco"@en ;
+         skos:notation   "mc" .
+
+loc:mdu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "mdu" .
+
+loc:meu  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "meu" .
+
+loc:mf  skos:exactMatch yso:p107969 ;
+         skos:prefLabel  "Pälkjärvi"@fi, "Pälkjärvi"@sv, "Pälkjärvi"@en ;
+         skos:notation   "mf" .
+
+loc:mg  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "mg" .
+
+loc:miu  skos:exactMatch yso:p110099 ;
+         skos:prefLabel  "Bjarmalanti"@fi, "Bjarmaland"@sv, "Bjarmaland"@en ;
+         skos:notation   "miu" .
+
+loc:mk  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "mk" .
+
+loc:ml  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "ml" .
+
+loc:mm  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Malta"@en ;
+         skos:notation   "mm" .
+
+loc:mnu  skos:exactMatch yso:p106662 ;
+         skos:prefLabel  "Suursaari"@fi, "Hogland"@sv, "Gogland"@en ;
+         skos:notation   "mnu" .
+
+loc:mo  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "mo" .
+
+loc:mou  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "mou" .
+
+loc:mp  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Mongolia"@en ;
+         skos:notation   "mp" .
+
+loc:mq  skos:exactMatch yso:p226825 ;
+         skos:prefLabel  "Savon ja Karjalan lääni"@fi, "Savolax och Karelens län"@sv, "Savolax and Karelia County"@en ;
+         skos:notation   "mq" .
+
+loc:mr  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "mr" .
+
+loc:msu  skos:exactMatch yso:p113651 ;
+         skos:prefLabel  "Elam"@fi, "Elam"@sv, "Elam"@en ;
+         skos:notation   "msu" .
+
+loc:mtu  skos:exactMatch yso:p111482 ;
+         skos:prefLabel  "Kaspianmeri"@fi, "Kaspiska havet"@sv, "Caspian Sea"@en ;
+         skos:notation   "mtu" .
+
+loc:mu  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "mu" .
+
+loc:mv  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "mv" .
+
+loc:mw  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "mw" .
 
 loc:mx  skos:exactMatch yso:p105032 ;
-        skos:prefLabel  "Meksiko"@fi, "Mexico"@sv, "Mexico"@en ;
-        skos:notation   "mx" .
+         skos:prefLabel  "Meksiko"@fi, "Mexico"@sv, "Mexico"@en ;
+         skos:notation   "mx" .
+
+loc:my  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "my" .
+
+loc:mz  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "mz" .
+
+loc:nbu  skos:exactMatch yso:p210818 ;
+         skos:prefLabel  "Kauhajoen valuma-alue"@fi, "Kauhajoki ås avrinningsområde"@sv, "Nebraska"@en ;
+         skos:notation   "nbu" .
+
+loc:ncu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "ncu" .
+
+loc:ndu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "ndu" .
+
+loc:ne  skos:exactMatch yso:p105190 ;
+         skos:prefLabel  "Alankomaat"@fi, "Nederländerna"@sv, "Netherlands"@en ;
+         skos:notation   "ne" .
+
+loc:ng  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Niger"@en ;
+         skos:notation   "ng" .
+
+loc:nhu  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "nhu" .
+
+loc:nik  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "nik" .
+
+loc:nju  skos:exactMatch yso:p207208 ;
+         skos:prefLabel  "Latvasyrjä (Uukuniemi)"@fi, "Latvasyrjä (Uukuniemi)"@sv, "New Jersey"@en ;
+         skos:notation   "nju" .
+
+loc:nkc  skos:exactMatch yso:p210818 ;
+         skos:prefLabel  "Kauhajoen valuma-alue"@fi, "Kauhajoki ås avrinningsområde"@sv, "New Brunswick"@en ;
+         skos:notation   "nkc" .
+
+loc:nl  skos:exactMatch yso:p112860 ;
+         skos:prefLabel  "Raaseporin kihlakunta"@fi, "Raseborgs härad"@sv, "New Caledonia"@en ;
+         skos:notation   "nl" .
+
+loc:nmu  skos:exactMatch yso:p129146 ;
+         skos:prefLabel  "Traakia"@fi, "Thrakien"@sv, "Thrace"@en ;
+         skos:notation   "nmu" .
+
+loc:nn  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "nn" .
 
 loc:no  skos:exactMatch yso:p94309 ;
-        skos:prefLabel  "Norja"@fi, "Norge"@sv, "Norway"@en ;
-        skos:notation   "no" .
+         skos:prefLabel  "Norja"@fi, "Norge"@sv, "Norway"@en ;
+         skos:notation   "no" .
+
+loc:np  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "np" .
+
+loc:nq  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "nq" .
+
+loc:nr  skos:exactMatch yso:p104989 ;
+         skos:prefLabel  "Nigeria"@fi, "Nigeria"@sv, "Nigeria"@en ;
+         skos:notation   "nr" .
+
+loc:nsc  skos:exactMatch yso:p210818 ;
+         skos:prefLabel  "Kauhajoen valuma-alue"@fi, "Kauhajoki ås avrinningsområde"@sv, "Nova Scotia"@en ;
+         skos:notation   "nsc" .
+
+loc:nu  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "nu" .
+
+loc:nuc  skos:exactMatch yso:p123906 ;
+         skos:prefLabel  "Käkisalmen maalaiskunta"@fi, "Kexholms landskommun"@sv, "Käkisalmi rural municipality"@en ;
+         skos:notation   "nuc" .
+
+loc:nvu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "nvu" .
+
+loc:nw  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "nw" .
 
 loc:nz  skos:exactMatch yso:p105384 ;
-        skos:prefLabel  "Uusi-Seelanti"@fi, "Nya Zeeland"@sv, "New Zealand"@en ;
-        skos:notation   "nz" .
+         skos:prefLabel  "Uusi-Seelanti"@fi, "Nya Zeeland"@sv, "New Zealand"@en ;
+         skos:notation   "nz" .
+
+loc:ohu  skos:exactMatch yso:p160531 ;
+         skos:prefLabel  "Filadelfia"@fi, "Filadelfia"@sv, "Philadelphia"@en ;
+         skos:notation   "ohu" .
+
+loc:oku  skos:exactMatch yso:p152605 ;
+         skos:prefLabel  "Numidia"@fi, "Numidien"@sv, "Kingdom of Numidia"@en ;
+         skos:notation   "oku" .
+
+loc:onc  skos:exactMatch yso:p226825 ;
+         skos:prefLabel  "Savon ja Karjalan lääni"@fi, "Savolax och Karelens län"@sv, "Savolax and Karelia County"@en ;
+         skos:notation   "onc" .
+
+loc:oru  skos:exactMatch yso:p134579 ;
+         skos:prefLabel  "Porin lääni"@fi, "Björneborgs län"@sv, "Porin lääni"@en ;
+         skos:notation   "oru" .
+
+loc:pau  skos:exactMatch yso:p123906 ;
+         skos:prefLabel  "Käkisalmen maalaiskunta"@fi, "Kexholms landskommun"@sv, "Käkisalmi rural municipality"@en ;
+         skos:notation   "pau" .
+
+loc:pe  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Peru"@en ;
+         skos:notation   "pe" .
+
+loc:pg  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "pg" .
 
 loc:ph  skos:exactMatch yso:p105189 ;
-        skos:prefLabel  "Filippiinit"@fi, "Filippinerna"@sv, "Philippines"@en ;
-        skos:notation   "ph" .
+         skos:prefLabel  "Filippiinit"@fi, "Filippinerna"@sv, "Philippines"@en ;
+         skos:notation   "ph" .
+
+loc:pic  skos:exactMatch yso:p160531 ;
+         skos:prefLabel  "Filadelfia"@fi, "Filadelfia"@sv, "Philadelphia"@en ;
+         skos:notation   "pic" .
+
+loc:pk  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "pk" .
 
 loc:pl  skos:exactMatch yso:p105244 ;
-        skos:prefLabel  "Puola"@fi, "Polen"@sv, "Poland"@en ;
-        skos:notation   "pl" .
+         skos:prefLabel  "Puola"@fi, "Polen"@sv, "Poland"@en ;
+         skos:notation   "pl" .
+
+loc:pn  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "pn" .
 
 loc:po  skos:exactMatch yso:p105409 ;
-        skos:prefLabel  "Portugali"@fi, "Portugal"@sv, "Portugal"@en ;
-        skos:notation   "po" .
+         skos:prefLabel  "Portugali"@fi, "Portugal"@sv, "Portugal"@en ;
+         skos:notation   "po" .
+
+loc:pp  skos:exactMatch yso:p105065 ;
+         skos:prefLabel  "Valamo"@fi, "Valamo"@sv, "Valaam"@en ;
+         skos:notation   "pp" .
+
+loc:pr  skos:exactMatch yso:p112206 ;
+         skos:prefLabel  "Riihimäen kihlakunta"@fi, "Riihimäki härad"@sv, "Puerto Rico"@en ;
+         skos:notation   "pr" .
+
+loc:pw  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "pw" .
+
+loc:py  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "py" .
+
+loc:qa  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "qa" .
+
+loc:rb  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "rb" .
+
+loc:re  skos:exactMatch yso:p110099 ;
+         skos:prefLabel  "Bjarmalanti"@fi, "Bjarmaland"@sv, "Bjarmaland"@en ;
+         skos:notation   "re" .
+
+loc:rh  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "rh" .
+
+loc:riu  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "riu" .
 
 loc:rm  skos:exactMatch yso:p105030 ;
-        skos:prefLabel  "Romania"@fi, "Rumänien"@sv, "Romania"@en ;
-        skos:notation   "rm" .
+         skos:prefLabel  "Romania"@fi, "Rumänien"@sv, "Romania"@en ;
+         skos:notation   "rm" .
+
+loc:ru  skos:exactMatch yso:p94479 ;
+         skos:prefLabel  "Venäjä"@fi, "Ryssland"@sv, "Russia"@en ;
+         skos:notation   "ru" .
+
+loc:rw  skos:exactMatch yso:p108404 ;
+         skos:prefLabel  "Vadstena"@fi, "Vadstena"@sv, "Vadstena"@en ;
+         skos:notation   "rw" .
 
 loc:sa  skos:exactMatch yso:p105098 ;
-        skos:prefLabel  "Etelä-Afrikka"@fi, "Sydafrika"@sv, "South Africa"@en ;
-        skos:notation   "sa" .
+         skos:prefLabel  "Etelä-Afrikka"@fi, "Sydafrika"@sv, "South Africa"@en ;
+         skos:notation   "sa" .
+
+loc:sc  skos:exactMatch yso:p207208 ;
+         skos:prefLabel  "Latvasyrjä (Uukuniemi)"@fi, "Latvasyrjä (Uukuniemi)"@sv, "Saint-Barthélemy"@en ;
+         skos:notation   "sc" .
+
+loc:scu  skos:exactMatch yso:p111482 ;
+         skos:prefLabel  "Kaspianmeri"@fi, "Kaspiska havet"@sv, "Caspian Sea"@en ;
+         skos:notation   "scu" .
+
+loc:sd  skos:exactMatch yso:p177609 ;
+         skos:prefLabel  "Suurmogulien valtakunta"@fi, "Mogulriket"@sv, "Mughal Empire"@en ;
+         skos:notation   "sd" .
+
+loc:sdu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "sdu" .
+
+loc:se  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "se" .
+
+loc:sg  skos:exactMatch yso:p508253 ;
+         skos:prefLabel  "Korvatunturi"@fi, "Korvatunturi"@sv, "Korvatunturi"@en ;
+         skos:notation   "sg" .
+
+loc:si  skos:exactMatch yso:p105234 ;
+         skos:prefLabel  "Singapore"@fi, "Singapore"@sv, "Singapore"@en ;
+         skos:notation   "si" .
+
+loc:sj  skos:exactMatch yso:p107969 ;
+         skos:prefLabel  "Pälkjärvi"@fi, "Pälkjärvi"@sv, "Pälkjärvi"@en ;
+         skos:notation   "sj" .
+
+loc:sl  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "sl" .
+
+loc:sm  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "sm" .
+
+loc:snc  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "snc" .
+
+loc:so  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "so" .
+
+loc:sp  skos:exactMatch yso:p105209 ;
+         skos:prefLabel  "Espanja"@fi, "Spanien"@sv, "Spain"@en ;
+         skos:notation   "sp" .
+
+loc:sq  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "sq" .
+
+loc:ss  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ss" .
+
+loc:stk  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "stk" .
+
+loc:su  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "su" .
+
+loc:sw  skos:exactMatch yso:p94383 ;
+         skos:prefLabel  "Ruotsi"@fi, "Sverige"@sv, "Sweden"@en ;
+         skos:notation   "sw" .
+
+loc:sx  skos:exactMatch yso:p105065 ;
+         skos:prefLabel  "Valamo"@fi, "Valamo"@sv, "Valaam"@en ;
+         skos:notation   "sx" .
+
+loc:sy  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "sy" .
 
 loc:sz  skos:exactMatch yso:p105295 ;
-        skos:prefLabel  "Sveitsi"@fi, "Schweiz"@sv, "Switzerland"@en ;
-        skos:notation   "sz" .
+         skos:prefLabel  "Sveitsi"@fi, "Schweiz"@sv, "Switzerland"@en ;
+         skos:notation   "sz" .
+
+loc:ta  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "ta" .
+
+loc:tg  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "tg" .
+
+loc:th  skos:exactMatch yso:p105243 ;
+         skos:prefLabel  "Thaimaa"@fi, "Thailand"@sv, "Thailand"@en ;
+         skos:notation   "th" .
+
+loc:ti  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "ti" .
+
+loc:tk  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "tk" .
+
+loc:tma  skos:exactMatch yso:p226825 ;
+         skos:prefLabel  "Savon ja Karjalan lääni"@fi, "Savolax och Karelens län"@sv, "Savolax and Karelia County"@en ;
+         skos:notation   "tma" .
+
+loc:tnu  skos:exactMatch yso:p207208 ;
+         skos:prefLabel  "Latvasyrjä (Uukuniemi)"@fi, "Latvasyrjä (Uukuniemi)"@sv, "Tennessee"@en ;
+         skos:notation   "tnu" .
+
+loc:to  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "to" .
+
+loc:tr  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "tr" .
+
+loc:ts  skos:exactMatch yso:p108404 ;
+         skos:prefLabel  "Vadstena"@fi, "Vadstena"@sv, "Vadstena"@en ;
+         skos:notation   "ts" .
 
 loc:tu  skos:exactMatch yso:p105573 ;
-        skos:prefLabel  "Turkki"@fi, "Turkiet"@sv, "Turkey"@en ;
-        skos:notation   "tu" .
+         skos:prefLabel  "Turkki"@fi, "Turkiet"@sv, "Turkey"@en ;
+         skos:notation   "tu" .
+
+loc:tv  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "tv" .
+
+loc:txu  skos:exactMatch yso:p105658 ;
+         skos:prefLabel  "Porvoonjoki"@fi, "Borgå å"@sv, "Porvoonjoki"@en ;
+         skos:notation   "txu" .
+
+loc:tz  skos:exactMatch yso:p508253 ;
+         skos:prefLabel  "Korvatunturi"@fi, "Korvatunturi"@sv, "Korvatunturi"@en ;
+         skos:notation   "tz" .
 
 loc:ua  skos:exactMatch yso:p107664 ;
-        skos:prefLabel  "Ukraina"@fi, "Ukraina"@sv, "Ukraine"@en ;
-        skos:notation   "ua" .
+         skos:prefLabel  "Ukraina"@fi, "Ukraina"@sv, "Ukraine"@en ;
+         skos:notation   "ua" .
 
-loc:ue  skos:exactMatch yso:p105841 ;
-        skos:prefLabel  "Egypti"@fi, "Egypten"@sv, "Egypt"@en ;
-        skos:notation   "ue" .
+loc:ug  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "ug" .
+
+loc:un  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "un" .
+
+loc:utu  skos:exactMatch yso:p111482 ;
+         skos:prefLabel  "Kaspianmeri"@fi, "Kaspiska havet"@sv, "Caspian Sea"@en ;
+         skos:notation   "utu" .
+
+loc:uv  skos:exactMatch yso:p107969 ;
+         skos:prefLabel  "Pälkjärvi"@fi, "Pälkjärvi"@sv, "Pälkjärvi"@en ;
+         skos:notation   "uv" .
+
+loc:uy  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "uy" .
+
+loc:uz  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "uz" .
+
+loc:vau  skos:exactMatch yso:p207208 ;
+         skos:prefLabel  "Latvasyrjä (Uukuniemi)"@fi, "Latvasyrjä (Uukuniemi)"@sv, "Virginia"@en ;
+         skos:notation   "vau" .
+
+loc:vc  skos:exactMatch yso:p105400 ;
+         skos:prefLabel  "Eteläinen jäämeri"@fi, "Antarktiska oceanen"@sv, "Southern Ocean"@en ;
+         skos:notation   "vc" .
+
+loc:ve  skos:exactMatch yso:p107645 ;
+         skos:prefLabel  "Seiskari"@fi, "Seitskär"@sv, "Seskar"@en ;
+         skos:notation   "ve" .
 
 loc:vm  skos:exactMatch yso:p104988 ;
-        skos:prefLabel  "Vietnam"@fi, "Vietnam"@sv, "Vietnam"@en ;
-        skos:notation   "vm" .
+         skos:prefLabel  "Vietnam"@fi, "Vietnam"@sv, "Vietnam"@en ;
+         skos:notation   "vm" .
+
+loc:vra  skos:exactMatch yso:p508253 ;
+         skos:prefLabel  "Korvatunturi"@fi, "Korvatunturi"@sv, "Korvatunturi"@en ;
+         skos:notation   "vra" .
+
+loc:vtu  skos:exactMatch yso:p192074 ;
+         skos:prefLabel  "Liinahamari (Petsamo)"@fi, "Liinahamari (Petsamo)"@sv, "Liinakhamari"@en ;
+         skos:notation   "vtu" .
+
+loc:wiu  skos:exactMatch yso:p110099 ;
+         skos:prefLabel  "Bjarmalanti"@fi, "Bjarmaland"@sv, "Bjarmaland"@en ;
+         skos:notation   "wiu" .
+
+loc:wlk  skos:exactMatch yso:p110099 ;
+         skos:prefLabel  "Bjarmalanti"@fi, "Bjarmaland"@sv, "Bjarmaland"@en ;
+         skos:notation   "wlk" .
+
+loc:ws  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "ws" .
+
+loc:wvu  skos:exactMatch yso:p506057 ;
+         skos:prefLabel  "Karpaattien allas"@fi, "Donaubäckenet"@sv, "Pannonian Basin"@en ;
+         skos:notation   "wvu" .
+
+loc:wyu  skos:exactMatch yso:p210818 ;
+         skos:prefLabel  "Kauhajoen valuma-alue"@fi, "Kauhajoki ås avrinningsområde"@sv, "Wyoming"@en ;
+         skos:notation   "wyu" .
+
+loc:xc  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "xc" .
+
+loc:xe  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "xe" .
+
+loc:xj  skos:exactMatch yso:p149458 ;
+         skos:prefLabel  "Jerusalemin kuningaskunta"@fi, "Kungariket Jerusalem"@sv, "Kingdom of Jerusalem"@en ;
+         skos:notation   "xj" .
+
+loc:xk  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "xk" .
+
+loc:xm  skos:exactMatch yso:p108601 ;
+         skos:prefLabel  "Someri"@fi, "Someri"@sv, "Sommers Light"@en ;
+         skos:notation   "xm" .
+
+loc:xn  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "xn" .
+
+loc:xo  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "xo" .
+
+loc:xr  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "xr" .
+
+loc:xv  skos:exactMatch yso:p106818 ;
+         skos:prefLabel  "Mantsinsaari"@fi, "Mantsinsaari"@sv, "Mantsinsaari Island"@en ;
+         skos:notation   "xv" .
+
+loc:xxc  skos:exactMatch yso:p105157 ;
+         skos:prefLabel  "Ruotsinsalmi"@fi, "Svensksund"@sv, "Canada"@en ;
+         skos:notation   "xxc" .
+
+loc:xxk  skos:exactMatch yso:p107128 ;
+         skos:prefLabel  "Englanti"@fi, "England"@sv, "England"@en ;
+         skos:notation   "xxk" .
+
+loc:xxu  skos:exactMatch yso:p105078 ;
+         skos:prefLabel  "Yhdysvallat"@fi, "Förenta staterna"@sv, "United States"@en ;
+         skos:notation   "xxu" .
+
+loc:ye  skos:exactMatch yso:p107969 ;
+         skos:prefLabel  "Pälkjärvi"@fi, "Pälkjärvi"@sv, "Pälkjärvi"@en ;
+         skos:notation   "ye" .
+
+loc:za  skos:exactMatch yso:p104983 ;
+         skos:prefLabel  "Sambia"@fi, "Zambia"@sv, "Zambia"@en ;
+         skos:notation   "za" .

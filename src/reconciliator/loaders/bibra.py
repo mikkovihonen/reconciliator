@@ -308,10 +308,16 @@ def bibra_to_marcxml_elem(
         sub_a.set("code", "a")
         sub_a.text = agent.name
 
-        if agent.role:
+        role_val = next(iter(agent.role_counts.keys())) if agent.role_counts else None
+        if role_val:
             sub_e = etree.SubElement(df, f"{{{ns}}}subfield")
             sub_e.set("code", "e")
-            sub_e.text = "author" if agent.role == "aut" else agent.role
+            sub_e.text = "author" if role_val == "aut" else role_val
+
+        for q_val in agent.qualifier_counts:
+            sub_c = etree.SubElement(df, f"{{{ns}}}subfield")
+            sub_c.set("code", "c")
+            sub_c.text = q_val
 
         # Inject reconciled URIs: $0 for standard authorities, $1 for Wikidata
         selected_uris = result.selected_agent_uris.get(idx, [])
@@ -420,7 +426,7 @@ def enrich_bibra_json(
         authorities.append(
             {
                 "name": agent.name,
-                "role": agent.role or "aut",
+                "role": next(iter(agent.role_counts.keys())) if agent.role_counts else "aut",
                 "selected_uris": selected,
                 "kanto_uri": kanto_uri,
                 "wikidata_uri": wikidata_uri,

@@ -10,7 +10,15 @@ from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader, Template
 
-from reconciliator.models import Agent, BibliographicRecord, ClassificationItem, SubjectItem
+from reconciliator.models import (
+    Agent,
+    AgentEntity,
+    ClassificationItem,
+    ExpressionEntity,
+    ManifestationEntity,
+    SubjectItem,
+    WorkEntity,
+)
 
 
 def join_names(agents: Sequence[Agent | dict[str, Any]], delimiter: str = ", ") -> str:
@@ -137,12 +145,215 @@ class RecordTemplateEngine:
         """Return the SHA-256 hash of the template file content."""
         return self.template_hash
 
-    def render(self, record: BibliographicRecord | dict[str, Any]) -> str:
-        """Render a BibliographicRecord into a serialized string."""
-        if isinstance(record, BibliographicRecord):
+    def render(self, record: Any, **kwargs: Any) -> str:
+        """Render a record (BibliographicRecord, entity model, or dict) into a serialized string."""
+        if hasattr(record, "model_dump"):
             context = record.model_dump()
-        else:
+        elif isinstance(record, dict):
             context = dict(record)
+        else:
+            context = {}
 
+        context.update(kwargs)
         rendered = self._template.render(**context)
         return collapse_ws(rendered)
+
+
+class WEMISerializationEngine:
+    """Manages compiled Jinja2 templates for the WEMI Triad:
+
+    - Work (work_serialization.j2)
+    - Expression (expression_serialization.j2)
+    - Manifestation (manifestation_serialization.j2)
+    """
+
+    def __init__(
+        self,
+        work_template_path: Optional[Path | str] = None,
+        expression_template_path: Optional[Path | str] = None,
+        manifestation_template_path: Optional[Path | str] = None,
+        agent_template_path: Optional[Path | str] = None,
+    ) -> None:
+        templates_dir = Path(__file__).parent / "templates"
+        self.work_engine = RecordTemplateEngine(
+            work_template_path or (templates_dir / "work_serialization.j2")
+        )
+        self.expression_engine = RecordTemplateEngine(
+            expression_template_path or (templates_dir / "expression_serialization.j2")
+        )
+        self.manifestation_engine = RecordTemplateEngine(
+            manifestation_template_path or (templates_dir / "manifestation_serialization.j2")
+        )
+        self.agent_engine = RecordTemplateEngine(
+            agent_template_path or (templates_dir / "agent_serialization.j2")
+        )
+
+    def render_work(
+        self,
+        work: WorkEntity | dict[str, Any],
+        authors: Optional[Sequence[AgentEntity | Agent | dict[str, Any] | str]] = None,
+        subjects: Optional[Sequence[SubjectItem | dict[str, Any] | str]] = None,
+        classifications: Optional[Sequence[ClassificationItem | dict[str, Any] | str]] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Render a conceptual Work entity into its dense embedding string."""
+        if isinstance(work, WorkEntity):
+            ctx = {
+                "preferred_title": work.title,
+                "uniform_title": getattr(work, "uniform_title", None),
+                "original_title": getattr(work, "original_title", None),
+                "work_type": work.work_type,
+                "original_language": work.original_language or "",
+                "subjects": work.subjects_json,
+                "classifications": [{"code": work.ykl_class}] if work.ykl_class else [],
+            }
+        else:
+            ctx = dict(work)
+            if "title" in ctx and "preferred_title" not in ctx:
+                ctx["preferred_title"] = ctx["title"]
+
+        if authors is not None:
+            ctx["authors"] = [
+                {
+                    "name": (
+                        a.name
+                        if hasattr(a, "name")
+                        else (a.get("name") if isinstance(a, dict) else str(a))
+                    )
+                }
+                for a in authors
+            ]
+        elif "authors" not in ctx:
+            ctx["authors"] = []
+
+        if subjects is not None:
+            ctx["subjects"] = subjects
+        if "subjects" in ctx and ctx["subjects"]:
+            ctx["subjects"] = [
+                {
+                    "pref_label": (
+                        s.pref_label
+                        if hasattr(s, "pref_label")
+                        else (s.get("pref_label") if isinstance(s, dict) else str(s))
+                    )
+                }
+                for s in ctx["subjects"]
+            ]
+        else:
+            ctx["subjects"] = []
+
+        if classifications is not None:
+            ctx["classifications"] = [
+                {
+                    "code": (
+                        c.code
+                        if hasattr(c, "code")
+                        else (c.get("code") if isinstance(c, dict) else str(c))
+                    )
+                }
+                for c in classifications
+            ]
+        elif "classifications" not in ctx:
+            ctx["classifications"] = []
+
+        ctx.update(kwargs)
+        return self.work_engine.render(ctx)
+
+    def render_expression(
+        self,
+        expression: ExpressionEntity | dict[str, Any],
+        work_title: Optional[str] = None,
+        translators: Optional[Sequence[Any]] = None,
+        performers: Optional[Sequence[Any]] = None,
+        narrators: Optional[Sequence[Any]] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Render an Expression entity into its dense embedding string."""
+        if isinstance(expression, ExpressionEntity):
+            ctx: dict[str, Any] = {
+                "work_title": work_title or expression.title or "",
+                "expression_title": expression.title or work_title or "",
+                "language": expression.language,
+                "content_type": expression.content_type,
+                "version_designation": expression.version_designation,
+                "arrangement_note": expression.arrangement_note,
+                "medium_of_performance": expression.medium_of_performance,
+            }
+        else:
+            ctx = dict(expression)
+            if work_title:
+                ctx["work_title"] = work_title
+            elif "work_title" not in ctx:
+                ctx["work_title"] = ctx.get("expression_title") or ctx.get("title") or ""
+
+        def _to_names(seq: Optional[Sequence[Any]]) -> list[dict[str, str]]:
+            if not seq:
+                return []
+            return [
+                {
+                    "name": str(
+                        x.name
+                        if hasattr(x, "name")
+                        else (x.get("name") if isinstance(x, dict) else str(x))
+                    )
+                }
+                for x in seq
+            ]
+
+        if translators is not None:
+            ctx["translators"] = _to_names(translators)
+        elif "translators" in ctx and ctx["translators"]:
+            ctx["translators"] = _to_names(ctx["translators"])
+
+        if performers is not None:
+            ctx["performers"] = _to_names(performers)
+        elif "performers" in ctx and ctx["performers"]:
+            ctx["performers"] = _to_names(ctx["performers"])
+
+        if narrators is not None:
+            ctx["narrators"] = _to_names(narrators)
+        elif "narrators" in ctx and ctx["narrators"]:
+            ctx["narrators"] = _to_names(ctx["narrators"])
+
+        ctx.update(kwargs)
+        return self.expression_engine.render(ctx)
+
+    def render_manifestation(
+        self,
+        manifestation: ManifestationEntity | dict[str, Any],
+        **kwargs: Any,
+    ) -> str:
+        """Render a Manifestation entity into its dense embedding string."""
+        if isinstance(manifestation, ManifestationEntity):
+            ctx = {
+                "title": manifestation.title,
+                "subtitle": manifestation.subtitle,
+                "publisher": manifestation.publisher or "",
+                "publication_place": manifestation.publication_place,
+                "publication_year": manifestation.publication_year,
+                "edition_statement": manifestation.edition_statement,
+                "carrier_type": manifestation.carrier_type,
+                "extent": manifestation.extent,
+                "series_title": manifestation.series_title,
+                "series_numbering": manifestation.series_numbering,
+            }
+        else:
+            ctx = dict(manifestation)
+
+        ctx.update(kwargs)
+        return self.manifestation_engine.render(ctx)
+
+    def render_agent(
+        self,
+        agent: AgentEntity | Agent | dict[str, Any],
+        **kwargs: Any,
+    ) -> str:
+        """Render an Agent entity into its dense embedding string."""
+        if hasattr(agent, "model_dump"):
+            ctx = agent.model_dump()
+        elif isinstance(agent, dict):
+            ctx = dict(agent)
+        else:
+            ctx = {}
+        ctx.update(kwargs)
+        return self.agent_engine.render(ctx)
