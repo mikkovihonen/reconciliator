@@ -144,6 +144,58 @@ cannot express as one constraint — so deleting an owning row does **not** casc
 and cleanup has to be explicit. `delete_source()` does that, which is what backs
 `ingest_mode: replace`.
 
+## 4a. Aggregates: what a publication contains
+
+An album's tracks, an anthology's stories, an article inside a journal issue.
+Two shapes, because the schema has two mechanisms and conflating them is how
+aggregate modelling goes wrong:
+
+- **Embodied constituent** — a track or a story. A Work realised as an
+  Expression *inside the container's manifestation*: no carrier of its own, so no
+  manifestation row. It appears as an ordered row in `manifestation_expressions`
+  with its `track_number`, `disc_number` and `duration`, plus a
+  `has_constituent` edge from the container's work.
+- **Component manifestation** — an article, a chapter with its own pagination.
+  Its own Work, Expression *and* Manifestation, the last carrying `container_id`,
+  `is_component` and `component_type`. A record that is itself a part gets this
+  from its host-item entry (MARC 773 `$w`, the host's control number), resolved
+  against the batch and then the store, since a journal issue is ingested long
+  before its articles.
+
+**Which fields carry constituents is per-source configuration**, because two
+sources in the same format do not agree about it: Melinda writes enhanced 505s, a
+sound-recording catalogue keeps tracks in its own conventions, and plenty of
+sources have no aggregates at all. A source names a bundled profile, a YAML
+profile of its own, or `off`; see
+[plans/aggregates.md](plans/aggregates.md) and `constituents/`.
+
+```yaml
+constituents:
+  profile: null          # the default: look for nothing
+  mode: keys_only        # off | keys_only | entities
+  index_works: false
+ingest_oai:
+  melinda: {constituents: marc_enhanced, constituents_mode: entities}
+```
+
+`keys_only` is what ingest did before constituents existed: the `analytic` and
+`analytic_title` blocking keys and no rows. `entities` also writes the works,
+expressions, ordered junction rows and edges.
+
+**Identity is content-derived**, so two releases that share a track converge on
+one work row — which is the point, since a tracklist that matched only within one
+release would be no use. A constituent naming no creator inherits the container's
+main entry, which is the cataloguing rule and what makes the convergence work
+when one release's note names a composer and the next does not. An RDF part keeps
+its own node URI instead: the graph stating it is better evidence than a digest.
+
+**Constituent works stay out of the work vector index** by default. Measured on
+200 albums of 12 tracks they are 82% of it, and a title-only query returns tracks
+and no albums, so tier 3's top-k window fills with things that are not what the
+target is. They remain reachable exactly — by `analytic_title` key and through
+`get_constituent_works` from a matched container — and `index_works: true` is
+there for a source whose targets are tracks.
+
 ## 5. Classification
 
 `determine_work_type()` decides what kind of thing a record is, in this order:
@@ -381,21 +433,24 @@ Ten public methods had no caller anywhere. Each was examined for a place in the
 architecture as it now stands; the verdicts differ, and are recorded here because
 the methods themselves have been removed.
 
-### Aggregates: albums and anthologies
+### Worth fixing next: the relator diacritic gap
 
-An album or anthology is stored as one work, one expression, one manifestation
-and a bag of constituent *title strings* in `entity_keys`
-(`analytic`, `analytic_title`). The schema has the whole containment model
-already — `manifestations.container_id`, `is_component`, `component_type`, and
-`manifestation_expressions.track_number` / `disc_number` / `duration` — and no
-loader writes any of it, so a tracklist is unordered and the container never
-knows its parts. Planned in
-[plans/aggregates.md](plans/aggregates.md), which also records the three defects
-the investigation turned up: a 700 `$t` name-title entry becomes a *contributor
-of the container* (an anthology's story authors come out as its primary
-authors), `bf:hasPart` is mapped to series membership in all three BIBFRAME
-profiles, and `insert_wemi_batch` binds every M-E association to the first
-expression, so ordered rows would collapse into one.
+The relator registry does not fold diacritics, and the consequence is not
+cosmetic. One unfolded term silently disables cross-source work consolidation:
+
+1. `säveltäjä` normalises to `cmp`; the ASCII-folded `saveltaja` does not
+   normalise at all;
+2. a role that is not a work role files the contribution against the
+   **expression** rather than the work;
+3. `WorkConsolidator.load_signatures` reads `contributions WHERE entity_type =
+   'work'`, so the work has no creators;
+4. the metadata score drops from clearing the 0.93 threshold to 0.90, and
+   **nothing consolidates** — including records whose titles and creators are
+   identical across two sources.
+
+Found while measuring stage 9 of the aggregates plan, on a fixture that happened
+to write the folded spelling. `fold_label` and a `preserved_diacritics` setting
+already exist; the fix belongs in `normalizers/relators.py`.
 
 ### Genuinely useful, and worth building deliberately
 
