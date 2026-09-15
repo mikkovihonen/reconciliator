@@ -374,10 +374,37 @@ def parse_marc_record_elem(
                 isbns.append(val)
 
     issns: list[str] = []
+    issn_ls: list[str] = []
     for f in _get_datafields(record_elem, "022"):
         for sub_code in ("a", "l", "m", "y", "z"):
             for val in _get_subfields(f, sub_code):
                 issns.append(val)
+        # $l is the linking ISSN, the one that identifies a serial across its
+        # medium changes, so funnel H needs it as its own scheme and not only
+        # merged into the ISSN bag.
+        for val in _get_subfields(f, "l"):
+            issn_ls.append(val)
+
+    # 028 publisher/plate numbers. These are the primary tier-1 schemes for
+    # recorded sound and notated music, and were previously extracted nowhere -
+    # so neither the identifiers table nor the matcher ever saw them.
+    publisher_numbers: list[str] = []
+    plate_numbers: list[str] = []
+    for f in _get_datafields(record_elem, "028"):
+        val = _get_subfield(f, "a")
+        if not val:
+            continue
+        # ind1: 0 issue number, 2 plate number, 3 other music publisher number
+        if f.get("ind1", " ") == "2":
+            plate_numbers.append(val)
+        else:
+            publisher_numbers.append(val)
+
+    # 088 report/standard technical report number, the tier-1 scheme for funnel O.
+    strns: list[str] = []
+    for f in _get_datafields(record_elem, "088"):
+        for val in _get_subfields(f, "a"):
+            strns.append(val)
 
     urns: list[str] = []
     ismns: list[str] = []
@@ -659,6 +686,11 @@ def parse_marc_record_elem(
             "other_ids": other_ids,
             "fingerprint": fingerprints,
             "patent_number": patent_numbers,
+            "issn_l": issn_ls,
+            "publisher_number": publisher_numbers,
+            "plate_number": plate_numbers,
+            "strn": strns,
+            "control_number": [source_id] if source_id else [],
         },
         "fingerprints": fingerprints,
         "patent_numbers": patent_numbers,
@@ -2024,6 +2056,15 @@ def build_target_record_from_marc(
         author_key=author_key,
         title_stem=title_stem,
         keys=keys,
+        identifiers={
+            scheme.lower(): list(values)
+            for scheme, values in (parsed.get("identifiers") or {}).items()
+            if values
+        },
+        content_type=expression.content_type,
+        work_uri=work.work_uri,
+        expression_uri=expression.expression_uri,
+        manifestation_uri=manifestation.manifestation_uri,
         year=pub_year,
         volume_designation=parsed.get("volume_designation"),
         is_component=is_component,

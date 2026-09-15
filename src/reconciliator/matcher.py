@@ -7,8 +7,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from lxml import etree
-from rdflib import RDF, Graph
 
 from reconciliator.agent_transfer import AgentAligner, AgentFallbackResolver
 from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
@@ -199,142 +197,31 @@ def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]
     if target.get_first_key("sammelband"):
         _add("barcode", target.get_first_key("sammelband"))
 
-    # From raw_payload if available
-    if target.raw_payload:
-        if target.format == "marcxml":
-            try:
-                root = etree.fromstring(target.raw_payload)
-                for f in root.findall(".//{http://www.loc.gov/MARC21/slim}controlfield"):
-                    if f.get("tag") == "001" and f.text:
-                        _add("control_number", f.text)
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='020']"):
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='a']"):
-                        if sf.text:
-                            _add("isbn", sf.text.split()[0])
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='022']"):
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='a']"):
-                        if sf.text:
-                            _add("issn", sf.text.strip())
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='l']"):
-                        if sf.text:
-                            _add("issn_l", sf.text.strip())
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='024']"):
-                    ind1 = df.get("ind1", "")
-                    val_sf = df.find("{http://www.loc.gov/MARC21/slim}subfield[@code='a']")
-                    val = val_sf.text.strip() if val_sf is not None and val_sf.text else None
-                    src_sf = df.find("{http://www.loc.gov/MARC21/slim}subfield[@code='2']")
-                    src = src_sf.text.strip().lower() if src_sf is not None and src_sf.text else ""
-                    if val:
-                        if ind1 == "0":
-                            _add("isrc", val)
-                        elif ind1 == "2":
-                            _add("ismn", val)
-                        elif ind1 == "3":
-                            _add("ean", val)
-                        elif src:
-                            _add(src, val)
-                        elif val.startswith("10."):
-                            _add("doi", val)
-                        elif val.lower().startswith("urn:"):
-                            _add("urn", val)
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='028']"):
-                    ind1 = df.get("ind1", "")
-                    val_sf = df.find("{http://www.loc.gov/MARC21/slim}subfield[@code='a']")
-                    val = val_sf.text.strip() if val_sf is not None and val_sf.text else None
-                    if val:
-                        if ind1 == "2":
-                            _add("plate_number", val)
-                        else:
-                            _add("publisher_number", val)
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='027']"):
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='a']"):
-                        if sf.text:
-                            _add("strn", sf.text.strip())
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='013']"):
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='a']"):
-                        if sf.text:
-                            _add("patent_number", sf.text.strip())
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='026']"):
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='e']"):
-                        if sf.text:
-                            _add("fingerprint", sf.text.strip())
-                for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='776']"):
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='w']"):
-                        if sf.text:
-                            _add("control_number", sf.text.strip())
-                    for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='z']"):
-                        if sf.text:
-                            _add("isbn", sf.text.split()[0])
-            except Exception:
-                pass
-        elif target.format in ("bibframe", "turtle", "rdf", "jsonld"):
-            try:
-                g = Graph()
-                fmt = "turtle" if target.format == "turtle" else "xml"
-                g.parse(data=target.raw_payload, format=fmt)
-                for _, p, o in g:
-                    p_str = str(p)
-                    if "identifiedBy" in p_str or "identifier" in p_str:
-                        for val_node in g.objects(o, RDF.value):
-                            v_str = str(val_node).strip()
-                            for t in g.objects(o, RDF.type):
-                                t_local = str(t).split("/")[-1].split("#")[-1].lower()
-                                for cand in (
-                                    "isbn",
-                                    "issn",
-                                    "ismn",
-                                    "isrc",
-                                    "doi",
-                                    "urn",
-                                    "barcode",
-                                ):
-                                    if cand in t_local:
-                                        _add(cand, v_str)
-            except Exception:
-                pass
+    # Identifiers extracted at ingest and carried on the record. This replaces a
+    # second full parse of raw_payload per match attempt which, on the reconcile
+    # path, parsed JSON as XML, threw, was swallowed, and returned nothing - so
+    # tier 1 could never fire there.
+    for scheme, values in (target.identifiers or {}).items():
+        for value in values:
+            _add(scheme, value)
 
     return ids
 
 
 def extract_target_track_titles(target: MatchRecord) -> set[str]:
-    """Extract constituent track titles from MatchRecord fields or payload."""
-    tracks: set[str] = set()
-    if target.raw_payload and target.format == "marcxml":
-        try:
-            root = etree.fromstring(target.raw_payload)
-            for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='505']"):
-                for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='t']"):
-                    if sf.text and sf.text.strip():
-                        tracks.add(sf.text.strip())
-            for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='700']"):
-                for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='t']"):
-                    if sf.text and sf.text.strip():
-                        tracks.add(sf.text.strip())
-        except Exception:
-            pass
-    return tracks
+    """Constituent track titles, from the analytics extracted at ingest."""
+    return {title for title, _creator in extract_target_analytics(target)}
 
 
 def extract_target_analytics(target: MatchRecord) -> list[tuple[str, Optional[str]]]:
-    """Extract constituent works (title, creator) from 700 $t / 710 $t / 505."""
-    analytics: list[tuple[str, Optional[str]]] = []
-    if target.raw_payload and target.format == "marcxml":
-        try:
-            root = etree.fromstring(target.raw_payload)
-            for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='700']"):
-                t_sf = df.find("{http://www.loc.gov/MARC21/slim}subfield[@code='t']")
-                a_sf = df.find("{http://www.loc.gov/MARC21/slim}subfield[@code='a']")
-                if t_sf is not None and t_sf.text and t_sf.text.strip():
-                    title = t_sf.text.strip()
-                    author = a_sf.text.strip() if a_sf is not None and a_sf.text else None
-                    analytics.append((title, author))
-            for df in root.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='505']"):
-                for sf in df.findall("{http://www.loc.gov/MARC21/slim}subfield[@code='t']"):
-                    if sf.text and sf.text.strip():
-                        analytics.append((sf.text.strip(), None))
-        except Exception:
-            pass
-    return analytics
+    """Constituent works (title, creator), from the analytics extracted at ingest.
+
+    These come from MARC 700/710/505 `$t`, parsed once by the loader into
+    `entity_keys` rather than re-parsed from the payload on every match attempt.
+    """
+    from reconciliator.loaders.marcxml import decode_analytic
+
+    return [decode_analytic(v) for v in target.get_keys("analytic")]
 
 
 class WorkMatcher:
@@ -2704,61 +2591,24 @@ class WorkMatcher:
                 )
             )
 
-    def match_target_record(
-        self, target_record: BibliographicRecord
+    def resolve_agents(
+        self,
+        result: WEMIMatchResult,
+        target_record: BibliographicRecord,
     ) -> ReconciliationResult:
-        """Resolve a BibliographicRecord using WorkMatcher's multi-tier domain funnels.
+        """Resolve authority URIs for a record's agents, given its work match.
 
-        Bridges the BibliographicRecord (CLI input) to MatchRecord (WorkMatcher input)
-        and converts the WEMIMatchResult back to ReconciliationResult for CLI compatibility.
+        Split out of the former `match_target_record`, which built its own
+        degraded MatchRecord and matched a second time. That inner record
+        hardcoded `work_type="text"`, carried no domain keys, and labelled a JSON
+        payload as marcxml, so it could only ever reach the monograph funnel and
+        could never resolve an identifier - yet its result was what agent
+        alignment anchored on, while the correct match was computed separately and
+        used only for reporting.
+
+        Matching a record and resolving its agents are two questions, so they are
+        two calls. The caller matches once and passes the result here.
         """
-        from reconciliator.normalizers.blocking import (
-            compute_author_key,
-            compute_title_stem,
-            compute_work_blocking_key,
-        )
-
-        # Convert BibliographicRecord to MatchRecord
-        agents = target_record.agents
-        author_name = agents[0].name if agents else None
-        author_surname = agents[0].surname if agents else None
-        author_key = compute_author_key(author_name, author_surname)
-
-        # The Work tier is keyed on the title proper. RecordNormalizer folds the
-        # subtitle into `title` ("Proper : subtitle"), while the WEMI decomposers
-        # store the uniform title or title proper alone, so the subtitle has to be
-        # peeled off here or the stems can never agree.
-        work_title = target_record.uniform_title or target_record.title or ""
-        if not target_record.uniform_title and target_record.subtitle:
-            suffix = target_record.subtitle.strip()
-            if suffix and work_title.rstrip().endswith(suffix):
-                work_title = work_title.rstrip()[: -len(suffix)].rstrip(" :;/,.")
-        title_stem = compute_title_stem(work_title)
-        work_blocking_key = compute_work_blocking_key(author_key, title_stem)
-
-        raw_bytes = json.dumps(
-            target_record.model_dump(), ensure_ascii=False
-        ).encode("utf-8")
-
-        target = MatchRecord(
-            record_id=target_record.source_id,
-            format="marcxml",
-            work_type="text",
-            title=target_record.title or "",
-            uniform_title=target_record.uniform_title,
-            language=target_record.language,
-            author_key=author_key,
-            title_stem=title_stem,
-            work_blocking_key=work_blocking_key,
-            raw_payload=raw_bytes,
-            publication_year=target_record.publication_year,
-            publisher=target_record.publisher,
-            is_component=False,
-        )
-
-        # Run WorkMatcher
-        result = self.match_target(target)
-
         # Build ReconciliationResult from WEMIMatchResult
         matches: list[ReconciliationMatch] = []
         accepted_candidates: list[BibliographicRecord] = []

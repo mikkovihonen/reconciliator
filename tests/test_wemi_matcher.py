@@ -68,25 +68,13 @@ def test_bounding_box_iou_and_jaccard():
 
 
 def test_extract_identifiers_from_target():
-    """Verify identifier extraction from MatchRecord keys and MARCXML raw payload."""
-    raw_marc = """<record xmlns="http://www.loc.gov/MARC21/slim">
-        <controlfield tag="001">rec-12345</controlfield>
-        <datafield tag="020" ind1=" " ind2=" ">
-            <subfield code="a">978-951-0-12345-6</subfield>
-        </datafield>
-        <datafield tag="022" ind1=" " ind2=" ">
-            <subfield code="a">0042-6806</subfield>
-            <subfield code="l">0042-6806</subfield>
-        </datafield>
-        <datafield tag="024" ind1="7" ind2=" ">
-            <subfield code="a">10.1234/test.doi</subfield>
-            <subfield code="2">doi</subfield>
-        </datafield>
-        <datafield tag="028" ind1="2" ind2="0">
-            <subfield code="a">B&amp;H 1890</subfield>
-        </datafield>
-    </record>"""
+    """Identifiers come from the record, not from re-parsing its payload.
 
+    They are extracted once by the loader and carried on the MatchRecord. The
+    payload is deliberately NOT consulted: the old parse was a second full parse
+    per match attempt, and on the reconcile path it parsed JSON as XML, threw,
+    was swallowed, and returned nothing.
+    """
     target = MatchRecord(
         record_id="rec-12345",
         format="marcxml",
@@ -94,22 +82,56 @@ def test_extract_identifiers_from_target():
         title="Test Title",
         title_stem="test title",
         work_blocking_key="key123",
-        standard_key="978-951-0-12345-6",
         swhid_key="swh:1:rev:123456",
-        raw_payload=raw_marc.encode("utf-8"),
+        identifiers={
+            "isbn": ["978-951-0-12345-6"],
+            "issn": ["0042-6806"],
+            "doi": ["10.1234/test.doi"],
+        },
     )
 
     ids = extract_identifiers_from_target(target)
-    assert "isbn" in ids
-    assert "978-951-0-12345-6" in ids["isbn"]
-    assert "issn" in ids
-    assert "0042-6806" in ids["issn"]
-    assert "doi" in ids
-    assert "10.1234/test.doi" in ids["doi"]
-    assert "plate_number" in ids
-    assert "B&H 1890" in ids["plate_number"]
-    assert "swhid" in ids
+    assert ids["isbn"] == ["978-951-0-12345-6"]
+    assert ids["issn"] == ["0042-6806"]
+    assert ids["doi"] == ["10.1234/test.doi"]
+    # Domain keys still contribute their derived schemes.
     assert "swh:1:rev:123456" in ids["swhid"]
+
+
+def test_identifiers_are_not_read_from_the_payload():
+    """Regression guard for the tier-1 defect: a payload alone yields nothing."""
+    raw_marc = b"""<record xmlns="http://www.loc.gov/MARC21/slim">
+        <datafield tag="020" ind1=" " ind2=" ">
+            <subfield code="a">978-951-0-12345-6</subfield>
+        </datafield>
+    </record>"""
+    target = MatchRecord(
+        record_id="rec-1",
+        format="marcxml",
+        title="T",
+        title_stem="t",
+        raw_payload=raw_marc,
+    )
+    assert extract_identifiers_from_target(target) == {}
+
+
+def test_analytics_come_from_keys_not_the_payload():
+    from reconciliator.loaders.marcxml import encode_analytic
+    from reconciliator.matcher import extract_target_analytics, extract_target_track_titles
+
+    target = MatchRecord(
+        record_id="rec-1",
+        format="marcxml",
+        title="Kokoelma",
+        title_stem="kokoelma",
+        keys={"analytic": [encode_analytic("Finlandia", "Sibelius, Jean"),
+                           encode_analytic("Valse triste", None)]},
+    )
+    assert extract_target_analytics(target) == [
+        ("Finlandia", "Sibelius, Jean"),
+        ("Valse triste", None),
+    ]
+    assert extract_target_track_titles(target) == {"Finlandia", "Valse triste"}
 
 
 def test_work_matcher_fast_path_isbn(repo: WEMIRepository):

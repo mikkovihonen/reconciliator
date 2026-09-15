@@ -231,6 +231,42 @@ def _reconcile_config(**overrides: Any) -> ReconcileConfig:
     return ReconcileConfig(**base)
 
 
+def _reconcile(matcher, bib: BibliographicRecord):
+    """Match a record, then resolve its agents against that match.
+
+    The conversion is spelled out here rather than hidden inside the matcher: a
+    BibliographicRecord carries no work type and no domain keys, so a MatchRecord
+    built from one is a deliberately impoverished input. The former
+    `match_target_record` did this silently and matched on the result, which is
+    why agent reconciliation never reached any funnel but the monograph one.
+    """
+    from reconciliator.models import MatchRecord
+    from reconciliator.normalizers.blocking import (
+        compute_author_key,
+        compute_title_stem,
+        compute_work_blocking_key,
+    )
+
+    author_key = compute_author_key(
+        bib.agents[0].name if bib.agents else None,
+        bib.agents[0].surname if bib.agents else None,
+    )
+    title_stem = compute_title_stem(bib.uniform_title or bib.title or "")
+    record = MatchRecord(
+        record_id=bib.source_id,
+        format="bibra",
+        title=bib.title or "",
+        uniform_title=bib.uniform_title,
+        language=bib.language,
+        author_key=author_key,
+        title_stem=title_stem,
+        work_blocking_key=compute_work_blocking_key(author_key, title_stem),
+        identifiers={"isbn": list(bib.identifiers.isbn)} if bib.identifiers.isbn else {},
+        year=bib.publication_year,
+    )
+    return matcher.resolve_agents(matcher.match_target(record), bib)
+
+
 def test_scenario1_coupled_match_transfers_agent_uris(setup_authority_system) -> None:
     store, embedder, agent_indexer = setup_authority_system
     r_cfg = _reconcile_config(threshold=0.80)
@@ -248,7 +284,7 @@ def test_scenario1_coupled_match_transfers_agent_uris(setup_authority_system) ->
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.match_target_record(target)
+    res = _reconcile(matcher, target)
     assert len(res.accepted_candidates) == 1
     assert res.accepted_candidates[0].source_id == "melinda-001"
     # Agent URI transferred via Tier 2 coupled matching
@@ -282,7 +318,7 @@ def test_scenario2_fallback_success_with_dates(setup_authority_system) -> None:
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.match_target_record(target)
+    res = _reconcile(matcher, target)
     # Coupled work matching did not match the book
     assert len(res.accepted_candidates) == 0
 
@@ -310,7 +346,7 @@ def test_scenario3_fallback_success_with_qualifier(setup_authority_system) -> No
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.match_target_record(target)
+    res = _reconcile(matcher, target)
     assert len(res.accepted_candidates) == 0
 
     # Fallback resolves to the doctor Virtanen, Matti (00099901), not the artist!
@@ -346,7 +382,7 @@ def test_scenario4_fallback_contradiction_rejected_by_date_guard(
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.match_target_record(target)
+    res = _reconcile(matcher, target)
     uris = res.discovered_agent_uris.get(0, [])
     # Date Guard must reject the match!
     assert len(uris) == 0
@@ -372,7 +408,7 @@ def test_scenario5_fallback_ambiguity_rejected_by_homonym_guard(
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.match_target_record(target)
+    res = _reconcile(matcher, target)
     uris = res.discovered_agent_uris.get(0, [])
     # Rejection: cannot guess which Matti Virtanen it is!
     assert len(uris) == 0

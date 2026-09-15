@@ -1015,7 +1015,15 @@ def reconcile_cmd(
             total_records += 1
             target_record = normalizer.normalize(raw_rec)
 
-            res = work_matcher.match_target_record(target_record)
+            # One construction, one match. Both halves of the output - the agent
+            # authority URIs and the WEMI report columns - derive from the same
+            # resolution. They used to come from two separately built records, of
+            # which the one driving agent reconciliation knew neither the work
+            # type nor any identifier.
+            target_wemi = _to_target_record(rec_fmt, orig_payload, raw_rec, bf_profile)
+            wemi_res = work_matcher.match_target(target_wemi)
+
+            res = work_matcher.resolve_agents(wemi_res, target_record)
             if res.accepted_candidates:
                 reporter.matched_records += 1
 
@@ -1222,10 +1230,7 @@ def reconcile_cmd(
                     )
                 )
 
-            # Modern WEMI resolution and reporting
-            target_wemi = _to_target_record(rec_fmt, orig_payload, raw_rec, bf_profile)
-            wemi_res = work_matcher.match_target(target_wemi)
-
+            # Modern WEMI resolution and reporting, from the single match above.
             linkage = linkage_map.get(target_wemi.record_id)
             w_cluster = work_cluster_map.get(linkage.work_cluster_id) if linkage else None
             e_cluster = (

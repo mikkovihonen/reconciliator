@@ -703,6 +703,17 @@ class MatchRecord(BaseModel):
     volume_designation: Optional[str] = None
     is_component: bool = False
     keys: dict[str, list[str]] = Field(default_factory=dict)
+    # Standard identifiers, extracted once at ingest. Carried on the record rather
+    # than re-derived from raw_payload at match time: the old payload parse was a
+    # second full parse per match attempt, and it silently returned nothing on the
+    # reconcile path, where the payload was JSON mislabelled as marcxml.
+    identifiers: dict[str, list[str]] = Field(default_factory=dict)
+    # Expression and Work context above the manifestation, so the funnels can
+    # align at all three tiers without a repository round trip.
+    content_type: Optional[str] = None
+    work_uri: Optional[str] = None
+    expression_uri: Optional[str] = None
+    manifestation_uri: Optional[str] = None
     serialized_work: Optional[str] = None
     serialized_expression: Optional[str] = None
     serialized_manifestation: Optional[str] = None
@@ -770,6 +781,19 @@ class MatchRecord(BaseModel):
     def get_keys(self, key_type: str) -> list[str]:
         """Get all values for key_type."""
         return self.keys.get(key_type, [])
+
+    def add_identifier(self, scheme: str, value: Optional[str]) -> None:
+        """Add an identifier value under a normalized scheme name."""
+        if value and str(value).strip():
+            s_low = scheme.lower().strip()
+            clean = str(value).strip()
+            bucket = self.identifiers.setdefault(s_low, [])
+            if clean not in bucket:
+                bucket.append(clean)
+
+    def get_identifiers(self, scheme: str) -> list[str]:
+        """Get all identifier values for a scheme."""
+        return self.identifiers.get(scheme.lower().strip(), [])
 
     # Accessors for common key types
     @property

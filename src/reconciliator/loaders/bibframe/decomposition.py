@@ -918,6 +918,16 @@ def decompose_bibframe_work(
     )
 
 
+def _identifiers_as_bag(identifiers: list[IdentifierEntity]) -> dict[str, list[str]]:
+    """Shape IdentifierEntity rows as the scheme -> values bag MatchRecord carries."""
+    bag: dict[str, list[str]] = {}
+    for ident in identifiers:
+        bucket = bag.setdefault(ident.scheme.lower().strip(), [])
+        if ident.value not in bucket:
+            bucket.append(ident.value)
+    return bag
+
+
 def derive_bibframe_keys(
     work: WorkEntity,
     agents: list[AgentEntity],
@@ -1024,6 +1034,11 @@ def build_target_record_from_bibframe(
         author_key=author_key,
         title_stem=title_stem,
         keys=keys,
+        identifiers=_identifiers_as_bag(identifiers),
+        content_type=expression.content_type,
+        work_uri=work.work_uri,
+        expression_uri=expression.expression_uri,
+        manifestation_uri=manifestation.manifestation_uri,
         year=manifestation.publication_year,
         volume_designation=None,
         is_component=False,

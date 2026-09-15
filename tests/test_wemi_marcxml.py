@@ -322,3 +322,54 @@ def test_derive_content_id_is_stable_and_content_sensitive() -> None:
 
     assert first.startswith("sha1:")
     assert derive_content_id(record("X"), prefix="auth").startswith("auth:")
+
+
+def test_parse_extracts_publisher_plate_strn_issnl_and_control_number():
+    """These five tier-1 schemes reached neither the identifiers table nor the matcher.
+
+    028 publisher/plate numbers are the primary tier-1 schemes for recorded sound
+    and notated music, 088 for standards, and 022 $l identifies a serial across
+    medium changes. All were parsed nowhere.
+    """
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import parse_marc_record_elem
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    rec = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">A1</controlfield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Finlandia</subfield></datafield>
+            <datafield tag="022" ind1=" " ind2=" "><subfield code="a">0042-6806</subfield><subfield code="l">0042-6807</subfield></datafield>
+            <datafield tag="028" ind1="0" ind2="2"><subfield code="a">ODE 1234-2</subfield></datafield>
+            <datafield tag="028" ind1="2" ind2="0"><subfield code="a">B&amp;H 1890</subfield></datafield>
+            <datafield tag="088" ind1=" " ind2=" "><subfield code="a">STRN-9</subfield></datafield>
+        </record>""".encode()
+    )
+    ids = parse_marc_record_elem(rec, source="melinda")["identifiers"]
+    assert ids["publisher_number"] == ["ODE 1234-2"]
+    assert ids["plate_number"] == ["B&H 1890"]
+    assert ids["strn"] == ["STRN-9"]
+    assert ids["issn_l"] == ["0042-6807"]
+    assert ids["control_number"] == ["A1"]
+
+
+def test_match_record_carries_identifiers_and_wemi_context():
+    """The record the matcher consumes needs identifiers and the tiers above it."""
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    rec = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">A1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Sibelius, Jean</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Finlandia</subfield></datafield>
+            <datafield tag="028" ind1="0" ind2="2"><subfield code="a">ODE 1234-2</subfield></datafield>
+        </record>""".encode()
+    )
+    record = build_target_record_from_marc(rec, source="melinda")
+    assert record.get_identifiers("publisher_number") == ["ODE 1234-2"]
+    assert record.work_uri and record.expression_uri and record.manifestation_uri
+    assert record.content_type
