@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-
 from reconciliator.agent_transfer import AgentAligner, AgentFallbackResolver
 from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
 from reconciliator.embedder import SentenceEmbedder
@@ -20,8 +19,8 @@ from reconciliator.models import (
     CorpusLinkage,
     ExpressionEntity,
     ManifestationEntity,
-    ReconciliationMatch,
     MatchRecord,
+    ReconciliationMatch,
     WorkEntity,
     WorkRelationship,
 )

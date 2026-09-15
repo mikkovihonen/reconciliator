@@ -22,9 +22,9 @@ from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
     ManifestationCluster,
+    MatchRecord,
     MultiplexClusterResult,
     SammelbandBinding,
-    MatchRecord,
     WorkCluster,
 )
 from reconciliator.repository import WEMIRepository

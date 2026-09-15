@@ -19,8 +19,8 @@ from reconciliator.models import (
     IdentifierEntity,
     ManifestationEntity,
     ManifestationExpressionAssociation,
-    MediumOfPerformance,
     MatchRecord,
+    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
 )

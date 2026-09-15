@@ -13,7 +13,12 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
-from reconciliator.loaders.marcxml import MARC_NS, _get_controlfield, _get_datafields, _get_subfields
+from reconciliator.loaders.marcxml import (
+    MARC_NS,
+    _get_controlfield,
+    _get_datafields,
+    _get_subfields,
+)
 from reconciliator.matcher import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (
     CorpusLinkage,
