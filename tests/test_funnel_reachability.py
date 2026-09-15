@@ -171,3 +171,127 @@ def test_a_meeting_main_entry_classifies_as_a_conference(capabilities):
 @pytest.mark.parametrize("work_type", sorted({"music", "cartography", "thesis", "serial"}))
 def test_core_work_types_remain_producible(capabilities, work_type: str):
     assert work_type in capabilities["work_types"]
+
+
+# --- the BibFrame path ----------------------------------------------------
+#
+# The same question from the other ingest path. BibFrame decomposition set
+# work_type under exactly two graph conditions (C-3 hub, C-5 music) and defaulted
+# everything else to "text", so a BibFrame cartographic resource, thesis or
+# dataset all arrived as text and reached the monograph funnel: only 5 of 42
+# funnels were reachable from a BibFrame record.
+#
+# Unlike the nine MARC gaps, this was a lookup rather than a heuristic - the
+# BIBFRAME vocabulary names its Work subclasses explicitly.
+
+BF_TTL = """
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+<http://example.org/w1> a bf:Work, bf:{cls} ;
+    bf:title [ a bf:Title ; bf:mainTitle "{title}" ] .
+<http://example.org/i1> a bf:Instance ;
+    bf:instanceOf <http://example.org/w1> ;
+    bf:title [ a bf:Title ; bf:mainTitle "{title}" ] .
+"""
+
+
+def _bibframe_record(cls: str, title: str = "Teos"):  # noqa: ANN202
+    from rdflib import Graph
+
+    from reconciliator.loaders.bibframe import build_target_record_from_bibframe
+
+    graph = Graph().parse(data=BF_TTL.format(cls=cls, title=title), format="turtle")
+    return build_target_record_from_bibframe(graph, source="bf")
+
+
+def _bibframe_funnel(cls: str) -> str:
+    from reconciliator.matcher import extract_identifiers_from_target
+
+    record = _bibframe_record(cls)
+    identifiers = extract_identifiers_from_target(record)
+    fallback = None
+    for spec in BUILTIN_SPECS:
+        if spec.default:
+            fallback = spec
+            continue
+        if spec.claims(record, identifiers):
+            return spec.id
+    return fallback.id
+
+
+@pytest.mark.parametrize(
+    ("bf_class", "expected_funnel"),
+    [
+        ("Text", "funnel_a_monograph"),
+        ("Cartography", "funnel_l_cartography"),
+        ("Dataset", "funnel_n_dataset"),
+        ("MovingImage", "funnel_f_moving_image"),
+        ("StillImage", "funnel_s_still_image"),
+        ("Object", "funnel_q_realia"),
+        ("Manuscript", "funnel_r_archival"),
+    ],
+)
+def test_a_bibframe_class_reaches_its_own_funnel(bf_class: str, expected_funnel: str):
+    assert _bibframe_funnel(bf_class) == expected_funnel
+
+
+def test_bibframe_music_classes_split_the_way_marc_does():
+    """Both are work_type "music"; only content_type separates them.
+
+    Without a content type from the class, every BibFrame music record reached
+    the recorded-sound funnel - scores included.
+    """
+    assert _bibframe_funnel("NotatedMusic") == "funnel_d_notated_music"
+    assert _bibframe_funnel("Audio") == "funnel_b_music_sound"
+
+
+def test_bibframe_content_classifies_a_generic_work():
+    """bf:content is the fallback when the Work carries only the generic class."""
+    from rdflib import Graph
+
+    from reconciliator.loaders.bibframe import build_target_record_from_bibframe
+
+    graph = Graph().parse(
+        data="""
+        @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+        <http://example.org/w2> a bf:Work ;
+            bf:content <http://id.loc.gov/vocabulary/contentTypes/cartographic-image> ;
+            bf:title [ a bf:Title ; bf:mainTitle "Kartta" ] .
+        <http://example.org/i2> a bf:Instance ; bf:instanceOf <http://example.org/w2> ;
+            bf:title [ a bf:Title ; bf:mainTitle "Kartta" ] .
+        """,
+        format="turtle",
+    )
+    assert build_target_record_from_bibframe(graph, source="bf").work_type == "cartography"
+
+
+def test_an_unrecognised_bibframe_class_still_defaults_to_text():
+    """Classification must not fail closed on a class it does not know."""
+    assert _bibframe_record("SomethingUnmapped").work_type == "text"
+
+
+def test_bibframe_reaches_substantially_more_funnels_than_before():
+    """A floor on the improvement, so a regression to 'everything is text' shows.
+
+    5 of 42 before the class mapping. The remaining gap is largely the same nine
+    MARC gaps plus types BIBFRAME does not model as distinct classes.
+    """
+    from reconciliator.loaders.bibframe.decomposition import (
+        BIBFRAME_CONTENT_TYPES,
+        BIBFRAME_CONTENT_WORK_TYPES,
+        BIBFRAME_WORK_TYPES,
+    )
+
+    work_types = (
+        set(BIBFRAME_WORK_TYPES.values())
+        | set(BIBFRAME_CONTENT_WORK_TYPES.values())
+        | {"text", "hub", "music"}
+    )
+    content_types = set(BIBFRAME_CONTENT_TYPES.values()) | {"text", "audio_music"}
+    caps = {
+        "work_types": work_types,
+        "content_types": content_types,
+        "keys": {"author", "title_stem", "work", "music_work", "standard"},
+        "identifiers": {"isbn", "issn", "urn", "doi", "other"},
+    }
+    reachable = len(BUILTIN_SPECS) - len(_unreachable(caps))
+    assert reachable >= 17, f"only {reachable} funnels reachable from BibFrame"
