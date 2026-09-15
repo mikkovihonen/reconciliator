@@ -101,7 +101,7 @@ def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
     w1 = repo.get_work(work_ids[0])
     assert w1 is not None
     assert w1.title == "Sinuhe egyptiläinen"
-    assert "muinainen egypti" in w1.subjects_json
+    assert "muinainen egypti" in [s["heading"] for s in w1.subjects_json]
 
     w_by_uri = repo.get_work_by_uri("urn:work:turms")
     assert w_by_uri is not None

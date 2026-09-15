@@ -342,6 +342,23 @@ class RecordLoader(ABC):
                     f"still carrying ISBD punctuation: {dirty[:3]}"
                 )
 
+        if caps.folds_subject_vocabularies:
+            # A heading with a recognisable vocabulary must carry the vocabulary
+            # and concept id, or it cannot be compared with the same subject from
+            # another catalogue - and an unfolded heading looks identical to a
+            # folded one in the stored row.
+            unfolded = [
+                subject.get("heading")
+                for work in record.works
+                for subject in work.subjects_json
+                if subject.get("uri") and not subject.get("scheme")
+            ]
+            if unfolded:
+                findings.append(
+                    f"{caps.name} claims folds_subject_vocabularies but stored "
+                    f"headings with a URI and no vocabulary: {unfolded[:3]}"
+                )
+
         if caps.normalises_relators:
             # Not "every role is a MARC code" - an unrecognised role legitimately
             # passes through as its own token - but "the shared normaliser has

@@ -8,10 +8,6 @@ from typing import Any, Iterator, Optional, Union
 
 from rdflib import RDF, RDFS, SKOS, Graph, IdentifiedNode, Literal, URIRef
 
-from reconciliator.config import (
-    get_category_default_field_map,
-    get_subject_field_category_map,
-)
 from reconciliator.loaders.bibframe.base import (
     bibframe_to_raw_record,
     extract_provenance_tag,
@@ -20,13 +16,13 @@ from reconciliator.loaders.bibframe.base import (
 )
 from reconciliator.loaders.bibframe.decomposition import (
     derive_bibframe_node_id,
+    extract_bibframe_subjects,
     is_blank_node,
 )
 from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
 )
-from reconciliator.vocabularies import detect_vocabulary
 
 logger = logging.getLogger(__name__)
 
@@ -231,108 +227,6 @@ def _extract_agents(
                             )
                         )
     return agents
-
-
-def _extract_subjects(
-    g: Graph, nodes: list[IdentifiedNode], profile: BIBFRAMESchemaProfile
-) -> dict[str, list[dict[str, Any]]]:
-    """Extract categorized subjects driven by configuration and BIBFRAME profile."""
-    field_category_map = get_subject_field_category_map()
-    cat_default_field = get_category_default_field_map()
-    default_target_field = (
-        profile.default_subject_field
-        or cat_default_field["topical"]
-    )
-    default_category = field_category_map[default_target_field]
-    subjects: dict[str, list[dict[str, Any]]] = {
-        cat: [] for cat in field_category_map.values()
-    }
-    seen_uris: set[str] = set()
-
-    type_to_field = profile.subject_type_fields
-    source_preds = profile.expanded_source_predicates
-
-    for node in nodes:
-        # Subject predicates
-        for subj_pred in profile.expanded_subject_predicates:
-            for subj_obj in g.objects(node, URIRef(subj_pred)):
-                if not isinstance(subj_obj, IdentifiedNode):
-                    continue
-
-                uri: Optional[str] = str(subj_obj) if isinstance(subj_obj, URIRef) else None
-                types = {str(t) for t in g.objects(subj_obj, RDF.type)}
-
-                headings = _get_literals(g, subj_obj, profile.expanded_subject_label_predicates)
-                heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
-                if not heading:
-                    continue
-
-                # Determine target field from configured RDF types
-                target_field = default_target_field
-                for type_sub, f_tag in type_to_field.items():
-                    if any(type_sub in t for t in types):
-                        target_field = f_tag
-                        break
-
-                # Vocabulary detection from URI or configured source predicates
-                vocab: Optional[str] = None
-                if uri:
-                    detected_v = detect_vocabulary(uri)
-                    if detected_v:
-                        vocab = detected_v.lower()
-
-                for src_pred in source_preds:
-                    for src_obj in g.objects(subj_obj, URIRef(src_pred)):
-                        if isinstance(src_obj, Literal):
-                            vocab = str(src_obj).strip()
-                        elif isinstance(src_obj, IdentifiedNode):
-                            src_labels = _get_literals(
-                                g, src_obj, [str(RDFS.label), str(RDF.value), str(SKOS.prefLabel)]
-                            )
-                            if src_labels:
-                                vocab = src_labels[0]
-
-                item_key = (heading, vocab or "", target_field)
-                if item_key in seen_uris:
-                    continue
-                seen_uris.add(item_key)
-
-                item = {
-                    "heading": heading,
-                    "vocabulary": vocab,
-                    "uri": uri,
-                    "field": target_field,
-                }
-                category = field_category_map.get(target_field, default_category)
-                subjects[category].append(item)
-
-    # Medium of performance predicates
-    mop_field = cat_default_field["medium_of_performance"]
-    mop_category = field_category_map[mop_field]
-    for node in nodes:
-        for mop_pred in profile.expanded_music_performance_predicates:
-            for mop_obj in g.objects(node, URIRef(mop_pred)):
-                if not isinstance(mop_obj, IdentifiedNode):
-                    continue
-                uri = str(mop_obj) if isinstance(mop_obj, URIRef) else None
-                headings = _get_literals(g, mop_obj, [str(RDFS.label), str(SKOS.prefLabel)])
-                heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
-                if not heading:
-                    continue
-                vocab = None
-                if uri:
-                    detected_v = detect_vocabulary(uri)
-                    vocab = detected_v.lower() if detected_v else profile.default_music_vocabulary
-                subjects[mop_category].append(
-                    {
-                        "heading": heading,
-                        "field": mop_field,
-                        "vocabulary": vocab,
-                        "uri": uri,
-                    }
-                )
-
-    return subjects
 
 
 def _extract_identifiers(
@@ -621,7 +515,7 @@ def parse_bibframe_graph(
         agents = _extract_agents(g, entity_nodes, profile)
 
         # Subjects
-        subjects = _extract_subjects(g, entity_nodes, profile)
+        subjects = extract_bibframe_subjects(g, entity_nodes, profile)
 
         # Provision activity (publisher, date, place)
         pub_year, publisher, pub_place = _extract_provision_activity(g, instance_node, profile)

@@ -355,7 +355,11 @@ def test_decompose_marc_authority_work():
     assert w.work_uri == "http://urn.fi/URN:NBN:fi:au:work:001"
     assert w.record_origin == "authority"
     assert w.record_origin == "authority"
-    assert "Vanha Kalevala" in w.subjects_json
+    # 4XX variant titles ride in subjects_json, tagged as such, because that
+    # list is what the work serialisation renders and WorkEntity has no variant
+    # title column.
+    assert {"heading": "Vanha Kalevala", "pref_label": "Vanha Kalevala",
+            "kind": "variant_title"} in w.subjects_json
 
     assert len(expressions) == 1
     assert expressions[0].language == "fin"

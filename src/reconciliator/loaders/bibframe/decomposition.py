@@ -17,16 +17,25 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from rdflib import RDF, RDFS, SKOS, BNode, Graph, IdentifiedNode, Literal, URIRef
 
+from reconciliator.config import (
+    get_category_default_field_map,
+    get_subject_field_category_map,
+)
 from reconciliator.loaders.bibframe.base import (
     normalize_role_uri_or_label,
 )
 from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
+)
+from reconciliator.loaders.subjects import (
+    fold_subjects,
+    subject_footprint,
+    vocabulary_hint_from_uri,
 )
 from reconciliator.models import (
     AgentEntity,
@@ -52,6 +61,7 @@ from reconciliator.normalizers.blocking import (
     compute_work_blocking_key,
 )
 from reconciliator.template import WEMISerializationEngine
+from reconciliator.vocabularies import detect_vocabulary
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +304,123 @@ def _extract_node_agents(
     return agents
 
 
+def extract_bibframe_subjects(
+    g: Graph, nodes: list[IdentifiedNode], profile: BIBFRAMESchemaProfile
+) -> dict[str, list[dict[str, Any]]]:
+    """Extract categorised subjects from a BIBFRAME graph.
+
+    Moved here from `rdflib_loader`, where it was private, so the decomposer can
+    use it too: the target path read `bf:subject` and the ingest path did not, so
+    a BIBFRAME work reached the datastore with no subjects at all - no terms in
+    its serialised text, and an empty subject footprint on each of its agents.
+    """
+    field_category_map = get_subject_field_category_map()
+    cat_default_field = get_category_default_field_map()
+    default_target_field = (
+        profile.default_subject_field
+        or cat_default_field["topical"]
+    )
+    default_category = field_category_map[default_target_field]
+    subjects: dict[str, list[dict[str, Any]]] = {
+        cat: [] for cat in field_category_map.values()
+    }
+    seen_uris: set[str] = set()
+
+    type_to_field = profile.subject_type_fields
+    source_preds = profile.expanded_source_predicates
+
+    for node in nodes:
+        # Subject predicates
+        for subj_pred in profile.expanded_subject_predicates:
+            for subj_obj in g.objects(node, URIRef(subj_pred)):
+                if not isinstance(subj_obj, IdentifiedNode):
+                    continue
+
+                uri: Optional[str] = str(subj_obj) if isinstance(subj_obj, URIRef) else None
+                types = {str(t) for t in g.objects(subj_obj, RDF.type)}
+
+                headings = _get_literals(g, subj_obj, profile.expanded_subject_label_predicates)
+                heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
+                if not heading:
+                    continue
+
+                # Determine target field from configured RDF types
+                target_field = default_target_field
+                for type_sub, f_tag in type_to_field.items():
+                    if any(type_sub in t for t in types):
+                        target_field = f_tag
+                        break
+
+                # Vocabulary detection from URI or configured source predicates
+                vocab: Optional[str] = None
+                if uri:
+                    detected_v = detect_vocabulary(uri)
+                    # The pattern table lists only the modern vocabularies, so a
+                    # legacy URI - ysa, allars, musa, kaunokki - is not detected.
+                    # It does name itself in its own path, and a BIBFRAME subject
+                    # has no MARC $2 to declare it with, so without this a legacy
+                    # heading reached the target record with no vocabulary and
+                    # nothing to fold.
+                    vocab = (
+                        detected_v.lower()
+                        if detected_v
+                        else vocabulary_hint_from_uri(uri)
+                    )
+
+                for src_pred in source_preds:
+                    for src_obj in g.objects(subj_obj, URIRef(src_pred)):
+                        if isinstance(src_obj, Literal):
+                            vocab = str(src_obj).strip()
+                        elif isinstance(src_obj, IdentifiedNode):
+                            src_labels = _get_literals(
+                                g, src_obj, [str(RDFS.label), str(RDF.value), str(SKOS.prefLabel)]
+                            )
+                            if src_labels:
+                                vocab = src_labels[0]
+
+                item_key = (heading, vocab or "", target_field)
+                if item_key in seen_uris:
+                    continue
+                seen_uris.add(item_key)
+
+                item = {
+                    "heading": heading,
+                    "vocabulary": vocab,
+                    "uri": uri,
+                    "field": target_field,
+                }
+                category = field_category_map.get(target_field, default_category)
+                subjects[category].append(item)
+
+    # Medium of performance predicates
+    mop_field = cat_default_field["medium_of_performance"]
+    mop_category = field_category_map[mop_field]
+    for node in nodes:
+        for mop_pred in profile.expanded_music_performance_predicates:
+            for mop_obj in g.objects(node, URIRef(mop_pred)):
+                if not isinstance(mop_obj, IdentifiedNode):
+                    continue
+                uri = str(mop_obj) if isinstance(mop_obj, URIRef) else None
+                headings = _get_literals(g, mop_obj, [str(RDFS.label), str(SKOS.prefLabel)])
+                heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
+                if not heading:
+                    continue
+                vocab = None
+                if uri:
+                    detected_v = detect_vocabulary(uri)
+                    vocab = detected_v.lower() if detected_v else profile.default_music_vocabulary
+                subjects[mop_category].append(
+                    {
+                        "heading": heading,
+                        "field": mop_field,
+                        "vocabulary": vocab,
+                        "uri": uri,
+                    }
+                )
+
+    return subjects
+
+
 def _extract_identifiers(
     g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile
 ) -> list[IdentifierEntity]:
@@ -457,6 +584,9 @@ def decompose_bibframe_work(
     source: str = "bibframe",
     serialization_engine: Optional[WEMISerializationEngine] = None,
     relator_mappings: Optional[dict[str, str]] = None,
+    supported_subject_vocabularies: Optional[Iterable[str]] = None,
+    legacy_to_modern: Optional[dict[str, str]] = None,
+    vocab_store: Optional[Any] = None,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -900,6 +1030,27 @@ def decompose_bibframe_work(
             g, work_node, instance_node, hub_node, default=expr_content_type
         )
 
+    # Subjects, through the same folder the MARC path uses. Nothing read
+    # `bf:subject` here at all, so a BIBFRAME work was stored with no subjects:
+    # no subject terms in the serialised text that BM25 and the dense index
+    # read, and an empty subject footprint on every agent - while the same
+    # record harvested as MARC carried both.
+    raw_subjects = [
+        subject
+        for group in extract_bibframe_subjects(g, nodes_to_scan, profile).values()
+        for subject in group
+    ]
+    folded_subjects = fold_subjects(
+        raw_subjects,
+        supported_vocabularies=supported_subject_vocabularies,
+        legacy_to_modern=legacy_to_modern,
+        vocab_store=vocab_store,
+        language=work_lang,
+    )
+    record_subject_counts = subject_footprint(folded_subjects)
+    for agent_ent in all_agents_map.values():
+        agent_ent.subject_counts = dict(record_subject_counts)
+
     # Build WEMI entities with serialization
     authors_list = [{"name": primary_creator_name}] if primary_creator_name else []
     work = WorkEntity(
@@ -911,6 +1062,7 @@ def decompose_bibframe_work(
         work_type=work_type,
         source=source,
         source_id=work_id,
+        subjects_json=[subject.as_dict() for subject in folded_subjects],
     )
     work.serialized_text = engine.render_work(work, authors=authors_list)
 

@@ -123,6 +123,9 @@ class BibframeLoader(RecordLoader):
                 source=ctx.source,
                 serialization_engine=ctx.serialization_engine,
                 relator_mappings=ctx.relator_mappings,
+                supported_subject_vocabularies=ctx.supported_subject_vocabularies,
+                legacy_to_modern=ctx.legacy_to_modern,
+                vocab_store=ctx.vocab_store,
             )
         )
         return DecomposedRecord(
@@ -303,16 +306,15 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         # moved into the base class. BIBFRAME converted out of MARC - most of what
         # circulates - carries the punctuation in its literals.
         normalises_isbd=True,
-        folds_subject_vocabularies=False,
+        # Subjects are read from bf:subject and folded through the same helper the
+        # MARC path uses, with ctx's supported vocabularies, legacy mapping and
+        # vocab_store all reaching it.
+        folds_subject_vocabularies=True,
         # The profile still resolves roles first, so a deployment can override
         # any of them; what it does not resolve now goes to the same relator
         # registry the MARC path uses, and ctx.relator_mappings reaches it.
         normalises_relators=True,
         not_produced={
-            "subject_vocabulary_folding": (
-                "takes no vocab_store, so legacy subject headings are not folded "
-                "to their modern ontology as they are on the MARC path"
-            ),
             "citation": "BIBFRAME has no host-item concept equivalent to MARC 773",
             "analytic": (
                 "constituent works are modelled as related Works rather than as "

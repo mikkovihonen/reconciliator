@@ -472,7 +472,14 @@ class WorkEntity(BaseModel):
     primary_agent_id: Optional[int] = None
     ykl_class: Optional[str] = None
     work_type: WorkType = "text"
-    subjects_json: list[str] = Field(default_factory=list)
+    #: Folded subjects, one dict each (see loaders/subjects.FoldedSubject).
+    #: Was a list of bare heading strings, which neither consumer could use:
+    #: `work_serialization.j2` renders `subjects | map(attribute='pref_label')`
+    #: and so rendered nothing - the work's serialised text, which BM25 and the
+    #: dense index read, carried no subject terms at all - while
+    #: `find_classification_evidence` looks for `code`/`scheme` per entry and
+    #: failed silently inside its own try/except.
+    subjects_json: list[dict[str, Any]] = Field(default_factory=list)
     serialized_text: Optional[str] = None
     # Representative of this work's cross-source equivalence group, set by
     # WorkConsolidator. None means the work is its own canonical.
@@ -481,17 +488,35 @@ class WorkEntity(BaseModel):
 
     @field_validator("subjects_json", mode="before")
     @classmethod
-    def parse_subjects_json(cls, v: Any) -> list[str]:
+    def parse_subjects_json(cls, v: Any) -> list[dict[str, Any]]:
+        """Accept the stored JSON, a list of dicts, or a list of bare headings.
+
+        The bare-heading form is still what a caller writes by hand, and rows
+        written before the shape changed read back that way, so a string becomes
+        the one thing it can honestly become: a heading with no vocabulary.
+        """
+        items: list[Any]
         if isinstance(v, str):
             try:
                 parsed = json.loads(v)
-                if isinstance(parsed, list):
-                    return [str(item) for item in parsed]
+                items = parsed if isinstance(parsed, list) else [v]
             except Exception:
-                return [v] if v else []
+                items = [v] if v else []
         elif isinstance(v, list):
-            return [str(item) for item in v]
-        return []
+            items = list(v)
+        else:
+            return []
+
+        out: list[dict[str, Any]] = []
+        for item in items:
+            if isinstance(item, dict):
+                entry = dict(item)
+                if not entry.get("pref_label"):
+                    entry["pref_label"] = entry.get("heading")
+                out.append(entry)
+            elif item:
+                out.append({"heading": str(item), "pref_label": str(item)})
+        return out
 
 
 class ExpressionEntity(BaseModel):

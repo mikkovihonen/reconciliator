@@ -197,11 +197,122 @@ def test_check_output_catches_an_unstable_id_under_a_determinism_claim():
 # --- every gap is declared with a reason ---------------------------------
 
 
-def test_bibframe_declares_the_normalisation_it_still_does_not_apply():
+def test_every_normalisation_flag_is_now_claimed_by_every_loader():
+    """Stage 5 closed the declared normalisation gaps one at a time. What remains
+    in `not_produced` is structural - BIBFRAME has no host item, no 505 analytic
+    and no bound-with - not normalisation a loader merely skipped."""
+    for loader in LOADERS:
+        caps = loader.capabilities
+        for flag in (
+            "deterministic_ids",
+            "stamps_record_origin",
+            "normalises_isbd",
+            "folds_subject_vocabularies",
+            "normalises_relators",
+        ):
+            if not getattr(caps, flag):
+                # Still allowed, but only with a stated reason.
+                key = {
+                    "normalises_isbd": "isbd_normalisation",
+                    "folds_subject_vocabularies": "subject_vocabulary_folding",
+                    "normalises_relators": "relator_normalisation",
+                }.get(flag, flag)
+                assert key in caps.not_produced, f"{caps.name}: {flag} is False but undeclared"
+
+
+# --- subject folding ------------------------------------------------------
+
+SUBJECT_TTL = """
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<http://example.org/w1> a bf:Work ;
+    bf:title [ a bf:Title ; bf:mainTitle "Sinuhe" ] ;
+    bf:subject <http://www.yso.fi/onto/yso/p2591> ;
+    bf:subject <http://www.yso.fi/onto/ysa/Y1002> ;
+    bf:contribution [ a bf:Contribution ;
+        bf:agent [ a bf:Person ; rdfs:label "Waltari, Mika" ] ] .
+<http://www.yso.fi/onto/yso/p2591> rdfs:label "laakarit" .
+<http://www.yso.fi/onto/ysa/Y1002> rdfs:label "laakarit (ysa)" .
+<http://example.org/i1> a bf:Instance ; bf:instanceOf <http://example.org/w1> ;
+    bf:title [ a bf:Title ; bf:mainTitle "Sinuhe" ] .
+"""
+
+MARC_SUBJECTS = (
+    '<datafield tag="650" ind1=" " ind2="7"><subfield code="a">laakarit</subfield>'
+    '<subfield code="2">yso/fin</subfield>'
+    '<subfield code="0">http://www.yso.fi/onto/yso/p2591</subfield></datafield>'
+    '<datafield tag="650" ind1=" " ind2="7"><subfield code="a">laakarit (ysa)</subfield>'
+    '<subfield code="2">ysa</subfield>'
+    '<subfield code="0">http://www.yso.fi/onto/ysa/Y1002</subfield></datafield>'
+)
+
+
+def test_bibframe_now_claims_subject_folding():
     caps = BibframeLoader.capabilities
-    for flag, key in (("folds_subject_vocabularies", "subject_vocabulary_folding"),):
-        assert getattr(caps, flag) is False, flag
-        assert key in caps.not_produced, f"{flag} is False but undeclared"
+    assert caps.folds_subject_vocabularies is True
+    assert "subject_vocabulary_folding" not in caps.not_produced
+
+
+def test_both_formats_fold_the_same_subjects_to_the_same_concepts(ctx: LoadContext):
+    """Nothing read `bf:subject` on the ingest path, so a BIBFRAME work was
+    stored with no subjects: no subject terms in the serialised text that BM25
+    and the dense index read, and an empty subject footprint on its agents."""
+    marc = load_record(_marc(MARC_SUBJECTS), ctx)
+    bibframe = load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx)
+
+    def concepts(record):
+        return sorted(
+            f"{s['scheme']}:{s['code']}" for s in record.works[0].subjects_json
+        )
+
+    assert concepts(marc) == ["yso:Y1002", "yso:p2591"]
+    assert concepts(bibframe) == concepts(marc)
+
+
+def test_a_legacy_vocabulary_folds_from_the_uri_alone(ctx: LoadContext):
+    """MARC declares a legacy thesaurus in `$2`; a BIBFRAME subject is a URI and
+    nothing else. The URI pattern table lists only the modern vocabularies, so
+    ysa went unrecognised - but the URI names its own vocabulary in its path."""
+    record = load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx)
+    ysa = next(s for s in record.works[0].subjects_json if s["code"] == "Y1002")
+    assert ysa["scheme"] == "yso", "legacy ysa should fold to yso"
+
+
+def test_the_agent_footprint_is_the_same_from_both_formats(ctx: LoadContext):
+    marc = load_record(_marc(MARC_SUBJECTS), ctx)
+    bibframe = load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx)
+    expected = {"yso:p2591": 1, "yso:y1002": 1}
+    assert [a.subject_counts for a in marc.agents] == [expected]
+    assert [a.subject_counts for a in bibframe.agents] == [expected]
+
+
+def test_subjects_reach_the_serialised_text(ctx: LoadContext):
+    """`work_serialization.j2` renders `subjects | map(attribute='pref_label')`,
+    and the stored list held bare strings, so no subject term ever reached the
+    text that BM25 and the dense index score."""
+    for record in (
+        load_record(_marc(MARC_SUBJECTS), ctx),
+        load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx),
+    ):
+        assert "laakarit" in (record.works[0].serialized_text or "")
+
+
+def test_an_unresolvable_heading_is_kept_but_not_counted(ctx: LoadContext):
+    """A 650 with no `$2` and no `$0` belongs to no vocabulary. It stays on the
+    record - it is still what the cataloguer wrote - but it cannot be a
+    comparison key, because two catalogues' spellings of an uncontrolled term
+    would look like two different subjects."""
+    record = load_record(
+        _marc(
+            '<datafield tag="650" ind1=" " ind2="4">'
+            '<subfield code="a">vapaa asiasana</subfield></datafield>'
+        ),
+        ctx,
+    )
+    subjects = record.works[0].subjects_json
+    assert [s["heading"] for s in subjects] == ["vapaa asiasana"]
+    assert subjects[0]["scheme"] is None
+    assert all(not a.subject_counts for a in record.agents)
 
 
 def test_bibframe_now_claims_deterministic_ids():

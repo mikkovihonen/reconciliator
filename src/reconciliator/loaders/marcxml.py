@@ -24,6 +24,7 @@ from reconciliator.config import (
 # still strip as they parse, because the cleaned title feeds key derivation
 # before `finalise` ever sees the record.
 from reconciliator.loaders.base import DEFAULT_ISBD_PUNCTUATION, strip_isbd
+from reconciliator.loaders.subjects import fold_subjects, subject_footprint
 from reconciliator.models import (
     AgentEntity,
     CarrierType,
@@ -54,9 +55,6 @@ from reconciliator.normalizers.relators import normalize_role
 from reconciliator.template import WEMISerializationEngine
 from reconciliator.vocabularies import (
     detect_vocabulary,
-    extract_concept_id,
-    normalize_subject_vocabulary,
-    resolve_subject_concept_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -678,56 +676,29 @@ def parse_marc_record_elem(
                     }
                 )
 
-    # Harvest supported subject headings for the agent footprint
-    valid_subject_keys: list[str] = []
+    # Fold every subject heading to vocabulary + concept id, through the shared
+    # folder. The 6XX name-subject tags are included alongside the configured
+    # topical and genre tags: a record *about* a person is evidence about that
+    # person even though the heading is a name.
     subject_tags = set(subject_field_category_map.keys()) | {"600", "610", "611", "630"}
-    for tag in subject_tags:
-        for f in _get_datafields(record_elem, tag):
-            heading = _get_subfield(f, "a")
-            vocab = _get_subfield(f, "2")
-            uris = _get_subfields(f, "0") + _get_subfields(f, "1")
-            norm_v = None
-            matched_uri = None
-            if uris:
-                for u in uris:
-                    v = normalize_subject_vocabulary(
-                        vocab,
-                        uri=u,
-                        supported_vocabularies=supported_subject_vocabularies,
-                        legacy_to_modern=legacy_to_modern,
-                    )
-                    if v:
-                        norm_v = v
-                        matched_uri = u
-                        break
-            if not norm_v and vocab:
-                norm_v = normalize_subject_vocabulary(
-                    vocab,
-                    uri=None,
-                    supported_vocabularies=supported_subject_vocabularies,
-                    legacy_to_modern=legacy_to_modern,
-                )
-            if not norm_v:
-                continue
-
-            concept_id = None
-            if matched_uri:
-                concept_id = extract_concept_id(matched_uri)
-            elif uris:
-                concept_id = extract_concept_id(uris[0])
-
-            if not concept_id and heading:
-                concept_id = resolve_subject_concept_id(
-                    heading,
-                    vocab=norm_v,
-                    vocab_store=vocab_store,
-                    language=language,
-                )
-
-            if concept_id:
-                valid_subject_keys.append(f"{norm_v}:{concept_id.lower()}")
-
-    rec_subject_counts = dict(Counter(valid_subject_keys))
+    raw_for_folding = [
+        {
+            "heading": _get_subfield(f, "a"),
+            "vocabulary": _get_subfield(f, "2"),
+            "uris": _get_subfields(f, "0") + _get_subfields(f, "1"),
+            "field": tag,
+        }
+        for tag in subject_tags
+        for f in _get_datafields(record_elem, tag)
+    ]
+    folded_subjects = fold_subjects(
+        raw_for_folding,
+        supported_vocabularies=supported_subject_vocabularies,
+        legacy_to_modern=legacy_to_modern,
+        vocab_store=vocab_store,
+        language=language,
+    )
+    rec_subject_counts = subject_footprint(folded_subjects)
     for a in agents:
         a["subject_counts"] = dict(rec_subject_counts)
 
@@ -751,6 +722,7 @@ def parse_marc_record_elem(
         "series_title": series_title,
         "series_numbering": series_numbering,
         "volume_designation": vol_desig,
+        "subjects_folded": [s.as_dict() for s in folded_subjects],
         "classifications": classifications,
         "identifiers": {
             "isbn": isbns,
@@ -1478,7 +1450,17 @@ def decompose_marc_authority(
             title_normalized=compute_title_stem(title, lang=orig_lang),
             original_language=orig_lang,
             work_type=work_type,
-            subjects_json=variant_titles,
+            # A work authority's 4XX variant titles, which have nowhere else to
+            # live: WorkEntity has one title field, and the serialised text -
+            # what BM25 and the dense index read - is built from this list, so
+            # putting them here is what makes "Vanha Kalevala" findable. Tagged
+            # so a reader can tell them from actual subjects; see
+            # docs/pipeline_overview.md for the open question of a proper
+            # variant-title column.
+            subjects_json=[
+                {"heading": vt, "pref_label": vt, "kind": "variant_title"}
+                for vt in variant_titles
+            ],
         )
 
         # Build canonical ExpressionEntity
@@ -1693,10 +1675,11 @@ def decompose_marc_wemi(
     content_type = determine_content_type(record_elem, work_type=work_type)
     carrier_type = determine_carrier_type(record_elem)
 
-    # All subject strings
-    flat_subjects = [
-        s.get("heading") for cat in parsed["subjects"].values() for s in cat if s.get("heading")
-    ]
+    # Subjects as folded by parse_marc_record_elem: heading, vocabulary, concept
+    # id. The work used to store bare heading strings, which the serialisation
+    # template could not render and the classification-evidence reader could not
+    # read.
+    flat_subjects = list(parsed.get("subjects_folded") or [])
 
     # Primary classification
     ykl_class = None

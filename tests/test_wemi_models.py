@@ -48,7 +48,12 @@ def test_work_entity_validations():
         title_normalized="kalevala",
         subjects_json=json.dumps(["runous", "kansanperinne"]),
     )
-    assert work_from_json_str.subjects_json == ["runous", "kansanperinne"]
+    # Bare headings are accepted and become the one thing they can honestly
+    # become: a heading with no vocabulary and no concept id.
+    assert work_from_json_str.subjects_json == [
+        {"heading": "runous", "pref_label": "runous"},
+        {"heading": "kansanperinne", "pref_label": "kansanperinne"},
+    ]
 
 
 def test_work_types_controlled_vocabulary():
