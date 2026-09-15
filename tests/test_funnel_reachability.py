@@ -653,3 +653,92 @@ def test_a_cartographic_dataset_is_spatial_data_not_a_map():
 
     assert funnel_for("crd") == "funnel_nn_geodata"
     assert funnel_for("cri") == "funnel_l_cartography"
+
+
+# --- domain keys with readers but no writer -------------------------------
+#
+# `translators_signature` was declared on MatchRecord, consulted by the
+# clusterer's pairwise scoring and by funnel HH's dispatch, and written by
+# nothing - so both consumers read a permanently absent value (fixed in 14.18).
+# It was not alone. These key types are read by the clusterer, the matcher's
+# identifier derivation, the XML enricher or a funnel's `has_key` predicate, and
+# no loader emits them.
+#
+# Each needs a MARC rule grounded in the Finnish RDA guidelines, which is the
+# same blocked work as the medieval-fragment gap. They are listed rather than
+# deleted because each becomes live the moment its rule lands, and rather than
+# guessed at because inventing bibliographic rules is the failure mode this file
+# exists to prevent.
+KEYS_READ_BUT_NEVER_WRITTEN = {
+    "board_game",
+    "broadcast",
+    "ephemera_corp",
+    "exhibition_event",
+    "fragment_codex",
+    "numismatic_issue",
+    "oral_history",
+    "podcast",
+    "statute",
+    "swhid",
+    "web_seed",
+}
+
+
+def _key_types_written() -> set[str]:
+    """First argument of every `_add(...)` in either loader's key derivation."""
+    written: set[str] = set()
+    for module, func in (
+        ("src/reconciliator/loaders/marcxml.py", "derive_domain_keys"),
+        ("src/reconciliator/loaders/bibframe/decomposition.py", "derive_bibframe_keys"),
+    ):
+        tree = ast.parse(pathlib.Path(module).read_text())
+        fn = next(
+            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func),
+            None,
+        )
+        if fn is None:
+            continue
+        for node in ast.walk(fn):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_add"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                written.add(node.args[0].value)
+    return written
+
+
+def test_the_keys_with_no_writer_are_exactly_as_documented():
+    """Fails in both directions.
+
+    Growing means a consumer started reading a key nothing produces - the defect
+    itself. Shrinking means a loader rule landed and this list is stale.
+    """
+    written = _key_types_written()
+    assert written, "key-writing extraction found nothing"
+    still_unwritten = {k for k in KEYS_READ_BUT_NEVER_WRITTEN if k not in written}
+    assert still_unwritten == KEYS_READ_BUT_NEVER_WRITTEN
+
+
+def test_the_keys_funnel_dispatch_depends_on_are_written():
+    """A `has_key` predicate on an unwritten key is a dead dispatch alternative.
+
+    Weaker than the reachability test above, which allows a funnel to be reached
+    through any one alternative: this checks that a funnel reachable *only*
+    through `has_key` has that key actually produced.
+    """
+    written = _key_types_written()
+    broken = []
+    for spec in BUILTIN_SPECS:
+        if spec.default or not spec.when:
+            continue
+        # alternatives that rest solely on a key, with no work_type to fall back on
+        for when in spec.when:
+            if when.has_key and not when.work_type and not when.content_type:
+                missing = [k for k in when.has_key if k not in written]
+                if missing and len(spec.when) == 1:
+                    broken.append((spec.id, missing))
+    assert broken == [], f"funnels reachable only through an unwritten key: {broken}"
