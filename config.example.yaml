@@ -876,6 +876,71 @@ reconcile:
   threshold: 0.85                # Minimum hybrid score for candidate acceptance
   link_policy: "priority_fallback" # "priority_fallback" (best authority) or "all"
 
+  # Name the reconciled corpus is stored under. It becomes record_origin on the
+  # corpus's WEMI rows, registered non-authoritative, so the corpus is ingested
+  # like any other source. Defaults to the target file's stem.
+  corpus_source_name: null
+
+  # ---------------------------------------------------------------------------
+  # Domain funnels
+  # ---------------------------------------------------------------------------
+  # 42 funnels ship built in and need no configuration. This section overrides or
+  # extends them: an entry whose `id` matches a built-in replaces it *in place*,
+  # keeping its precedence; an entry with a new id goes where its `before` says,
+  # or just ahead of the fall-through funnel when it says nothing. Order is
+  # precedence - the first funnel whose `when` claims a record wins, so a new
+  # funnel that overlaps a built-in needs `before` to be reachable at all.
+  #
+  # `when` is a list of alternatives, and each alternative is a conjunction:
+  # the funnel claims a record when ANY alternative matches and ALL of that
+  # alternative's conditions hold. An empty `when` matches everything, which is
+  # what the fall-through funnel uses.
+  #
+  # Available conditions: work_type, is_component, has_key, has_identifier,
+  # title_matches (regex), key_matches (key_type -> regex),
+  # identifier_matches (scheme -> regex).
+  funnels: []
+  # Example 1 - retune a built-in without changing when it applies:
+  #
+  # funnels:
+  #   - id: funnel_l_cartography
+  #     when: { work_type: [cartography] }
+  #     identifier_schemes: [sheet_number, isbn]
+  #     work_types: [cartography]
+  #     content_type: cartographic_image
+  #     align_expression: true
+  #     confidence: 0.85            # was 0.90
+  #     fallback_work_type: cartography
+  #
+  # Example 2 - a new funnel claiming records the built-ins would not, with a
+  # regex on an identifier value:
+  #
+  #   - id: funnel_local_theses
+  #     before: funnel_k_thesis     # REQUIRED to beat the built-in thesis funnel.
+  #     when:                       # Without it this lands after funnel_k_thesis,
+  #       - work_type: [thesis]     # which already claims every thesis, so this
+  #         identifier_matches: { urn: "(?i)urn:nbn:fi:oulu" }   # would never run.
+  #     identifier_schemes: [urn, handle]
+  #     work_types: [thesis, text]
+  #     match_tier: tier2_local_repository
+  #     confidence: 0.95
+  #     align_expression: true
+  #
+  # Example 3 - a funnel with real logic. `handler` is either a built-in name
+  # (recorded_sound, notated_music, audiobook) or a path to a Python file,
+  # absolute or relative to THIS config file. The module may define tier1, tier2
+  # and/or tier3; whichever it omits falls back to the generic template.
+  #
+  #   - id: funnel_b_music_sound
+  #     when: { work_type: [music] }
+  #     identifier_schemes: [publisher_number, isrc, ean, upc]
+  #     work_types: [music]
+  #     content_type: audio_music
+  #     align_expression: true
+  #     handler: recorded_sound
+  #     # handler: src/reconciliator/funnels/recorded_sound.py
+  #     # handler: /opt/site/funnels/my_rule.py
+
   # Base directory for output reconciliation reports
   # Automatically sets agent_reports and subject_reports file paths
   reports_dir: "data/reports"

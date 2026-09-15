@@ -11,6 +11,8 @@ from typing import Any, Final, Literal, Optional, Self, Union
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from reconciliator.funnels.spec import FunnelSpec
+
 # ---------------------------------------------------------------------------
 # Default Resources Loader
 # ---------------------------------------------------------------------------
@@ -1105,6 +1107,10 @@ class ReconcileConfig(BaseModel):
     # WEMI rows and is registered non-authoritative, so the corpus is ingested
     # like any other source rather than through a staging table.
     corpus_source_name: Optional[str] = None
+    # Funnel overrides. An entry whose `id` matches a built-in replaces it in
+    # place; a new id is appended just before the fall-through funnel. Omitting
+    # this leaves the 42 built-ins as they are.
+    funnels: list[FunnelSpec] = Field(default_factory=list)
     format: Literal["auto", "marcxml", "bibra", "bibframe"] = "auto"
     schema_profile: Optional[str] = None
     output_file: Optional[Path] = None

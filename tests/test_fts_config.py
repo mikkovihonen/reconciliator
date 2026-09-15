@@ -229,7 +229,7 @@ def test_work_matcher_fts_fallback_config(tmp_path: Path):
         fts_fallback=ReconcileFTSFallbackConfig(enabled=False),
     )
     matcher_disabled = WorkMatcher(wemi_repo=repo, config=cfg_disabled)
-    res_disabled = matcher_disabled.match_monograph(target, ids={})
+    res_disabled = matcher_disabled.match_target(target)
     assert res_disabled.match_tier == "unmatched"
     assert res_disabled.matched_work is None
 
@@ -245,7 +245,7 @@ def test_work_matcher_fts_fallback_config(tmp_path: Path):
         ),
     )
     matcher_enabled = WorkMatcher(wemi_repo=repo, config=cfg_enabled)
-    res_enabled = matcher_enabled.match_monograph(target, ids={})
+    res_enabled = matcher_enabled.match_target(target)
     assert res_enabled is not None
     assert res_enabled.match_tier == "tier3_fts_fallback"
     assert res_enabled.confidence_score == 0.88

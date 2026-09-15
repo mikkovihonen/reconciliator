@@ -558,7 +558,7 @@ def test_work_matcher_authority_isolation(tmp_path):
         author_key="oksanen",
         format="marcxml",
     )
-    res = matcher.match_monograph(target_rec, {"isbn": ["978-951-0-34567-8"]})
+    res = matcher.match_target(target_rec, identifiers={"isbn": ["978-951-0-34567-8"]})
     assert res is not None
     assert res.matched_work is not None
     # Must be the authority record, NEVER the target record!
@@ -567,7 +567,7 @@ def test_work_matcher_authority_isolation(tmp_path):
     assert res.matched_manifestation.record_origin == "authority"
 
     # 2. Tier 2 match without ISBN (Author + Title stem)
-    res_title = matcher.match_monograph(target_rec, {})
+    res_title = matcher.match_target(target_rec)
     assert res_title is not None
     assert res_title.matched_work.record_origin == "authority"
     assert res_title.matched_work.source == "asteri"
