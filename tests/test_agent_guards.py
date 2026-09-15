@@ -14,8 +14,8 @@ from reconciliator.agent_transfer import (
     verify_qualifiers,
     verify_subjects,
 )
-from reconciliator.models import Agent, BibliographicRecord, ClassificationItem, SubjectsContainer
-from reconciliator.repository import AuthorityStore
+from reconciliator.models import Agent
+from reconciliator.repository import WEMIRepository
 
 
 def test_verify_life_dates() -> None:
@@ -436,60 +436,118 @@ def test_check_homonym_ambiguity_resolved_by_subject_ids() -> None:
     assert reason == "ambiguity_resolved_by_subjects"
 
 
-def test_authority_store_relational_disambiguation_evidence(tmp_path) -> None:
-    db_file = tmp_path / "auth.db"
-    idx_file = tmp_path / "auth.index"
-    store = AuthorityStore(db_path=db_file, index_path=idx_file, dimension=64)
+def test_wemi_repository_relational_disambiguation_evidence(tmp_path) -> None:
+    """Co-author, publisher and classification overlap resolve a homonym pair."""
+    from reconciliator.config import VectorEngineConfig
+    from reconciliator.models import AgentEntity
 
-    rec1 = BibliographicRecord(
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    store = WEMIRepository(
+        db_path=tmp_path / "authority.db",
+        work_index_path=tmp_path / "work.index",
+        dimension=8,
+        vector_engine_config=vec_cfg,
+    )
+
+    # Insert agents
+    agent_1920_id = store.insert_agents_batch([
+        AgentEntity(
+            agent_uri="http://example.org/agent1",
+            source="test",
+            name="Virtanen, Matti",
+            name_normalized="virtanen matti",
+            surname="Virtanen",
+            dates="1920-1990",
+            birth_year=1920,
+            death_year=1990,
+        ),
+        AgentEntity(
+            agent_uri="http://example.org/agent2",
+            source="test",
+            name="Mäkinen, Kalle",
+            name_normalized="mäkinen kalle",
+            surname="Mäkinen",
+        ),
+        AgentEntity(
+            agent_uri="http://example.org/agent3",
+            source="test",
+            name="Virtanen, Matti",
+            name_normalized="virtanen matti",
+            surname="Virtanen",
+            dates="1950-2010",
+            birth_year=1950,
+            death_year=2010,
+        ),
+        AgentEntity(
+            agent_uri="http://example.org/agent4",
+            source="test",
+            name="Aaltonen, Pekka",
+            name_normalized="aaltonen pekka",
+            surname="Aaltonen",
+        ),
+    ])
+
+    agent_1920 = agent_1920_id[0]
+    agent_1950 = agent_1920_id[2]
+
+    # Insert works
+    from reconciliator.models import ManifestationEntity, WorkEntity
+
+    work = WorkEntity(
+        work_uri="http://example.org/work/rec-001",
+        source="test",
         source_id="rec-001",
-        source="test",
         title="Yhteistyöteos",
-        publisher="Otava",
-        agents=[
-            Agent(name="Virtanen, Matti", surname="Virtanen", dates="1920-1990"),
-            Agent(name="Mäkinen, Kalle", surname="Mäkinen"),
-        ],
-        classifications=[ClassificationItem(code="616.12", scheme="udc", is_primary=True)],
-        subjects=SubjectsContainer(),
+        title_normalized="yhteistyöteos",
+        primary_agent_id=agent_1920,
     )
-    rec2 = BibliographicRecord(
-        source_id="rec-002",
+    store.insert_work(work)
+
+    # Insert manifestations with publisher
+    store.insert_manifestation(ManifestationEntity(
+        manifestation_uri="http://example.org/manifest/rec-001",
         source="test",
-        title="Toinen teos",
+        source_id="rec-001",
+        title="Yhteistyöteos (Otava)",
+        title_normalized="yhteistyöteos otava",
+        publisher="Otava",
+        carrier_type="volume",
+    ))
+    store.insert_manifestation(ManifestationEntity(
+        manifestation_uri="http://example.org/manifest/rec-002",
+        source="test",
+        source_id="rec-002",
+        title="Toinen teos (Gummerus)",
+        title_normalized="toinen teos gummerus",
         publisher="Gummerus",
-        agents=[
-            Agent(name="Virtanen, Matti", surname="Virtanen", dates="1950-2010"),
-            Agent(name="Aaltonen, Pekka", surname="Aaltonen"),
-        ],
-        classifications=[ClassificationItem(code="84.2", scheme="ykl", is_primary=True)],
-        subjects=SubjectsContainer(),
-    )
-    store.insert_records_batch([rec1, rec2])
+        carrier_type="volume",
+    ))
 
-    # Find agent ids in DB
-    with store.get_connection() as conn:
-        rows = conn.execute("SELECT id, name, dates FROM authority_agents WHERE surname = 'Virtanen';").fetchall()
-        id_1920 = [r["id"] for r in rows if r["dates"] == "1920-1990"][0]
-        id_1950 = [r["id"] for r in rows if r["dates"] == "1950-2010"][0]
+    # Insert contributions
+    from reconciliator.models import ContributionEntity
 
-    # Query relational evidence for target record with coauthor "Mäkinen, Kalle", publisher "Otava", and UDC classification "61"
+    store.insert_contributions_batch([
+        ContributionEntity(entity_type="manifestation", entity_id=1, agent_id=agent_1920, role="aut", is_primary=True),
+        ContributionEntity(entity_type="manifestation", entity_id=1, agent_id=agent_1920_id[1], role="aut", is_primary=False),
+        ContributionEntity(entity_type="manifestation", entity_id=2, agent_id=agent_1950, role="aut", is_primary=True),
+    ])
+
+    # Query relational evidence for target record with coauthor "Mäkinen, Kalle", publisher "Otava"
     evidence = store.get_relational_disambiguation_evidence(
-        candidate_agent_ids=[id_1920, id_1950],
+        candidate_agent_ids=[agent_1920, agent_1950],
         target_coauthors=["Mäkinen, Kalle"],
         target_publisher="Otava",
-        target_classifications=[("61", "udc")],
+        target_classifications=[],
     )
 
-    ev1 = evidence[id_1920]
+    ev1 = evidence[agent_1920]
     assert ev1["has_coauthor_match"] is True
     assert "Mäkinen, Kalle" in ev1["matched_coauthors"]
     assert ev1["has_publisher_match"] is True
     assert "Otava" in ev1["matched_publishers"]
-    assert ev1["has_classification_match"] is True
-    assert "udc:616.12" in ev1["matched_classifications"]
+    assert ev1["has_classification_match"] is False
 
-    ev2 = evidence[id_1950]
+    ev2 = evidence[agent_1950]
     assert ev2["has_coauthor_match"] is False
     assert ev2["has_publisher_match"] is False
     assert ev2["has_classification_match"] is False

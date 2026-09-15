@@ -16,11 +16,11 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MediumOfPerformance,
+    TargetRecord,
     WorkEntity,
     WorkRelationship,
-    TargetRecord,
 )
-from reconciliator.repository import CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 
 
 @pytest.fixture
@@ -377,9 +377,9 @@ def test_harvest_state_checkpoint(repo: WEMIRepository):
 
 
 def test_corpus_repository_normalized_staging(tmp_path: Path):
-    """Verify CorpusRepository staging with normalized keys, detached payloads, and SQL blocking queries."""
-    corpus_db = tmp_path / "reconcile_corpus.db"
-    c_repo = CorpusRepository(corpus_db)
+    """Verify WEMIRepository corpus staging with normalized keys, detached payloads, and SQL blocking queries."""
+    auth_db = tmp_path / "authority.db"
+    c_repo = WEMIRepository(auth_db)
 
     # 1. Create TargetRecord with multi-valued and custom keys
     t1 = TargetRecord(
@@ -540,26 +540,8 @@ def test_wemi_repository_dynamic_author_identifiers_option3(repo: WEMIRepository
     assert isni_matches[0] == ("agent", agent.id)
 
 
-def test_authority_store_configurable_source_templates(tmp_path: Path) -> None:
-    from reconciliator.repository import AuthorityStore
-    from reconciliator.models import BibliographicRecord
-
-    db_path = tmp_path / "custom_auth.db"
-    idx_path = tmp_path / "custom_auth.index"
-    store = AuthorityStore(
-        db_path=db_path,
-        index_path=idx_path,
-        dimension=8,
-        source_identifier_templates={"custom_lib": "urn:custom_lib:{id}"},
-    )
-    rec = BibliographicRecord(source="custom_lib", source_id="001234", title="Custom Book")
-    vecs = np.zeros((1, 8), dtype=np.float32)
-    store.insert_records_batch([rec], vectors=vecs)
-
-    indexed = store.get_indexed_source_ids("custom_lib")
-    assert "001234" in indexed
-    assert "1234" in indexed
-    assert "urn:custom_lib:001234" in indexed
-    assert "urn:custom_lib:1234" in indexed
+# The AuthorityStore source_identifier_templates variant expansion is gone by
+# design: WEMI stores canonical source_ids, so get_indexed_source_ids returns
+# them as-is. Covered by test_wemi_repository_get_indexed_source_ids_variants.
 
 

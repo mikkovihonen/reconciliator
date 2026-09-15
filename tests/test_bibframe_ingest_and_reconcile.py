@@ -11,7 +11,7 @@ import numpy as np
 from rdflib import Graph, URIRef
 
 from reconciliator.cli import ingest_oai_cmd, reconcile_cmd, reset_cmd
-from reconciliator.repository import AuthorityStore
+from reconciliator.repository import WEMIRepository
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -29,7 +29,7 @@ def test_bibframe_ingest_and_reconcile_e2e(tmp_path: Path) -> None:
     config_yaml = f"""
 storage:
   data_dir: "{tmp_path}"
-  index_path: "{index_path}"
+  work_index: "{index_path}"
 
 embedding:
   model_name: "sentence-transformers/all-MiniLM-L6-v2"
@@ -105,15 +105,30 @@ telemetry:
         # 1. Test Ingestion of BIBFRAME into authority store
         ingest_oai_cmd(config=config_file)
 
-        store = AuthorityStore(db_path, index_path)
+        store = WEMIRepository(db_path, index_path)
         with store.get_connection() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM authority_records;").fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM works;").fetchone()[0]
         assert count == 1
-        rec = store.get_record_by_id(1)
+
+        # BFFI records are keyed by their own URIs, under the configured source name.
+        rec = store.get_work_by_source(
+            "melinda_bffi", "http://urn.fi/URN:NBN:fi:bib:work:9912345678"
+        )
         assert rec is not None
         assert "Sinuhe egyptiläinen" in rec.title
-        assert rec.publication_year == 1945
-        assert rec.agents[0].surname == "Waltari"
+
+        # Publication data lives on the Manifestation tier after the WEMI split.
+        manifestations = store.get_manifestations_for_work(rec.id)
+        assert len(manifestations) == 1
+        assert manifestations[0].publication_year == 1945
+        assert manifestations[0].publisher == "WSOY"
+
+        # The creator is reachable from the work through contributions.
+        contributions = store.get_contributions_for_entity("work", rec.id)
+        assert [c.role for c in contributions] == ["aut"]
+        creator = store.get_agent(contributions[0].agent_id)
+        assert creator is not None
+        assert creator.name == "Waltari, Mika"
 
         # 2. Test native reconciliation and enrichment of Turtle file
         reconcile_cmd(config=config_file)
@@ -150,7 +165,7 @@ def test_bibframe_jsonld_native_reconciliation(tmp_path: Path) -> None:
     config_yaml = f"""
 storage:
   data_dir: "{tmp_path}"
-  index_path: "{index_path}"
+  work_index: "{index_path}"
 
 embedding:
   model_name: "sentence-transformers/all-MiniLM-L6-v2"

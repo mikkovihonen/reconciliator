@@ -22,16 +22,16 @@ compute:
 # ==============================================================================
 storage:
   # Base directory for all SQLite databases and vector index files.
-  # All standard storage paths (authority_db, vocab_db, progress_db, corpus_db,
-  # work_index, expression_index, manifestation_index, agent_index) automatically
-  # derive from this directory unless individually overridden.
+  # All standard storage paths (authority_db, vocab_db, progress_db, work_index,
+  # expression_index, manifestation_index, agent_index) automatically derive from
+  # this directory unless individually overridden. Corpus staging, clustering and
+  # linkage live inside authority_db rather than in a database of their own.
   data_dir: "data"
 
   # Optional path overrides (only needed if storing files in non-standard locations):
   # authority_db: "data/authority.db"
   # vocab_db: "data/vocab.db"
   # progress_db: "data/progress.db"
-  # corpus_db: "data/reconcile_corpus.db"
   # work_index: "data/work.index"
   # expression_index: "data/expression.index"
   # manifestation_index: "data/manifestation.index"
@@ -228,6 +228,30 @@ vocabularies:
     swe: "swe"
     en: "eng"
     eng: "eng"
+
+  # --- Subject heading rewriting policy ---------------------------------------
+  # These four values reproduce the shipped behaviour.
+  #
+  # Append the language subcode from language_subcode_vocabularies above to the
+  # $2 vocabulary code, per the Finto convention:
+  #   true  -> $2 yso/fin        (default)
+  #   false -> $2 yso
+  apply_language_subcode: true
+
+  # Replace a resolved heading's $a with the ontology's preferred label. A record
+  # catalogued with the YSO altLabel "tohtorit" becomes "lääkärit":
+  #   true  -> $a lääkärit       (default)
+  #   false -> $a tohtorit       ($0 URI is still injected either way)
+  replace_heading_with_pref_label: true
+
+  # Additionally keep the heading exactly as catalogued, in the record itself
+  # rather than only in the subject report's source_heading column:
+  #   false -> $a lääkärit                              (default)
+  #   true  -> $a lääkärit  +  $9 tohtorit
+  # Set this if the exported record is your system of record and you need the
+  # catalogued form to survive alongside the modernized one.
+  preserve_original_heading: false
+  original_heading_subfield: "9"
 
   # Preferred languages for label selection
   preferred_label_languages:
@@ -769,17 +793,23 @@ ingest_oai:
     oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
     metadata_prefix: "marc21"
     set_spec: null
+    # Whether this source's records may be used as authority when matching.
+    # A corpus you are reconciling is ingested exactly like any other source,
+    # with authoritative: false, rather than through a separate staging path.
+    # record_origin on every row is the source name, and the `sources` table
+    # records which names are authoritative.
+    authoritative: true
     id_source: "marc_001"
     control_number_prefix: "(FI-MELINDA)"
     control_number_padding_digits: 9
-    workers: 8                   # Number of concurrent harvest workers
-    normalization_workers: 8     # Concurrent worker threads for record normalization
-    queue_size: null             # Queue buffer capacity (null auto-sizes)
-    batch_queue_size: 4          # Batches queued for embedding/indexing
-    checkpoint_interval: 50000   # Snapshot index checkpoint every N records
-    slice_days: 30
-    batch_size: 500
-    request_delay: 0.1
+    # >1 harvests date slices concurrently. Needs a resolvable date window:
+    # from_date, or an endpoint answering Identify with earliestDatestamp.
+    # Otherwise one continuous resumptionToken stream is followed.
+    workers: 8
+    slice_days: 30               # Width of each concurrent date slice
+    batch_queue_size: 4          # Decomposed batches buffered ahead of DB writes
+    batch_size: 500              # Records per database write
+    request_delay: 0.1           # Pause between pagination requests
     timeout: 60.0
 
 # ==============================================================================
@@ -792,7 +822,50 @@ ingest_wikidata:
   # author_authority_properties: null (automatically uses vocabularies.wikidata_author_properties)
 
 # ==============================================================================
-# 11. Target Reconciliation, Matching & Native Tree Enrichment
+# 11. Cross-Source Work Consolidation
+# ==============================================================================
+# Every source mints its own urn:work:{source}:{id}, so one work held by three
+# catalogues is three rows. `reconciliator consolidate-works` elects one canonical
+# row per equivalence group and records same_work_as edges explaining why; nothing
+# is deleted, and the command is repeatable after ingesting further sources.
+# Matching then resolves through that election, so a record links to the same work
+# no matter which source it happened to match.
+consolidation:
+  enabled: true
+
+  # Evidence admitted when deciding two work rows are the same work.
+  use_wikidata_qid: true         # Shared QID is decisive; differing QIDs veto a merge
+  use_shared_identifiers: true   # A strong identifier shared by their manifestations
+  use_metadata: true             # Title + creator + work type, for identifier-free corpora
+
+  # Identifier schemes strong enough to assert work identity on their own.
+  # Source-local schemes such as control_number are deliberately excluded.
+  strong_identifier_schemes:
+    - "isbn"
+    - "issn"
+    - "ismn"
+    - "isrc"
+    - "ean"
+    - "doi"
+    - "urn"
+    - "asteri"
+
+  # Metadata agreement required when no identifier or QID is shared.
+  # 0.6 * title similarity + 0.4 * creator similarity, both 0..1.
+  metadata_threshold: 0.93
+
+  # Also consolidate duplicates held by one source, not just across sources.
+  include_same_source: false
+
+  # Sources preferred as the canonical representative, best first. A work carrying
+  # a wikidata_qid always outranks one without; ties break on work_uri so the
+  # election is stable across runs.
+  canonical_source_priority: []
+    # - "melinda"
+    # - "finna"
+
+# ==============================================================================
+# 12. Target Reconciliation, Matching & Native Tree Enrichment
 # ==============================================================================
 reconcile:
   target_file: "tests/fixtures/sample_target.xml"

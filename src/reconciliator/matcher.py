@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -14,8 +15,11 @@ from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.indexer.base import VectorIndex
 from reconciliator.models import (
+    Agent,
+    AgentEntity,
     AgentURI,
     BibliographicRecord,
+    CorpusLinkage,
     ExpressionEntity,
     ManifestationEntity,
     ReconciliationMatch,
@@ -23,7 +27,7 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.repository import AuthorityStore, WEMIRepository
+from reconciliator.repository import WEMIRepository
 from reconciliator.rerank import CandidateEvaluator
 from reconciliator.vocabularies import (
     VocabularyManager,
@@ -42,271 +46,7 @@ class ReconciliationResult:
     discovered_agent_uris: dict[int, list[AgentURI]] = field(default_factory=dict)
     selected_agent_uris: dict[int, list[str]] = field(default_factory=dict)
     suppressed_agent_uris: dict[int, list[str]] = field(default_factory=dict)
-
-
-class ReconciliationEngine:
-    """Orchestrates multi-tier offline reconciliation against local authority storage."""
-
-    def __init__(
-        self,
-        authority_store: AuthorityStore,
-        embedder: SentenceEmbedder,
-        config: ReconcileConfig,
-        agent_indexer: Optional[VectorIndex] = None,
-    ) -> None:
-        self.authority_store = authority_store
-        self.embedder = embedder
-        self.config = config
-        self.agent_indexer = agent_indexer
-
-        self.evaluator = CandidateEvaluator(config.rerank)
-        self.vocab_manager = VocabularyManager(
-            allowed_vocabularies=config.vocabularies,
-            agent_priority=config.agent_priority,
-            subject_priority=config.subject_priority,
-            link_policy=config.link_policy,
-            vocabulary_patterns=config.vocabulary_patterns,
-            entity_vocabularies=config.entity_vocabularies,
-            supported_subject_vocabularies=config.supported_subject_vocabularies,
-        )
-        self.agent_aligner = AgentAligner()
-        self.agent_fallback_resolver = AgentFallbackResolver(
-            similarity_threshold=config.agent_fallback_threshold,
-            verify_chronology=config.verify_chronology,
-            min_author_age=config.chronology_min_author_age,
-            max_posthumous_years=config.chronology_max_posthumous_years,
-            strict_homonym_guard=config.strict_homonym_guard,
-        )
-
-    def reconcile_record(self, target_record: BibliographicRecord) -> ReconciliationResult:
-        """Run complete multi-tier matching funnel on target record."""
-        matches: list[ReconciliationMatch] = []
-        accepted_candidates: list[BibliographicRecord] = []
-        seen_cand_ids: set[str] = set()
-
-        # Step 2.2: Tier 1 Exact ID Lookup
-        exact_candidates = self.authority_store.find_exact_matches(target_record.identifiers)
-        for cand in exact_candidates:
-            if cand.source_id not in seen_cand_ids:
-                seen_cand_ids.add(cand.source_id)
-                match = ReconciliationMatch(
-                    candidate_record_id=cand.source_id,
-                    source=cand.source,
-                    match_tier="tier1_exact_id",
-                    match_score=1.0,
-                    dense_score=None,
-                    rerank_score=None,
-                    volume_match=True,
-                    surname_match=True,
-                    year_diff=None,
-                    accepted=True,
-                )
-                matches.append(match)
-                accepted_candidates.append(cand)
-
-        # Step 2.3: Tier 2 Dense Retrieval & Step 2.4: Pluggable Reranking
-        dense_candidates = []
-        if self.authority_store.indexer.total_vectors > 0:
-            query_vector = self.embedder.embed_records([target_record])
-            dense_candidates = self.authority_store.search_vector_candidates(
-                query_vector, top_k=self.config.rerank.top_k
-            )
-
-        for cand_record, dense_score in dense_candidates:
-            if cand_record.source_id in seen_cand_ids:
-                continue
-            seen_cand_ids.add(cand_record.source_id)
-
-            match = self.evaluator.evaluate_candidate(
-                target_record=target_record,
-                candidate_record=cand_record,
-                dense_score=dense_score,
-                acceptance_threshold=self.config.threshold,
-            )
-            matches.append(match)
-            if match.accepted:
-                accepted_candidates.append(cand_record)
-
-        # Step 2.5: Coupled Work Matching Agent Alignment & Multi-Candidate URI Aggregation
-        discovered_uris = self.agent_aligner.align_target_agents(
-            target_record.agents, accepted_candidates
-        )
-
-        # Step 2.55: Standalone Agent Fallback (Tier 3) for unlinked target agents
-        if self.config.fallback_agent_reconciliation and self.agent_indexer is not None:
-            import json
-            from reconciliator.template import WEMISerializationEngine
-            from reconciliator.vocabularies import detect_vocabulary
-
-            wemi_engine = WEMISerializationEngine()
-            for idx, target_agent in enumerate(target_record.agents):
-                # Skip if already linked via Tier 1/2 coupled matching or fictional
-                if discovered_uris.get(idx) or target_agent.is_fictional:
-                    continue
-
-                # Essential representation for dense query vector (~30-50 tokens)
-                agent_text = wemi_engine.render_agent(target_agent)
-                if not agent_text or not agent_text.strip():
-                    continue
-
-                q_vec = self.embedder.embed_texts([agent_text])
-                cand_scores, cand_ids = self.agent_indexer.search(q_vec, top_k=5)
-                if len(cand_ids) == 0 or len(cand_ids[0]) == 0:
-                    continue
-
-                agent_id_list = [int(i) for i in cand_ids[0]]
-                agent_score_list = [float(s) for s in cand_scores[0]]
-
-                # Hydrate rich candidate profiles from SQLite
-                cand_profiles = self.authority_store.get_agents_by_ids(agent_id_list)
-                evaluated_cands: list[dict[str, Any]] = []
-                for cid, cscore in zip(agent_id_list, agent_score_list):
-                    if cid in cand_profiles:
-                        profile = dict(cand_profiles[cid])
-                        profile["score"] = cscore
-                        evaluated_cands.append(profile)
-
-                target_coauthors = [a.name for a in target_record.agents if a != target_agent]
-                target_classifications = [(c.code, c.scheme) for c in target_record.classifications]
-                target_subjects = dict(target_agent.subject_counts)
-                if not target_subjects and target_record.subjects:
-                    for cat in target_record.subjects.all_subjects():
-                        if cat.vocabulary and cat.pref_label:
-                            norm_v = normalize_subject_vocabulary(
-                                cat.vocabulary,
-                                uri=cat.uri,
-                                supported_vocabularies=self.config.supported_subject_vocabularies,
-                            )
-                            if norm_v:
-                                target_subjects[f"{norm_v}:{cat.pref_label.strip().lower()}"] = 1
-
-                best_cand, reason = self.agent_fallback_resolver.evaluate_candidates(
-                    target_agent=target_agent,
-                    target_pub_year=target_record.publication_year,
-                    candidates=evaluated_cands,
-                    authority_store=self.authority_store,
-                    target_coauthors=target_coauthors,
-                    target_publisher=target_record.publisher,
-                    target_classifications=target_classifications,
-                    target_subjects=target_subjects,
-                )
-
-                if best_cand:
-                    best_score = best_cand.get("score", self.config.agent_fallback_threshold)
-                    existing_uris = {u.uri for u in discovered_uris[idx]}
-
-                    # Extract primary agent URI if present
-                    if best_cand.get("agent_uri"):
-                        u = str(best_cand["agent_uri"])
-                        if u not in existing_uris:
-                            vocab = detect_vocabulary(u) or ("WIKIDATA" if "wikidata.org" in u else "OTHER")
-                            subfield = "1" if "wikidata.org" in u.lower() else "0"
-                            discovered_uris[idx].append(
-                                AgentURI(
-                                    uri=u,
-                                    vocabulary=vocab,
-                                    subfield_code=subfield,
-                                    source_record_id=str(best_cand.get("source_id") or best_cand.get("id")),
-                                    source=str(best_cand.get("source") or "agent_fallback"),
-                                    alignment_score=float(best_score * 100.0),
-                                )
-                            )
-                            existing_uris.add(u)
-
-                    # Extract uri_subfield_0 (KANTO/ISNI/VIAF)
-                    u0_raw = best_cand.get("uri_subfield_0")
-                    if u0_raw:
-                        try:
-                            parsed_u0 = json.loads(u0_raw) if u0_raw.startswith("[") else [u0_raw]
-                            for item in parsed_u0:
-                                if item and item not in existing_uris:
-                                    vocab = detect_vocabulary(item) or "OTHER"
-                                    discovered_uris[idx].append(
-                                        AgentURI(
-                                            uri=item,
-                                            vocabulary=vocab,
-                                            subfield_code="0",
-                                            source_record_id=str(best_cand.get("id")),
-                                            source=str(best_cand.get("source") or "agent_fallback"),
-                                            alignment_score=float(best_score * 100.0),
-                                        )
-                                    )
-                                    existing_uris.add(item)
-                        except Exception:
-                            pass
-
-                    # Extract uri_subfield_1 (Wikidata QIDs)
-                    u1_raw = best_cand.get("uri_subfield_1")
-                    if u1_raw:
-                        try:
-                            parsed_u1 = json.loads(u1_raw) if u1_raw.startswith("[") else [u1_raw]
-                            for item in parsed_u1:
-                                if item and item not in existing_uris:
-                                    vocab = detect_vocabulary(item) or "WIKIDATA"
-                                    discovered_uris[idx].append(
-                                        AgentURI(
-                                            uri=item,
-                                            vocabulary=vocab,
-                                            subfield_code="1",
-                                            source_record_id=str(best_cand.get("id")),
-                                            source=str(best_cand.get("source") or "agent_fallback"),
-                                            alignment_score=float(best_score * 100.0),
-                                        )
-                                    )
-                                    existing_uris.add(item)
-                        except Exception:
-                            pass
-
-                    # Extract wikidata_qid
-                    if best_cand.get("wikidata_qid"):
-                        qid = best_cand["wikidata_qid"]
-                        wiki_uri = format_wikidata_uri(qid)
-                        if wiki_uri and wiki_uri not in existing_uris:
-                            discovered_uris[idx].append(
-                                AgentURI(
-                                    uri=wiki_uri,
-                                    vocabulary="WIKIDATA",
-                                    subfield_code="1",
-                                    source_record_id=str(best_cand.get("id")),
-                                    source="wikidata",
-                                    alignment_score=float(best_score * 100.0),
-                                )
-                            )
-                            existing_uris.add(wiki_uri)
-
-                    matches.append(
-                        ReconciliationMatch(
-                            candidate_record_id=str(best_cand.get("agent_uri") or best_cand.get("id")),
-                            source=str(best_cand.get("source") or "agent_fallback"),
-                            match_tier="tier3_agent_fallback",
-                            match_score=float(best_score),
-                            dense_score=float(best_score),
-                            rerank_score=None,
-                            volume_match=True,
-                            surname_match=True,
-                            year_diff=None,
-                            accepted=True,
-                        )
-                    )
-
-        # Step 2.6: Vocabulary Filter & Priority Selection
-        selected_uris: dict[int, list[str]] = {}
-        suppressed_uris: dict[int, list[str]] = {}
-
-        for idx, uri_items in discovered_uris.items():
-            raw_uri_strs = [item.uri for item in uri_items]
-            sel, sup = self.vocab_manager.select_agent_uris(raw_uri_strs)
-            selected_uris[idx] = sel
-            suppressed_uris[idx] = sup
-
-        return ReconciliationResult(
-            target_record=target_record,
-            matches=matches,
-            accepted_candidates=accepted_candidates,
-            discovered_agent_uris=discovered_uris,
-            selected_agent_uris=selected_uris,
-            suppressed_agent_uris=suppressed_uris,
-        )
+    corpus_linkage: Optional[CorpusLinkage] = None
 
 
 @dataclass
@@ -605,16 +345,42 @@ class WorkMatcher:
         wemi_repo: WEMIRepository,
         embedder: Optional[SentenceEmbedder] = None,
         config: Optional[ReconcileConfig] = None,
+        authoritative_only: bool = True,
+        agent_indexer: Optional[VectorIndex] = None,
     ) -> None:
         self.repo = wemi_repo
         self.embedder = embedder
         self.config = config
+        self.authoritative_only = authoritative_only
+        self.agent_indexer = agent_indexer
+        self._equivalence_cache: Optional[dict[int, int]] = None
         self.agent_aligner = AgentAligner()
         self.evaluator = (
             CandidateEvaluator(self.config.rerank)
             if (self.config and hasattr(self.config, "rerank"))
             else None
         )
+        # Vocabulary filtering and the standalone agent fallback are only meaningful
+        # once a ReconcileConfig is present; match_target_record() guards on these.
+        self.vocab_manager: Optional[VocabularyManager] = None
+        self.agent_fallback_resolver: Optional[AgentFallbackResolver] = None
+        if config is not None:
+            self.vocab_manager = VocabularyManager(
+                allowed_vocabularies=config.vocabularies,
+                agent_priority=config.agent_priority,
+                subject_priority=config.subject_priority,
+                link_policy=config.link_policy,
+                vocabulary_patterns=config.vocabulary_patterns,
+                entity_vocabularies=config.entity_vocabularies,
+                supported_subject_vocabularies=config.supported_subject_vocabularies,
+            )
+            self.agent_fallback_resolver = AgentFallbackResolver(
+                similarity_threshold=config.agent_fallback_threshold,
+                verify_chronology=config.verify_chronology,
+                min_author_age=config.chronology_min_author_age,
+                max_posthumous_years=config.chronology_max_posthumous_years,
+                strict_homonym_guard=config.strict_homonym_guard,
+            )
 
     # -----------------------------------------------------------------------
     # Helper Methods
@@ -691,7 +457,9 @@ class WorkMatcher:
         for scheme in schemes_order:
             values = ids.get(scheme, [])
             for val in values:
-                matches = self.repo.lookup_by_identifier(scheme, val)
+                matches = self.repo.lookup_by_identifier(
+                    scheme, val, authoritative_only=self.authoritative_only
+                )
                 if not matches:
                     continue
 
@@ -775,7 +543,9 @@ class WorkMatcher:
         ):
             query_text = target.serialized_work or f"{target.title} {target.author_key or ''}"
             query_vec = self.embedder.embed_texts([query_text])
-            results = self.repo.search_work_vectors(query_vec, top_k=5)
+            results = self.repo.search_work_vectors(
+                query_vec, top_k=5, authoritative_only=self.authoritative_only
+            )
             thresh = (
                 self.config.threshold
                 if hasattr(self.config, "threshold") and self.config.threshold is not None
@@ -814,7 +584,9 @@ class WorkMatcher:
             fts_query = target.title_stem or target.title
             if fts_query:
                 try:
-                    fts_results = self.repo.search_works_fts(fts_query, limit=fts_cfg.limit)
+                    fts_results = self.repo.search_works_fts(
+                        fts_query, limit=fts_cfg.limit, authoritative_only=self.authoritative_only
+                    )
                     for cand_work, _rank in fts_results:
                         if work_type and cand_work.work_type != work_type:
                             continue
@@ -2456,7 +2228,22 @@ class WorkMatcher:
         target: TargetRecord,
         identifiers: Optional[dict[str, list[str]]] = None,
     ) -> WEMIMatchResult:
-        """Resolve a staged TargetRecord using specialized multi-tier domain funnels (A through PP)."""
+        """Resolve a staged TargetRecord and map the result to its canonical work.
+
+        Canonicalisation happens here rather than at each call site so that every
+        consumer - the corpus clusterer's authority hoisting and the reconcile
+        loop alike - resolves a work the same way. Without it, records matching
+        different sources that hold the same work would disagree about its URI.
+        """
+        result = self._dispatch_match(target, identifiers)
+        return self._canonicalize_match(result)
+
+    def _dispatch_match(
+        self,
+        target: TargetRecord,
+        identifiers: Optional[dict[str, list[str]]] = None,
+    ) -> WEMIMatchResult:
+        """Route a staged TargetRecord to its specialized domain funnel (A through PP)."""
         # 1. Extract and merge standard identifiers
         extracted_ids = extract_identifiers_from_target(target)
         if identifiers:
@@ -2611,3 +2398,440 @@ class WorkMatcher:
 
         # Default: Monographic Work matching
         return self.match_monograph(target, extracted_ids)
+
+    def _canonicalize_match(self, result: WEMIMatchResult) -> WEMIMatchResult:
+        """Re-point a matched work at the canonical work of its equivalence group.
+
+        Each source mints its own work URI, so the same work exists once per
+        source. Consolidation elects one representative; this maps a match onto
+        it, leaving the match tier and score untouched. The matched expression is
+        deliberately not re-pointed: an expression of a consolidated work is a
+        genuine expression of the canonical work.
+        """
+        if result.matched_work is None or result.matched_work.id is None:
+            return result
+
+        equivalences = self._work_equivalences()
+        canonical_id = equivalences.get(result.matched_work.id)
+        if canonical_id is None or canonical_id == result.matched_work.id:
+            return result
+
+        canonical = self.repo.get_work(canonical_id)
+        if canonical is None:
+            return result
+
+        result.matched_work = canonical
+        result.work_uri = canonical.work_uri
+        return result
+
+    def _work_equivalences(self) -> dict[int, int]:
+        """Cached work-id -> canonical-work-id map; empty when nothing is consolidated."""
+        cached = getattr(self, "_equivalence_cache", None)
+        if cached is None:
+            try:
+                cached = self.repo.get_work_equivalence_map()
+            except Exception:
+                cached = {}
+            self._equivalence_cache = cached
+        return cached
+
+    def refresh_work_equivalences(self) -> None:
+        """Drop the cached equivalence map, e.g. after re-running consolidation."""
+        self._equivalence_cache = None
+
+    def _agent_uris_from_identifiers(self, agent: AgentEntity) -> tuple[list[str], list[str]]:
+        """Collect an authority agent's $0 and $1 URIs from the identifiers table and its own columns."""
+        u0: list[str] = []
+        u1: list[str] = []
+
+        def _add(uri: Optional[str], subfield: Optional[str] = None) -> None:
+            if not uri:
+                return
+            uri = uri.strip()
+            # Synthetic placeholders minted at ingest are not linkable authority URIs.
+            if not uri or uri.startswith(("urn:agent:", "urn:reconciliator:")):
+                return
+            is_entity = "wikidata.org" in uri.lower() or (subfield == "1")
+            bucket = u1 if is_entity else u0
+            if uri not in u0 and uri not in u1:
+                bucket.append(uri)
+
+        if agent.id:
+            for ident in self.repo.get_identifiers_for_entity("agent", agent.id):
+                scheme = (ident.scheme or "").lower()
+                _add(ident.value, "1" if scheme == "wikidata" else "0")
+
+        _add(agent.agent_uri)
+        _add(agent.orcid)
+        if agent.wikidata_qid:
+            _add(format_wikidata_uri(agent.wikidata_qid), "1")
+
+        return u0, u1
+
+    def _hydrate_candidate_record(
+        self,
+        work: Optional[WorkEntity],
+        expression: Optional[ExpressionEntity] = None,
+        manifestation: Optional[ManifestationEntity] = None,
+    ) -> Optional[BibliographicRecord]:
+        """Reconstruct a BibliographicRecord from matched WEMI entities for agent alignment.
+
+        AgentAligner compares target agents against candidate records' agents, so a
+        matched work has to be rehydrated (contributions -> agents -> identifiers)
+        before its authority URIs can be transferred.
+        """
+        from reconciliator.models import RecordIdentifiers
+
+        if work is None and manifestation is None:
+            return None
+
+        # Gather contributions across every matched tier, de-duplicating by agent.
+        agent_ids: list[int] = []
+        tiers: list[tuple[str, Optional[int]]] = [
+            ("work", work.id if work else None),
+            ("expression", expression.id if expression else None),
+            ("manifestation", manifestation.id if manifestation else None),
+        ]
+        for entity_type, entity_id in tiers:
+            if not entity_id:
+                continue
+            try:
+                contribs = self.repo.get_contributions_for_entity(entity_type, entity_id)
+            except Exception:
+                continue
+            for c in contribs:
+                if c.agent_id and c.agent_id not in agent_ids:
+                    agent_ids.append(c.agent_id)
+
+        agents: list[Agent] = []
+        for aid in agent_ids:
+            entity = self.repo.get_agent(aid)
+            if entity is None:
+                continue
+            u0, u1 = self._agent_uris_from_identifiers(entity)
+            agents.append(
+                Agent(
+                    name=entity.name,
+                    surname=entity.surname,
+                    dates=entity.dates,
+                    fuller_name=entity.fuller_name,
+                    birth_year=entity.birth_year,
+                    death_year=entity.death_year,
+                    is_personal=entity.is_personal,
+                    is_fictional=entity.is_fictional,
+                    uri_subfield_0=u0,
+                    uri_subfield_1=u1,
+                    orcid=entity.orcid,
+                    variant_names=list(entity.variant_names),
+                    metadata_json=entity.metadata_json,
+                    role_counts=dict(entity.role_counts),
+                    subject_counts=dict(entity.subject_counts),
+                )
+            )
+
+        title = (work.title if work else None) or (manifestation.title if manifestation else "")
+        source = (work.source if work else None) or (manifestation.source if manifestation else "")
+        source_id = (work.source_id if work else None) or (
+            manifestation.source_id if manifestation else ""
+        )
+
+        identifiers = RecordIdentifiers()
+        if manifestation and manifestation.id:
+            try:
+                for ident in self.repo.get_identifiers_for_entity("manifestation", manifestation.id):
+                    bucket = getattr(identifiers, (ident.scheme or "").lower(), None)
+                    if isinstance(bucket, list) and ident.value not in bucket:
+                        bucket.append(ident.value)
+            except Exception:
+                pass
+
+        return BibliographicRecord(
+            source_id=source_id,
+            source=source,
+            title=title,
+            subtitle=manifestation.subtitle if manifestation else None,
+            uniform_title=work.original_title if work else None,
+            publication_year=manifestation.publication_year if manifestation else None,
+            publisher=manifestation.publisher if manifestation else None,
+            publication_place=manifestation.publication_place if manifestation else None,
+            language=expression.language if expression else None,
+            original_language=work.original_language if work else None,
+            series_title=manifestation.series_title if manifestation else None,
+            series_numbering=manifestation.series_numbering if manifestation else None,
+            volume_designation=manifestation.volume_designation if manifestation else None,
+            identifiers=identifiers,
+            agents=agents,
+        )
+
+    def _resolve_agent_fallback(
+        self,
+        target_record: BibliographicRecord,
+        discovered_uris: dict[int, list[AgentURI]],
+        matches: list[ReconciliationMatch],
+    ) -> None:
+        """Tier 3: resolve target agents left unlinked by coupled work matching.
+
+        Queries the standalone agent vector index, hydrates candidate profiles from
+        SQLite, and lets AgentFallbackResolver arbitrate with chronology and homonym
+        guards before any URI is accepted.
+        """
+        cfg = self.config
+        if (
+            cfg is None
+            or not cfg.fallback_agent_reconciliation
+            or self.agent_indexer is None
+            or self.embedder is None
+            or self.agent_fallback_resolver is None
+        ):
+            return
+
+        from reconciliator.template import WEMISerializationEngine
+        from reconciliator.vocabularies import detect_vocabulary
+
+        wemi_engine = WEMISerializationEngine()
+        for idx, target_agent in enumerate(target_record.agents):
+            # Already linked via coupled matching, or a fictional character that
+            # must never be bound to a real authority record.
+            if discovered_uris.get(idx) or target_agent.is_fictional:
+                continue
+
+            agent_text = wemi_engine.render_agent(target_agent)
+            if not agent_text or not agent_text.strip():
+                continue
+
+            q_vec = self.embedder.embed_texts([agent_text])
+            cand_scores, cand_ids = self.agent_indexer.search(q_vec, top_k=5)
+            if len(cand_ids) == 0 or len(cand_ids[0]) == 0:
+                continue
+
+            agent_id_list = [int(i) for i in cand_ids[0]]
+            agent_score_list = [float(s) for s in cand_scores[0]]
+
+            cand_profiles = self.repo.get_agents_by_ids(agent_id_list)
+            evaluated_cands: list[dict[str, Any]] = []
+            for cid, cscore in zip(agent_id_list, agent_score_list):
+                if cid in cand_profiles:
+                    profile = dict(cand_profiles[cid])
+                    profile["score"] = cscore
+                    evaluated_cands.append(profile)
+            if not evaluated_cands:
+                continue
+
+            target_coauthors = [a.name for a in target_record.agents if a is not target_agent]
+            target_classifications = [(c.code, c.scheme) for c in target_record.classifications]
+            target_subjects = dict(target_agent.subject_counts)
+            if not target_subjects and target_record.subjects:
+                for cat in target_record.subjects.all_subjects():
+                    if cat.vocabulary and cat.pref_label:
+                        norm_v = normalize_subject_vocabulary(
+                            cat.vocabulary,
+                            uri=cat.uri,
+                            supported_vocabularies=cfg.supported_subject_vocabularies,
+                        )
+                        if norm_v:
+                            target_subjects[f"{norm_v}:{cat.pref_label.strip().lower()}"] = 1
+
+            best_cand, _reason = self.agent_fallback_resolver.evaluate_candidates(
+                target_agent=target_agent,
+                target_pub_year=target_record.publication_year,
+                candidates=evaluated_cands,
+                authority_store=self.repo,
+                target_coauthors=target_coauthors,
+                target_publisher=target_record.publisher,
+                target_classifications=target_classifications,
+                target_subjects=target_subjects,
+            )
+            if not best_cand:
+                continue
+
+            best_score = float(best_cand.get("score", cfg.agent_fallback_threshold))
+            existing_uris = {u.uri for u in discovered_uris.setdefault(idx, [])}
+            cand_source = str(best_cand.get("source") or "agent_fallback")
+            cand_row_id = str(best_cand.get("id"))
+
+            def _accept(uri: Optional[str], subfield: str, default_vocab: str) -> None:
+                if not uri or uri in existing_uris:
+                    return
+                vocab = detect_vocabulary(uri) or default_vocab
+                discovered_uris[idx].append(
+                    AgentURI(
+                        uri=uri,
+                        vocabulary=vocab,
+                        subfield_code=subfield,
+                        source_record_id=cand_row_id,
+                        source=cand_source,
+                        alignment_score=best_score * 100.0,
+                    )
+                )
+                existing_uris.add(uri)
+
+            if best_cand.get("agent_uri"):
+                a_uri = str(best_cand["agent_uri"])
+                if not a_uri.startswith(("urn:agent:", "urn:reconciliator:")):
+                    is_wd = "wikidata.org" in a_uri.lower()
+                    _accept(a_uri, "1" if is_wd else "0", "WIKIDATA" if is_wd else "OTHER")
+
+            for raw_key, subfield, default_vocab in (
+                ("uri_subfield_0", "0", "OTHER"),
+                ("uri_subfield_1", "1", "WIKIDATA"),
+            ):
+                raw = best_cand.get(raw_key)
+                if not raw:
+                    continue
+                try:
+                    items = json.loads(raw) if str(raw).startswith("[") else [raw]
+                except Exception:
+                    items = [raw]
+                for item in items:
+                    if item:
+                        _accept(str(item), subfield, default_vocab)
+
+            if best_cand.get("wikidata_qid"):
+                _accept(format_wikidata_uri(str(best_cand["wikidata_qid"])), "1", "WIKIDATA")
+
+            matches.append(
+                ReconciliationMatch(
+                    candidate_record_id=str(best_cand.get("agent_uri") or best_cand.get("id")),
+                    source=cand_source,
+                    match_tier="tier3_agent_fallback",
+                    match_score=best_score,
+                    dense_score=best_score,
+                    rerank_score=None,
+                    volume_match=True,
+                    surname_match=True,
+                    year_diff=None,
+                    accepted=True,
+                )
+            )
+
+    def match_target_record(
+        self, target_record: BibliographicRecord
+    ) -> ReconciliationResult:
+        """Resolve a BibliographicRecord using WorkMatcher's multi-tier domain funnels.
+
+        Bridges the BibliographicRecord (CLI input) to TargetRecord (WorkMatcher input)
+        and converts the WEMIMatchResult back to ReconciliationResult for CLI compatibility.
+        """
+        from reconciliator.normalizers.blocking import (
+            compute_author_key,
+            compute_title_stem,
+            compute_work_blocking_key,
+        )
+
+        # Convert BibliographicRecord to TargetRecord
+        agents = target_record.agents
+        author_name = agents[0].name if agents else None
+        author_surname = agents[0].surname if agents else None
+        author_key = compute_author_key(author_name, author_surname)
+
+        # The Work tier is keyed on the title proper. RecordNormalizer folds the
+        # subtitle into `title` ("Proper : subtitle"), while the WEMI decomposers
+        # store the uniform title or title proper alone, so the subtitle has to be
+        # peeled off here or the stems can never agree.
+        work_title = target_record.uniform_title or target_record.title or ""
+        if not target_record.uniform_title and target_record.subtitle:
+            suffix = target_record.subtitle.strip()
+            if suffix and work_title.rstrip().endswith(suffix):
+                work_title = work_title.rstrip()[: -len(suffix)].rstrip(" :;/,.")
+        title_stem = compute_title_stem(work_title)
+        work_blocking_key = compute_work_blocking_key(author_key, title_stem)
+
+        raw_bytes = json.dumps(
+            target_record.model_dump(), ensure_ascii=False
+        ).encode("utf-8")
+
+        target = TargetRecord(
+            record_id=target_record.source_id,
+            format="marcxml",
+            work_type="text",
+            title=target_record.title or "",
+            uniform_title=target_record.uniform_title,
+            language=target_record.language,
+            author_key=author_key,
+            title_stem=title_stem,
+            work_blocking_key=work_blocking_key,
+            raw_payload=raw_bytes,
+            publication_year=target_record.publication_year,
+            publisher=target_record.publisher,
+            is_component=False,
+        )
+
+        # Run WorkMatcher
+        result = self.match_target(target)
+
+        # Build ReconciliationResult from WEMIMatchResult
+        matches: list[ReconciliationMatch] = []
+        accepted_candidates: list[BibliographicRecord] = []
+        selected_uris: dict[int, list[str]] = {}
+        suppressed_uris: dict[int, list[str]] = {}
+
+        is_matched = bool(result.matched_work or result.matched_manifestation)
+        if is_matched and result.match_tier != "unmatched":
+            matched = result.matched_work
+            matches.append(
+                ReconciliationMatch(
+                    candidate_record_id=str(
+                        (matched.work_uri if matched else None)
+                        or result.work_uri
+                        or result.manifestation_uri
+                        or result.target_record_id
+                    ),
+                    source="authority",
+                    match_tier=result.match_tier or "tier2_domain_key",
+                    match_score=result.confidence_score or 0.8,
+                    dense_score=None,
+                    rerank_score=None,
+                    volume_match=False,
+                    surname_match=True,
+                    year_diff=None,
+                    accepted=True,
+                )
+            )
+            # Rehydrate the matched WEMI entities so their agents (and thus their
+            # authority URIs) are available to AgentAligner.
+            candidate = self._hydrate_candidate_record(
+                result.matched_work,
+                result.matched_expression,
+                result.matched_manifestation,
+            )
+            if candidate is not None:
+                accepted_candidates.append(candidate)
+
+        # Tier 1/2: coupled agent alignment against the accepted candidates.
+        discovered_uris: dict[int, list[AgentURI]] = self.agent_aligner.align_target_agents(
+            target_record.agents, accepted_candidates
+        )
+
+        # Tier 3: standalone agent fallback for target agents still unlinked.
+        self._resolve_agent_fallback(target_record, discovered_uris, matches)
+
+        # Vocabulary filter and link-policy priority selection. Without this the
+        # enricher receives no URIs to inject and every report row stays empty.
+        for idx, uri_items in discovered_uris.items():
+            raw_uri_strs = [item.uri for item in uri_items]
+            if self.vocab_manager is not None:
+                sel, sup = self.vocab_manager.select_agent_uris(raw_uri_strs)
+            else:
+                sel, sup = raw_uri_strs, []
+            selected_uris[idx] = sel
+            suppressed_uris[idx] = sup
+
+        # Query corpus_linkages for linkage context
+        corpus_linkage: Optional[CorpusLinkage] = None
+        try:
+            corpus_linkage = self.repo.get_corpus_linkage(
+                target_record.source_id
+            )
+        except Exception:
+            # Corpus linkage may not exist if record hasn't been linked yet
+            pass
+
+        return ReconciliationResult(
+            target_record=target_record,
+            matches=matches,
+            accepted_candidates=accepted_candidates,
+            discovered_agent_uris=discovered_uris,
+            selected_agent_uris=selected_uris,
+            suppressed_agent_uris=suppressed_uris,
+            corpus_linkage=corpus_linkage,
+        )

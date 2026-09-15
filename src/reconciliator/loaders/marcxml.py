@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
-import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
@@ -16,16 +17,11 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
-from reconciliator.normalizers.relators import normalize_role
-from reconciliator.vocabularies import (
-    extract_concept_id,
-    normalize_subject_vocabulary,
-    resolve_subject_concept_id,
-)
 from reconciliator.models import (
-    AgentEntity,
+AgentEntity,
     CarrierType,
     ContributionEntity,
+    EntityKey,
     ExpressionContentType,
     ExpressionEntity,
     IdentifierEntity,
@@ -33,6 +29,7 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MediumOfPerformance,
+    RecordOrigin,
     TargetRecord,
     WorkEntity,
     WorkRelationship,
@@ -46,11 +43,54 @@ from reconciliator.normalizers.blocking import (
     compute_title_stem,
     compute_work_blocking_key,
 )
+from reconciliator.normalizers.relators import normalize_role
 from reconciliator.template import WEMISerializationEngine
+from reconciliator.vocabularies import (
+    detect_vocabulary,
+    extract_concept_id,
+    normalize_subject_vocabulary,
+    resolve_subject_concept_id,
+)
 
 logger = logging.getLogger(__name__)
 
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}
+
+
+def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
+    """Derive a stable identifier from a record's own content.
+
+    Records lacking a control number previously got a uuid4, which changes on
+    every ingest: the same record re-harvested became a different work, agent,
+    expression and manifestation, and no index key built from its URI could
+    survive a rebuild. Digesting the record's canonical XML instead makes the
+    identifier a function of the data, so re-ingesting is idempotent.
+
+    Two genuinely identical records collapse onto one id, which is the correct
+    outcome for a record that carries no identifier of its own.
+
+    The digest is taken over the record's fields rather than its serialization,
+    so it does not shift with whitespace, attribute order, or whether a source
+    writes the MARC namespace with a prefix.
+    """
+    parts: list[str] = []
+    for child in record_elem:
+        tag = etree.QName(child).localname if isinstance(child.tag, str) else str(child.tag)
+        if tag == "controlfield":
+            parts.append(f"C|{child.get('tag')}|{(child.text or '').strip()}")
+        elif tag == "datafield":
+            subs = "|".join(
+                f"{s.get('code')}={(s.text or '').strip()}"
+                for s in child
+                if isinstance(s.tag, str)
+            )
+            parts.append(
+                f"D|{child.get('tag')}|{child.get('ind1') or ' '}{child.get('ind2') or ' '}|{subs}"
+            )
+        elif tag == "leader":
+            parts.append(f"L|{(child.text or '').strip()}")
+    digest = hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+    return f"{prefix}:{digest}"
 
 
 def _get_subfields(elem: etree._Element, code: str) -> list[str]:
@@ -140,6 +180,33 @@ def _get_controlfield(record: etree._Element, tag: str) -> Optional[str]:
     if cf is None:
         cf = record.find(f"controlfield[@tag='{tag}']")
     return cf.text.strip() if cf is not None and cf.text else None
+
+
+def extract_marc_source_id(
+    record_elem: etree._Element,
+    id_source: str = "marc_001",
+) -> Optional[str]:
+    """Resolve the source_id of a MARCXML record without parsing the whole record.
+
+    Mirrors the resolution in parse_marc_record_elem so skip-existing filtering
+    compares the same identifiers that decomposition would later persist.
+    """
+    oai_id = record_elem.get("_oai_identifier")
+    if id_source == "oai_identifier" and oai_id:
+        return oai_id
+    if id_source == "marc_024":
+        for f in _get_datafields(record_elem, "024"):
+            v = _get_subfield(f, "a")
+            if v:
+                return v
+        return oai_id
+    f001 = _get_controlfield(record_elem, "001")
+    if f001:
+        f003 = _get_controlfield(record_elem, "003")
+        if f003 and not f001.startswith("("):
+            return f"({f003}){f001}"
+        return f001
+    return oai_id
 
 
 def parse_marc_record_elem(
@@ -605,33 +672,6 @@ def parse_marc_record_elem(
     }
 
 
-def iter_marcxml_records(file_path: Path | str, source: str = "target") -> Iterator[dict[str, Any]]:
-    """Stream MARCXML records from a file without loading entire document into memory."""
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"MARCXML file not found at: {path}")
-
-    # Iterparse <record> or <marc:record>
-    context = etree.iterparse(
-        str(path),
-        events=("end",),
-        tag=(
-            "{http://www.loc.gov/MARC21/slim}record",
-            "record",
-        ),
-    )
-
-    for _, elem in context:
-        parsed = parse_marc_record_elem(elem, source=source)
-        yield parsed
-        elem.clear()
-        parent = elem.getparent()
-        if parent is not None:
-            while elem.getprevious() is not None:
-                del parent[0]
-    del context
-
-
 def iter_marc_record_elements(
     file_path: Path | str,
 ) -> Iterator[tuple[etree._Element, int]]:
@@ -882,6 +922,7 @@ def parse_marc_items(
     record_elem: etree._Element,
     manifestation_id: int = 0,
     source: str = "target",
+    record_origin: RecordOrigin = "authority",
 ) -> list[ItemEntity]:
     """Extract Item entities from 852 and 952 fields (Koha / local holdings)."""
     items: list[ItemEntity] = []
@@ -909,6 +950,7 @@ def parse_marc_items(
                 item_uri=f"urn:item:{source}:{item_id}",
                 source=source,
                 source_id=item_id,
+                record_origin=record_origin,
                 holding_organization=org,
                 shelf_mark=call_no,
                 barcode=barcode,
@@ -931,6 +973,7 @@ def parse_marc_items(
                     item_uri=f"urn:item:{source}:{item_id}",
                     source=source,
                     source_id=item_id,
+                    record_origin=record_origin,
                     holding_organization=org,
                     shelf_mark=call_no,
                     barcode=barcode,
@@ -941,16 +984,390 @@ def parse_marc_items(
     return items
 
 
+def is_marc_authority_record(record_elem: etree._Element) -> bool:
+    """Determine whether a MARCXML element represents a MARC 21 Authority record.
+
+    A MARC 21 Authority record has Leader/06 == 'z'. If leader is missing or short,
+    it is considered an authority record if it has an established 1xx heading
+    (100, 110, 111, 130, 147, 148, 150, 151, 155) and NO 245 title statement
+    (which is mandatory in MARC 21 bibliographic records).
+    """
+    leader_elem = record_elem.find("marc:leader", MARC_NS)
+    if leader_elem is None:
+        leader_elem = record_elem.find(".//leader")
+    ldr = (leader_elem.text or "") if leader_elem is not None else ""
+    if len(ldr) > 6 and ldr[6].lower() == "z":
+        return True
+
+    # Heuristic fallback: bibliographic records require 245, authority records never have 245
+    has_245 = bool(_get_datafields(record_elem, "245"))
+    if not has_245:
+        authority_tags = {"100", "110", "111", "130", "147", "148", "150", "151", "155"}
+        for tag in authority_tags:
+            if _get_datafields(record_elem, tag):
+                return True
+    return False
+
+
+def decompose_marc_authority(
+    record_elem: etree._Element,
+    source: str = "authority",
+    id_source: str = "marc_001",
+    record_origin: RecordOrigin = "authority",
+    serialization_engine: Optional[WEMISerializationEngine] = None,
+) -> tuple[
+    list[WorkEntity],
+    list[ExpressionEntity],
+    list[ManifestationEntity],
+    list[ItemEntity],
+    list[AgentEntity],
+    list[WorkRelationship],
+    list[IdentifierEntity],
+    list[ManifestationExpressionAssociation],
+    list[MediumOfPerformance],
+    list[ContributionEntity],
+]:
+    """Decompose a MARC 21 Authority record (Leader/06 = 'z') into WEMI domain entities.
+
+    Extracts:
+    - Work authorities (130 Uniform Title, or 100/110/111 with $t Author/Title):
+      creates WorkEntity and canonical ExpressionEntity, with variant titles from 4xx,
+      work relationships from 5xx, medium of performance from 382, and standard identifiers from 024.
+    - Agent authorities (100/110/111 without $t):
+      creates AgentEntity with dates, variant names (4xx), affiliations (373), and standard identifiers from 024.
+    """
+    # 1. Resolve source_id
+    source_id: Optional[str] = None
+    if id_source == "marc_001":
+        source_id = _get_controlfield(record_elem, "001")
+    elif id_source == "marc_024":
+        for f in _get_datafields(record_elem, "024"):
+            v = _get_subfield(f, "a")
+            if v:
+                source_id = v
+                break
+
+    if not source_id or source_id == "unknown_id":
+        source_id = derive_content_id(record_elem, prefix="auth")
+
+    # 2. Extract standard identifiers from 024 and 035
+    raw_identifiers: list[tuple[str, str]] = []
+    for f in _get_datafields(record_elem, "024"):
+        val = _get_subfield(f, "a")
+        scheme = (_get_subfield(f, "2") or "other").lower().strip()
+        if val:
+            raw_identifiers.append((scheme, val))
+    for f in _get_datafields(record_elem, "035"):
+        val = _get_subfield(f, "a")
+        if val:
+            raw_identifiers.append(("control_number", val))
+
+    # 3. Detect heading tags
+    f130 = _get_datafields(record_elem, "130")
+    f100 = _get_datafields(record_elem, "100")
+    f110 = _get_datafields(record_elem, "110")
+    f111 = _get_datafields(record_elem, "111")
+
+    is_work_authority = bool(f130) or any(
+        _get_subfield(f, "t") is not None for f in (f100 + f110 + f111)
+    )
+
+    if is_work_authority:
+        # -------------------------------------------------------------
+        # Work Authority (130 Uniform title, or 100/110/111 with $t)
+        # -------------------------------------------------------------
+        heading_field: etree._Element
+        agent_field: Optional[etree._Element] = None
+        if f130:
+            heading_field = f130[0]
+            title = _get_subfield(heading_field, "a") or "Untitled Work"
+        else:
+            cand_heading = (f100 or f110 or f111)[0]
+            heading_field = cand_heading
+            title = _get_subfield(heading_field, "t") or "Untitled Work"
+            agent_field = cand_heading
+
+        # Clean trailing punctuation
+        title = title.rstrip(" ./,")
+
+        agents_list: list[AgentEntity] = []
+        contributions: list[ContributionEntity] = []
+        if agent_field is not None:
+            agent_name = _get_subfield(agent_field, "a")
+            if agent_name:
+                agent_name_clean = agent_name.rstrip(" ./,")
+                agent_dates = _get_subfield(agent_field, "d")
+                b_yr, d_yr = parse_marc_dates(agent_dates)
+                sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
+                agent_uri = sub0 or f"urn:agent:{source}:{source_id}:1"
+                agent = AgentEntity(
+                    agent_uri=agent_uri,
+                    source=source,
+                    source_id=source_id,
+                    record_origin=record_origin,
+                    name=agent_name_clean,
+                    name_normalized=agent_name_clean.strip().lower(),
+                    surname=agent_name_clean.split(",")[0].strip() if "," in agent_name_clean else None,
+                    dates=agent_dates,
+                    birth_year=b_yr,
+                    death_year=d_yr,
+                    fuller_name=_get_subfield(agent_field, "q"),
+                    is_personal=bool(f100),
+                )
+                agents_list.append(agent)
+                contributions.append(
+                    ContributionEntity(
+                        entity_type="work",
+                        entity_id=0,
+                        agent_id=0,
+                        agent_uri=agent_uri,
+                        role="aut",
+                        is_primary=True,
+                    )
+                )
+
+        # Language from 377 $a
+        orig_lang: Optional[str] = None
+        for f in _get_datafields(record_elem, "377"):
+            orig_lang = _get_subfield(f, "a")
+            if orig_lang:
+                break
+
+        # Work type from 380 or leader
+        work_type = determine_work_type(record_elem)
+
+        # Medium of performance from 382
+        mops: list[MediumOfPerformance] = []
+        for f in _get_datafields(record_elem, "382"):
+            h = _get_subfield(f, "a")
+            if h:
+                uri = _get_subfield(f, "0") or f"urn:mop:{h}"
+                mops.append(MediumOfPerformance(work_id=0, medium_uri=uri, label=h))
+
+        # Variant titles from 4xx
+        variant_titles: list[str] = []
+        for f in _get_datafields(record_elem, "430"):
+            vt = _get_subfield(f, "a")
+            if vt:
+                variant_titles.append(vt.rstrip(" ./,"))
+        for tag in ("400", "410", "411"):
+            for f in _get_datafields(record_elem, tag):
+                vt = _get_subfield(f, "t")
+                if vt:
+                    variant_titles.append(vt.rstrip(" ./,"))
+
+        # Relationships from 5xx
+        relationships: list[WorkRelationship] = []
+        for tag in ("500", "510", "511", "530"):
+            for f in _get_datafields(record_elem, tag):
+                rel_text = _get_subfield(f, "i") or ""
+                w_code = _get_subfield(f, "w") or ""
+                rel_type = "adaptation_of"
+                if "continues" in rel_text.lower() or w_code == "a":
+                    rel_type = "continues"
+                elif "continued by" in rel_text.lower() or w_code == "b":
+                    rel_type = "continued_by"
+                elif "expansion" in rel_text.lower():
+                    rel_type = "expansion_of"
+                elif "reproduction" in rel_text.lower():
+                    rel_type = "reproduction_of"
+                relationships.append(
+                    WorkRelationship(
+                        source_work_id=0,
+                        target_work_id=0,
+                        relationship_type=rel_type,  # type: ignore[arg-type]
+                    )
+                )
+
+        # URI & Identifiers
+        work_uri: Optional[str] = None
+        identifiers: list[IdentifierEntity] = []
+        for scheme, val in raw_identifiers:
+            norm = val.replace("-", "").strip().lower()
+            if not work_uri and (scheme in ("uri", "urn", "asteri") or val.startswith(("http://", "https://", "urn:"))):
+                work_uri = val
+            identifiers.append(
+                IdentifierEntity(
+                    entity_type="work",
+                    entity_id=0,
+                    scheme=scheme,
+                    value=val,
+                    value_normalized=norm,
+                )
+            )
+        if not work_uri:
+            work_uri = f"urn:work:{source}:{source_id}"
+
+        for ident in identifiers:
+            if not ident.entity_uri and ident.entity_type == "work":
+                ident.entity_uri = work_uri
+        for contrib in contributions:
+            if not contrib.entity_uri and contrib.entity_type == "work":
+                contrib.entity_uri = work_uri
+
+        # Build WorkEntity
+        work = WorkEntity(
+            work_uri=work_uri,
+            source=source,
+            source_id=source_id,
+            record_origin=record_origin,
+            title=title,
+            title_normalized=compute_title_stem(title, lang=orig_lang),
+            original_language=orig_lang,
+            work_type=work_type,
+            subjects_json=variant_titles,
+        )
+
+        # Build canonical ExpressionEntity
+        expr_lang = orig_lang or "und"
+        expression = ExpressionEntity(
+            work_id=0,
+            expression_uri=f"urn:exp:{source}:{source_id}:{expr_lang}",
+            source=source,
+            source_id=source_id,
+            record_origin=record_origin,
+            language=expr_lang,
+            content_type="text",
+            title=title,
+        )
+
+        engine = serialization_engine or WEMISerializationEngine()
+        work.serialized_text = engine.render_work(work, authors=[{"name": a.name} for a in agents_list])
+        expression.serialized_text = engine.render_expression(expression, work_title=work.title)
+
+        return (
+            [work],
+            [expression],
+            [],
+            [],
+            agents_list,
+            relationships,
+            identifiers,
+            [],
+            mops,
+            contributions,
+        )
+
+    elif f100 or f110 or f111:
+        # -------------------------------------------------------------
+        # Agent Authority (100 Personal, 110 Corporate, 111 Meeting)
+        # -------------------------------------------------------------
+        agent_field = (f100 or f110 or f111)[0]
+        agent_name = _get_subfield(agent_field, "a") or "Unknown Agent"
+        agent_name_clean = agent_name.rstrip(" ./,")
+        agent_dates = _get_subfield(agent_field, "d")
+        birth_yr, death_yr = parse_marc_dates(agent_dates)
+
+        # Check 046 for birth/death dates
+        if birth_yr is None or death_yr is None:
+            for f in _get_datafields(record_elem, "046"):
+                f_b = _get_subfield(f, "f")
+                f_d = _get_subfield(f, "g")
+                if f_b and birth_yr is None:
+                    birth_yr = int(f_b[:4]) if f_b[:4].isdigit() else None
+                if f_d and death_yr is None:
+                    death_yr = int(f_d[:4]) if f_d[:4].isdigit() else None
+
+        # Variant names from 400, 410, 411
+        variant_names: list[str] = []
+        for tag in ("400", "410", "411"):
+            for f in _get_datafields(record_elem, tag):
+                v = _get_subfield(f, "a")
+                if v:
+                    variant_names.append(v.rstrip(" ./,"))
+
+        # Affiliations from 373
+        affiliations: dict[str, int] = {}
+        for f in _get_datafields(record_elem, "373"):
+            aff = _get_subfield(f, "a")
+            if aff:
+                affiliations[aff] = affiliations.get(aff, 0) + 1
+
+        # Identifiers & Agent URI
+        agent_uri: Optional[str] = None
+        orcid: Optional[str] = None
+        identifiers: list[IdentifierEntity] = []
+        for scheme, val in raw_identifiers:
+            norm = val.replace("-", "").strip().lower()
+            if scheme == "orcid" or "orcid.org" in val:
+                orcid = val
+            if not agent_uri and (scheme in ("isni", "viaf", "uri", "urn", "asteri") or val.startswith(("http://", "https://", "urn:"))):
+                agent_uri = val
+            identifiers.append(
+                IdentifierEntity(
+                    entity_type="agent",
+                    entity_id=0,
+                    scheme=scheme,
+                    value=val,
+                    value_normalized=norm,
+                )
+            )
+
+        # Authority headings carry their own $0/$1 links; keep them as identifiers
+        # so reconciliation can transfer them, not just the one chosen as agent_uri.
+        for sub_code in ("0", "1"):
+            for uri in _get_subfields(agent_field, sub_code):
+                if not uri or any(i.value == uri for i in identifiers):
+                    continue
+                if not agent_uri:
+                    agent_uri = uri
+                scheme = (
+                    detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")
+                ).lower()
+                identifiers.append(
+                    IdentifierEntity(
+                        entity_type="agent",
+                        entity_id=0,
+                        scheme=scheme,
+                        value=uri,
+                        value_normalized=uri.replace("-", "").strip().lower(),
+                    )
+                )
+
+        if not agent_uri:
+            sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
+            agent_uri = sub0 or f"urn:agent:{source}:{source_id}"
+
+        for ident in identifiers:
+            if ident.entity_type == "agent" and not ident.entity_uri:
+                ident.entity_uri = agent_uri
+
+        agent = AgentEntity(
+            agent_uri=agent_uri,
+            source=source,
+            source_id=source_id,
+            record_origin=record_origin,
+            name=agent_name_clean,
+            name_normalized=agent_name_clean.strip().lower(),
+            surname=agent_name_clean.split(",")[0].strip() if "," in agent_name_clean else None,
+            dates=agent_dates,
+            birth_year=birth_yr,
+            death_year=death_yr,
+            fuller_name=_get_subfield(agent_field, "q"),
+            is_personal=bool(f100),
+            orcid=orcid,
+            variant_names=variant_names,
+            affiliation_counts=affiliations,
+        )
+
+        return ([], [], [], [], [agent], [], identifiers, [], [], [])
+
+    # Subject/topical/form authority without work or agent heading
+    return ([], [], [], [], [], [], [], [], [], [])
+
+
 def decompose_marc_wemi(
     record_elem: etree._Element,
     source: str = "melinda",
     id_source: str = "marc_001",
     include_items: bool = False,
+    record_origin: Optional[RecordOrigin | str] = None,
     serialization_engine: Optional[WEMISerializationEngine] = None,
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
+    key_sink: Optional[list[EntityKey]] = None,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -963,7 +1380,16 @@ def decompose_marc_wemi(
     list[MediumOfPerformance],
     list[ContributionEntity],
 ]:
-    """Decompose a single MARCXML record into the WEMI entity core hierarchy."""
+    """Decompose a single MARCXML record into the WEMI entity core hierarchy.
+
+    `key_sink`, when given, collects the record's derived domain blocking keys as
+    `EntityKey` rows bound to the manifestation URI. It is a sink rather than an
+    eleventh tuple element so that adding it does not break the ten-way unpacking
+    at every existing call site; the tuple is slated to become a result object.
+    """
+    # record_origin names the ingest source since Phase 13. An explicit value
+    # wins; otherwise the source name is the origin.
+    effective_origin: RecordOrigin = record_origin or source or "unknown"
     parsed = parse_marc_record_elem(
         record_elem,
         source=source,
@@ -975,9 +1401,9 @@ def decompose_marc_wemi(
     )
     source_id = parsed["source_id"]
     if not source_id or source_id == "unknown_id":
-        source_id = f"unknown_id_{uuid.uuid4()}"
+        source_id = derive_content_id(record_elem)
         logger.warning(
-            "MARCXML record in source '%s' is missing an identifier; assigned unique fallback '%s'",
+            "MARCXML record in source '%s' carries no control number; derived '%s' from its content",
             source,
             source_id,
         )
@@ -1023,8 +1449,11 @@ def decompose_marc_wemi(
         work_uri=work_uri,
         source=source,
         source_id=source_id,
+        record_origin=effective_origin,
         title=preferred_title,
-        title_normalized=preferred_title.lower(),
+        # Must use the same stem normalization as the BIBFRAME and Wikidata
+        # decomposers, otherwise stem-based work lookup cannot find MARC records.
+        title_normalized=compute_title_stem(preferred_title, lang=orig_lang),
         original_title=parsed.get("original_title"),
         original_language=orig_lang,
         work_type=work_type,
@@ -1040,6 +1469,7 @@ def decompose_marc_wemi(
         expression_uri=expression_uri,
         source=source,
         source_id=source_id,
+        record_origin=effective_origin,
         language=lang,
         content_type=content_type,
         title=parsed["title"],
@@ -1059,8 +1489,9 @@ def decompose_marc_wemi(
         manifestation_uri=manifestation_uri,
         source=source,
         source_id=source_id,
+        record_origin=effective_origin,
         title=parsed["title"],
-        title_normalized=parsed["title"].lower(),
+        title_normalized=compute_title_stem(parsed["title"], lang=parsed.get("language")),
         subtitle=parsed.get("subtitle"),
         publication_year=pub_year,
         publisher=parsed.get("publisher"),
@@ -1083,7 +1514,9 @@ def decompose_marc_wemi(
 
     # 5. Items
     items = (
-        parse_marc_items(record_elem, manifestation_id=0, source=source) if include_items else []
+        parse_marc_items(record_elem, manifestation_id=0, source=source, record_origin=effective_origin)
+        if include_items
+        else []
     )
 
     # 6. Identifiers
@@ -1226,21 +1659,10 @@ def decompose_marc_wemi(
             )
         )
 
-    # 7. Contributions
+    # 7. Contributions are emitted alongside the agents below, where each agent's
+    # URI is known, so they can be bound to the right agent and the right work.
     contributions: list[ContributionEntity] = []
     work_roles = {"aut", "cmp", "drt", "cre", "dsr", "prg", "arc"}
-    for a in parsed["agents"]:
-        role = a.get("role") or "aut"
-        e_type = "work" if role in work_roles else "expression"
-        contributions.append(
-            ContributionEntity(
-                entity_type=e_type,
-                entity_id=0,
-                agent_id=0,
-                role=role,
-                is_primary=(role in ("aut", "cmp")),
-            )
-        )
 
     # 8. Work Relationships
     relationships: list[WorkRelationship] = []
@@ -1313,6 +1735,8 @@ def decompose_marc_wemi(
             AgentEntity(
                 agent_uri=a_uri,
                 source=source,
+                source_id=source_id,
+                record_origin=effective_origin,
                 name=a_name,
                 name_normalized=norm_name,
                 surname=a.get("surname"),
@@ -1332,6 +1756,85 @@ def decompose_marc_wemi(
             )
         )
 
+        role = a.get("role") or "aut"
+        is_work_role = role in work_roles
+        contributions.append(
+            ContributionEntity(
+                entity_type="work" if is_work_role else "expression",
+                entity_id=0,
+                agent_id=0,
+                entity_uri=work.work_uri if is_work_role else expression.expression_uri,
+                agent_uri=a_uri,
+                role=role,
+                is_primary=(role in ("aut", "cmp")),
+            )
+        )
+
+        # Persist every authority URI carried on the agent. a_uri only holds the
+        # first one, so without these rows the remaining $0/$1 links are lost at
+        # ingest and can never be transferred during reconciliation.
+        for sub_code, uri_list in (("0", u0), ("1", u1)):
+            for uri in uri_list:
+                if not uri:
+                    continue
+                scheme = (detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")).lower()
+                identifiers.append(
+                    IdentifierEntity(
+                        entity_type="agent",
+                        entity_id=0,
+                        entity_uri=a_uri,
+                        scheme=scheme,
+                        value=uri,
+                        value_normalized=uri.replace("-", "").strip().lower(),
+                    )
+                )
+        if a.get("orcid"):
+            orcid_val = str(a["orcid"])
+            identifiers.append(
+                IdentifierEntity(
+                    entity_type="agent",
+                    entity_id=0,
+                    entity_uri=a_uri,
+                    scheme="orcid",
+                    value=orcid_val,
+                    value_normalized=orcid_val.replace("-", "").strip().lower(),
+                )
+            )
+
+    # Bind non-agent identifiers to their owning entity by URI so that a batch
+    # holding several records does not attribute them all to the first one.
+    _owner_uris: dict[str, Optional[str]] = {
+        "work": work.work_uri,
+        "expression": expression.expression_uri,
+        "manifestation": manifestation.manifestation_uri,
+    }
+    for ident in identifiers:
+        if not ident.entity_uri:
+            ident.entity_uri = _owner_uris.get(ident.entity_type)
+
+    if key_sink is not None:
+        _agents = parsed.get("agents") or []
+        _author_key = compute_author_key(
+            _agents[0]["name"] if _agents else None,
+            _agents[0].get("surname") if _agents else None,
+        )
+        _title_stem = compute_title_stem(
+            parsed.get("uniform_title") or parsed.get("title"), lang=parsed.get("language")
+        )
+        for key_type, values in derive_domain_keys(
+            record_elem, parsed, work_type, _author_key, _title_stem
+        ).items():
+            for value in values:
+                key_sink.append(
+                    EntityKey(
+                        entity_type="manifestation",
+                        entity_id=0,
+                        key_type=key_type,
+                        key_value=value,
+                        entity_uri=manifestation.manifestation_uri,
+                    )
+                )
+
     return (
         work,
         expression,
@@ -1344,6 +1847,111 @@ def decompose_marc_wemi(
         mops,
         contributions,
     )
+
+
+# Analytics are (title, creator) pairs but entity_keys stores one string per row,
+# so the pair is JSON-encoded. A control-character separator was tried first and
+# rejected: Python counts U+001C-U+001F as whitespace, so `.strip()` silently ate
+# it. JSON survives stripping, stays readable in the database, and cannot be
+# confused with subfield text whatever punctuation the title carries.
+def encode_analytic(title: str, creator: Optional[str]) -> str:
+    """Encode a constituent-work (title, creator) pair as one key value."""
+    return json.dumps([title, creator], ensure_ascii=False)
+
+
+def decode_analytic(value: str) -> tuple[str, Optional[str]]:
+    """Decode a key value written by `encode_analytic`."""
+    try:
+        title, creator = json.loads(value)
+    except (ValueError, TypeError):
+        return value, None
+    return title, creator
+
+
+def extract_marc_analytics(record_elem: etree._Element) -> list[tuple[str, Optional[str]]]:
+    """Extract constituent works (title, creator) from 700 $t / 710 $t / 505 $t.
+
+    Lives here rather than in the matcher so the record is parsed once, at
+    ingest, instead of once per record per match attempt.
+    """
+    analytics: list[tuple[str, Optional[str]]] = []
+    for df in _get_datafields(record_elem, "700"):
+        title = _get_subfield(df, "t")
+        if title and title.strip():
+            creator = _get_subfield(df, "a")
+            analytics.append((title.strip(), creator.strip() if creator else None))
+    for df in _get_datafields(record_elem, "710"):
+        title = _get_subfield(df, "t")
+        if title and title.strip():
+            creator = _get_subfield(df, "a")
+            analytics.append((title.strip(), creator.strip() if creator else None))
+    for df in _get_datafields(record_elem, "505"):
+        for value in _get_subfields(df, "t"):
+            if value:
+                analytics.append((value, None))
+    return analytics
+
+
+def derive_domain_keys(
+    record_elem: etree._Element,
+    parsed: dict[str, Any],
+    work_type: str,
+    author_key: Optional[str],
+    title_stem: Optional[str],
+) -> dict[str, list[str]]:
+    """Derive every domain blocking key for one MARC record.
+
+    Single definition of the key bag, shared by the staged `TargetRecord` and by
+    the `entity_keys` rows written at ingest, so the two cannot drift apart.
+    """
+    keys: dict[str, list[str]] = {}
+
+    def _add(key_type: str, val: Optional[str]) -> None:
+        if val and str(val).strip():
+            clean = str(val).strip()
+            bucket = keys.setdefault(key_type, [])
+            if clean not in bucket:
+                bucket.append(clean)
+
+    idents = parsed.get("identifiers") or {}
+    first_issn = (idents.get("issn") or [None])[0]
+    first_isbn = (idents.get("isbn") or [None])[0]
+
+    uniform_title = parsed.get("uniform_title")
+    title = parsed.get("title")
+    agents = parsed.get("agents") or []
+    author_surname = agents[0].get("surname") if agents else None
+
+    _add("work", compute_work_blocking_key(author_key, title_stem))
+
+    if work_type == "music":
+        _add("music_work", compute_music_work_key(author_key, uniform_title or title))
+
+    _add("series", compute_series_key(parsed.get("series_title"), first_issn))
+    _add("standard", first_isbn or first_issn)
+
+    pub_year = None
+    py_raw = parsed.get("publication_year") or ""
+    if str(py_raw).isdigit():
+        pub_year = int(py_raw)
+
+    start_page = None
+    for f in _get_datafields(record_elem, "773"):
+        q = _get_subfield(f, "q")
+        if q:
+            start_page = q
+            break
+    _add("citation", compute_host_citation_key(first_issn, pub_year, start_page, author_surname))
+
+    _add("patent", (idents.get("patent_number") or [None])[0])
+    _add("fingerprint", (idents.get("fingerprint") or [None])[0])
+    _add("geodata_spatial", (parsed.get("cartographic_coordinates") or [None])[0])
+    _add("heritage_model", (parsed.get("digital_file_formats") or [None])[0])
+
+    for a_title, a_creator in extract_marc_analytics(record_elem):
+        _add("analytic", encode_analytic(a_title, a_creator))
+
+    return keys
 
 
 def build_target_record_from_marc(
@@ -1380,24 +1988,6 @@ def build_target_record_from_marc(
 
     # Title stem
     title_stem = compute_title_stem(uniform_title or title, lang=lang)
-    work_blocking_key = compute_work_blocking_key(author_key, title_stem)
-
-    # Music work key
-    music_key = None
-    if work_type == "music":
-        music_key = compute_music_work_key(author_key, uniform_title or title)
-
-    # Series key
-    first_issn = (
-        parsed["identifiers"].get("issn", [None])[0] if parsed["identifiers"].get("issn") else None
-    )
-    series_key = compute_series_key(parsed.get("series_title"), first_issn)
-
-    # Standard key
-    first_isbn = (
-        parsed["identifiers"].get("isbn", [None])[0] if parsed["identifiers"].get("isbn") else None
-    )
-    standard_key = first_isbn or first_issn
 
     # Publication year
     pub_year = None
@@ -1405,37 +1995,11 @@ def build_target_record_from_marc(
     if py_raw.isdigit():
         pub_year = int(py_raw)
 
-    # Host citation key
     is_component = bool(_get_datafields(record_elem, "773"))
-    start_page = None
-    for f in _get_datafields(record_elem, "773"):
-        q = _get_subfield(f, "q")
-        if q:
-            start_page = q
-            break
-    host_citation = compute_host_citation_key(first_issn, pub_year, start_page, author_surname)
 
-    # Domain-specific keys
-    first_fp = (
-        parsed["identifiers"].get("fingerprint", [None])[0]
-        if parsed["identifiers"].get("fingerprint")
-        else None
-    )
-    first_pat = (
-        parsed["identifiers"].get("patent_number", [None])[0]
-        if parsed["identifiers"].get("patent_number")
-        else None
-    )
-    first_coords = (
-        parsed.get("cartographic_coordinates", [None])[0]
-        if parsed.get("cartographic_coordinates")
-        else None
-    )
-    first_3d = (
-        parsed.get("digital_file_formats", [None])[0]
-        if parsed.get("digital_file_formats")
-        else None
-    )
+    # One shared derivation, so the staged record and the persisted entity_keys
+    # rows cannot drift apart.
+    keys = derive_domain_keys(record_elem, parsed, work_type, author_key, title_stem)
 
     # Pre-render serializations
     engine = serialization_engine or WEMISerializationEngine()
@@ -1459,18 +2023,10 @@ def build_target_record_from_marc(
         language=lang,
         author_key=author_key,
         title_stem=title_stem,
-        work_blocking_key=work_blocking_key,
-        music_work_key=music_key,
-        series_key=series_key,
-        standard_key=standard_key,
-        patent_key=first_pat,
-        fingerprint_key=first_fp,
-        geodata_spatial_key=first_coords,
-        heritage_model_key=first_3d,
+        keys=keys,
         year=pub_year,
         volume_designation=parsed.get("volume_designation"),
         is_component=is_component,
-        host_citation_key=host_citation,
         serialized_work=work.serialized_text,
         serialized_expression=expression.serialized_text,
         serialized_manifestation=manifestation.serialized_text,

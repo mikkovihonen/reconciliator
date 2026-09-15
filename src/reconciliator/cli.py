@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import IO, Any, Iterator, Optional
@@ -45,7 +46,7 @@ from reconciliator.loaders.marcxml import (
     iter_marc_record_elements,
     parse_marc_record_elem,
 )
-from reconciliator.matcher import ReconciliationEngine, WorkMatcher
+from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
@@ -81,7 +82,7 @@ from reconciliator.reports import (
     SubjectReportRow,
     WorkReportRow,
 )
-from reconciliator.repository import AuthorityStore, CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 from reconciliator.vocab_folding import VocabFolder
 from reconciliator.vocab_store import VocabStore
 from reconciliator.vocabularies import detect_vocabulary
@@ -91,6 +92,7 @@ app = typer.Typer(
     help="Reconciliator: High-Performance Finnish Bibliographic Authority Reconciliation Engine"
 )
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def _resolve_cli_config(config: Path | str) -> Path:
@@ -106,57 +108,27 @@ def reset_cmd(
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
-    all_components: bool = typer.Option(
-        False,
-        "--all",
-        "-a",
-        help="Reset all storage (authority.db, vocab.db, progress.db, corpus_db, vector indices)",
-    ),
-    authority: bool = typer.Option(
-        False, "--authority", help="Reset authority.db and vector indices only"
-    ),
-    vocab: bool = typer.Option(False, "--vocab", help="Reset vocab.db only"),
-    progress: bool = typer.Option(False, "--progress", help="Reset progress.db only"),
-    corpus: bool = typer.Option(False, "--corpus", help="Reset corpus staging database only"),
-    daemon: bool = typer.Option(
-        False, "--daemon", help="Reset and terminate the vector daemon service"
-    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
-    """Reset configured databases and vector indices."""
+    """Reset all storage: authority.db, vocab.db, progress.db, the corpus database,
+    every vector index, and the vector daemon.
+
+    Partial resets left the stores inconsistent with each other - an authority.db
+    rebuilt without its corpus database, or indices outliving the rows they point
+    at - so reset is all or nothing.
+    """
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
 
-    # Determine which components to reset
-    if all_components or not (authority or vocab or progress or corpus or daemon):
-        reset_auth = True
-        reset_voc = True
-        reset_prog = True
-        reset_corp = True
-        reset_daemon = True
-    else:
-        reset_auth = authority
-        reset_voc = vocab
-        reset_prog = progress
-        reset_corp = corpus
-        reset_daemon = daemon or authority
-
     if not yes:
-        confirm = typer.confirm("Are you sure you want to reset the specified storage?")
+        confirm = typer.confirm("Reset all databases and vector indices?")
         if not confirm:
             console.print("[yellow]Reset aborted.[/yellow]")
             raise typer.Abort()
 
-    reset_all_storage(
-        storage_config=cfg.storage,
-        reset_authority=reset_auth,
-        reset_vocab=reset_voc,
-        reset_progress=reset_prog,
-        reset_corpus=reset_corp,
-        reset_daemon=reset_daemon,
-    )
-    console.print("[green]Successfully reset specified storage.[/green]")
+    reset_all_storage(storage_config=cfg.storage)
+    console.print("[green]Successfully reset all storage.[/green]")
 
 
 @app.command("status")
@@ -675,17 +647,27 @@ def ingest_oai_cmd(
     workers: Optional[int] = typer.Option(
         None, "--workers", "-w", help="Override number of harvest workers"
     ),
-    normalization_workers: Optional[int] = typer.Option(
-        None, "--normalization-workers", help="Override number of normalization workers"
+    slice_days: Optional[int] = typer.Option(
+        None, "--slice-days", help="Override the width in days of each concurrent date slice"
     ),
     skip_existing: bool = typer.Option(
         False,
         "--skip-existing",
-        "--resume",
-        help="Skip records that have already been embedded and indexed in authority storage",
+        help="Skip individual records already stored for this source",
+    ),
+    restart: bool = typer.Option(
+        False,
+        "--restart",
+        help="Ignore the saved harvest checkpoint and re-harvest the source from the start",
     ),
 ) -> None:
-    """Harvest or read authority records from configured OAI-PMH/XML sources."""
+    """Harvest or read authority records from configured OAI-PMH/XML sources.
+
+    An interrupted OAI-PMH harvest resumes from its saved checkpoint by default,
+    and a source that previously completed is harvested incrementally. Use
+    --restart to discard that checkpoint. --skip-existing filters individual
+    records instead, and is independent of harvest checkpointing.
+    """
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
@@ -716,19 +698,10 @@ def ingest_oai_cmd(
         )
         raise typer.Exit(code=1)
 
+    # Decomposition folds legacy subject headings and normalizes relator codes, so
+    # ingest needs the same vocabulary store and relator mappings reconcile uses.
     vocab_store = VocabStore(cfg.storage.vocab_db)
-    vocab_cfg = (
-        cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
-    ) or cfg.normalization.vocab
-    vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
-    embedder = SentenceEmbedder(cfg.embedding)
-    store = AuthorityStore(
-        cfg.storage.authority_db,
-        cfg.storage.index_path,
-        dimension=embedder.dimension,
-        vector_engine_config=cfg.storage.vector_engine,
-    )
-
+    relator_mappings = getattr(cfg.normalization.record, "relator_mappings", None)
     for src_name, src_cfg in targets.items():
         if isinstance(from_date, str):
             src_cfg.from_date = from_date
@@ -736,15 +709,8 @@ def ingest_oai_cmd(
             src_cfg.until_date = until_date
         if isinstance(workers, int):
             src_cfg.workers = workers
-        if isinstance(normalization_workers, int):
-            src_cfg.normalization_workers = normalization_workers
-
-        src_norm_cfg = src_cfg.normalization or cfg.normalization.record
-        normalizer = RecordNormalizer(
-            vocab_folder=vocab_folder,
-            template_engine=embedder.template_engine,
-            config=src_norm_cfg,
-        )
+        if isinstance(slice_days, int):
+            src_cfg.slice_days = slice_days
 
         tracker = ProgressTracker(
             db_path=cfg.storage.progress_db,
@@ -754,55 +720,17 @@ def ingest_oai_cmd(
         )
 
         console.print(f"[cyan]Ingesting authority records from source '{src_name}'...[/cyan]")
-        if src_cfg.target_database == "corpus" or (
-            isinstance(src_cfg.target_database, Path)
-            and src_cfg.target_database == cfg.storage.corpus_db
-        ):
-            from reconciliator.repository import CorpusRepository
-
-            corpus_repo = CorpusRepository(cfg.storage.corpus_db)
-            total = ingest_oai_pipeline(
-                source_name=src_name,
-                config=src_cfg,
-                store=corpus_repo,
-                tracker=tracker,
-                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-            )
-        elif src_cfg.target_database == "authority" or (
-            isinstance(src_cfg.target_database, Path)
-            and src_cfg.target_database == cfg.storage.authority_db
-        ):
-            from reconciliator.repository import WEMIRepository
-
-            wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
-            total = ingest_oai_pipeline(
-                source_name=src_name,
-                config=src_cfg,
-                store=wemi_repo,
-                tracker=tracker,
-                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-            )
-        elif isinstance(src_cfg.target_database, Path):
-            from reconciliator.repository import CorpusRepository
-
-            corpus_repo = CorpusRepository(src_cfg.target_database)
-            total = ingest_oai_pipeline(
-                source_name=src_name,
-                config=src_cfg,
-                store=corpus_repo,
-                tracker=tracker,
-                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-            )
-        else:
-            total = ingest_oai_pipeline(
-                source_name=src_name,
-                config=src_cfg,
-                store=store,
-                normalizer=normalizer,
-                embedder=embedder,
-                tracker=tracker,
-                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-            )
+        wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+        total = ingest_oai_pipeline(
+            source_name=src_name,
+            config=src_cfg,
+            store=wemi_repo,
+            tracker=tracker,
+            skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
+            relator_mappings=relator_mappings,
+            vocab_store=vocab_store,
+            resume=not (bool(restart) if isinstance(restart, bool) else False),
+        )
         console.print(
             f"[green]Successfully ingested {total} records from source '{src_name}'.[/green]"
         )
@@ -829,35 +757,9 @@ def ingest_wikidata_cmd(
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
 
-    if cfg.ingest_wikidata.extract_works:
-        from reconciliator.repository import WEMIRepository
-
-        wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
-        console.print("[cyan]Streaming Wikidata entities into WEMI authority repository...[/cyan]")
-        total = ingest_wikidata_pipeline(cfg.ingest_wikidata, wemi_repo, tracker=tracker)
-    else:
-        vocab_store = VocabStore(cfg.storage.vocab_db)
-        vocab_cfg = (
-            cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
-        ) or cfg.normalization.vocab
-        vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
-        embedder = SentenceEmbedder(cfg.embedding)
-        wiki_norm_cfg = cfg.ingest_wikidata.normalization or cfg.normalization.record
-        normalizer = RecordNormalizer(
-            vocab_folder=vocab_folder,
-            template_engine=embedder.template_engine,
-            config=wiki_norm_cfg,
-        )
-        store = AuthorityStore(
-            cfg.storage.authority_db,
-            cfg.storage.index_path,
-            dimension=embedder.dimension,
-            vector_engine_config=cfg.storage.vector_engine,
-        )
-        console.print("[cyan]Streaming Wikidata entities from compressed dump...[/cyan]")
-        total = ingest_wikidata_pipeline(
-            cfg.ingest_wikidata, store, normalizer, embedder, tracker=tracker
-        )
+    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    console.print("[cyan]Streaming Wikidata entities into WEMI authority repository...[/cyan]")
+    total = ingest_wikidata_pipeline(cfg.ingest_wikidata, wemi_repo, tracker=tracker)
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
 
 
@@ -943,34 +845,31 @@ def reconcile_cmd(
         template_engine=embedder.template_engine,
         config=rec_norm_cfg,
     )
-    store = AuthorityStore(
-        cfg.storage.authority_db,
-        cfg.storage.index_path,
-        dimension=embedder.dimension,
-        vector_engine_config=cfg.storage.vector_engine,
-    )
+    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
 
-    # Verify index metadata compatibility
-    if store.indexer.total_vectors > 0:
-        store.indexer.verify_metadata(
-            expected_model=cfg.embedding.model_name,
-            expected_dimension=embedder.dimension,
-            expected_template_hash=embedder.template_hash,
-            force_template=cfg.embedding.force_template,
-        )
-
+    # Tier 3 standalone agent fallback needs the dedicated agent index; it is
+    # optional, so only load it when build-agent-index has produced one.
     agent_indexer = None
-    if r_cfg.fallback_agent_reconciliation and cfg.storage.agent_index.exists():
+    if r_cfg.fallback_agent_reconciliation and cfg.storage.agent_index:
         from reconciliator.indexer import create_vector_engine
 
-        agent_indexer = create_vector_engine(
-            cfg.storage.agent_index,
-            dimension=embedder.dimension,
-            config=cfg.storage.vector_engine,
-        )
+        try:
+            agent_indexer = create_vector_engine(
+                cfg.storage.agent_index,
+                dimension=embedder.dimension,
+                config=cfg.storage.vector_engine,
+            )
+            if getattr(agent_indexer, "total_vectors", 0) == 0:
+                agent_indexer = None
+        except Exception as exc:
+            logger.warning("Agent index unavailable, skipping agent fallback: %s", exc)
+            agent_indexer = None
 
-    engine = ReconciliationEngine(
-        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    work_matcher = WorkMatcher(
+        wemi_repo=wemi_repo,
+        embedder=embedder,
+        config=r_cfg,
+        agent_indexer=agent_indexer,
     )
     enricher = MARCXMLEnricher(vocab_folder=vocab_folder)
     reporter = ReportGenerator(config=cfg)
@@ -1076,9 +975,6 @@ def reconcile_cmd(
                 )
                 yield "marcxml", r_elem, raw_rec_item, b_offset
 
-    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
-    work_matcher = WorkMatcher(wemi_repo=wemi_repo, embedder=embedder, config=r_cfg)
-
     linkage_map: dict[str, CorpusLinkage] = {}
     work_cluster_map: dict[str, WorkCluster] = {}
     expression_cluster_map: dict[str, ExpressionCluster] = {}
@@ -1088,7 +984,7 @@ def reconcile_cmd(
         console.print(
             "[cyan]Staging target records and running intra-corpus graph clusterer...[/cyan]"
         )
-        corpus_repo = CorpusRepository(cfg.storage.corpus_db)
+        corpus_repo = wemi_repo
         staged_targets: list[TargetRecord] = []
         for rec_fmt_s, orig_payload_s, raw_rec_s, _ in _iter_records():
             staged_targets.append(
@@ -1119,7 +1015,7 @@ def reconcile_cmd(
             total_records += 1
             target_record = normalizer.normalize(raw_rec)
 
-            res = engine.reconcile_record(target_record)
+            res = work_matcher.match_target_record(target_record)
             if res.accepted_candidates:
                 reporter.matched_records += 1
 
@@ -1240,6 +1136,45 @@ def reconcile_cmd(
                         )
                     )
 
+                # An agent with no candidate URI is left untouched in the record,
+                # but must still appear in the report: without a row there is no
+                # way to tell an agent that failed to link from one never seen,
+                # and no way to measure link coverage over a corpus.
+                if not selected and not suppressed:
+                    reporter.add_agent_row(
+                        AgentReportRow(
+                            target_record_id=target_record.source_id,
+                            target_title=target_record.title,
+                            target_year=target_record.publication_year,
+                            target_isbn=target_record.identifiers.isbn[0]
+                            if target_record.identifiers.isbn
+                            else None,
+                            field_tag=field_tag,
+                            field_occurrence=idx + 1,
+                            subfield_code="0",
+                            target_heading=agent.name,
+                            target_role=", ".join(agent.role_counts.keys())
+                            if agent.role_counts
+                            else None,
+                            uri="",
+                            vocabulary="",
+                            authority_label=None,
+                            authority_record_id="",
+                            authority_source="",
+                            match_tier=match_tier,
+                            match_score=match_score,
+                            dense_score=dense_score,
+                            rerank_score=rerank_score,
+                            agent_name_score=None,
+                            action="unmatched",
+                            is_novel=False,
+                            dates=agent.dates,
+                            fuller_name=agent.fuller_name,
+                            birth_year=agent.birth_year,
+                            death_year=agent.death_year,
+                        )
+                    )
+
             # Record subject report rows
             all_subjects = target_record.subjects.all_items()
             for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
@@ -1302,10 +1237,17 @@ def reconcile_cmd(
 
             # Add WorkReportRow
             is_clustered = linkage is not None and linkage.work_cluster_id is not None
+
+            # Precedence must match the enricher's, which lets the work cluster's
+            # canonical URI win: every member of a work cluster has to carry the
+            # same work URI, and the report has to state the URI actually written.
+            # Sibling records can match different authority sources, so the
+            # record's own resolution is kept alongside as provenance.
+            record_level_w_uri = wemi_res.work_uri if wemi_res else None
             matched_w_uri = (
-                (wemi_res.work_uri if wemi_res else None)
+                (w_cluster.canonical_work_uri if w_cluster else None)
                 or (linkage.final_work_uri if linkage else None)
-                or (w_cluster.canonical_work_uri if w_cluster else None)
+                or record_level_w_uri
             )
             qid = (
                 wemi_res.matched_work.wikidata_qid if (wemi_res and wemi_res.matched_work) else None
@@ -1342,6 +1284,7 @@ def reconcile_cmd(
                     is_clustered=is_clustered,
                     cluster_id=linkage.work_cluster_id if linkage else None,
                     action=w_action,
+                    record_level_work_uri=record_level_w_uri,
                 )
             )
 
@@ -1524,6 +1467,85 @@ def reconcile_cmd(
     console.print("[green]Reconciliation complete! Emitted dual TSV report sets.[/green]")
 
 
+@app.command("consolidate-works")
+def consolidate_works_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report the groups that would be formed without writing"
+    ),
+    reset: bool = typer.Option(
+        False, "--reset", help="Discard existing consolidation before running"
+    ),
+) -> None:
+    """Consolidate work rows that different sources hold for the same work.
+
+    Each source mints its own work URI, so one work held by three catalogues is
+    three rows. This elects one canonical row per equivalence group and records
+    same_work_as edges explaining why. Nothing is deleted, and the run is
+    repeatable after ingesting further sources.
+    """
+    from reconciliator.consolidation import WorkConsolidator
+
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
+
+    # Typer's OptionInfo defaults are truthy, so guard for direct invocation.
+    dry_run = dry_run if isinstance(dry_run, bool) else False
+    reset = reset if isinstance(reset, bool) else False
+
+    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    if reset:
+        wemi_repo.clear_canonical_works()
+        console.print("[yellow]Cleared existing work consolidation.[/yellow]")
+
+    consolidator = WorkConsolidator(repo=wemi_repo, config=cfg.consolidation)
+    if not cfg.consolidation.enabled:
+        console.print("[yellow]Work consolidation is disabled in configuration.[/yellow]")
+        raise typer.Exit(code=0)
+
+    signatures = consolidator.load_signatures()
+    console.print(f"[cyan]Comparing {len(signatures)} authority works...[/cyan]")
+    result = consolidator.consolidate(dry_run=dry_run)
+
+    if not result.groups:
+        console.print("[green]No cross-source duplicates found.[/green]")
+        return
+
+    table = Table(title="Work consolidation groups")
+    table.add_column("Canonical work", overflow="fold")
+    table.add_column("Folded in", overflow="fold")
+    table.add_column("Evidence")
+    for members in result.groups:
+        canonical = result.canonical_by_work[members[0]]
+        others = [m for m in members if m != canonical]
+        evidence = sorted(
+            {
+                ev
+                for (a, b), ev in result.evidence.items()
+                if a in members and b in members
+            }
+        )
+        table.add_row(
+            signatures[canonical].work_uri,
+            "\n".join(signatures[m].work_uri for m in others),
+            ", ".join(evidence),
+        )
+    console.print(table)
+
+    verb = "Would consolidate" if dry_run else "Consolidated"
+    console.print(
+        f"[green]{verb} {result.consolidated_works} work rows into "
+        f"{len(result.groups)} canonical works"
+        + ("" if dry_run else f" ({result.edges_written} same_work_as edges).")
+        + "[/green]"
+    )
+    if dry_run:
+        console.print("[yellow]Dry run: nothing was written.[/yellow]")
+
+
 @app.command("build-agent-index")
 def build_agent_index_cmd(
     config_path: Path = typer.Option(
@@ -1535,11 +1557,7 @@ def build_agent_index_cmd(
     from reconciliator.indexer import create_vector_engine
 
     cfg = load_config(config_path)
-    store = AuthorityStore(
-        db_path=cfg.storage.authority_db,
-        index_path=cfg.storage.index_path,
-        vector_engine_config=cfg.storage.vector_engine,
-    )
+    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
     embedder = SentenceEmbedder(cfg.embedding)
     agent_indexer = create_vector_engine(
         cfg.storage.agent_index,
@@ -1548,7 +1566,7 @@ def build_agent_index_cmd(
     )
     console.print(f"[cyan]Building agent index at {cfg.storage.agent_index}...[/cyan]")
     tpl_path = cfg.reconcile.templates.agent if cfg.reconcile else None
-    count = store.build_agent_index(
+    count = wemi_repo.build_agent_index(
         agent_indexer=agent_indexer,
         embedder=embedder,
         batch_size=batch_size,

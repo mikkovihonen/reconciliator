@@ -236,7 +236,9 @@ class OAIPMHHarvester:
                     elif tracker:
                         tracker.update_progress(items_increment=1)
 
-                # Check resumptionToken
+                # Check resumptionToken. The callback fires only at a page boundary,
+                # after every record on the page has been yielded, so a consumer may
+                # treat the token as "everything before this has been delivered".
                 token_elem = root.find(".//oai:resumptionToken", OAI_NS)
                 if token_elem is None:
                     token_elem = root.find(".//resumptionToken")

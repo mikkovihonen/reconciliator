@@ -5,15 +5,17 @@ from pathlib import Path
 
 import orjson
 
+from reconciliator.config import VectorEngineConfig
 from reconciliator.ingestion.wikidata import stream_wikidata_dump
-from reconciliator.repository import AuthorityStore
+from reconciliator.repository import WEMIRepository
 
 
-def _make_store(tmp_path: Path) -> AuthorityStore:
-    """Create a temporary AuthorityStore for testing."""
+def _make_store(tmp_path: Path) -> WEMIRepository:
+    """Create a temporary WEMIRepository for testing."""
     db_path = tmp_path / "authority.db"
-    index_path = tmp_path / "authority.faiss"
-    return AuthorityStore(db_path=db_path, index_path=index_path)
+    index_path = tmp_path / "authority.index"
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    return WEMIRepository(db_path, index_path, dimension=64, vector_engine_config=vec_cfg)
 
 
 def test_stream_wikidata_dump(tmp_path: Path) -> None:

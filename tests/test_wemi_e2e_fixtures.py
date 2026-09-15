@@ -36,7 +36,7 @@ from reconciliator.reports import (
     ReportGenerator,
     WorkReportRow,
 )
-from reconciliator.repository import CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -408,12 +408,10 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
     - 3D Heritage Digital Twins (Funnel PP)
     """
     auth_db_path = tmp_path / "authority.db"
-    corpus_db_path = tmp_path / "reconcile_corpus.db"
 
-    w_repo = WEMIRepository(auth_db_path)
-    c_repo = CorpusRepository(corpus_db_path)
-    matcher = WorkMatcher(wemi_repo=w_repo)
-    clusterer = CorpusClusterer(corpus_repo=c_repo, wemi_repo=w_repo, matcher=matcher)
+    repo = WEMIRepository(auth_db_path)
+    matcher = WorkMatcher(wemi_repo=repo)
+    clusterer = CorpusClusterer(corpus_repo=repo, wemi_repo=repo, matcher=matcher)
     enricher = MARCXMLEnricher()
     rep_gen = ReportGenerator(config=AppConfig())
 
@@ -755,7 +753,7 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
 
     for code, w_type, scheme, id_val, title, author, extra in domain_specs:
         uri = f"http://urn.fi/URN:NBN:fi:test:{code}"
-        w_id = w_repo.insert_work(
+        w_id = repo.insert_work(
             WorkEntity(
                 work_uri=uri,
                 source="test_source",
@@ -765,7 +763,7 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
                 title_normalized=title.lower(),
             )
         )
-        e_id = w_repo.insert_expression(
+        e_id = repo.insert_expression(
             ExpressionEntity(
                 work_id=w_id,
                 expression_uri=f"{uri}#exp",
@@ -776,7 +774,7 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
                 title=title,
             )
         )
-        m_id = w_repo.insert_manifestation(
+        m_id = repo.insert_manifestation(
             ManifestationEntity(
                 work_id=w_id,
                 manifestation_uri=f"{uri}#manif",
@@ -786,8 +784,8 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
                 title_normalized=title.lower(),
             )
         )
-        w_repo.link_manifestation_expression(m_id, e_id)
-        w_repo.insert_identifiers_batch(
+        repo.link_manifestation_expression(m_id, e_id)
+        repo.insert_identifiers_batch(
             [
                 IdentifierEntity(
                     entity_type="manifestation",
@@ -813,8 +811,8 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
         target_records_list.append(t_rec)
 
     # 1. Test Staging and Clustering
-    c_repo.insert_target_records_batch(target_records_list)
-    assert c_repo.count_target_records() == len(domain_specs)
+    repo.insert_target_records_batch(target_records_list)
+    assert repo.count_target_records() == len(domain_specs)
 
     res_cluster = clusterer.cluster_corpus()
     assert res_cluster.records_clustered == len(domain_specs)

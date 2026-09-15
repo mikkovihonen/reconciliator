@@ -12,23 +12,19 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterator, Optional, Union
+from typing import Any, Iterator, Optional
 
 import orjson
 
 from reconciliator.config import (
     WikidataIngestConfig,
     get_bundled_record_defaults,
-    get_bundled_vocab_defaults,
     get_category_default_field_map,
     get_subject_field_category_map,
     get_wikidata_author_properties,
 )
-from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
-from reconciliator.embedder import SentenceEmbedder
 from reconciliator.models import (
     AgentEntity,
-    BibliographicRecord,
     CarrierType,
     ContributionEntity,
     ExpressionEntity,
@@ -43,10 +39,10 @@ from reconciliator.models import (
 )
 from reconciliator.normalizers.blocking import compute_title_stem
 from reconciliator.normalizers.linguistic import fold_label
-from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import ProgressTracker
-from reconciliator.repository import AuthorityStore, WEMIRepository
+from reconciliator.repository import WEMIRepository
 from reconciliator.template import WEMISerializationEngine
+from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 
 logger = logging.getLogger(__name__)
 
@@ -318,9 +314,9 @@ def _extract_author_data(
 
 def _lookup_entity_name(
     qid: str,
-    store: Optional[AuthorityStore],
+    store: Optional[WEMIRepository],
 ) -> Optional[str]:
-    """Look up an entity name from SQLite wikidata_authors by QID."""
+    """Look up an entity name from SQLite agents table by QID."""
     if not store or not qid:
         return None
     author = store.get_wikidata_author(qid)
@@ -333,11 +329,11 @@ def _lookup_entity_name(
 
 def parse_wikidata_entity(
     entity: dict[str, Any],
-    store: Optional[AuthorityStore] = None,
+    store: Optional[WEMIRepository] = None,
 ) -> Optional[dict[str, Any]]:
     """Parse a Wikidata entity into raw bibliographic dictionary format.
 
-    Author/publisher/subject names are hydrated from the SQLite wikidata_authors table
+    Author/publisher/subject names are hydrated from the SQLite agents/identifiers tables
     via the store parameter, achieving O(1) memory usage.
     """
     qid = entity.get("id", "")
@@ -654,7 +650,7 @@ def parse_wikidata_entity(
 
 def _prescan_authors(
     path: Path,
-    store: Optional[Union[AuthorityStore, WEMIRepository]],
+    store: Optional[WEMIRepository],
     tracker: Optional[ProgressTracker],
     config: Optional[WikidataIngestConfig] = None,
 ) -> int:
@@ -715,12 +711,12 @@ def _prescan_authors(
 
 def _stream_bibliographic_entities(
     path: Path,
-    store: Optional[AuthorityStore],
+    store: Optional[WEMIRepository],
     tracker: Optional[ProgressTracker],
 ) -> Iterator[dict[str, Any]]:
     """Pass 2: Stream the Wikidata dump and yield bibliographic entities.
 
-    Author names are hydrated from the SQLite wikidata_authors table (populated in Pass 1),
+    Author names are hydrated from the SQLite agents/identifiers tables (populated in Pass 1),
     achieving true O(1) memory consumption.
     """
     with gzip.open(path, "rb") as f:
@@ -751,7 +747,7 @@ def _stream_bibliographic_entities(
 
 def stream_wikidata_dump(
     dump_path: Path | str,
-    store: Optional[AuthorityStore] = None,
+    store: Optional[WEMIRepository] = None,
     tracker: Optional[ProgressTracker] = None,
     config: Optional[WikidataIngestConfig] = None,
 ) -> Iterator[dict[str, Any]]:
@@ -787,7 +783,7 @@ def stream_wikidata_dump(
 
 def decompose_wikidata_entity(
     entity: dict[str, Any],
-    store: Optional[Union[AuthorityStore, WEMIRepository]] = None,
+    store: Optional[WEMIRepository] = None,
     serialization_engine: Optional[WEMISerializationEngine] = None,
 ) -> Optional[
     tuple[
@@ -1288,72 +1284,11 @@ def ingest_wikidata_wemi_pipeline(
 
 def ingest_wikidata_pipeline(
     config: WikidataIngestConfig,
-    store: Union[AuthorityStore, WEMIRepository],
-    normalizer: Optional[RecordNormalizer] = None,
-    embedder: Optional[SentenceEmbedder] = None,
+    store: WEMIRepository,
     tracker: Optional[ProgressTracker] = None,
 ) -> int:
-    """Run streaming Wikidata dump ingestion with batch embedding or WEMI storage."""
-    if isinstance(store, WEMIRepository) or (normalizer is None and embedder is None):
-        if isinstance(store, WEMIRepository):
-            return ingest_wikidata_wemi_pipeline(config=config, wemi_repo=store, tracker=tracker)
-
-    if normalizer is None or embedder is None:
-        raise ValueError("normalizer and embedder required for AuthorityStore ingestion")
-    batch: list[BibliographicRecord] = []
-    total_ingested = 0
-    last_checkpoint = 0
-    checkpoint_interval = 5000
-
-    try:
-        for raw_data in stream_wikidata_dump(
-            config.dump_path, store=store, tracker=tracker, config=config
-        ):
-            record = normalizer.normalize(raw_data)
-            batch.append(record)
-
-            if len(batch) >= config.batch_size:
-                vectors = embedder.embed_records(batch)
-                store.insert_records_batch(batch, vectors=vectors)
-                total_ingested += len(batch)
-                batch.clear()
-
-                if total_ingested - last_checkpoint >= checkpoint_interval:
-                    store.save_index(
-                        metadata={
-                            "model_name": embedder.config.model_name,
-                            "dimension": embedder.dimension,
-                            "template_hash": embedder.template_hash,
-                        }
-                    )
-                    last_checkpoint = total_ingested
-
-                if tracker:
-                    tracker.update_progress(stage="indexing", items_processed=total_ingested)
-
-        if batch:
-            vectors = embedder.embed_records(batch)
-            store.insert_records_batch(batch, vectors=vectors)
-            total_ingested += len(batch)
-            batch.clear()
-    finally:
-        store.save_index(
-            metadata={
-                "model_name": embedder.config.model_name,
-                "dimension": embedder.dimension,
-                "template_hash": embedder.template_hash,
-            }
-        )
-        store.set_embedding_metadata(
-            model_name=embedder.config.model_name,
-            dimension=embedder.dimension,
-            template_hash=embedder.template_hash,
-        )
-
-    if tracker:
-        tracker.complete_task(metadata={"records_ingested": total_ingested})
-
-    return total_ingested
+    """Run streaming Wikidata dump ingestion into WEMI repository."""
+    return ingest_wikidata_wemi_pipeline(config=config, wemi_repo=store, tracker=tracker)
 
 
 def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]:

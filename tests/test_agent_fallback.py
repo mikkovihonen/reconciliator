@@ -11,14 +11,20 @@ import pytest
 
 from reconciliator.config import ReconcileConfig, VectorEngineConfig
 from reconciliator.indexer import create_vector_engine
-from reconciliator.matcher import ReconciliationEngine
+from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
     Agent,
+    AgentEntity,
     BibliographicRecord,
-    RecordIdentifiers,
+    ContributionEntity,
+    ExpressionEntity,
+    IdentifierEntity,
+    ManifestationEntity,
     SubjectsContainer,
+    WorkEntity,
 )
-from reconciliator.repository import AuthorityStore
+from reconciliator.normalizers.blocking import compute_title_stem
+from reconciliator.repository import WEMIRepository
 
 
 class MockDeterministicEmbedder:
@@ -63,6 +69,79 @@ class MockDeterministicEmbedder:
         return self.embed_texts(texts)
 
 
+def _authority_record(
+    source_id: str,
+    title: str,
+    publication_year: int,
+    agent: AgentEntity,
+    isbn: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build one authority record as a WEMI split bound together by URIs."""
+    work_uri = f"urn:work:melinda:{source_id}"
+    expression_uri = f"urn:exp:melinda:{source_id}:fin"
+    manifestation_uri = f"urn:manif:melinda:{source_id}"
+
+    work = WorkEntity(
+        work_uri=work_uri,
+        source="melinda",
+        source_id=source_id,
+        record_origin="authority",
+        title=title,
+        title_normalized=compute_title_stem(title),
+        work_type="text",
+    )
+    expression = ExpressionEntity(
+        work_id=0,
+        expression_uri=expression_uri,
+        source="melinda",
+        source_id=source_id,
+        record_origin="authority",
+        language="fin",
+        content_type="text",
+        title=title,
+    )
+    manifestation = ManifestationEntity(
+        work_id=0,
+        manifestation_uri=manifestation_uri,
+        source="melinda",
+        source_id=source_id,
+        record_origin="authority",
+        title=title,
+        title_normalized=compute_title_stem(title),
+        publication_year=publication_year,
+        carrier_type="volume",
+    )
+    identifiers: list[IdentifierEntity] = []
+    if isbn:
+        identifiers.append(
+            IdentifierEntity(
+                entity_type="manifestation",
+                entity_id=0,
+                entity_uri=manifestation_uri,
+                scheme="isbn",
+                value=isbn,
+                value_normalized=isbn,
+            )
+        )
+    contribution = ContributionEntity(
+        entity_type="work",
+        entity_id=0,
+        agent_id=0,
+        entity_uri=work_uri,
+        agent_uri=agent.agent_uri,
+        role="aut",
+        is_primary=True,
+    )
+    return {
+        "works": [work],
+        "expressions": [expression],
+        "manifestations": [manifestation],
+        "agents": [agent],
+        "identifiers": identifiers,
+        "contributions": [contribution],
+    }
+
+
 @pytest.fixture
 def setup_authority_system(tmp_path: Path):
     db_path = tmp_path / "authority.db"
@@ -70,80 +149,69 @@ def setup_authority_system(tmp_path: Path):
     agent_idx_path = tmp_path / "agent.index"
 
     vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
-    store = AuthorityStore(
+    store = WEMIRepository(
         db_path=db_path,
-        index_path=work_idx_path,
+        work_index_path=work_idx_path,
         dimension=64,
         vector_engine_config=vec_cfg,
     )
     embedder = MockDeterministicEmbedder(dimension=64)
 
-    # 1. Insert authority records (coupled Work level)
-    auth_rec1 = BibliographicRecord(
-        source_id="melinda-001",
+    waltari = AgentEntity(
+        agent_uri="http://urn.fi/URN:NBN:fi:au:pn:000028241",
         source="melinda",
-        title="Sinuhe egyptiläinen",
-        publication_year=1945,
-        identifiers=RecordIdentifiers(isbn=["9789510000001"]),
-        agents=[
-            Agent(
-                name="Waltari, Mika",
-                surname="Waltari",
-                birth_year=1908,
-                death_year=1979,
-                dates="1908-1979",
-                qualifier_counts={"kirjailija": 1},
-                uri_subfield_0=["http://urn.fi/URN:NBN:fi:au:pn:000028241"],
-                uri_subfield_1=["http://www.wikidata.org/entity/Q12345"],
-            )
-        ],
-        subjects=SubjectsContainer(),
+        record_origin="authority",
+        wikidata_qid="Q12345",
+        name="Waltari, Mika",
+        name_normalized="waltari, mika",
+        surname="Waltari",
+        birth_year=1908,
+        death_year=1979,
+        dates="1908-1979",
+        qualifier_counts={"kirjailija": 1},
     )
-    # Authority record 2: Virtanen, Matti (doctor)
-    auth_rec2 = BibliographicRecord(
-        source_id="melinda-002",
+    # Two Matti Virtanens: a doctor and an artist, to exercise the homonym guard.
+    virtanen_doctor = AgentEntity(
+        agent_uri="http://urn.fi/URN:NBN:fi:au:pn:00099901",
         source="melinda",
-        title="Sisätautioppi ja diagnostiikka",
-        publication_year=1960,
-        agents=[
-            Agent(
-                name="Virtanen, Matti",
-                surname="Virtanen",
-                birth_year=1915,
-                death_year=1980,
-                dates="1915-1980",
-                qualifier_counts={"lääkäri": 1},
-                uri_subfield_0=["http://urn.fi/URN:NBN:fi:au:pn:00099901"],
-            )
-        ],
-        subjects=SubjectsContainer(),
+        record_origin="authority",
+        name="Virtanen, Matti",
+        name_normalized="virtanen, matti",
+        surname="Virtanen",
+        birth_year=1915,
+        death_year=1980,
+        dates="1915-1980",
+        qualifier_counts={"lääkäri": 1},
     )
-    # Authority record 3: Virtanen, Matti (artist homonym)
-    auth_rec3 = BibliographicRecord(
-        source_id="melinda-003",
+    virtanen_artist = AgentEntity(
+        agent_uri="http://urn.fi/URN:NBN:fi:au:pn:00099902",
         source="melinda",
-        title="Moderni grafiikka",
-        publication_year=1975,
-        agents=[
-            Agent(
-                name="Virtanen, Matti",
-                surname="Virtanen",
-                birth_year=1940,
-                death_year=2010,
-                dates="1940-2010",
-                qualifier_counts={"kuvataiteilija": 1},
-                uri_subfield_0=["http://urn.fi/URN:NBN:fi:au:pn:00099902"],
-            )
-        ],
-        subjects=SubjectsContainer(),
+        record_origin="authority",
+        name="Virtanen, Matti",
+        name_normalized="virtanen, matti",
+        surname="Virtanen",
+        birth_year=1940,
+        death_year=2010,
+        dates="1940-2010",
+        qualifier_counts={"kuvataiteilija": 1},
     )
 
-    records = [auth_rec1, auth_rec2, auth_rec3]
-    vecs = embedder.embed_records(records)
-    store.insert_records_batch(records, vectors=vecs)
-    store.save_index()
+    for parts in (
+        _authority_record(
+            "melinda-001",
+            "Sinuhe egyptiläinen",
+            1945,
+            waltari,
+            isbn="9789510000001",
+        ),
+        _authority_record(
+            "melinda-002", "Sisätautioppi ja diagnostiikka", 1960, virtanen_doctor
+        ),
+        _authority_record("melinda-003", "Moderni grafiikka", 1975, virtanen_artist),
+    ):
+        store.insert_wemi_batch(record_origin="authority", **parts)
 
-    # 2. Build agent.index for fallback
+    # Build agent.index so the Tier 3 standalone fallback has something to search.
     agent_indexer = create_vector_engine(agent_idx_path, dimension=64, config=vec_cfg)
     indexed_count = store.build_agent_index(agent_indexer, embedder)
     assert indexed_count >= 3
@@ -151,17 +219,23 @@ def setup_authority_system(tmp_path: Path):
     return store, embedder, agent_indexer
 
 
+def _reconcile_config(**overrides: Any) -> ReconcileConfig:
+    base: dict[str, Any] = {
+        "target_file": Path("dummy.xml"),
+        "threshold": 0.85,
+        "agent_reports": {"detailed_file": Path("d.tsv"), "summary_file": Path("s.tsv")},
+        "subject_reports": {"detailed_file": Path("d2.tsv"), "summary_file": Path("s2.tsv")},
+        "fallback_agent_reconciliation": True,
+    }
+    base.update(overrides)
+    return ReconcileConfig(**base)
+
+
 def test_scenario1_coupled_match_transfers_agent_uris(setup_authority_system) -> None:
     store, embedder, agent_indexer = setup_authority_system
-    r_cfg = ReconcileConfig(
-        target_file=Path("dummy.xml"),
-        threshold=0.80,
-        agent_reports={"detailed_file": Path("d.tsv"), "summary_file": Path("s.tsv")},
-        subject_reports={"detailed_file": Path("d2.tsv"), "summary_file": Path("s2.tsv")},
-        fallback_agent_reconciliation=True,
-    )
-    matcher = ReconciliationEngine(
-        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    r_cfg = _reconcile_config(threshold=0.80)
+    matcher = WorkMatcher(
+        wemi_repo=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
     )
 
     # Target book matches coupled work "Sinuhe egyptiläinen" by Mika Waltari
@@ -174,7 +248,7 @@ def test_scenario1_coupled_match_transfers_agent_uris(setup_authority_system) ->
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.reconcile_record(target)
+    res = matcher.match_target_record(target)
     assert len(res.accepted_candidates) == 1
     assert res.accepted_candidates[0].source_id == "melinda-001"
     # Agent URI transferred via Tier 2 coupled matching
@@ -184,16 +258,9 @@ def test_scenario1_coupled_match_transfers_agent_uris(setup_authority_system) ->
 
 def test_scenario2_fallback_success_with_dates(setup_authority_system) -> None:
     store, embedder, agent_indexer = setup_authority_system
-    r_cfg = ReconcileConfig(
-        target_file=Path("dummy.xml"),
-        threshold=0.85,
-        agent_fallback_threshold=0.80,
-        agent_reports={"detailed_file": Path("d.tsv"), "summary_file": Path("s.tsv")},
-        subject_reports={"detailed_file": Path("d2.tsv"), "summary_file": Path("s2.tsv")},
-        fallback_agent_reconciliation=True,
-    )
-    matcher = ReconciliationEngine(
-        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    r_cfg = _reconcile_config(agent_fallback_threshold=0.80)
+    matcher = WorkMatcher(
+        wemi_repo=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
     )
 
     # Target is a rare uncataloged publication: "Harvinaiset kirjeet", missing from Melinda
@@ -215,7 +282,7 @@ def test_scenario2_fallback_success_with_dates(setup_authority_system) -> None:
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.reconcile_record(target)
+    res = matcher.match_target_record(target)
     # Coupled work matching did not match the book
     assert len(res.accepted_candidates) == 0
 
@@ -228,16 +295,9 @@ def test_scenario2_fallback_success_with_dates(setup_authority_system) -> None:
 
 def test_scenario3_fallback_success_with_qualifier(setup_authority_system) -> None:
     store, embedder, agent_indexer = setup_authority_system
-    r_cfg = ReconcileConfig(
-        target_file=Path("dummy.xml"),
-        threshold=0.85,
-        agent_fallback_threshold=0.80,
-        agent_reports={"detailed_file": Path("d.tsv"), "summary_file": Path("s.tsv")},
-        subject_reports={"detailed_file": Path("d2.tsv"), "summary_file": Path("s2.tsv")},
-        fallback_agent_reconciliation=True,
-    )
-    matcher = ReconciliationEngine(
-        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    r_cfg = _reconcile_config(agent_fallback_threshold=0.80)
+    matcher = WorkMatcher(
+        wemi_repo=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
     )
 
     # Target book missing from Melinda, author is "Matti Virtanen" with qualifier "lääkäri"
@@ -250,7 +310,7 @@ def test_scenario3_fallback_success_with_qualifier(setup_authority_system) -> No
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.reconcile_record(target)
+    res = matcher.match_target_record(target)
     assert len(res.accepted_candidates) == 0
 
     # Fallback resolves to the doctor Virtanen, Matti (00099901), not the artist!
@@ -264,16 +324,9 @@ def test_scenario4_fallback_contradiction_rejected_by_date_guard(
     setup_authority_system,
 ) -> None:
     store, embedder, agent_indexer = setup_authority_system
-    r_cfg = ReconcileConfig(
-        target_file=Path("dummy.xml"),
-        threshold=0.85,
-        agent_fallback_threshold=0.80,
-        agent_reports={"detailed_file": Path("d.tsv"), "summary_file": Path("s.tsv")},
-        subject_reports={"detailed_file": Path("d2.tsv"), "summary_file": Path("s2.tsv")},
-        fallback_agent_reconciliation=True,
-    )
-    matcher = ReconciliationEngine(
-        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    r_cfg = _reconcile_config(agent_fallback_threshold=0.80)
+    matcher = WorkMatcher(
+        wemi_repo=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
     )
 
     # Author named "Mika Waltari", but born in 1980 (different person!)
@@ -293,7 +346,7 @@ def test_scenario4_fallback_contradiction_rejected_by_date_guard(
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.reconcile_record(target)
+    res = matcher.match_target_record(target)
     uris = res.discovered_agent_uris.get(0, [])
     # Date Guard must reject the match!
     assert len(uris) == 0
@@ -303,17 +356,9 @@ def test_scenario5_fallback_ambiguity_rejected_by_homonym_guard(
     setup_authority_system,
 ) -> None:
     store, embedder, agent_indexer = setup_authority_system
-    r_cfg = ReconcileConfig(
-        target_file=Path("dummy.xml"),
-        threshold=0.85,
-        agent_fallback_threshold=0.80,
-        strict_homonym_guard=True,
-        agent_reports={"detailed_file": Path("d.tsv"), "summary_file": Path("s.tsv")},
-        subject_reports={"detailed_file": Path("d2.tsv"), "summary_file": Path("s2.tsv")},
-        fallback_agent_reconciliation=True,
-    )
-    matcher = ReconciliationEngine(
-        authority_store=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
+    r_cfg = _reconcile_config(agent_fallback_threshold=0.80, strict_homonym_guard=True)
+    matcher = WorkMatcher(
+        wemi_repo=store, embedder=embedder, config=r_cfg, agent_indexer=agent_indexer
     )
 
     # Target has only "Virtanen, Matti" with NO dates, NO qualifiers, and NO book match
@@ -327,7 +372,7 @@ def test_scenario5_fallback_ambiguity_rejected_by_homonym_guard(
         subjects=SubjectsContainer(),
     )
 
-    res = matcher.reconcile_record(target)
+    res = matcher.match_target_record(target)
     uris = res.discovered_agent_uris.get(0, [])
     # Rejection: cannot guess which Matti Virtanen it is!
     assert len(uris) == 0

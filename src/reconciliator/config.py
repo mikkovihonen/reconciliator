@@ -145,10 +145,6 @@ def get_bundled_enrichment_defaults() -> dict[str, Any]:
 
 
 # Backward-compatible accessors
-def get_bundled_normalization_data() -> dict[str, Any]:
-    return get_bundled_defaults()
-
-
 def get_bundled_vocab_defaults() -> dict[str, Any]:
     return get_bundled_vocabularies_defaults()
 
@@ -294,12 +290,10 @@ class StorageConfig(BaseModel):
     authority_db: Optional[Path] = None
     vocab_db: Optional[Path] = None
     progress_db: Optional[Path] = None
-    corpus_db: Optional[Path] = None
     work_index: Optional[Path] = None
     expression_index: Optional[Path] = None
     manifestation_index: Optional[Path] = None
     agent_index: Optional[Path] = None
-    index_path: Optional[Path] = None
     vector_engine: VectorEngineConfig = Field(default_factory=VectorEngineConfig)
     fts: RepositoryFTSConfig = Field(default_factory=RepositoryFTSConfig)
 
@@ -312,18 +306,14 @@ class StorageConfig(BaseModel):
             self.vocab_db = d / "vocab.db"
         if self.progress_db is None:
             self.progress_db = d / "progress.db"
-        if self.corpus_db is None:
-            self.corpus_db = d / "reconcile_corpus.db"
         if self.work_index is None:
-            self.work_index = self.index_path or (d / "work.index")
+            self.work_index = d / "work.index"
         if self.expression_index is None:
             self.expression_index = d / "expression.index"
         if self.manifestation_index is None:
             self.manifestation_index = d / "manifestation.index"
         if self.agent_index is None:
             self.agent_index = d / "agent.index"
-        if self.index_path is None:
-            self.index_path = self.work_index
         return self
 
 
@@ -436,6 +426,20 @@ class VocabulariesConfig(BaseModel):
     language_subcode_suffixes: dict[str, str] = Field(
         default_factory=lambda: dict(_VOCAB_DEFAULTS.get("language_subcode_suffixes", {}))
     )
+
+    # --- Subject heading rewriting policy -------------------------------------
+    # Append the Finto language subcode to the $2 vocabulary code of the
+    # vocabularies listed in language_subcode_vocabularies (yso -> yso/fin).
+    # Set false to emit the bare vocabulary code instead.
+    apply_language_subcode: bool = True
+    # Replace a resolved heading's $a with the ontology's preferred label
+    # (tohtorit -> lääkärit). Set false to leave the catalogued heading in place
+    # while still injecting the $0 URI.
+    replace_heading_with_pref_label: bool = True
+    # Also keep the heading as catalogued, in original_heading_subfield, so the
+    # record itself retains it rather than only the subject report.
+    preserve_original_heading: bool = False
+    original_heading_subfield: str = "9"
     preferred_label_languages: list[str] = Field(
         default_factory=lambda: list(_VOCAB_DEFAULTS.get("preferred_label_languages", []))
     )
@@ -877,6 +881,10 @@ class OAIIngestConfig(BaseModel):
     resourcesync_url: Optional[str] = None
     metadata_prefix: str = "marc21"
     set_spec: Optional[str] = None
+    # Whether this source's records may be used as authority when matching.
+    # A corpus being reconciled is ingested the same way as any other source,
+    # with this set false, rather than through a separate staging path.
+    authoritative: bool = True
     id_source: Literal["marc_001", "oai_identifier", "auto"] = "marc_001"
     control_number_prefix: Optional[str] = None
     control_number_padding_digits: Optional[int] = None
@@ -886,9 +894,6 @@ class OAIIngestConfig(BaseModel):
     until_date: Optional[str] = None
     slice_days: int = 30
     batch_size: int = 500
-    checkpoint_interval: int = 50000
-    normalization_workers: int = 4
-    queue_size: Optional[int] = None
     batch_queue_size: int = 4
     request_delay: float = 0.1
     timeout: float = 60.0
@@ -900,14 +905,12 @@ class OAIIngestConfig(BaseModel):
     def validate_workers_and_queues(self) -> OAIIngestConfig:
         if self.workers < 1:
             raise ValueError(f"workers must be at least 1, got {self.workers}")
-        if self.normalization_workers < 1:
-            raise ValueError(
-                f"normalization_workers must be at least 1, got {self.normalization_workers}"
-            )
         if self.batch_queue_size < 1:
             raise ValueError(f"batch_queue_size must be at least 1, got {self.batch_queue_size}")
-        if self.queue_size is not None and self.queue_size < 1:
-            raise ValueError(f"queue_size must be at least 1, got {self.queue_size}")
+        if self.slice_days < 1:
+            raise ValueError(f"slice_days must be at least 1, got {self.slice_days}")
+        if self.batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, got {self.batch_size}")
         return self
 
 
@@ -1038,6 +1041,42 @@ class ClusterConfig(BaseModel):
     thresholds: MultiplexClusterThresholds = Field(default_factory=MultiplexClusterThresholds)
     message_passing: bool = True
     reconcile_items: bool = False
+
+
+class WorkConsolidationConfig(BaseModel):
+    """Configuration for cross-source work identity consolidation.
+
+    Each contributing source mints its own work URI, so the same work arrives once
+    per source. Consolidation records `same_work_as` edges between those rows and
+    elects one canonical work per equivalence group, without deleting anything.
+    """
+
+    enabled: bool = True
+    # Evidence admitted when deciding two work rows are the same work.
+    use_wikidata_qid: bool = True
+    use_shared_identifiers: bool = True
+    use_metadata: bool = True
+    # Identifier schemes strong enough to assert work identity on their own.
+    # Deliberately excludes weak or source-local schemes such as control_number.
+    strong_identifier_schemes: list[str] = Field(
+        default_factory=lambda: [
+            "isbn",
+            "issn",
+            "ismn",
+            "isrc",
+            "ean",
+            "doi",
+            "urn",
+            "asteri",
+        ]
+    )
+    # Metadata agreement required when no identifier or QID is shared.
+    metadata_threshold: float = 0.93
+    # Consolidate works held by the same source as well as across sources.
+    include_same_source: bool = False
+    # Sources preferred as the canonical representative, best first. Sources not
+    # listed rank after those that are; ties break on work_uri for stability.
+    canonical_source_priority: list[str] = Field(default_factory=list)
 
 
 class ReconcileFTSFallbackConfig(BaseModel):
@@ -1225,6 +1264,7 @@ class AppConfig(BaseModel):
     ingest_vocab: Optional[VocabIngestConfig] = None
     ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
     ingest_wikidata: Optional[WikidataIngestConfig] = None
+    consolidation: WorkConsolidationConfig = Field(default_factory=WorkConsolidationConfig)
     reconcile: Optional[ReconcileConfig] = None
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
@@ -1438,7 +1478,6 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
     config.storage.authority_db = resolve_p(config.storage.authority_db)
     config.storage.vocab_db = resolve_p(config.storage.vocab_db)
     config.storage.progress_db = resolve_p(config.storage.progress_db)
-    config.storage.corpus_db = resolve_p(config.storage.corpus_db)
     config.storage.work_index = resolve_p(config.storage.work_index)
     config.storage.expression_index = resolve_p(config.storage.expression_index)
     config.storage.manifestation_index = resolve_p(config.storage.manifestation_index)

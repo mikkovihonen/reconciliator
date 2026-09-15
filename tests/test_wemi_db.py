@@ -192,44 +192,38 @@ def test_reset_all_storage_wemi(tmp_path: Path):
     from reconciliator.config import StorageConfig
 
     auth_db = tmp_path / "authority.db"
-    corpus_db = tmp_path / "reconcile_corpus.db"
     w_idx = tmp_path / "work.index"
     e_idx = tmp_path / "expression.index"
     m_idx = tmp_path / "manifestation.index"
-    legacy_idx = tmp_path / "authority.index"
+    a_idx = tmp_path / "agent.index"
 
     storage_cfg = StorageConfig(
         data_dir=tmp_path,
         authority_db=auth_db,
-        corpus_db=corpus_db,
         work_index=w_idx,
         expression_index=e_idx,
         manifestation_index=m_idx,
-        index_path=legacy_idx,
+        agent_index=a_idx,
     )
 
     # Create dummy files
-    for p in [auth_db, corpus_db, w_idx, e_idx, m_idx, legacy_idx]:
+    for p in [auth_db, w_idx, e_idx, m_idx, a_idx]:
         p.write_text("test")
         assert p.exists()
 
-    reset_all_storage(
-        storage_config=storage_cfg,
-        reset_corpus=True,
-    )
+    reset_all_storage(storage_config=storage_cfg)
 
     # Database files exist and are re-initialized with fresh empty schemas
     assert auth_db.exists()
-    assert corpus_db.exists()
 
     with get_db_connection(auth_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM works;").fetchone()[0] == 0
 
-    with get_db_connection(corpus_db) as conn:
+    with get_db_connection(auth_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM target_records;").fetchone()[0] == 0
 
     # Vector indices are deleted
-    for p in [w_idx, e_idx, m_idx, legacy_idx]:
+    for p in [w_idx, e_idx, m_idx, a_idx]:
         assert not p.exists()
 
 

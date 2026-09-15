@@ -52,7 +52,7 @@ def test_cluster_config():
 def test_storage_config_wemi():
     storage = StorageConfig()
     assert storage.authority_db == Path("data/authority.db")
-    assert storage.corpus_db == Path("data/reconcile_corpus.db")
+    # Corpus staging shares authority.db; there is no separate corpus file.
     assert storage.work_index == Path("data/work.index")
     assert storage.expression_index == Path("data/expression.index")
     assert storage.manifestation_index == Path("data/manifestation.index")

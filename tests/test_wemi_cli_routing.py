@@ -6,7 +6,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from reconciliator.cli import app
-from reconciliator.repository import CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 
 
 def test_cli_ingest_wikidata_wemi_routing(tmp_path: Path) -> None:
@@ -39,7 +39,7 @@ ingest_wikidata:
 
 
 def test_cli_ingest_oai_corpus_routing(tmp_path: Path) -> None:
-    """Verify that target_database='corpus' routes to CorpusRepository."""
+    """Verify that target_database='corpus' routes to unified WEMIRepository."""
     runner = CliRunner()
     cfg_file = tmp_path / "config.yaml"
 
@@ -47,7 +47,6 @@ def test_cli_ingest_oai_corpus_routing(tmp_path: Path) -> None:
         f"""
 storage:
   data_dir: "{tmp_path}"
-  corpus_db: "{tmp_path}/corpus.db"
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
@@ -70,8 +69,8 @@ ingest_oai:
         assert result.exit_code == 0
         assert mock_pipeline.called
         store_kwarg = mock_pipeline.call_args.kwargs.get("store")
-        assert isinstance(store_kwarg, CorpusRepository)
-        assert store_kwarg.db_path == tmp_path / "corpus.db"
+        assert isinstance(store_kwarg, WEMIRepository)
+        assert store_kwarg.db_path == tmp_path / "authority.db"
 
 
 def test_cli_ingest_oai_authority_routing(tmp_path: Path) -> None:

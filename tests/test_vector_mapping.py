@@ -7,8 +7,7 @@ import pytest
 
 from reconciliator.config import VectorEngineConfig
 from reconciliator.indexer import FAISSIndexEngine, TorchVectorEngine
-from reconciliator.models import Agent, BibliographicRecord
-from reconciliator.repository import AuthorityStore
+from reconciliator.repository import WEMIRepository
 
 
 def test_faiss_index_engine_explicit_ids(tmp_path: Path) -> None:
@@ -88,62 +87,58 @@ def test_torch_vector_engine_explicit_ids(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("backend", ["faiss", "torch"])
-def test_authority_store_idempotent_ingest(tmp_path: Path, backend: str) -> None:
+def test_wemi_repository_idempotent_ingest(tmp_path: Path, backend: str) -> None:
+    from reconciliator.models import WorkEntity
+
     db_path = tmp_path / f"authority_{backend}.db"
     index_path = tmp_path / f"authority_{backend}.index"
     dim = 64
 
     cfg = VectorEngineConfig(backend=backend, device="cpu")  # type: ignore[arg-type]
-    store = AuthorityStore(db_path, index_path, dimension=dim, vector_engine_config=cfg)
-    rec1 = BibliographicRecord(
-        source_id="MEL-001",
-        source="melinda",
-        title="First Title",
-        agents=[Agent(name="Author One", surname="One", role="aut")],
-    )
+    store = WEMIRepository(db_path, index_path, dimension=dim, vector_engine_config=cfg)
     v1 = np.random.randn(1, dim).astype(np.float32)
 
     # Initial insert
-    rec_ids = store.insert_records_batch([rec1], vectors=v1)
-    assert len(rec_ids) == 1
-    orig_id = rec_ids[0]
-    assert store.indexer.total_vectors == 1
+    work = WorkEntity(
+        work_uri="http://example.org/work/MEL-001",
+        source="melinda",
+        source_id="MEL-001",
+        title="First Title",
+        title_normalized="first title",
+        work_type="text",
+    )
+    work_id = store.insert_work(work, vector=v1[0])
+    assert work_id is not None
+    assert store.work_indexer.total_vectors == 1
 
-    # Search should find rec1
-    cands = store.search_vector_candidates(v1, top_k=5)
+    # Search should find the work
+    cands = store.search_work_vectors(v1, top_k=5)
     assert len(cands) == 1
     assert cands[0][0].source_id == "MEL-001"
     assert cands[0][0].title == "First Title"
 
-    # Update rec1 with modified title and new vector
-    rec1_updated = BibliographicRecord(
-        source_id="MEL-001",
-        source="melinda",
-        title="Updated Title",
-        agents=[Agent(name="Author One", surname="One", role="aut")],
-    )
+    # Update work with modified title and new vector
     v1_updated = np.random.randn(1, dim).astype(np.float32)
-    updated_rec_ids = store.insert_records_batch([rec1_updated], vectors=v1_updated)
-    assert updated_rec_ids == [orig_id]
+    work_updated = WorkEntity(
+        work_uri="http://example.org/work/MEL-001",
+        source="melinda",
+        source_id="MEL-001",
+        title="Updated Title",
+        title_normalized="updated title",
+        work_type="text",
+    )
+    updated_work_id = store.insert_work(work_updated, vector=v1_updated[0])
+    assert updated_work_id == work_id
     # Total vectors must remain 1, not 2!
-    assert store.indexer.total_vectors == 1
+    assert store.work_indexer.total_vectors == 1
 
     # Verify vector mappings in sqlite
     with store.get_connection() as conn:
-        rows = conn.execute("SELECT vector_id, record_id FROM vector_mappings;").fetchall()
+        rows = conn.execute("SELECT work_id FROM work_vectors;").fetchall()
         assert len(rows) == 1
-        assert rows[0]["vector_id"] == orig_id
-        assert rows[0]["record_id"] == orig_id
-
-        # Verify FTS was cleaned up and updated
-        fts_rows = conn.execute(
-            "SELECT title FROM authority_fts WHERE record_id = ?;", (orig_id,)
-        ).fetchall()
-        assert len(fts_rows) == 1
-        assert fts_rows[0]["title"] == "Updated Title"
 
     # Search with new vector
-    cands2 = store.search_vector_candidates(v1_updated, top_k=5)
+    cands2 = store.search_work_vectors(v1_updated, top_k=5)
     assert len(cands2) == 1
     assert cands2[0][0].source_id == "MEL-001"
     assert cands2[0][0].title == "Updated Title"

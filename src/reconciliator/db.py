@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -27,142 +28,10 @@ def get_db_connection(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
-def _migrate_agent_columns(conn: sqlite3.Connection) -> None:
-    """Safely migrate any missing rich metadata columns in existing SQLite tables."""
-    tables_cols = {
-        "authority_agents": [
-            ("qualifier", "TEXT"),
-            ("dates", "TEXT"),
-            ("birth_year", "INTEGER"),
-            ("death_year", "INTEGER"),
-            ("fuller_name", "TEXT"),
-            ("affiliation", "TEXT"),
-            ("metadata_json", "TEXT"),
-        ],
-        "wikidata_authors": [
-            ("birth_year", "INTEGER"),
-            ("death_year", "INTEGER"),
-            ("occupations", "TEXT"),
-            ("fields_of_work", "TEXT"),
-            ("affiliations", "TEXT"),
-            ("metadata_json", "TEXT"),
-            ("identifiers_json", "TEXT"),
-        ],
-        "agents": [
-            ("qualifier", "TEXT"),
-            ("dates", "TEXT"),
-            ("birth_year", "INTEGER"),
-            ("death_year", "INTEGER"),
-            ("fuller_name", "TEXT"),
-            ("affiliation", "TEXT"),
-            ("metadata_json", "TEXT"),
-        ],
-    }
-    for tbl, cols in tables_cols.items():
-        try:
-            cur = conn.execute(f"PRAGMA table_info({tbl});")
-            existing = {row[1] for row in cur.fetchall()}
-            if not existing:
-                continue
-            for col_name, col_type in cols:
-                if col_name not in existing:
-                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col_name} {col_type};")
-        except Exception:
-            pass
-
-
 def init_authority_db(conn: sqlite3.Connection) -> None:
     """Initialize tables, indexes, and FTS5 in authority.db."""
     with conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS authority_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source TEXT NOT NULL,
-                source_id TEXT NOT NULL UNIQUE,
-                title TEXT NOT NULL,
-                title_normalized TEXT,
-                uniform_title TEXT,
-                edition INTEGER,
-                series TEXT,
-                volume_info TEXT,
-                year INTEGER,
-                publisher TEXT,
-                language TEXT,
-                subjects_json TEXT,
-                record_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_records_source ON authority_records(source);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_records_year ON authority_records(year);")
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS authority_identifiers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                record_id INTEGER NOT NULL REFERENCES authority_records(id) ON DELETE CASCADE,
-                id_type TEXT NOT NULL,
-                id_value TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_identifiers_type_val ON authority_identifiers(id_type, id_value);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_identifiers_record_id ON authority_identifiers(record_id);"
-        )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS authority_agents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                record_id INTEGER NOT NULL REFERENCES authority_records(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                name_normalized TEXT NOT NULL,
-                surname TEXT,
-                role TEXT,
-                qualifier TEXT,
-                dates TEXT,
-                birth_year INTEGER,
-                death_year INTEGER,
-                fuller_name TEXT,
-                affiliation TEXT,
-                metadata_json TEXT,
-                uri_subfield_0 TEXT,
-                uri_subfield_1 TEXT
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agents_record_id ON authority_agents(record_id);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agents_name_norm ON authority_agents(name_normalized);"
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_surname ON authority_agents(surname);")
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS wikidata_authors (
-                qid TEXT PRIMARY KEY,
-                name TEXT,
-                family_name TEXT,
-                identifiers_json TEXT,
-                birth_year INTEGER,
-                death_year INTEGER,
-                occupations TEXT,
-                fields_of_work TEXT,
-                affiliations TEXT,
-                metadata_json TEXT
-            );
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS vector_mappings (
-                vector_id INTEGER PRIMARY KEY,
-                record_id INTEGER NOT NULL REFERENCES authority_records(id) ON DELETE CASCADE
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_vector_mappings_record ON vector_mappings(record_id);"
-        )
-
+        # db_metadata table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS db_metadata (
                 key TEXT PRIMARY KEY,
@@ -170,17 +39,21 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
             );
         """)
 
-        # FTS5 Full-Text Search Virtual Table
+        # Registry of ingest sources. record_origin on every WEMI row names one of
+        # these, so "is this authoritative?" is a property of the source rather
+        # than a literal baked into each row. A corpus being reconciled is just a
+        # non-authoritative source.
         conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS authority_fts USING fts5(
-                record_id UNINDEXED,
-                title,
-                uniform_title,
-                author_names,
-                publisher,
-                subjects
+            CREATE TABLE IF NOT EXISTS sources (
+                name TEXT PRIMARY KEY,
+                is_authoritative BOOLEAN NOT NULL DEFAULT 1,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sources_authoritative ON sources(is_authoritative);"
+        )
 
         # ===================================================================
         # WEMI Relational Tables (§4.1)
@@ -192,6 +65,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 agent_uri TEXT NOT NULL UNIQUE,
                 source TEXT NOT NULL,
+                record_origin TEXT NOT NULL DEFAULT 'unknown',
                 wikidata_qid TEXT,
                 name TEXT NOT NULL,
                 name_normalized TEXT NOT NULL,
@@ -212,8 +86,6 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_name_norm ON agents(name_normalized);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_surname ON agents(surname);")
 
-        _migrate_agent_columns(conn)
-
         # 2. Works Table (Abstract Intellectual Creations)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS works (
@@ -221,6 +93,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 work_uri TEXT NOT NULL UNIQUE,
                 source TEXT NOT NULL,
                 source_id TEXT NOT NULL,
+                record_origin TEXT NOT NULL DEFAULT 'unknown',
                 wikidata_qid TEXT,
                 title TEXT NOT NULL,
                 title_normalized TEXT NOT NULL,
@@ -230,10 +103,18 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 work_type TEXT NOT NULL DEFAULT 'text',
                 subjects_json TEXT NOT NULL DEFAULT '[]',
                 serialized_text TEXT,
+                -- Elected representative of this work's cross-source equivalence
+                -- group, set by WorkConsolidator. NULL means the work is its own
+                -- canonical. The same_work_as edges in work_relationships record
+                -- why the group was formed; this column records the decision.
+                canonical_work_id INTEGER REFERENCES works(id) ON DELETE SET NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_works_uri ON works(work_uri);")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_works_canonical ON works(canonical_work_id);"
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_works_qid ON works(wikidata_qid);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_works_source_id ON works(source, source_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_works_title_norm ON works(title_normalized);")
@@ -250,6 +131,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 expression_uri TEXT NOT NULL UNIQUE,
                 source TEXT NOT NULL,
                 source_id TEXT NOT NULL,
+                record_origin TEXT NOT NULL DEFAULT 'unknown',
                 wikidata_qid TEXT,
                 language TEXT NOT NULL,
                 content_type TEXT NOT NULL DEFAULT 'text',
@@ -280,6 +162,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 manifestation_uri TEXT UNIQUE,
                 source TEXT NOT NULL,
                 source_id TEXT NOT NULL UNIQUE,
+                record_origin TEXT NOT NULL DEFAULT 'unknown',
                 title TEXT NOT NULL,
                 title_normalized TEXT NOT NULL,
                 subtitle TEXT,
@@ -343,6 +226,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 item_uri TEXT UNIQUE,
                 source TEXT NOT NULL,
                 source_id TEXT NOT NULL,
+                record_origin TEXT NOT NULL DEFAULT 'unknown',
                 holding_organization TEXT NOT NULL,
                 shelf_mark TEXT,
                 barcode TEXT,
@@ -371,6 +255,29 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_identifiers_entity ON identifiers(entity_type, entity_id);"
+        )
+
+        # Derived domain blocking keys, beside `identifiers`. That table holds
+        # externally-meaningful standard numbers; this one holds the keys the
+        # clusterer blocks on and the funnels dispatch on, computed at ingest.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS entity_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL CHECK(entity_type IN ('work', 'expression', 'manifestation', 'item', 'agent')),
+                entity_id INTEGER NOT NULL,
+                key_type TEXT NOT NULL,
+                key_value TEXT NOT NULL,
+                UNIQUE(entity_type, entity_id, key_type, key_value)
+            );
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entity_keys_entity ON entity_keys(entity_type, entity_id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entity_keys_lookup ON entity_keys(key_type, key_value);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entity_keys_value ON entity_keys(key_value);"
         )
 
         # 8. Agent Contributions with Relator Roles
@@ -530,6 +437,12 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
             END;
         """)
 
+        # Corpus staging, clustering and linkage live in this same database.
+        # They were a separate file, which prevented joins between a cluster and
+        # the works it resolves to, and let reset clear one while the repository
+        # used the other.
+        init_corpus_db(conn)
+
         # 13. Persistent Harvest Checkpointing for OAI-PMH and ResourceSync
         conn.execute("""
             CREATE TABLE IF NOT EXISTS harvest_state (
@@ -542,6 +455,7 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 resumption_token TEXT,
                 records_harvested INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'in_progress',
+                completed_slices TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -602,6 +516,9 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_target_records_author ON target_records(author_key);"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_target_records_created ON target_records(created_at);"
+        )
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS target_keys (
@@ -620,6 +537,9 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_target_keys_val ON target_keys(key_value);"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_target_keys_record_type ON target_keys(record_id, key_type);"
+        )
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS target_payloads (
@@ -628,7 +548,7 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
                 serialized_work TEXT,
                 serialized_expression TEXT,
                 serialized_manifestation TEXT
-            ) WITHOUT ROWID;
+            );
         """)
 
         conn.execute("""
@@ -677,11 +597,17 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
                 manifestation_cluster_id TEXT REFERENCES corpus_manifestation_clusters(cluster_id),
                 work_cluster_id TEXT NOT NULL REFERENCES corpus_work_clusters(cluster_id),
                 expression_cluster_id TEXT NOT NULL REFERENCES corpus_expression_clusters(cluster_id),
-                final_work_uri TEXT NOT NULL,
-                final_expression_uri TEXT NOT NULL,
+                final_work_uri TEXT NOT NULL DEFAULT '',
+                final_expression_uri TEXT NOT NULL DEFAULT '',
                 sibling_manifestation_ids_json TEXT
             );
         """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_linkage_manifestation ON corpus_linkages(manifestation_cluster_id);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_linkage_work ON corpus_linkages(work_cluster_id);"
+        )
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sammelband_bindings (
@@ -695,78 +621,51 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sammelband_binding ON sammelband_bindings(binding_id);"
         )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS harvest_state (
-                source_id TEXT PRIMARY KEY,
-                source_type TEXT NOT NULL,
-                metadata_prefix TEXT NOT NULL,
-                set_spec TEXT,
-                last_harvest_from TEXT,
-                last_harvest_until TEXT,
-                resumption_token TEXT,
-                records_harvested INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'in_progress',
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sammelband_record ON sammelband_bindings(record_id);"
+        )
 
 
-def reset_all_storage(
-    storage_config: StorageConfig,
-    reset_authority: bool = True,
-    reset_vocab: bool = True,
-    reset_progress: bool = True,
-    reset_corpus: bool = True,
-    reset_daemon: bool = True,
-) -> None:
-    """Reset specified database files and vector indices, then reinitialize clean schemas."""
+def reset_all_storage(storage_config: StorageConfig) -> None:
+    """Delete every database and vector index, then reinitialize clean schemas.
+
+    All or nothing: partial resets left the stores inconsistent with each other,
+    most often a vector index or a staged corpus outliving the rows it referred to.
+    """
     # Import locally to prevent circular dependencies
     from reconciliator.indexer.ipc.client import DaemonLifecycleManager, get_default_socket_path
     from reconciliator.progress import init_progress_db
     from reconciliator.vocab_store import init_vocab_db
 
-    if reset_daemon:
-        try:
-            sock_p = (
-                storage_config.vector_engine.daemon.socket_path
-                or get_default_socket_path(storage_config.authority_db.parent)
-            )
-            lifecycle = DaemonLifecycleManager(sock_p)
-            if lifecycle.is_running():
-                lifecycle.shutdown(save=False)
-                time.sleep(0.1)
-        except Exception:
-            pass
+    # Stop the vector daemon first; it holds indices open.
+    try:
+        sock_p = storage_config.vector_engine.daemon.socket_path or get_default_socket_path(
+            storage_config.authority_db.parent
+        )
+        lifecycle = DaemonLifecycleManager(sock_p)
+        if lifecycle.is_running():
+            lifecycle.shutdown(save=False)
+            time.sleep(0.1)
+    except Exception:
+        pass
 
-    if reset_authority:
-        reset_database_file(storage_config.authority_db)
-        for idx in (
-            storage_config.index_path,
-            storage_config.work_index,
-            storage_config.expression_index,
-            storage_config.manifestation_index,
-            storage_config.agent_index,
-        ):
-            if idx.exists():
-                try:
-                    idx.unlink()
-                except OSError:
-                    pass
-        with get_db_connection(storage_config.authority_db) as conn:
-            init_authority_db(conn)
+    for index_path in (
+        storage_config.work_index,
+        storage_config.expression_index,
+        storage_config.manifestation_index,
+        storage_config.agent_index,
+    ):
+        if index_path and index_path.exists():
+            try:
+                index_path.unlink()
+            except OSError:
+                pass
 
-    if reset_vocab:
-        reset_database_file(storage_config.vocab_db)
-        with get_db_connection(storage_config.vocab_db) as conn:
-            init_vocab_db(conn)
-
-    if reset_progress:
-        reset_database_file(storage_config.progress_db)
-        with get_db_connection(storage_config.progress_db) as conn:
-            init_progress_db(conn)
-
-    if reset_corpus:
-        reset_database_file(storage_config.corpus_db)
-        with get_db_connection(storage_config.corpus_db) as conn:
-            init_corpus_db(conn)
+    for db_path, initializer in (
+        (storage_config.authority_db, init_authority_db),
+        (storage_config.vocab_db, init_vocab_db),
+        (storage_config.progress_db, init_progress_db),
+    ):
+        reset_database_file(db_path)
+        with get_db_connection(db_path) as conn:
+            initializer(conn)

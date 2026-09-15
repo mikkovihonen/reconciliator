@@ -342,7 +342,7 @@ def check_homonym_ambiguity(
     """Detect if multiple candidates share near-identical names without distinguishing metadata.
 
     Tier 1 (In-Memory Footprint): Evaluates dates, ORCID, qualifier counts, affiliation counts, and language counts.
-    Tier 2 (Relational SQLite Graph): Executes targeted SQL queries on authority_records/contributions to evaluate
+    Tier 2 (Relational SQLite Graph): Executes targeted SQL queries on contributions/agents/manifestations to evaluate
     co-author graph overlap, publisher history, and scheme-agnostic classification overlap.
     """
     if len(top_candidates) <= 1:

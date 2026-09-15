@@ -216,6 +216,10 @@ class WorkReportRow:
     is_clustered: bool
     cluster_id: Optional[str]
     action: str  # "injected", "hoisted", "minted", "unmatched"
+    # The URI this record resolved to on its own, before its work cluster's
+    # canonical URI was applied. Differs from matched_work_uri when sibling
+    # records in the same cluster matched different authority sources.
+    record_level_work_uri: Optional[str] = None
 
 
 @dataclass
@@ -292,6 +296,7 @@ WORK_TSV_COLUMNS = [
     "is_clustered",
     "cluster_id",
     "action",
+    "record_level_work_uri",
 ]
 
 EXPRESSION_TSV_COLUMNS = [
@@ -1198,6 +1203,7 @@ class ReportGenerator:
                     sanitize_tsv_cell(r.is_clustered),
                     sanitize_tsv_cell(r.cluster_id),
                     sanitize_tsv_cell(r.action),
+                    sanitize_tsv_cell(r.record_level_work_uri),
                 ]
                 f.write("\t".join(vals) + "\n")
 

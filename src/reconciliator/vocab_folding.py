@@ -17,10 +17,17 @@ def format_target_vocab(
     lang: Optional[str] = None,
     config: Optional[VocabNormalizationConfig] = None,
 ) -> str:
-    """Format vocabulary code with compliant language suffix (e.g. yso/fin, yso/swe)."""
+    """Format vocabulary code with compliant language suffix (e.g. yso/fin, yso/swe).
+
+    Returns the bare vocabulary code when ``apply_language_subcode`` is disabled,
+    or when the vocabulary is not one that carries a subcode.
+    """
     cfg = config or VocabNormalizationConfig()
     raw_source = (source_vocab or "").strip().lower()
     base_vocab = strip_vocabulary_subcode(target_vocab)
+
+    if not cfg.apply_language_subcode:
+        return base_vocab
 
     # Subcode vocabularies from configuration
     subcode_vocabs = set(cfg.language_subcode_vocabularies.keys())

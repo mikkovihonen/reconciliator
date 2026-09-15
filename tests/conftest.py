@@ -22,7 +22,6 @@ def init_test_storage(
     authority_db: Path | str | None = None,
     vocab_db: Path | str | None = None,
     progress_db: Path | str | None = None,
-    corpus_db: Path | str | None = None,
     work_index: Path | str | None = None,
     reset: bool = True,
 ) -> StorageConfig:
@@ -39,7 +38,6 @@ def init_test_storage(
         authority_db=Path(authority_db) if authority_db else None,
         vocab_db=Path(vocab_db) if vocab_db else None,
         progress_db=Path(progress_db) if progress_db else None,
-        corpus_db=Path(corpus_db) if corpus_db else None,
         work_index=Path(work_index) if work_index else None,
     )
     if reset:

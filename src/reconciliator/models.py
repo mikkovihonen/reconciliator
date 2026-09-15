@@ -407,7 +407,15 @@ WorkRelationshipType = Literal[
     "critical_edition_of",
     "spatial_layer_of",
     "digital_twin_of",
+    # Cross-source identity: two work rows describing the same intellectual
+    # creation, typically one per contributing source. Symmetric.
+    "same_work_as",
 ]
+
+# The ingest source a row came from, e.g. "melinda". Whether that source is
+# authoritative is a property of the source (see the `sources` table), not of
+# the row, so a corpus being reconciled is simply a non-authoritative source.
+RecordOrigin = str
 
 EntityType = Literal["work", "expression", "manifestation", "item", "agent"]
 
@@ -425,6 +433,7 @@ class AgentEntity(BaseModel):
     id: Optional[int] = None
     agent_uri: str
     source: str
+    record_origin: RecordOrigin = "unknown"
     wikidata_qid: Optional[str] = None
     name: str
     name_normalized: str
@@ -454,6 +463,7 @@ class WorkEntity(BaseModel):
     work_uri: str
     source: str
     source_id: str
+    record_origin: RecordOrigin = "unknown"
     wikidata_qid: Optional[str] = None
     title: str
     title_normalized: str
@@ -464,6 +474,9 @@ class WorkEntity(BaseModel):
     work_type: WorkType = "text"
     subjects_json: list[str] = Field(default_factory=list)
     serialized_text: Optional[str] = None
+    # Representative of this work's cross-source equivalence group, set by
+    # WorkConsolidator. None means the work is its own canonical.
+    canonical_work_id: Optional[int] = None
     created_at: Optional[str] = None
 
     @field_validator("subjects_json", mode="before")
@@ -489,6 +502,7 @@ class ExpressionEntity(BaseModel):
     expression_uri: str
     source: str
     source_id: str
+    record_origin: RecordOrigin = "unknown"
     wikidata_qid: Optional[str] = None
     language: str
     content_type: ExpressionContentType = "text"
@@ -511,6 +525,7 @@ class ManifestationEntity(BaseModel):
     manifestation_uri: Optional[str] = None
     source: str
     source_id: str
+    record_origin: RecordOrigin = "unknown"
     title: str
     title_normalized: str
     subtitle: Optional[str] = None
@@ -550,6 +565,7 @@ class ItemEntity(BaseModel):
     item_uri: Optional[str] = None
     source: str
     source_id: str
+    record_origin: RecordOrigin = "unknown"
     holding_organization: str
     shelf_mark: Optional[str] = None
     barcode: Optional[str] = None
@@ -567,6 +583,30 @@ class IdentifierEntity(BaseModel):
     scheme: str
     value: str
     value_normalized: str
+    # Transient binding hint: the owning entity's URI, used by insert_wemi_batch to
+    # resolve entity_id when the decomposer cannot know the assigned row id yet.
+    # Never persisted to the identifiers table.
+    entity_uri: Optional[str] = None
+
+
+class EntityKey(BaseModel):
+    """Domain blocking key attached to a WEMI entity.
+
+    Sits beside `identifiers`: that table holds externally-meaningful standard
+    numbers, this one holds the derived keys the clusterer blocks on and the
+    funnels dispatch on (work stems, music work keys, host citations, MARC
+    analytics). Both are computed once at ingest, where the record is already
+    parsed, rather than by re-parsing the payload at match time.
+    """
+
+    id: Optional[int] = None
+    entity_type: EntityType
+    entity_id: int
+    key_type: str
+    key_value: str
+    # Transient binding hint, mirroring IdentifierEntity.entity_uri: the owning
+    # entity's URI, resolved to entity_id by insert_wemi_batch. Never persisted.
+    entity_uri: Optional[str] = None
 
 
 class ContributionEntity(BaseModel):
@@ -579,6 +619,12 @@ class ContributionEntity(BaseModel):
     role: str
     is_primary: bool = False
     field_tag: Optional[str] = None
+    # Transient binding hints used by insert_wemi_batch to resolve entity_id /
+    # agent_id when the decomposer cannot know the assigned row ids yet. Without
+    # them a multi-record or multi-agent batch collapses onto the first row.
+    # Never persisted to the contributions table.
+    entity_uri: Optional[str] = None
+    agent_uri: Optional[str] = None
 
 
 class WorkRelationship(BaseModel):
@@ -613,7 +659,27 @@ class HarvestState(BaseModel):
     resumption_token: Optional[str] = None
     records_harvested: int = 0
     status: str = "in_progress"
+    # Date slices already fully written, for resuming a partitioned harvest.
+    # A single-stream harvest leaves this empty and resumes via resumption_token.
+    completed_slices: list[tuple[Optional[str], Optional[str]]] = Field(default_factory=list)
     updated_at: Optional[str] = None
+
+    @field_validator("completed_slices", mode="before")
+    @classmethod
+    def parse_completed_slices(cls, v: Any) -> list[tuple[Optional[str], Optional[str]]]:
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+            except Exception:
+                return []
+            v = parsed if isinstance(parsed, list) else []
+        if not isinstance(v, list):
+            return []
+        slices: list[tuple[Optional[str], Optional[str]]] = []
+        for item in v:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                slices.append((item[0], item[1]))
+        return slices
 
 
 class TargetRecord(BaseModel):
@@ -859,15 +925,6 @@ class SammelbandBinding(BaseModel):
     record_id: str
     sequence_in_binding: int = 1
     binding_notes: Optional[str] = None
-
-
-class ClusterNode(BaseModel):
-    """Node in intra-corpus multiplex graph."""
-
-    node_id: str
-    entity_tier: Literal["work", "expression", "manifestation", "item"]
-    record_id: str
-    features: dict[str, Any] = Field(default_factory=dict)
 
 
 class ClusterEdge(BaseModel):

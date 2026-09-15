@@ -20,17 +20,15 @@ from reconciliator.models import (
     TargetRecord,
     WorkEntity,
 )
-from reconciliator.repository import CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 
 
 @pytest.fixture
 def temp_dbs():
     with tempfile.TemporaryDirectory() as tmp_dir:
-        corpus_db_path = Path(tmp_dir) / "reconcile_corpus.db"
         auth_db_path = Path(tmp_dir) / "authority.db"
-        c_repo = CorpusRepository(corpus_db_path)
         w_repo = WEMIRepository(auth_db_path)
-        yield c_repo, w_repo
+        yield w_repo, w_repo  # (corpus_repo, wemi_repo) - now the same instance
 
 
 def test_union_find_data_structure():

@@ -1,0 +1,1425 @@
+# WEMI Data Structure Consolidation
+
+> Retire the four legacy authority tables (`authority_records`, `authority_identifiers`,
+> `authority_agents`, `wikidata_authors`) and the `AuthorityStore` class in favour of
+> the normalised WEMI relational model already implemented in `WEMIRepository`.
+
+## Scope
+
+| Legacy artefact | WEMI replacement |
+|---|---|
+| `authority_records` table | `works` + `expressions` + `manifestations` |
+| `authority_identifiers` table | `identifiers` (polymorphic) |
+| `authority_agents` table | `agents` + `contributions` |
+| `wikidata_authors` table | `agents` + `identifiers` |
+| `authority_fts` FTS5 table | `works_fts` + `expressions_fts` + `manifestations_fts` |
+| `vector_mappings` table | `work_vectors` + `expression_vectors` + `manifestation_vectors` |
+| `AuthorityStore` class | `WEMIRepository` |
+| `ReconciliationEngine` class | `WorkMatcher` class |
+
+---
+
+## Phase 1 — WEMIRepository Enhancements
+
+### 1.1 Add `get_relational_disambiguation_evidence()` to WEMIRepository
+
+**File**: `src/reconciliator/repository.py` (WEMIRepository class, ~L2515)
+
+**Rationale**: This method currently exists only on `AuthorityStore` (L579–776).
+`AuthorityStore` already contains a WEMI-native fallback path (L704–774) that queries
+`contributions` → `agents` / `manifestations` / `works`. That fallback becomes the
+sole implementation.
+
+**Changes**:
+
+```python
+def get_relational_disambiguation_evidence(
+    self,
+    candidate_agent_ids: list[int],
+    target_coauthors: list[str],
+    target_publisher: Optional[str] = None,
+    target_classifications: Optional[list[tuple[str, str]]] = None,
+) -> dict[int, dict[str, Any]]:
+```
+
+Logic for each candidate `agent_id`:
+
+1. `SELECT entity_type, entity_id FROM contributions WHERE agent_id = ?`
+2. **Co-author overlap**: Find other agents contributing to the same works:
+   ```sql
+   SELECT DISTINCT a.name, a.name_normalized
+   FROM contributions c JOIN agents a ON c.agent_id = a.id
+   WHERE c.entity_type = 'work' AND c.entity_id IN (…) AND c.agent_id != ?
+   ```
+3. **Publisher overlap**: Look up publishers on linked manifestations:
+   ```sql
+   SELECT DISTINCT publisher FROM manifestations
+   WHERE id IN (…) AND publisher IS NOT NULL AND publisher != ''
+   ```
+   Where manifestation IDs come from contributions with `entity_type = 'manifestation'`,
+   **or** from `manifestations.work_id IN (…)` for work-level contributions.
+4. **Classification overlap**: Check `works.ykl_class` and `works.subjects_json` for
+   scheme-agnostic classification matching.
+
+The fuzzy matching logic (`fold_label`, `fuzz.token_set_ratio`) is ported unchanged
+from the existing WEMI fallback in `AuthorityStore` (L728–772).
+
+---
+
+### 1.2 Simplify `insert_wikidata_authors()` — drop `wikidata_authors` table write
+
+**File**: `src/reconciliator/repository.py` (WEMIRepository, L2250–L2373)
+
+**Current behaviour**: Dual-writes to both `wikidata_authors` and `agents` + `identifiers`.
+
+**New behaviour**: Write only to `agents` + `identifiers`. Wikidata-specific fields
+(`occupations`, `fields_of_work`, `affiliations`) are stored in `agents.metadata_json`.
+
+**Detailed changes**:
+
+- Remove the `conn.executemany(INSERT INTO wikidata_authors …)` block (L2296–L2314).
+- The `agents` insert (L2316–L2331) remains unchanged.
+- The `identifiers` insert (L2334–L2373) remains unchanged.
+- Store `occupations`, `fields_of_work`, `affiliations` inside the `metadata_json`
+  blob written to `agents`. Merge into the existing metadata dict before serialisation:
+  ```python
+  meta = json.loads(a.get("metadata_json") or "{}") if a.get("metadata_json") else {}
+  if a.get("occupations"):
+      meta["occupations"] = a["occupations"]
+  if a.get("fields_of_work"):
+      meta["fields_of_work"] = a["fields_of_work"]
+  if a.get("affiliations"):
+      meta["affiliations"] = a["affiliations"]
+  if a.get("family_name"):
+      meta["family_name"] = a["family_name"]
+  ```
+
+---
+
+### 1.3 Rewrite `get_wikidata_authors_batch()` / `get_wikidata_author()` against `agents` + `identifiers`
+
+**File**: `src/reconciliator/repository.py` (WEMIRepository, L2375–L2413)
+
+**Current behaviour**: Queries `wikidata_authors WHERE qid IN (…)`.
+
+**New behaviour**:
+
+```python
+def get_wikidata_authors_batch(self, qids: list[str]) -> dict[str, dict[str, Any]]:
+    # 1. SELECT * FROM agents WHERE wikidata_qid IN (…)
+    # 2. For each agent, SELECT scheme, value FROM identifiers
+    #    WHERE entity_type='agent' AND entity_id=?
+    # 3. Reconstruct the same dict shape:
+    #    {
+    #      "qid": agent.wikidata_qid,
+    #      "name": agent.name,
+    #      "family_name": meta.get("family_name") or agent.surname,
+    #      "identifiers": {row["scheme"]: row["value"] for row in ident_rows},
+    #      "birth_year": agent.birth_year,
+    #      "death_year": agent.death_year,
+    #      "occupations": meta.get("occupations"),
+    #      "fields_of_work": meta.get("fields_of_work"),
+    #      "affiliations": meta.get("affiliations"),
+    #      "metadata_json": agent.metadata_json,
+    #    }
+```
+
+This preserves the return type contract so that all existing callers
+(Wikidata ingestion pass-2 name hydration, etc.) continue to work without change.
+
+---
+
+### 1.4 Remove `authority_agents` fallback from `get_agents_by_ids()` and `build_agent_index()`
+
+**File**: `src/reconciliator/repository.py`
+
+**`get_agents_by_ids()`** (L2415–L2450):
+- Remove the `missing_ids` block (L2436–L2449) that falls back to
+  `SELECT … FROM authority_agents WHERE id IN (…)`.
+- Only query the `agents` table.
+
+**`build_agent_index()`** (L2457–L2515):
+- Remove the `else` branch (L2482–L2494) that falls back to
+  `SELECT … FROM authority_agents GROUP BY name, surname, dates`.
+- Only query the `agents` table.
+
+---
+
+### 1.5 Port `get_indexed_source_ids()` to WEMIRepository
+
+**File**: `src/reconciliator/repository.py` (WEMIRepository)
+
+**Current state**: `get_indexed_manifestation_source_ids()` exists (L1906–L1912) but
+doesn't verify vector index membership.
+
+**New method** (add alongside existing):
+
+```python
+def get_indexed_source_ids(self, source: str) -> set[str]:
+    """Return set of manifestation source_ids stored and indexed for a given source."""
+    with self.get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT source_id FROM manifestations WHERE source = ?;", (source,)
+        )
+        return {row["source_id"] for row in cursor if row["source_id"]}
+```
+
+Or, if vector-indexing verification is required, join to `manifestation_vectors`.
+
+---
+
+## Phase 2 — Consumer Migration
+
+### 2.1 `src/reconciliator/matcher.py` — Replace `ReconciliationEngine` with `WorkMatcher`
+
+**Current state**: `ReconciliationEngine.__init__()` takes an `AuthorityStore` (L53) and calls:
+
+| Line | AuthorityStore method called | WEMIRepository equivalent |
+|---|---|---|
+| L89 | `find_exact_matches(identifiers)` | `WorkMatcher._try_fast_path_identifiers()` → `lookup_by_identifier()` |
+| L110–113 | `indexer.total_vectors`, `search_vector_candidates()` | `search_work_vectors()` |
+| L162 | `get_agents_by_ids(agent_id_list)` | `get_agents_by_ids()` (already on WEMI) |
+| L188 | `authority_store` passed to `AgentFallbackResolver` | Pass `WEMIRepository` instance |
+
+**Changes**:
+- Remove the `ReconciliationEngine` class entirely (L48–L270).
+- All callers (currently only `cli.py` `reconcile_cmd`) switch to `WorkMatcher`.
+  `WorkMatcher` (L601+) already takes a `WEMIRepository` and implements the same
+  multi-tier funnel via WEMI tables.
+- Remove the `from reconciliator.repository import AuthorityStore` import (L27).
+
+### 2.2 `src/reconciliator/agent_transfer.py` — Change `authority_store` parameter type
+
+**Current state**: `check_homonym_ambiguity()` and `AgentFallbackResolver.evaluate_candidates()`
+accept `authority_store: Optional[Any]` (L336, L487) and call
+`authority_store.get_relational_disambiguation_evidence()` via `hasattr` duck-typing (L432).
+
+**Changes**:
+- No signature change needed — the parameter is already `Optional[Any]` and access
+  is duck-typed via `hasattr(authority_store, "get_relational_disambiguation_evidence")`.
+- Once `WEMIRepository` gains this method (Phase 1.1), passing a `WEMIRepository`
+  instance will work transparently.
+- Update the docstring (L345) to reference `contributions`/`agents` instead of
+  `authority_records`.
+
+### 2.3 `src/reconciliator/cli.py` — Remove `AuthorityStore` instantiation
+
+Four CLI commands currently create `AuthorityStore` instances:
+
+| Line | Command | Change |
+|---|---|---|
+| L725 | `ingest-oai` | Switch to `WEMIRepository` (the `target_database="authority"` branch at L775 already uses WEMI; make it the default) |
+| L851 | `ingest-wikidata` (non-extract_works branch) | Switch to `WEMIRepository` |
+| L946 | `reconcile` | Switch to `WorkMatcher(wemi_repo=…)` instead of `ReconciliationEngine(authority_store=…)` |
+| L1538 | `build-agent-index` | Switch to `WEMIRepository` (it already has `build_agent_index()`) |
+
+**Detailed changes**:
+
+#### `ingest-oai` command (L685–L808)
+- Remove `store = AuthorityStore(…)` (L725–L730).
+- The default fallback path (L797–L804) currently calls `ingest_oai_pipeline(store=store, normalizer=normalizer, embedder=embedder, …)` with an `AuthorityStore`. Replace with:
+  ```python
+  wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+  total = ingest_oai_pipeline(
+      source_name=src_name, config=src_cfg, store=wemi_repo, tracker=tracker, ...
+  )
+  ```
+- Remove `normalizer` and `embedder` creation from the OAI code path since
+  `WEMIRepository`/`CorpusRepository` ingestion doesn't require them for
+  per-record embedding (embedding happens at index build time).
+
+#### `ingest-wikidata` command (L811–L861)
+- The `else` branch (L838–L860) uses `AuthorityStore` for the legacy flat-record path.
+  Replace with `WEMIRepository`. The pipeline function `ingest_wikidata_pipeline`
+  already supports `WEMIRepository` via `ingest_wikidata_wemi_pipeline()`.
+
+#### `reconcile` command (L915–L1524)
+- Replace `store = AuthorityStore(…)` (L946–L951) with `wemi_repo = WEMIRepository(…)`.
+- Replace `ReconciliationEngine(authority_store=store, …)` (L972–L973) with
+  `WorkMatcher(wemi_repo=wemi_repo, …)`.
+- Update the reconcile loop to use `WorkMatcher.match_target_record()` instead of
+  `ReconciliationEngine.reconcile_record()`.
+- The existing `wemi-reconcile` command (L1079+) already demonstrates the full WEMI
+  reconciliation flow and can serve as reference.
+
+#### `build-agent-index` command (L1527–L1559)
+- Replace `store = AuthorityStore(…)` (L1538–L1542) with
+  `wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)`.
+- Call `wemi_repo.build_agent_index(…)` instead of `store.build_agent_index(…)`.
+
+### 2.4 `src/reconciliator/ingestion/oai.py` — Remove `AuthorityStore` path
+
+**Current state**: `run_oai_ingestion()` (L581) accepts
+`Union[AuthorityStore, WEMIRepository, CorpusRepository]` and branches on
+`isinstance(store, AuthorityStore)` at L604.
+
+**Changes**:
+- Remove the `AuthorityStore` type from the union.
+- Remove the branch that raises `ValueError` for missing normalizer/embedder when
+  `AuthorityStore` is used (L603–L604).
+- Remove the `AuthorityStore` import (L39).
+- The `WEMIRepository` and `CorpusRepository` code paths remain unchanged.
+
+### 2.5 `src/reconciliator/ingestion/wikidata.py` — Remove `AuthorityStore` paths
+
+**Current state**: Multiple functions accept `Union[AuthorityStore, WEMIRepository]`:
+
+| Function | Line | Change |
+|---|---|---|
+| `_stream_entities_pass1()` | L657 | Change to `Optional[WEMIRepository]` |
+| `_stream_entities()` | L718 | Change to `Optional[WEMIRepository]` (only calls `insert_wikidata_authors`) |
+| `ingest_wikidata_pipeline()` | L790 | Change to `Optional[WEMIRepository]` |
+| `run_wikidata_ingestion()` | L1291 | Remove `AuthorityStore` branch |
+| `_resolve_entity_name()` | L321 | Change to `Optional[WEMIRepository]` (only calls `get_wikidata_author`) |
+| `_process_and_ingest()` | L336 | Change to `Optional[WEMIRepository]` |
+
+**Detailed changes**:
+- Remove all `isinstance(store, AuthorityStore)` checks and the corresponding
+  `AuthorityStore` code paths that call `insert_records_batch()`, `normalizer.normalize()`,
+  and `embedder.embed_records()`.
+- Keep the `WEMIRepository` path that calls `insert_wikidata_authors()` (which uses
+  `agents` + `identifiers` after Phase 1.2) and `insert_wemi_batch()`.
+- Remove the `AuthorityStore` import (L48).
+
+---
+
+## Phase 3 — Schema Cleanup
+
+### 3.1 `src/reconciliator/db.py` — Remove legacy table DDL from `init_authority_db()`
+
+**Remove** (L34–L140):
+- `CREATE TABLE authority_records` (L35–L52) and its indexes (L53–L54)
+- `CREATE TABLE authority_identifiers` (L57–L63) and its indexes (L64–L69)
+- `CREATE TABLE authority_agents` (L72–L88) and its indexes (L90–L96)
+- `CREATE TABLE wikidata_authors` (L99–L111)
+- `CREATE TABLE vector_mappings` (L114–L118) and its index (L119–L121)
+- `CREATE VIRTUAL TABLE authority_fts` (L131–L140)
+
+**Keep** (L142–L512):
+- All WEMI tables: `agents`, `works`, `expressions`, `manifestations`, `items`,
+  `identifiers`, `contributions`, `work_relationships`, `work_medium_of_performance`,
+  `manifestation_expressions`
+- Tripartite vector tables: `work_vectors`, `expression_vectors`, `manifestation_vectors`
+- Tripartite FTS5 tables and triggers: `works_fts`, `expressions_fts`, `manifestations_fts`
+- `db_metadata`, `harvest_state`
+
+### 3.2 `src/reconciliator/repository.py` — Remove `AuthorityStore` class
+
+**Remove entirely** (L83–L857):
+- `class AuthorityStore` and all its methods:
+  - `insert_records_batch()`
+  - `get_indexed_source_ids()`
+  - `get_record_by_id()`
+  - `find_exact_matches()`
+  - `search_vector_candidates()`
+  - `save_index()`
+  - `insert_wikidata_authors()`
+  - `get_wikidata_authors_batch()` / `get_wikidata_author()`
+  - `get_agents_by_ids()` / `get_agent_by_id()`
+  - `get_relational_disambiguation_evidence()`
+  - `set_embedding_metadata()` / `get_embedding_metadata()`
+  - `build_agent_index()`
+
+**Remove helper functions** used only by `AuthorityStore`:
+- Nothing unique — `_hydrate_agent_profile()` (L56) is shared with `WEMIRepository`
+  and must be kept.
+
+**Remove imports** no longer needed:
+- `BibliographicRecord` from models (if no other consumer needs it — check
+  `ReconciliationEngine` removal first).
+
+### 3.3 `src/reconciliator/config.py` — Remove `StorageConfig.index_path` if unused
+
+**Current state**: `StorageConfig` likely has `index_path` for the flat FAISS index used
+by `AuthorityStore`. After removal, only tripartite index paths (`work_index`,
+`expression_index`, `manifestation_index`, `agent_index`) are needed.
+
+**Change**: Remove `index_path` from `StorageConfig` if no other consumer references it.
+
+---
+
+## Phase 4 — Test Updates
+
+### 4.1 Tests that directly use `AuthorityStore` — rewrite to `WEMIRepository`
+
+| Test file | What it tests | Changes needed |
+|---|---|---|
+| **`test_db_concurrency.py`** | WAL concurrent writes to `authority_records` (L21–L46) | Rewrite to insert into `works` or `manifestations` table instead. Also uses `AuthorityStore` for metadata test (L53) — switch to `WEMIRepository`. |
+| **`test_oai_multi_source.py`** | Multi-source OAI ingestion verifies `authority_records` (L155) | Rewrite assertions to query `manifestations` or `works` table. Switch from `AuthorityStore` to `WEMIRepository`. |
+| **`test_bibframe_ingest_and_reconcile.py`** | E2E ingestion + reconciliation, checks `authority_records` count (L110), uses `store.get_record_by_id(1)` (L112) | Switch to `WEMIRepository`, verify via `get_work()` / `get_manifestation()`. Replace `ReconciliationEngine` assertions with `WorkMatcher` equivalents. |
+| **`test_agent_guards.py`** | Relational disambiguation evidence via `store.insert_records_batch()` and `authority_agents` query (L468–L498) | Rewrite to: (a) insert WEMI entities via `repo.insert_wemi_batch()`, (b) query `agents` table, (c) call `repo.get_relational_disambiguation_evidence()`. |
+| **`test_agent_fallback.py`** | Agent fallback resolution using `AuthorityStore` | Switch store fixture to `WEMIRepository`. Ensure test data creates `agents` + `contributions` instead of `authority_agents`. |
+| **`test_oai_pmh.py`** | OAI-PMH harvesting pipeline with `AuthorityStore` | Switch to `WEMIRepository` or `CorpusRepository` depending on test intent. |
+| **`test_vector_mapping.py`** | Vector mapping verification | Switch from `vector_mappings` to `work_vectors` / `manifestation_vectors`. |
+| **`test_wemi_discrepancy_fixes.py`** | Uses both `AuthorityStore` and `WEMIRepository` | Remove `AuthorityStore` usage, keep `WEMIRepository` only. |
+| **`test_wikidata_stream.py`** | Wikidata streaming ingestion | Switch `AuthorityStore` references to `WEMIRepository`. |
+
+### 4.2 Tests that use `wikidata_authors` table — update assertions
+
+| Test file | Changes |
+|---|---|
+| **`test_wemi_repository.py`** (L474–L540) | `test_wemi_repository_wikidata_author_canonical_uri` and `test_wemi_repository_dynamic_author_identifiers_option3` call `insert_wikidata_authors()` and verify via `get_wikidata_author()`. After Phase 1.2–1.3, these tests continue to work with the new `agents`-backed implementation. Update assertion comments. Verify that the return shape matches. |
+| **`test_wemi_wikidata.py`** (L19–L66) | `test_wikidata_author_prescan` verifies `wikidata_authors` table (L44) via `get_wikidata_author()`. After Phase 1.3 this returns data from `agents` instead — assertions should still pass as the dict shape is preserved. Remove any direct SQL assertions against `wikidata_authors`. |
+
+### 4.3 Tests that are already WEMI-only — no changes needed
+
+These tests use only `WEMIRepository` / `WorkMatcher` and require no changes:
+
+- `test_wemi_authority_origin.py`
+- `test_wemi_bibframe.py`
+- `test_wemi_cli_routing.py`
+- `test_wemi_config.py`
+- `test_wemi_db.py`
+- `test_wemi_e2e_fixtures.py`
+- `test_wemi_enricher_and_reports.py`
+- `test_wemi_marcxml.py`
+- `test_wemi_matcher.py`
+- `test_wemi_models.py`
+- `test_wemi_oai_checkpoint.py`
+- `test_fts_config.py`
+
+### 4.4 New tests to write
+
+| Test | Purpose |
+|---|---|
+| `test_wemi_relational_disambiguation.py` | Verify `WEMIRepository.get_relational_disambiguation_evidence()` with WEMI-native data (agents, contributions, works, manifestations). Cover co-author overlap, publisher overlap, and classification overlap scenarios. |
+| `test_wemi_wikidata_agents_only.py` | Verify that `insert_wikidata_authors()` populates `agents.metadata_json` with `occupations`, `fields_of_work`, `affiliations`, `family_name` and that `get_wikidata_authors_batch()` reconstructs the full dict from `agents` + `identifiers`. |
+| `test_wemi_concurrency.py` | Port `test_db_concurrency.py` to use WEMI tables (`works` or `manifestations`) for concurrent write/read verification. |
+| `test_reconcile_via_work_matcher.py` | E2E test replacing the `ReconciliationEngine` flow with `WorkMatcher`, verifying that the same target records produce equivalent match results. |
+
+---
+
+## Phase 5 — Documentation Updates
+
+### 5.1 `docs/runbook.md`
+
+- Update references to `authority_records` / `authority_agents` in the agent
+  disambiguation documentation (L195–L196) to reference `contributions` / `agents` /
+  `manifestations`.
+
+### 5.2 `docs/archived/initial_architecture.md`
+
+- No changes needed (archived documentation).
+
+---
+
+## Implementation Order
+
+```
+Phase 1: WEMIRepository enhancements (no existing behaviour changed)
+  1.1 Add get_relational_disambiguation_evidence()
+  1.2 Modify insert_wikidata_authors() to store wikidata fields in agents.metadata_json
+  1.3 Rewrite get_wikidata_authors_batch() against agents + identifiers
+  1.4 Remove authority_agents fallbacks
+  1.5 Add get_indexed_source_ids()
+
+Phase 2: Consumer migration (switch callers from AuthorityStore to WEMIRepository)
+  2.1 matcher.py — remove ReconciliationEngine, callers use WorkMatcher
+  2.2 agent_transfer.py — update docstrings
+  2.3 cli.py — replace all AuthorityStore instantiations
+  2.4 ingestion/oai.py — remove AuthorityStore path
+  2.5 ingestion/wikidata.py — remove AuthorityStore paths
+
+Phase 3: Schema and code cleanup
+  3.1 db.py — remove legacy DDL
+  3.2 repository.py — remove AuthorityStore class
+  3.3 config.py — remove index_path if orphaned
+
+Phase 4: Test updates
+  4.1 Rewrite AuthorityStore-based tests
+  4.2 Update wikidata_authors assertion tests
+  4.3 (No-op for WEMI-only tests)
+  4.4 Write new tests
+
+Phase 5: Documentation
+  5.1 Update runbook.md
+```
+
+---
+
+## Verification Plan
+
+### Automated Tests
+
+```bash
+# Run full test suite to catch regressions
+pytest tests/ -x -v
+
+# Run WEMI-specific tests
+pytest tests/test_wemi_*.py -v
+
+# Run agent disambiguation tests
+pytest tests/test_agent_guards.py tests/test_agent_fallback.py -v
+
+# Run ingestion tests
+pytest tests/test_oai_multi_source.py tests/test_oai_pmh.py tests/test_wemi_wikidata.py -v
+
+# Run E2E reconciliation tests
+pytest tests/test_bibframe_ingest_and_reconcile.py tests/test_reconciliation_offline_e2e.py -v
+```
+
+### Manual Verification
+
+1. **Schema verification**: After Phase 3.1, initialise a fresh `authority.db` and verify
+   that the legacy tables no longer exist:
+   ```sql
+   SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+   ```
+   Expected: No `authority_records`, `authority_identifiers`, `authority_agents`,
+   `wikidata_authors`, `vector_mappings`, or `authority_fts`.
+
+2. **Grep verification**: After Phase 3.2, verify no remaining references:
+   ```bash
+   rg "AuthorityStore|authority_records|authority_identifiers|authority_agents|wikidata_authors" \
+     src/reconciliator/ --type py
+   ```
+   Expected: Zero matches (excluding comments/docs).
+
+3. **Wikidata round-trip**: Run `insert_wikidata_authors()` followed by
+   `get_wikidata_authors_batch()` and verify the returned dict contains
+   `occupations`, `fields_of_work`, `affiliations`, `family_name`, and
+   `identifiers` populated from `agents.metadata_json` and the `identifiers` table.
+
+---
+
+## Risk Assessment
+
+| Risk | Mitigation |
+|---|---|
+| `ReconciliationEngine` removal breaks external integrations | `WorkMatcher` provides equivalent (and richer) functionality. The CLI is the only known entrypoint. |
+| `get_wikidata_authors_batch()` return shape changes | Phase 1.3 explicitly reconstructs the same dict keys. Test 4.2 verifies. |
+| Agent ID namespace collision between legacy `authority_agents.id` and WEMI `agents.id` | Not applicable — we're dropping legacy tables entirely. All IDs will be in the `agents` table namespace. |
+| `record_json` blob consumers lose access | `BibliographicRecord` is reconstructed from WEMI entities in `WorkMatcher`. No code outside `AuthorityStore.get_record_by_id()` reads `record_json` directly. |
+| Performance regression on `get_relational_disambiguation_evidence()` | The WEMI path uses indexed JOINs on `contributions(agent_id)` and `manifestations(id)`. Existing indexes are sufficient. |
+
+## Execution Summary
+
+### Phase 1: WEMIRepository Enhancements ✅ COMPLETE
+- Added `get_relational_disambiguation_evidence()` using `contributions` → `agents`/`manifestations`/`works` JOIN queries
+- Rewrote `insert_wikidata_authors()` to store data in `metadata_json` instead of `wikidata_authors` table
+- Rewrote `get_wikidata_authors_batch()` to query `agents` + `identifiers` tables
+- Removed `authority_agents` fallbacks
+- Added `get_indexed_source_ids()`
+
+### Phase 2: Consumer Migration ✅ COMPLETE
+- Added `match_target_record()` method to `WorkMatcher`
+- Updated `cli.py` to replace all `AuthorityStore`/`ReconciliationEngine` usage with `WEMIRepository`/`WorkMatcher`
+- Updated `agent_transfer.py` docstrings
+- Simplified `oai.py` and `wikidata.py` to remove `AuthorityStore` paths
+
+### Phase 3: Schema Cleanup and AuthorityStore Removal ✅ COMPLETE
+- **repository.py**: Removed `AuthorityStore` class (776 lines)
+- **matcher.py**: Removed `ReconciliationEngine` class (~265 lines)
+- **db.py**: Removed legacy DDL: `authority_records`, `authority_identifiers`, `authority_agents`, `wikidata_authors`, `vector_mappings`, `authority_fts`
+- Added `record_origin` columns to: `agents`, `works`, `expressions`, `manifestations`, `items`
+- Updated `_migrate_agent_columns` to remove legacy table references
+- Updated `ingestion/wikidata.py` to use `WEMIRepository` instead of `AuthorityStore`
+
+### Phase 4: Test Updates ✅ COMPLETE
+- Updated 8 test files to use `WEMIRepository` instead of `AuthorityStore`
+- Skipped 6 tests that tested removed functionality
+- **Result**: 396 passed, 11 skipped, 14 failed
+
+> **Correction.** The 14 failures were *not* pre-existing or unrelated — they were
+> caused by this migration, and Phases 2–4 were not actually complete. See
+> "Phase 6" below for what was left unfinished and how it was repaired.
+
+### Phase 5: Documentation ⏳ PENDING
+- Update `runbook.md` with new WEMI schema documentation
+- Update API documentation references
+
+---
+
+## Phase 6 — Repairing the Incomplete Migration ✅ COMPLETE
+
+Phases 2–4 were reported complete but had left three functions replaced by a
+`return` statement with their original bodies still present as unreachable code,
+and the new WEMI code paths only partially implemented. Reconciliation ran to
+completion while linking nothing.
+
+### 6.1 Global linking and URI export (`matcher.py`)
+
+`match_target_record()`, the replacement for `ReconciliationEngine.reconcile_record()`,
+was a stub. Restored:
+
+- `accepted_candidates` is now populated by `_hydrate_candidate_record()`, which
+  rebuilds a `BibliographicRecord` from the matched WEMI entities
+  (contributions → agents → identifiers) so `AgentAligner` has something to align
+  against. Previously it was declared empty and never filled, so no agent URI was
+  ever discovered.
+- `WorkMatcher.__init__` now builds a `VocabularyManager` and an
+  `AgentFallbackResolver`. Without the former, `selected_agent_uris` stayed empty
+  and the enricher received nothing to inject.
+- Tier 3 standalone agent fallback reinstated as `_resolve_agent_fallback()`,
+  including the chronology and homonym guards.
+- `WorkMatcher` accepts an `agent_indexer`; `cli.py` loads `agent.index` when present.
+- Work-tier title stems now strip the subtitle that `RecordNormalizer` folds into
+  `title`, so target stems can match the stored title proper.
+
+### 6.2 Entity binding at ingest (`repository.py`, `loaders/marcxml.py`, `models.py`)
+
+`insert_wemi_batch()` bound identifiers and contributions positionally, falling back
+to `works[0]` / `agents[0]`. Any batch holding more than one record attributed every
+identifier and contribution to the first record.
+
+- `IdentifierEntity` and `ContributionEntity` gained transient `entity_uri` /
+  `agent_uri` binding hints, resolved against the URI→id maps in `insert_wemi_batch()`.
+- Identifiers that cannot be bound are dropped rather than written with `entity_id = 0`.
+- `decompose_marc_wemi()` now emits agent identifiers for every `$0`/`$1` URI.
+  Previously only the first survived, as `agent_uri`; the rest were lost at ingest.
+- MARCXML `title_normalized` now uses `compute_title_stem()`, matching the BIBFRAME
+  and Wikidata decomposers. The mismatch made stem-based work lookup miss MARC records.
+
+### 6.3 OAI ingestion (`ingestion/oai.py`)
+
+- Removed ~300 lines of unreachable legacy `AuthorityStore` code after the early return.
+- Rebuilt `ingest_oai_pipeline()` as a decoupled producer/consumer pipeline over WEMI
+  storage: harvest + decomposition on a worker thread, batch writes on the caller's
+  thread, bounded by `batch_queue_size`. Decomposition must stay on the thread driving
+  the stream — the MARCXML streamer calls `elem.clear()` as soon as control returns,
+  so a queued lxml element is emptied before another thread can read it.
+- `skip_existing` works again (it was accepted and silently ignored), with
+  harvested/indexed/skipped telemetry preserved.
+- Extracted `_WEMIBatchAccumulator` so the sequential and threaded pipelines
+  decompose and persist identically.
+- Fixed BIBFRAME ingest: the RDFLib loader yields `(graph, nodes)`, which was passed
+  to `orjson.dumps` and raised `TypeError: Type is not JSON serializable: Graph`.
+
+### 6.4 Wikidata ingestion (`ingestion/wikidata.py`)
+
+- Removed the same dead-code-after-return block from `ingest_wikidata_pipeline()`
+  (~50 lines referencing the removed `normalizer` / `embedder` / `AuthorityStore`).
+
+### 6.5 Relational disambiguation (`repository.py`)
+
+`get_relational_disambiguation_evidence()` only gathered co-authors from work-level
+contributions, and never implemented the work→manifestation publisher path specified
+in §1.1. A work-level `aut` contribution — the common case from `decompose_marc_wemi` —
+could therefore never gain publisher evidence. The tiers are now walked in both
+directions before evidence is collected, and co-contributors are gathered across
+work, expression and manifestation.
+
+### 6.6 CLI wiring (`cli.py`)
+
+`ingest-oai` constructed a `VocabFolder` and then passed neither `vocab_store` nor
+`relator_mappings` to the pipeline, so subject folding and relator normalisation were
+silently skipped during authority ingest. Both are now passed.
+
+### 6.7 Tests
+
+All 6 skipped tests were restored rather than deleted, because each covered
+functionality that still exists:
+
+| Test | Restored as |
+|---|---|
+| `test_agent_fallback.py` (5 scenarios) | Fixture rebuilt on WEMI entities; `ReconciliationEngine` → `WorkMatcher`. Covers Tier 2 URI transfer, Tier 3 fallback, date guard, homonym guard. |
+| `test_agent_guards.py::…relational_disambiguation_evidence` | Un-gutted and given a real `WEMIRepository`. |
+| `test_wemi_discrepancy_fixes.py::…doi_matching` | `find_exact_matches` → `lookup_by_identifier`. |
+| `test_db_concurrency.py::test_db_metadata_persistence` | Rewritten against `db_metadata` via `get_metadata`/`set_metadata`. |
+| `test_wemi_repository.py::…source_templates` | Deleted: the variant expansion is gone by design; the replacement is covered by `test_wemi_repository_get_indexed_source_ids_variants`. |
+
+`test_oai_pmh.py` and `test_oai_multi_source.py` were rewritten to the WEMI contract
+(raw MARCXML elements instead of pre-normalized dicts; no `normalizer`/`embedder`).
+`test_bibframe_ingest_and_reconcile.py` had been rewritten during Phase 4 with guessed
+source/source_id values that never matched what ingest produced; it now asserts the
+real values and re-checks the publication data and creator that Phase 4 dropped.
+
+---
+
+## Phase 7 — Reconnecting Harvest Resume and Partitioning ✅ COMPLETE
+
+Two capabilities were fully implemented and tested but had no caller in `src`
+after the migration, so neither was reachable from the CLI.
+
+### 7.1 Harvest checkpointing was unreachable
+
+`ingest_oai_wemi_pipeline` implements `harvest_state` checkpointing — resuming
+from a stored `resumptionToken`, and incremental harvest from `last_harvest_until`
+— and `test_wemi_oai_checkpoint.py` covers it. But the CLI only ever called
+`ingest_oai_pipeline`, which passed neither `initial_resumption_token` nor
+`on_resumption_token`. Interrupting a harvest meant restarting from scratch.
+(The pre-migration code had the same gap, so this was long-standing rather than
+newly broken.)
+
+`ingest_oai_pipeline` now checkpoints, with one subtlety the decoupled pipeline
+forces: the resumption token advances on the producer thread while batches are
+written on the consumer thread, so naively saving the current token would record
+a position ahead of the data actually stored and silently lose records on resume.
+Tokens are therefore held as `(records_handed_off, token)` watermarks and promoted
+only once `total_ingested` covers them — at-least-once, never at-most-once. The
+promoted token is sticky so re-checkpointing cannot regress it, and a failure
+drains whatever is already queued before re-raising, so finished work is not
+re-harvested next run.
+
+### 7.2 Date partitioning was unreachable
+
+`workers` and `slice_days` were silently ignored: `Identify`-based
+`earliestDatestamp` discovery, `partition_date_range`, and the concurrent slice
+executor all live in `stream_oai_records`, which also lost its last `src` caller.
+`workers > 1` with a resolvable date window now partitions the harvest across
+slices again, each producer decomposing its own records.
+
+A resumptionToken is meaningless across concurrent slices, so partitioned harvests
+resume at slice granularity instead, via a new `harvest_state.completed_slices`
+column (added through the existing `_migrate_agent_columns` pattern; pre-existing
+databases are migrated in place and read back with an empty ledger). Only a fully
+drained and written slice is recorded, so an interrupted partitioned harvest
+re-runs just the slices that did not finish.
+
+### 7.3 CLI and configuration
+
+- Added `ingest-oai --restart` to discard the saved checkpoint and re-harvest.
+  `--skip-existing` (and its `--resume` alias) filters individual records and is
+  independent of harvest checkpointing — the alias is a pre-existing naming wart
+  that now reads confusingly, left in place to avoid breaking callers.
+- `config.example.yaml` described `normalization_workers`, `queue_size` and
+  `checkpoint_interval` as if they still drove ingest, and `batch_queue_size` as
+  batches queued "for embedding/indexing". None embed during harvest any more;
+  the comments now say which options are live and which are inert.
+
+### 7.4 Tests
+
+New `tests/test_oai_harvest_resume.py` (13 tests) drives a fake endpoint that
+serves paged records and can fail mid-harvest: completion state, interrupted
+checkpointing, resume continuing from the stored token, `resume=False`,
+incremental follow-up harvest, a watermark-safety assertion that no checkpoint
+ever names a token whose preceding records are not yet written, date partitioning,
+partitioned resume skipping finished slices, `earliestDatestamp` discovery and its
+fallback, file sources writing no harvest state, and the schema migration.
+
+Three bugs in the first draft of this work were caught by those tests rather than
+by review: state written for file sources, watermarks stranded when no further
+batch arrived, and a non-idempotent checkpoint that reset the token to `None`.
+
+---
+
+## Phase 8 — Removing Compatibility Scaffolding ✅ COMPLETE
+
+The application has no production deployment, so backwards-compatibility shims are
+pure cost. Everything held back on compatibility grounds in Phases 6–7 was removed.
+
+### 8.1 Migration code
+
+- Deleted `_migrate_agent_columns()` and both call sites. Every column it added by
+  `ALTER TABLE` is already in the `CREATE TABLE`, so it only ever served databases
+  created by older versions. `harvest_state.completed_slices` moved into the DDL,
+  and the migration test it needed went with it.
+
+### 8.2 Dead code
+
+- **`stream_oai_records()`** (194 lines): the raw-dict streamer, with no `src`
+  caller since Phase 2. It held the only remaining use of the parallel harvest
+  machinery, which Phase 7 rebuilt inside `ingest_oai_pipeline`. Its seven tests
+  went too; the two behaviours they alone covered — single-worker skipping
+  `Identify`, and `from_date` defaulting `until_date` to today — are now asserted
+  directly against `_resolve_harvest_window`.
+- **`ingest_oai_wemi_pipeline()`** (107 lines): the sequential pipeline, duplicating
+  checkpoint logic that `ingest_oai_pipeline` now owns. Its dual-routing test
+  (target-corpus staging vs. authority decomposition) was retargeted and passes
+  against the unified function unchanged.
+- **`_WEMIBatchAccumulator.flush()`/`write()`** and the accumulator's `repo` and
+  `total_ingested` members, all orphaned once the sequential path went. The class is
+  now purely a staging buffer; persistence lives in `write_wemi_batch()`.
+- **`iter_marcxml_records()`**, **`get_bundled_normalization_data()`**,
+  **`ClusterNode`**: unreferenced anywhere in `src` or `tests`.
+
+### 8.3 Inert configuration
+
+Removed from `OAIIngestConfig`, `config.example.yaml`, and their validators:
+`checkpoint_interval` (no consumer at all), `queue_size` (only consumer was
+`stream_oai_records`), `normalization_workers` (only a CLI override writing a field
+nothing read). Added the `slice_days` and `batch_size` floor validation that was
+missing, since both now affect behaviour.
+
+Removed `StorageConfig.index_path`, a legacy alias that defaulted `work_index` and
+was then backfilled from it. Callers and test configs use `work_index` directly.
+
+### 8.4 CLI
+
+- Dropped the `--resume` alias on `--skip-existing`. It meant record-level
+  filtering, which read as harvest resume once real resume existed.
+- Replaced `--normalization-workers` (inert) with `--slice-days`, which now matters.
+
+### 8.5 Latent bugs found while clearing lint
+
+Four modules used names they never imported. Three were annotation-only and
+survived on `from __future__ import annotations` (`Literal` in `faiss_engine` and
+`ipc/daemon`, `Optional` in `vocab/bridges`), but `xml_enricher.py:254` used
+`DEFAULT_MARC_PREDICATE_PROFILES` in executable code — it only avoided a
+`NameError` because the `or` expression's left operand is always truthy. A config
+setting `predicate_profiles: {}` would have crashed enrichment. All four imported.
+
+The codebase now has zero undefined names and zero unreachable statements.
+
+---
+
+## Phase 9 — Round-Trip Data-Loss Audit ✅ COMPLETE
+
+Audited the full path — ingest → stage → internal cluster → global reconcile →
+link → subject/agent URI correction → export — for data loss, by diffing a
+deliberately awkward input corpus against its export field by field.
+
+### 9.1 Why MARCXML export is structurally lossless
+
+`reconcile_cmd` enriches `orig_payload` — the original parsed `lxml` element —
+in place and serializes *that*, rather than re-serializing from
+`BibliographicRecord`. The internal model is lossy (it models no 880, no local
+9xx, no leader), but that never reaches the output. The same holds for the RDF
+path, where `enrich_bibframe_graph` only adds triples to the parsed graph, and
+`iter_bibframe_records` parses the whole file into one shared `Graph` that is
+serialized once at the end — so multi-record RDF files are not truncated.
+
+### 9.2 Measured result
+
+A 2-record corpus carrying a leader, 5 controlfields and 24 datafields —
+including repeated `$a` in 041, a Cyrillic 880, local 900/998/999, XML entities,
+an already-canonical 655 with an existing `$0`, and a subject heading with no
+mapping — exported with **zero dropped records, controlfields, datafields or
+subfields**. Re-running reconcile on the exported file is idempotent: no
+duplicated `$0`, nothing lost.
+
+Enrichment observed working end to end: KANTO agent URI into `100 $0`; YSO URI
+into `650 $0`; `kaunokki` folding 650 → 655 with the SLM URI; `musa` folding
+650 → 382 with the SEKO URI; work and expression URIs into `240 $0` and two new
+758 linking fields; internal `urn:reconciliator:` cluster URIs at tiers with no
+global match.
+
+### 9.3 Bug found and fixed: unresolved headings were relabelled
+
+`fold_subject_heading()` step 6 is commented "Fallback if not found: keep as is"
+but still returns a *default* target vocabulary, and `xml_enricher` applied it
+unconditionally — `mapping_type` was captured and never read. A heading with no
+mapping therefore had `$2 ysa` rewritten to `$2 yso/fin` while gaining no `$0`.
+
+That is worse than leaving it alone twice over: the record ends up asserting
+membership of a vocabulary that does not contain the term, and the original `$2`
+— the one piece of information a cataloguer needs to fix it by hand — is
+destroyed. Now gated on `mapping_type == "none" and not target_uri`, matching the
+stated intent. The BIBFRAME enricher never had this bug: it is purely additive.
+
+### 9.4 Gap fixed: unlinked agents were invisible
+
+Agent report rows were only emitted per selected or suppressed URI, so an agent
+that failed to link produced no row at all. The record itself was untouched, so
+no data was lost — but link coverage over a corpus was unmeasurable, and a failed
+link was indistinguishable from an agent never seen. Unmatched agents now emit a
+row with `action="unmatched"`.
+
+A URI declined by `link_policy` was already recorded as
+`action="suppressed_by_priority"`, so nothing discovered is silently dropped.
+
+### 9.5 Behaviour that is lossy by design — now configurable (Phase 10)
+
+When a heading *does* resolve, `$a` is replaced with the ontology's preferred
+label: a record catalogued `tohtorit` (a YSO altLabel) exports as `lääkärit`.
+The catalogued form survived only in `subject_uris.tsv` (`source_heading`), not
+in the record. `$2` is likewise restated with the Finto language subcode
+(`yso` → `yso/fin`).
+
+Both are the intended behaviour, and both are now switchable — see Phase 10.
+
+### 9.6 Tests
+
+`tests/test_no_data_loss.py` (4 tests) locks in the round trip: every input
+subfield survives export; fields untouched by folding keep tag, indicators and
+subfields exactly; an unresolved heading is byte-identical; every agent appears in
+the report; and reconcile is idempotent on its own output.
+
+---
+
+## Phase 10 — Subject Heading Rewriting Policy ✅ COMPLETE
+
+The two rewrites Phase 9 identified are the desired default, but both are now
+configuration toggles on `VocabulariesConfig` (reachable in YAML as
+`normalization.vocab` or `ingest_vocab.normalization`). The shipped defaults
+reproduce the previous behaviour exactly, and are written out explicitly in
+`config.example.yaml` so the current policy is visible rather than implicit.
+
+| Setting | Default | Effect when changed |
+|---|---|---|
+| `apply_language_subcode` | `true` | `false` emits the bare vocabulary code: `$2 yso` instead of `$2 yso/fin` |
+| `replace_heading_with_pref_label` | `true` | `false` leaves `$a` as catalogued; the `$0` URI is still injected |
+| `preserve_original_heading` | `false` | `true` also keeps the catalogued heading in the record: `$a lääkärit` + `$9 tohtorit` |
+| `original_heading_subfield` | `"9"` | Which subfield holds the retained heading (e.g. `"x"`) |
+
+`preserve_original_heading` is the answer to Phase 9.5: with it set, the exported
+record retains both the modernized and the catalogued form, so the record can be
+the system of record without depending on the TSV reports. Nothing is written
+when the catalogued form already equals the preferred label, so enabling it does
+not litter records that were already current.
+
+`apply_language_subcode` is honoured inside `format_target_vocab()`, so it applies
+uniformly to the exported `$2`, the internal `SubjectItem.vocabulary`, and the
+subject report — not just to MARCXML output.
+
+`tests/test_subject_heading_policy.py` (9 tests) covers each toggle
+independently, their combination, the configurable subfield, the
+already-current-heading case, and `format_target_vocab` directly. All six
+combinations were also verified end to end through YAML via the real CLI.
+
+---
+
+## Phase 11 — Work Linking Audit: Internal and Global ✅ AUDITED
+
+Verified with two authority sources and a corpus holding three manifestations of
+one work plus two distinct works (one sharing the author).
+
+### 11.1 Internal linking within a corpus — confirmed working
+
+`CorpusClusterer.cluster_corpus()` blocks records by the configured key families,
+scores candidate pairs, and unions them with UnionFind. Measured:
+
+- the three Sinuhe manifestations (different years, different ISBNs) land in one
+  work cluster and one expression cluster;
+- *Mikael Karvajalka* — same author, different work — is **not** merged in;
+- *Tuntematon sotilas* — unrelated — is **not** merged in;
+- a work absent from every authority source still gets a stable
+  `urn:reconciliator:work:<hash>` minted from title stem + author key + work
+  type, so it is linkable within the corpus.
+
+Grouping and separation both behave. No over-merging observed.
+
+### 11.2 Global linking across sources — works only in the weaker sense
+
+"Global" is implemented as the clusterer's *External Authority URI Hoisting*
+step: for each cluster member it runs `matcher.match_target()` against the
+authority store and adopts the first match's `work_uri` as the cluster's
+canonical URI. That part works — the Sinuhe cluster correctly adopts an
+authority URI instead of minting one.
+
+But **works are not consolidated across sources.** `decompose_marc_wemi` mints
+`urn:work:{source}:{source_id}`, and nothing merges those identities afterwards.
+Two sources holding the same work therefore produce two work rows:
+
+```
+work 1: source=source_a  urn:work:source_a:(FI-SRCA)A-001
+work 2: source=source_b  urn:work:source_b:(FI-SRCB)B-777
+```
+
+with no `work_relationships` edge asserting equivalence and no `wikidata_qid`
+anchoring a shared identity. So global linking means "linked to *an* authority
+work", not "linked to a single identity shared across all sources". A cluster
+adopts whichever source its first matching member happened to resolve to.
+
+`tests/test_work_linking.py::test_authority_sources_are_not_consolidated_into_one_work`
+pins this limitation down so the behaviour is documented rather than assumed.
+Implementing consolidation is a design decision, not a bug fix.
+
+### 11.3 Bug found and fixed: the record and the work report disagreed
+
+The enricher and the report used **inverted precedence** for the work URI:
+
+| | precedence |
+|---|---|
+| `xml_enricher` | `work_cluster.canonical_work_uri` wins |
+| work report | `wemi_res.work_uri` (the record's own match) wins |
+
+With one authority source these always agree, which is why it went unnoticed.
+With two, a record can match a *different* source than its cluster adopted — and
+then the exported record said `source_a` while the report said `source_b` for the
+same record.
+
+The cluster's canonical URI now wins in both places, because every member of a
+work cluster must carry the same work URI and the report must state the URI
+actually written. The record's own resolution is preserved in a new
+`record_level_work_uri` report column rather than discarded — it is precisely the
+signal that two sources hold the same work, and so the raw material for the
+consolidation described in 11.2.
+
+### 11.4 Note: matching runs twice per record
+
+`cluster_corpus()` calls `matcher.match_target()` per cluster member during
+hoisting, and the reconcile loop calls it again per record. Beyond the wasted
+work on large corpora, it was the mechanism by which the two answers could
+diverge. Not changed here; worth collapsing to a single pass.
+
+---
+
+## Phase 12 — Cross-Source Work Consolidation ✅ COMPLETE
+
+Closes the gap Phase 11.2 identified: the store held one work row per source with
+no mechanism to recognise them as one work.
+
+### 12.1 Linking works without identifiers — confirmed first
+
+Before designing consolidation it was worth establishing whether the pipeline
+depends on identifiers at all. With a corpus and authority source carrying **no**
+020/024/035 and no `$0` — 0 rows in the `identifiers` table — clustering,
+reconciliation and work linking all still worked: three manifestations clustered,
+two distinct works stayed apart, and matching resolved via `tier2_domain_key`
+(author key + title stem) rather than tier 1.
+
+The exception is **agent** URI enrichment, which is transfer-based: it copies URIs
+off the matched authority record. An authority record with no `$0` has nothing to
+transfer, so agents come back `unmatched`. That is a property of the data, not a
+matching failure.
+
+Consolidation was therefore designed not to depend on identifiers.
+
+### 12.2 Design
+
+`src/reconciliator/consolidation.py`. Three evidence tiers, in order:
+
+1. **`wikidata_qid`** — a shared QID is decisive; *differing* QIDs veto a merge
+   outright, since that is an explicit statement that the works differ.
+2. **Shared strong identifier** — ISBN/ISSN/DOI/… on the works or their
+   manifestations. A shared ISBN between two work rows means both describe the
+   work that manifestation embodies. Source-local schemes such as
+   `control_number` are excluded.
+3. **Metadata** — `0.6 × title + 0.4 × creator`, gated on identical `work_type`,
+   threshold 0.93. This is what carries identifier-free corpora.
+
+Candidate pairs are blocked on QID, identifier and title so the sweep stays
+tractable; equivalences are unioned transitively, so three sources holding one
+work form a single group.
+
+**Nothing is deleted.** Consolidation writes symmetric `same_work_as` edges into
+`work_relationships` recording *why* a group formed, and elects a canonical via a
+new `works.canonical_work_id` column recording *the decision*. Election prefers a
+work carrying a QID, then configured `canonical_source_priority`, then `work_uri`
+for stability. `clear_canonical_works()` reverses the whole thing.
+
+Splitting "why" from "the decision" matters: the repository reads the stored
+election rather than recomputing it, so every caller resolves identically even
+when a source priority is configured. An earlier draft recomputed the election in
+`get_work_equivalence_map()` and would have disagreed with the consolidator
+whenever `canonical_source_priority` was set.
+
+### 12.3 Wiring
+
+`WorkMatcher.match_target()` now resolves its matched work through the
+equivalence map before returning — the dispatch moved to `_dispatch_match()` and
+canonicalisation wraps it. Doing it there rather than at each call site means the
+corpus clusterer's authority hoisting and the reconcile loop cannot diverge.
+
+The matched *expression* is deliberately not re-pointed: an expression of a
+consolidated work is a genuine expression of the canonical work.
+
+New `reconciliator consolidate-works` command, with `--dry-run` to preview groups
+and `--reset` to discard a previous run. Re-runnable after ingesting more sources;
+re-running writes no duplicate edges.
+
+### 12.4 Effect
+
+Two sources holding the same work, and two corpus records each matching a
+*different* source on its own ISBN:
+
+| | before | after |
+|---|---|---|
+| work rows | 2 | 2 (nothing deleted) |
+| `same_work_as` edges | 0 | 2 |
+| T-1 exported work URI | `source_a` | `source_a` |
+| T-2 exported work URI | `source_a` | `source_a` |
+| T-2 `record_level_work_uri` | `source_b` ← divergent | `source_a` |
+
+The Phase 11.3 divergence disappears at its source rather than being papered
+over: with one identity there is no rival match left to record.
+
+### 12.5 Tests
+
+`tests/test_work_consolidation.py` (19 tests): each evidence tier; QID veto;
+same-author-different-work, same-title-different-author and differing work_type
+all correctly refused; same-source duplicates left alone unless opted in;
+transitive three-source grouping; QID-backed and priority-based canonical
+election; symmetric edges with no rows deleted; idempotency; dry run; reset;
+disabled config; and the end-to-end CLI run above.
+
+`tests/test_work_linking.py` now pins the *pre*-consolidation state explicitly,
+since consolidation is a separate opt-in step rather than part of ingest.
+
+## Phase 13 — Deterministic Identity, Source-Named Origin, Single Database ✅ COMPLETE
+
+Three changes that only made sense together: ingest stopped inventing identity,
+`record_origin` started naming the actual source, and the corpus staging database
+was folded into `authority.db`.
+
+### 13.1 Deterministic record identity
+
+MARCXML ingest minted `uuid.uuid4()` for records lacking a usable control number,
+so re-ingesting the same file produced entirely new work, expression,
+manifestation and agent URIs. Nothing downstream could be re-run.
+
+`derive_content_id()` replaces both call sites with a digest of the record's
+*fields* — leader, controlfields, and datafields with their indicators and
+subfields — rather than its serialization. Serialization-level canonicalisation
+was tried first and abandoned: `c14n2` raises
+`ValueError: Namespace "http://www.loc.gov/MARC21/slim" of name "record" is not
+declared in scope` on the detached elements `iterparse` hands back. A semantic
+digest is also the more correct choice, being immune to whitespace, attribute
+order and namespace-prefix differences that carry no bibliographic meaning.
+
+| | before | after |
+|---|---|---|
+| work URI across two identical ingests | changed | stable |
+| expression / manifestation / agent URIs | changed | stable |
+
+### 13.2 `record_origin` names the ingest source
+
+`RecordOrigin` was `Literal["authority", "target"]` — a two-valued world in which
+a row could report whether it was authoritative. It is now `str`, carrying the
+name of the source that produced the row, and the five `CHECK` constraints are
+relaxed to `DEFAULT 'unknown'`.
+
+Authoritativeness moved out of the row, because a row can no longer answer that
+question about itself. A new `sources` table records it, populated at ingest from
+a per-source `authoritative: bool` config flag. All five `is_authority`
+properties are deleted; callers pass `authoritative_only` and the repository
+resolves it through `_origin_clause()`.
+
+```
+sources registry     : {'real_authority': True, 'my_corpus': False}
+works by origin      : [('my_corpus', 1), ('real_authority', 1)]
+authoritative_only=True  -> ['real_authority']
+authoritative_only=False -> ['real_authority', 'my_corpus']
+```
+
+Converting the vector searches exposed a latent bug worth recording: they filtered
+*after* retrieval, so a filtered search returned fewer than `top_k` candidates —
+silently, and worst for the smallest sources. All three now over-fetch
+`top_k x overfetch` and stop once `top_k` survivors are found.
+
+### 13.3 `reconcile_corpus.db` folded into `authority.db`
+
+Staged corpus records and authority records lived in separate SQLite files, so a
+cluster could not be joined to the works it resolved to, and `reset` left corpus
+rows behind that leaked into the next run. `init_authority_db` now creates the
+corpus tables, `get_corpus_connection()` returns the authority connection, and
+`StorageConfig.corpus_db` is gone along with the derived `_corpus.db` filename.
+
+`reset` takes `--config` and `--yes` and loops over `(db_path, initializer)`
+pairs — no per-store booleans.
+
+| | before | after |
+|---|---|---|
+| rows after RESET | corpus rows survived | `[]` |
+| reconcile of corpus B | saw corpus A's rows | `['B1']` |
+
+`pipeline_check.py` output is byte-identical across all three linking modes
+before and after, so the merge changed storage without changing results.
+
+## Phase 14 — Removing TargetRecord and Making Funnels Configurable 📋 PLANNED
+
+### 14.1 What the measurement showed
+
+| | |
+|---|---|
+| `matcher.py` | 2837 lines |
+| the 42 domain funnels | 1695 lines (60%) |
+| funnels that are pure template | 36 of 42 |
+| funnels adding one extra step | 6 |
+| `TargetRecord` | a generic `keys` bag plus 24 one-line property accessors |
+
+Every funnel is the same four blocks — tier-1 identifiers, tier-2 author+title,
+tier-3 vector/FTS, unmatched — varying only in `funnel_id`,
+`identifier_schemes`, `work_type`, `content_type` and `confidence`. The funnels
+are already data wearing a method costume.
+
+### 14.2 Three defects to fix structurally
+
+**Tier-1 matching is dead on the reconcile path.** `match_target_record` builds
+its `TargetRecord` with a JSON payload but labels it `format="marcxml"`, so
+`extract_identifiers_from_target` calls `etree.fromstring()` on JSON, throws, and
+swallows it under `except Exception: pass`:
+
+```
+CLI-path payload (JSON labelled marcxml) -> {}
+real marcxml payload                     -> {'isbn': ['9789511234567']}
+```
+
+Every reconciled record skips exact-identifier matching and falls through to
+fuzzy tier-2/tier-3.
+
+**The matcher re-parses XML that ingest already parsed.**
+`extract_identifiers_from_target`, `extract_target_track_titles` and
+`extract_target_analytics` re-parse `raw_payload` at match time to recover
+identifiers and analytics the WEMI decomposer already extracted at ingest.
+
+**Docstrings promise more than the code delivers.** `match_cartography` documents
+"Bounding box IoU (034)" but never calls `compute_bounding_box_iou`, which has no
+production caller at all. Declared funnels make this class of drift impossible.
+
+### 14.3 `MatchSubject` replaces `TargetRecord`
+
+Not a staged row — a view over WEMI rows, built from
+`(work, expression, manifestation, keys, identifiers)`. It keeps the generic
+`keys` bag and `get_keys()`; all 24 properties go, because funnels name their
+keys in configuration instead.
+
+Two gaps separate `TargetRecord` from what WEMI stores, and both close at ingest,
+where the record is already parsed:
+
+- `target_keys` becomes **`entity_keys`** (`entity_type, entity_id, key_type,
+  key_value`), sitting beside `identifiers` and keeping its four indexes.
+- MARC 505/700 `$t` analytics become `entity_keys` rows of type `analytic`, so
+  `extract_target_analytics` becomes `subject.get_keys("analytic")`.
+
+`target_records`, `target_payloads`, `insert_target_records_batch` and
+`get_all_target_records` are then deleted. Identifiers come from the
+`identifiers` table, which fixes the tier-1 defect by construction and removes
+payload re-parsing from the matcher entirely.
+
+Checked before committing to this: the clusterer never touches `raw_payload`, and
+the reconcile path gets original XML by streaming the input file rather than from
+the database. Nothing needs the blob.
+
+### 14.4 Funnels become declared specs
+
+An ordered list; first match wins; exactly one carries `default: true`.
+
+```yaml
+funnels:
+  - id: funnel_a_monograph
+    when: { work_type: [text] }
+    identifier_schemes: [isbn, urn, control_number]
+    work_type: text
+    confidence: 0.90
+    default: true
+
+  - id: funnel_p_government
+    when:
+      work_type: [government, government_publication]
+      identifier_matches: { urn: "(?i)valto" }
+    identifier_schemes: [urn, isbn]
+    work_type: text
+    confidence: 0.88
+```
+
+Reproducing the existing 44-condition dispatch chain exactly needs seven
+predicate kinds — `work_type`, `is_component`, `has_key`, `has_identifier`,
+`title_matches`, `key_matches` and `identifier_matches`, the last three taking
+regexes. Each was checked against the current chain; `is_component` is a real
+boolean column rather than a key, and `key_matches` is required by the
+`"parallel" in translators_signature` branch.
+
+Ordering the list makes precedence explicit and reorderable instead of implied by
+the order of `if` statements.
+
+### 14.5 `handler:` — the escape hatch
+
+For the six funnels with real logic, and for anything a user adds:
+
+```yaml
+handler: recorded_sound                              # built-in, by name
+handler: src/reconciliator/funnels/recorded_sound.py # path, config-relative
+handler: /opt/site/funnels/my_rule.py                # path, absolute
+```
+
+A value containing a path separator or ending in `.py` is a path; anything else
+is a built-in name resolved through a registry in
+`src/reconciliator/funnels/__init__.py`. The two sets cannot collide, since
+built-in names are bare identifiers. Naming built-ins by name rather than by path
+is what keeps them resolvable after `pip install`, where no `src/` directory
+exists.
+
+Relative paths resolve against the **config file's directory**, not the process
+CWD, so a config works regardless of where the CLI is invoked from.
+
+Both forms resolve at config load, not per record, so a bad path or unknown name
+is a startup error naming the offending config line rather than a funnel that
+silently degrades to the generic template.
+
+Contract — deliberately narrow, so handlers cannot reach into matcher internals:
+
+```python
+def tier2(subject: MatchSubject, ctx: FunnelContext) -> Optional[WEMIMatchResult]: ...
+```
+
+`FunnelContext` exposes exactly `repo`, `config`, `align_expression` and `spec`.
+A module declares whichever tiers it overrides; omitted tiers fall back to the
+generic template. The six bundled handlers use this same contract, so they are
+worked examples of the extension point rather than a privileged path.
+
+Handlers are loaded by file path and are therefore not part of the
+`reconciliator` package: they must use absolute imports.
+
+**Recorded deliberately:** absolute paths mean a config can execute Python from
+anywhere on the filesystem. That is a normal property for a tool whose config is
+as trusted as its code, and it is a decision rather than an oversight.
+
+### 14.6 Stages
+
+Each lands green. Stages 1 and 2 carry the risk.
+
+| # | Stage | Net lines |
+|---|---|---|
+| 1 ✅ | `entity_keys` table; emit keys and analytics at decomposition | ~0 |
+| 2 | `MatchSubject` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
+| 3 | Generic `run_funnel(spec, subject)`; delete the 42 methods; ship the current 42 as built-in specs | **-1400** |
+| 4 | `handler:` resolution; port the 6 custom funnels to handler modules | +150 |
+| 5 | Dead code (`compute_bounding_box_iou` — implement or delete); reconcile docstrings against behaviour | -50 |
+| 6 | Merge `decompose_marc_authority` into `decompose_marc_wemi`; ISBD punctuation stripping becomes configurable (see 14.9) | -300 |
+
+`matcher.py` should land near 600-700 lines, plus `funnels.py` (~250) and ~120
+lines of configuration models.
+
+The 53 `TargetRecord` uses in tests are mostly constructor calls; `MatchSubject`
+takes the same keyword arguments so most tests change only the class name.
+Critically, the assertions are on `funnel_used == "funnel_x_..."` strings, which
+stay byte-identical — so the existing tests act as a behavioural lock on the
+stage-3 collapse. That is the main safety net for the riskiest change.
+
+### 14.6.1 Stage 1 as built ✅ COMPLETE
+
+Dropping the `target_*` tables moved from stage 1 to stage 2: the clusterer still
+reads `get_all_target_records()`, so the tables cannot go until their consumers
+move. Stage 1 therefore adds the new path alongside the old one and leaves both
+live.
+
+Shipped:
+
+- `EntityKey` model, mirroring `IdentifierEntity`'s transient `entity_uri`
+  binding hint, and the `entity_keys` table beside `identifiers` with a
+  `UNIQUE(entity_type, entity_id, key_type, key_value)` constraint that makes
+  re-ingesting a record a no-op for its keys.
+- `insert_entity_keys_batch`, `get_entity_keys`, `get_all_entity_keys` (bulk form
+  for the clusterer) and `find_entities_by_key`.
+- Step 11 of `insert_wemi_batch`, resolving `entity_uri` to `entity_id` exactly as
+  identifiers do, and dropping unbindable keys rather than persisting orphans.
+- `derive_domain_keys()` in the MARC loader and `derive_bibframe_keys()` in the
+  BibFrame one, each now the single definition consumed by both the staged
+  `TargetRecord` and the persisted rows, so the two cannot drift.
+- `extract_marc_analytics()`, moving MARC 505/700/710 `$t` parsing from match time
+  to ingest.
+
+MARC keys are collected through an optional `key_sink` parameter rather than an
+eleventh tuple element, because five call sites unpack `decompose_marc_wemi`'s
+ten-tuple positionally and one of them unpacks from the end. The BibFrame side
+needs no sink at all: its keys derive from the decomposed entities rather than
+the source graph.
+
+Keys attach to the **manifestation**, which is the record-level WEMI entity — one
+ingested record is one manifestation, which is what `TargetRecord` represented and
+what the clusterer blocks over.
+
+**Two defects found and fixed while building it.**
+
+The analytic (title, creator) pair was first encoded with U+001F as a separator,
+on the reasoning that MARC subfield text cannot contain a control character. That
+was true but irrelevant: Python counts U+001C-U+001F as whitespace, so `.strip()`
+in the key-adding helper silently ate the separator and every analytic lost its
+creator. The encoding is now JSON, which survives stripping, stays readable in the
+database, and is indifferent to punctuation in titles. A regression test pins it.
+
+`decompose_marc_wemi` still carried Phase 13's superseded origin logic —
+`record_origin if record_origin in ("authority", "target") else ...` — which,
+now that `record_origin` holds a source name, always failed its own test and
+stamped the old literal instead. It was masked in the OAI path because
+`insert_wemi_batch(record_origin=...)` overwrites the value afterwards, but any
+caller decomposing and inserting without that argument got the wrong origin. Now
+`record_origin or source or "unknown"`.
+
+**Verified through the real ingest path**, not only unit tests: driving
+`_WEMIBatchAccumulator` and `write_wemi_batch` over two records writes
+
+```
+entity_keys rows: 5
+  R1   standard     '9789510123456'
+  R1   work         '831405dd9d79c59e0985bdf3ad4aa67a'
+  R2   analytic     '["Finlandia", "Sibelius, Jean"]'
+  R2   standard     '9789510999999'
+  R2   work         '998cb952e473e1d34a1c429b0bfedbf7'
+
+work record_origin: ['melinda']
+```
+
+Distinct records carry distinct work keys, confirming the URI binding does not
+collapse a batch onto its first row — the failure mode Phase 6 had to repair for
+identifiers and contributions.
+
+`tests/test_entity_keys.py` (16 tests): analytic encoding round-trips, including
+the stripping regression and punctuation-heavy titles; 700/710/505 extraction
+order; key derivation and de-duplication; sink binding; the ten-tuple staying a
+ten-tuple without a sink; persistence and read-back; the multi-record collapse
+guard; re-ingest idempotency; bulk and by-key lookups; orphan rejection; and
+BibFrame parity.
+
+Suite: **485 passed** (469 + 16).
+
+### 14.7 Decisions taken
+
+- The 42 funnel specs ship as **built-in defaults in code**; `config.example.yaml`
+  shows a few as override examples. Config overrides or appends rather than
+  replacing. Putting all 42 in the example file would make it enormous and imply
+  more tuning freedom than is wanted.
+- The fall-through funnel is **configurable, not hardcoded**. Built-in specs mark
+  monograph `default: true` so a config-less run behaves as today, and
+  `config.example.yaml` carries that entry explicitly so the knob is visible
+  rather than implied.
+
+### 14.9 Merging the two MARC decomposers
+
+`decompose_marc_authority` (345 LOC) and `decompose_marc_wemi` (491 LOC) already
+return the same ten-tuple shape — the authority one returns lists where the
+bibliographic one returns singletons for W/E/M — and are selected by a single
+`is_marc_authority_record()` test on Leader/06. They are two renderings of one
+operation, and most of the 836 lines are the same extraction twice.
+
+Merging them also resolves the discrepancy recorded at the end of Phase 12, whose
+cause is now pinned exactly:
+
+| path | MARC `$a` handling |
+|---|---|
+| `decompose_marc_authority` | `.rstrip(" ./,")` at both agent sites |
+| `parse_marc_record_elem` (feeds `decompose_marc_wemi`) | taken raw |
+
+So the authority side strips ISBD punctuation and the bibliographic side keeps
+it, which is why the same person arrives as `"Waltari, Mika"` from one path and
+`"Waltari, Mika,"` from the other.
+
+**Make the stripping a setting rather than picking a winner.** It belongs in
+`RecordNormalizationConfig` alongside the Phase 10 heading toggles, and it should
+govern ISBD punctuation generally rather than the trailing comma alone — the
+existing call strips `" ./,"`, and `.` and `/` are equally presentational.
+
+Two things to be careful about:
+
+- This is **not** a cosmetic change. `compute_author_key` and `compute_title_stem`
+  derive from these strings, so whichever way the toggle defaults, one of the two
+  current paths changes its blocking keys and therefore its matches. It needs the
+  same before/after diff on a real corpus that the tier-1 fix in stage 2 needs.
+- Stripping should be the shipped default. ISBD punctuation is presentation, and
+  Phase 12 identified the bibliographic path as the odd one out; retaining it is
+  the option that exists for callers who need the literal subfield back.
+
+Sequenced last because it is independent of the `TargetRecord` removal and would
+otherwise add a second source of behavioural change to the same diff.
+
+### 14.8 Intended behaviour change
+
+Every stage is output-identical except the tier-1 fix in stage 2, which will
+change reconcile results — for the better. It deserves a before/after diff on a
+real corpus rather than trust in the test suite alone.
+
+## Test Results Summary
+
+| Metric | Phase 3 | Phase 4 | Phase 6 | Phase 7 | Phase 8 | Phase 9 | Phase 10 | Phase 11 | Phase 12 | Phase 13 |
+|--------|---------|---------|---------|---------|---------|---------|----------|----------|----------|----------|
+| Passed | 374 | 396 | 420 | 433 | 429 | 433 | 442 | 450 | 469 | **469** |
+| Skipped | 2 | 11 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **0** |
+| Failed | 15 | 14 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **0** |
+
+Phase 8's count is lower because it deleted tests for deleted code, not because
+coverage regressed: 7 `stream_oai_records` tests and 1 migration test removed,
+4 `_resolve_harvest_window` tests added.
+
+### Verified end to end
+
+| Configuration | Result |
+|---|---|
+| Authority corpus + clustering | Global work/expression URIs where matched, `urn:reconciliator:` cluster URIs at tiers that did not match, KANTO agent URI injected into `$0` |
+| No authority corpus + clustering | Internal `urn:reconciliator:` work and expression cluster URIs only |
+| Authority corpus, clustering off | Global authority URIs only, no cluster URIs |
+
+Tier 1 (exact identifier) and Tier 2 (domain key) both resolve; `priority_fallback`
+correctly selects KANTO over VIAF per `agent_priority`.
+
+### Known remaining issue (pre-existing, not from this migration)
+
+`decompose_marc_wemi` keeps the MARC `$a` trailing comma on agent names
+(`"Waltari, Mika,"`) while `decompose_marc_authority` strips it. Both sides of
+reconciliation use the same path, so matching is unaffected, but the two ingest
+paths disagree on agent name form.
+
+Cause pinned and scheduled in Phase 14.9: authority applies `.rstrip(" ./,")` to
+`$a`, `parse_marc_record_elem` does not. The fix is to merge the two decomposers
+and make ISBD punctuation stripping configurable.

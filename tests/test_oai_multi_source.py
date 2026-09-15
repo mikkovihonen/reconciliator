@@ -8,12 +8,10 @@ import numpy as np
 from typer.testing import CliRunner
 
 from reconciliator.cli import app
-from reconciliator.config import OAIIngestConfig
+from reconciliator.config import OAIIngestConfig, VectorEngineConfig
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
-from reconciliator.normalizers.record import RecordNormalizer
-from reconciliator.repository import AuthorityStore
-from reconciliator.vocab_folding import VocabFolder
+from reconciliator.repository import WEMIRepository
 from reconciliator.vocab_store import VocabStore
 
 SAMPLE_OAI_SOURCE_A = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -78,9 +76,9 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
     index_path = tmp_path / "authority.faiss"
     dim = 64
 
-    store = AuthorityStore(db_path, index_path, dimension=dim)
-    vocab_store = VocabStore(tmp_path / "vocab.db")
-    vocab_folder = VocabFolder(vocab_store)
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    store = WEMIRepository(db_path, index_path, dimension=dim, vector_engine_config=vec_cfg)
+    VocabStore(tmp_path / "vocab.db")
 
     mock_model = MagicMock()
     mock_model.get_embedding_dimension.return_value = dim
@@ -101,10 +99,7 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
         from reconciliator.config import EmbeddingConfig
 
         emb_cfg = EmbeddingConfig(template_path=template_path, device="cpu", batch_size=10)
-        embedder = SentenceEmbedder(emb_cfg)
-        normalizer = RecordNormalizer(
-            vocab_folder=vocab_folder, template_engine=embedder.template_engine
-        )
+        SentenceEmbedder(emb_cfg)
 
         cfg_a = OAIIngestConfig(
             source_type="oai",
@@ -134,8 +129,6 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
                 source_name="catalog_a",
                 config=cfg_a,
                 store=store,
-                normalizer=normalizer,
-                embedder=embedder,
             )
             assert ingested_a == 1
 
@@ -144,23 +137,33 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
                 source_name="catalog_b",
                 config=cfg_b,
                 store=store,
-                normalizer=normalizer,
-                embedder=embedder,
             )
             assert ingested_b == 1
 
     # Verify both records exist with their respective source names
     with store.get_connection() as conn:
-        rows = conn.execute(
-            "SELECT source, source_id, title FROM authority_records ORDER BY id;"
-        ).fetchall()
+        rows = conn.execute("SELECT source, source_id, title FROM works ORDER BY id;").fetchall()
         assert len(rows) == 2
         assert rows[0]["source"] == "catalog_a"
         assert rows[0]["title"] == "Source A Book Title"
         assert rows[1]["source"] == "catalog_b"
         assert rows[1]["title"] == "Source B Book Title"
 
-    assert store.indexer.total_vectors == 2
+        # Each source contributes a full WEMI split, not just a Work row.
+        # Vectors are not written at ingest time; build-index does that.
+        manif_sources = [
+            r["source"]
+            for r in conn.execute("SELECT source FROM manifestations ORDER BY id;").fetchall()
+        ]
+        assert manif_sources == ["catalog_a", "catalog_b"]
+
+        # Names keep the MARC $a trailing comma on the bibliographic path; the
+        # agent-authority path strips it. Both sides of reconciliation agree, so
+        # matching is unaffected.
+        agent_names = sorted(
+            r["name"] for r in conn.execute("SELECT name FROM agents;").fetchall()
+        )
+        assert agent_names == ["Author Alpha,", "Author Beta,"]
 
 
 def test_cli_ingest_oai_options(tmp_path: Path) -> None:
@@ -239,6 +242,8 @@ ingest_oai:
             assert res.exit_code == 0
             assert "Successfully ingested 0 records from source 'source_one'" in res.output
 
+            # --restart discards the harvest checkpoint, so the source is
+            # re-harvested; --skip-existing still filters the stored record.
             res = runner.invoke(
                 app,
                 [
@@ -247,8 +252,8 @@ ingest_oai:
                     str(cfg_file),
                     "--source",
                     "source_one",
-                    "--resume",
+                    "--restart",
                 ],
             )
             assert res.exit_code == 0
-            assert "Successfully ingested 0 records from source 'source_one'" in res.output
+            assert "Successfully ingested 1 records from source 'source_one'" in res.output

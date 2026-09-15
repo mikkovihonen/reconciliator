@@ -264,8 +264,61 @@ def test_decompose_marc_wemi_missing_id(caplog):
     with caplog.at_level("WARNING"):
         work, expr, manif, *_ = decompose_marc_wemi(rec, source="fennica")
 
-    assert work.source_id.startswith("unknown_id_")
+    # Derived from the record's own fields, so re-ingesting is idempotent.
+    assert work.source_id.startswith("sha1:")
     assert expr.source_id == work.source_id
     assert manif.source_id == work.source_id
-    assert any("missing an identifier" in record.message for record in caplog.records)
+    assert any("carries no control number" in record.message for record in caplog.records)
 
+    again, *_ = decompose_marc_wemi(
+        _build_marc_record(
+            leader="00000cam a2200000 i 4500",
+            controlfields={},
+            datafields=[("245", "1", "0", [("a", "Nimetön kirja")])],
+        ),
+        source="fennica",
+    )
+    assert again.source_id == work.source_id, "the same record must keep the same id"
+
+
+
+def test_derive_content_id_is_stable_and_content_sensitive() -> None:
+    """Records without a control number get an id derived from their own fields.
+
+    A uuid4 fallback made the same record a different work on every ingest, so no
+    URI-derived key could survive a rebuild.
+    """
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import derive_content_id
+
+    MARC = "http://www.loc.gov/MARC21/slim"
+
+    def record(title: str, author: str = "Waltari, Mika,") -> etree._Element:
+        return etree.fromstring(
+            f"""<record xmlns="{MARC}">
+              <datafield tag="100" ind1="1" ind2=" "><subfield code="a">{author}</subfield></datafield>
+              <datafield tag="245" ind1="1" ind2="0"><subfield code="a">{title}</subfield></datafield>
+            </record>""".encode("utf-8")
+        )
+
+    first = derive_content_id(record("Sinuhe egyptiläinen"))
+    again = derive_content_id(record("Sinuhe egyptiläinen"))
+    assert first == again, "same content must yield the same id"
+
+    assert first != derive_content_id(record("Mikael Karvajalka")), "title must matter"
+    assert first != derive_content_id(record("Sinuhe egyptiläinen", "Linna, Väinö,")), (
+        "creator must matter"
+    )
+
+    # Serialization differences must not change the identifier.
+    unprefixed = etree.fromstring(
+        """<record>
+          <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Waltari, Mika,</subfield></datafield>
+          <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Sinuhe egyptiläinen</subfield></datafield>
+        </record>""".encode("utf-8")
+    )
+    assert derive_content_id(unprefixed) == first, "namespace prefix must not affect the id"
+
+    assert first.startswith("sha1:")
+    assert derive_content_id(record("X"), prefix="auth").startswith("auth:")

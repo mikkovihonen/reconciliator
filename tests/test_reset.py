@@ -16,7 +16,7 @@ def test_reset_all_storage(tmp_path: Path) -> None:
         vocab_db=tmp_path / "vocab.db",
         progress_db=tmp_path / "prog.db",
         corpus_db=tmp_path / "corpus.db",
-        index_path=tmp_path / "auth.faiss",
+        work_index=tmp_path / "auth.faiss",
     )
 
     # Initialize and populate a test row
@@ -24,7 +24,7 @@ def test_reset_all_storage(tmp_path: Path) -> None:
         init_authority_db(conn)
         conn.execute("INSERT INTO db_metadata (key, value) VALUES ('test', '123');")
 
-    storage.index_path.write_bytes(b"dummy index content")
+    storage.work_index.write_bytes(b"dummy index content")
 
     # Perform full reset
     reset_all_storage(storage)
@@ -33,109 +33,11 @@ def test_reset_all_storage(tmp_path: Path) -> None:
     assert storage.authority_db.exists()
     assert storage.vocab_db.exists()
     assert storage.progress_db.exists()
-    assert not storage.index_path.exists()
+    assert not storage.work_index.exists()
 
     with get_db_connection(storage.authority_db) as conn:
         row = conn.execute("SELECT * FROM db_metadata WHERE key = 'test';").fetchone()
         assert row is None
-
-
-def test_cli_reset_all_flag(tmp_path: Path) -> None:
-    cfg_file = tmp_path / "config.yaml"
-    cfg_file.write_text(
-        f"""
-storage:
-  data_dir: "{tmp_path}"
-  authority_db: "{tmp_path}/cli_auth.db"
-  vocab_db: "{tmp_path}/cli_vocab.db"
-  progress_db: "{tmp_path}/cli_prog.db"
-  corpus_db: "{tmp_path}/cli_corpus.db"
-  index_path: "{tmp_path}/cli_auth.faiss"
-""",
-        encoding="utf-8",
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["reset", "--config", str(cfg_file), "--all", "--yes"])
-    assert result.exit_code == 0
-    assert "Successfully reset specified storage" in result.output
-    assert (tmp_path / "cli_auth.db").exists()
-    assert (tmp_path / "cli_vocab.db").exists()
-    assert (tmp_path / "cli_prog.db").exists()
-
-
-def test_cli_reset_vocab_flag(tmp_path: Path) -> None:
-    cfg_file = tmp_path / "config.yaml"
-    cfg_file.write_text(
-        f"""
-storage:
-  data_dir: "{tmp_path}"
-  authority_db: "{tmp_path}/cli_auth.db"
-  vocab_db: "{tmp_path}/cli_vocab.db"
-  progress_db: "{tmp_path}/cli_prog.db"
-  corpus_db: "{tmp_path}/cli_corpus.db"
-  index_path: "{tmp_path}/cli_auth.faiss"
-""",
-        encoding="utf-8",
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["reset", "--config", str(cfg_file), "--vocab", "--yes"])
-    assert result.exit_code == 0
-    assert "Successfully reset specified storage" in result.output
-    assert (tmp_path / "cli_vocab.db").exists()
-
-
-def test_cli_reset_corpus_flag(tmp_path: Path) -> None:
-    cfg_file = tmp_path / "config.yaml"
-    cfg_file.write_text(
-        f"""
-storage:
-  data_dir: "{tmp_path}"
-  authority_db: "{tmp_path}/cli_auth.db"
-  vocab_db: "{tmp_path}/cli_vocab.db"
-  progress_db: "{tmp_path}/cli_prog.db"
-  corpus_db: "{tmp_path}/cli_corpus.db"
-  index_path: "{tmp_path}/cli_auth.faiss"
-""",
-        encoding="utf-8",
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["reset", "--config", str(cfg_file), "--corpus", "--yes"])
-    assert result.exit_code == 0
-    assert "Successfully reset specified storage" in result.output
-    assert (tmp_path / "cli_corpus.db").exists()
-
-
-def test_cli_reset_daemon_flag(tmp_path: Path, monkeypatch) -> None:
-    cfg_file = tmp_path / "config.yaml"
-    cfg_file.write_text(
-        f"""
-storage:
-  data_dir: "{tmp_path}"
-  authority_db: "{tmp_path}/cli_auth.db"
-  vocab_db: "{tmp_path}/cli_vocab.db"
-  progress_db: "{tmp_path}/cli_prog.db"
-  corpus_db: "{tmp_path}/cli_corpus.db"
-  index_path: "{tmp_path}/cli_auth.faiss"
-""",
-        encoding="utf-8",
-    )
-
-    called_reset_all = {}
-
-    def mock_reset_all_storage(**kwargs):
-        called_reset_all.update(kwargs)
-
-    monkeypatch.setattr("reconciliator.cli.reset_all_storage", mock_reset_all_storage)
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["reset", "--config", str(cfg_file), "--daemon", "--yes"])
-    assert result.exit_code == 0
-    assert "Successfully reset specified storage" in result.output
-    assert called_reset_all.get("reset_daemon") is True
-    assert called_reset_all.get("reset_authority") is False
 
 
 def test_reset_all_storage_daemon_shutdown(tmp_path: Path, monkeypatch) -> None:
@@ -145,7 +47,7 @@ def test_reset_all_storage_daemon_shutdown(tmp_path: Path, monkeypatch) -> None:
         vocab_db=tmp_path / "vocab.db",
         progress_db=tmp_path / "prog.db",
         corpus_db=tmp_path / "corpus.db",
-        index_path=tmp_path / "auth.faiss",
+        work_index=tmp_path / "auth.faiss",
     )
 
     shutdown_calls = []
@@ -163,7 +65,63 @@ def test_reset_all_storage_daemon_shutdown(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("reconciliator.indexer.ipc.client.DaemonLifecycleManager", MockLifecycle)
 
-    reset_all_storage(storage, reset_daemon=True)
+    reset_all_storage(storage)
     assert shutdown_calls == [False]
 
 
+
+
+def test_cli_reset_clears_every_store(tmp_path: Path) -> None:
+    """Reset is all or nothing: every database and index is rebuilt clean."""
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        f"""
+storage:
+  data_dir: "{tmp_path}"
+  authority_db: "{tmp_path}/cli_auth.db"
+  vocab_db: "{tmp_path}/cli_vocab.db"
+  progress_db: "{tmp_path}/cli_prog.db"
+  work_index: "{tmp_path}/cli_auth.faiss"
+""",
+        encoding="utf-8",
+    )
+
+    # Seed every store with content that must not survive.
+    for name in ("cli_auth.db", "cli_vocab.db", "cli_prog.db"):
+        (tmp_path / name).write_bytes(b"stale")
+    (tmp_path / "cli_auth.faiss").write_bytes(b"stale index")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["reset", "--config", str(cfg_file), "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "Successfully reset all storage" in result.output
+
+    # Every database is back with a clean schema...
+    for name in ("cli_auth.db", "cli_vocab.db", "cli_prog.db"):
+        path = tmp_path / name
+        assert path.exists(), f"{name} was not recreated"
+        assert path.read_bytes()[:16] == b"SQLite format 3\x00", f"{name} is not a fresh database"
+
+    # ...and the stale vector index is gone rather than left pointing at deleted rows.
+    assert not (tmp_path / "cli_auth.faiss").exists()
+
+
+def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
+    """One database, so reset cannot clear a corpus the repository is not using.
+
+    Corpus staging used to live in its own file whose name the repository derived
+    itself, while reset cleared the configured one. Staged records consequently
+    survived a reset and leaked into the next corpus run.
+    """
+    from reconciliator.config import StorageConfig
+    from reconciliator.repository import WEMIRepository
+
+    storage = StorageConfig(data_dir=tmp_path)
+    repo = WEMIRepository(storage.authority_db)
+    assert repo.corpus_db_path == storage.authority_db
+
+    # Corpus and WEMI tables are reachable over the same connection, so a cluster
+    # can be joined to the works it resolves to.
+    with repo.get_connection() as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"works", "target_records", "corpus_work_clusters", "sources"} <= tables

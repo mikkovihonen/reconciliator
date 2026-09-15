@@ -1,7 +1,9 @@
 """Tests verifying the resolution of WEMI schema, decomposition, and pre-scan discrepancies."""
 
 import logging
+from pathlib import Path
 
+import pytest
 from rdflib import Graph
 
 from reconciliator.db import get_db_connection, init_authority_db
@@ -395,9 +397,11 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
 
 
 def test_record_identifiers_and_repository_doi_matching(tmp_path):
-    """Verify H-26 and M-17: DOI field on RecordIdentifiers and Tier 1 exact matching."""
-    from reconciliator.models import RecordIdentifiers
+    """Verify H-26 and M-17: DOI on RecordIdentifiers and Tier 1 exact matching."""
+    from reconciliator.config import VectorEngineConfig
+    from reconciliator.models import IdentifierEntity, ManifestationEntity, RecordIdentifiers
     from reconciliator.normalizers.record import RecordNormalizer
+    from reconciliator.repository import WEMIRepository
 
     # 1. RecordIdentifiers contains doi
     ids = RecordIdentifiers(doi=["10.1000/182"])
@@ -415,16 +419,45 @@ def test_record_identifiers_and_repository_doi_matching(tmp_path):
     )
     assert norm_rec.identifiers.doi == ["10.1234/test.doi"]
 
-    # 3. Repository Tier 1 exact match queries DOI
-    from reconciliator.repository import AuthorityStore
+    # 3. Tier 1 exact identifier resolution now runs against the WEMI
+    #    identifiers table via lookup_by_identifier.
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    repo = WEMIRepository(
+        db_path=tmp_path / "auth.db",
+        work_index_path=tmp_path / "work.index",
+        dimension=8,
+        vector_engine_config=vec_cfg,
+    )
+    manifestation_uri = "urn:manif:target:rec_doi_1"
+    manif_id = repo.insert_manifestation(
+        ManifestationEntity(
+            manifestation_uri=manifestation_uri,
+            source="target",
+            source_id="rec_doi_1",
+            title=norm_rec.title,
+            title_normalized=norm_rec.title.lower(),
+            carrier_type="volume",
+        )
+    )
+    doi = norm_rec.identifiers.doi[0]
+    repo.insert_identifiers_batch(
+        [
+            IdentifierEntity(
+                entity_type="manifestation",
+                entity_id=manif_id,
+                scheme="doi",
+                value=doi,
+                value_normalized=doi.lower(),
+            )
+        ]
+    )
 
-    db_path = tmp_path / "auth.db"
-    store = AuthorityStore(db_path, tmp_path / "dummy.index")
-    store.insert_records_batch([norm_rec])
+    exact_matches = repo.lookup_by_identifier("doi", doi)
+    assert exact_matches == [("manifestation", manif_id)]
+    assert repo.get_manifestation(manif_id).source_id == "rec_doi_1"
 
-    exact_matches = store.find_exact_matches(RecordIdentifiers(doi=["10.1234/test.doi"]))
-    assert len(exact_matches) == 1
-    assert exact_matches[0].source_id == "rec_doi_1"
+    # Unknown DOIs resolve to nothing rather than a false positive.
+    assert repo.lookup_by_identifier("doi", "10.9999/missing") == []
 
 
 def test_marc_predicate_profiles_default():
@@ -570,14 +603,11 @@ def test_translator_alignment_via_agent_aligner(tmp_path):
 def test_blocking_key_families_coverage(tmp_path):
     """Verify H-29: generate_blocking_keys covers material-specific blocking families."""
     from reconciliator.clusterer import CorpusClusterer
-    from reconciliator.db import get_db_connection, init_corpus_db
     from reconciliator.models import TargetRecord
-    from reconciliator.repository import CorpusRepository
+    from reconciliator.repository import WEMIRepository
 
-    db_path = tmp_path / "corpus.db"
-    with get_db_connection(db_path) as conn:
-        init_corpus_db(conn)
-    repo = CorpusRepository(db_path)
+    db_path = tmp_path / "authority.db"
+    repo = WEMIRepository(db_path)
     clusterer = CorpusClusterer(corpus_repo=repo)
 
     # 1. Moving image family

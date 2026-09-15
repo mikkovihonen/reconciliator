@@ -64,32 +64,32 @@ def test_oai_ingest_config_workers_and_queue_defaults_and_validation() -> None:
 
     cfg = OAIIngestConfig()
     assert cfg.workers == 4
-    assert cfg.normalization_workers == 4
-    assert cfg.queue_size is None
+    assert cfg.slice_days == 30
+    assert cfg.batch_size == 500
     assert cfg.batch_queue_size == 4
 
     custom = OAIIngestConfig(
         workers=8,
-        normalization_workers=6,
-        queue_size=5000,
+        slice_days=7,
+        batch_size=250,
         batch_queue_size=8,
     )
     assert custom.workers == 8
-    assert custom.normalization_workers == 6
-    assert custom.queue_size == 5000
+    assert custom.slice_days == 7
+    assert custom.batch_size == 250
     assert custom.batch_queue_size == 8
 
     with pytest.raises(ValueError, match="workers must be at least 1"):
         OAIIngestConfig(workers=0)
 
-    with pytest.raises(ValueError, match="normalization_workers must be at least 1"):
-        OAIIngestConfig(normalization_workers=0)
-
     with pytest.raises(ValueError, match="batch_queue_size must be at least 1"):
         OAIIngestConfig(batch_queue_size=0)
 
-    with pytest.raises(ValueError, match="queue_size must be at least 1"):
-        OAIIngestConfig(queue_size=0)
+    with pytest.raises(ValueError, match="slice_days must be at least 1"):
+        OAIIngestConfig(slice_days=0)
+
+    with pytest.raises(ValueError, match="batch_size must be at least 1"):
+        OAIIngestConfig(batch_size=0)
 
 
 def test_logging_config_defaults_and_validation() -> None:

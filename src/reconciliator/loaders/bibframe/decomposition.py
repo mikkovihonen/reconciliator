@@ -31,6 +31,7 @@ from reconciliator.models import (
     AgentEntity,
     CarrierType,
     ContributionEntity,
+    EntityKey,
     ExpressionContentType,
     ExpressionEntity,
     IdentifierEntity,
@@ -917,6 +918,63 @@ def decompose_bibframe_work(
     )
 
 
+def derive_bibframe_keys(
+    work: WorkEntity,
+    agents: list[AgentEntity],
+    identifiers: list[IdentifierEntity],
+    author_key: Optional[str] = None,
+    title_stem: Optional[str] = None,
+) -> dict[str, list[str]]:
+    """Derive domain blocking keys for a BIBFRAME record.
+
+    Unlike the MARC side these derive from the decomposed entities rather than
+    the source graph, so no second parse is needed and no sink parameter either.
+    """
+    if author_key is None:
+        author_key = compute_author_key(agents[0].name if agents else None)
+    if title_stem is None:
+        title_stem = compute_title_stem(work.title, lang=work.original_language)
+
+    keys: dict[str, list[str]] = {}
+
+    def _add(key_type: str, val: Optional[str]) -> None:
+        if val and str(val).strip():
+            keys.setdefault(key_type, [])
+            clean = str(val).strip()
+            if clean not in keys[key_type]:
+                keys[key_type].append(clean)
+
+    _add("work", compute_work_blocking_key(author_key, title_stem))
+    if work.work_type == "music":
+        _add("music_work", compute_music_work_key(author_key, work.title))
+
+    first_isbn = next((i.value for i in identifiers if i.scheme == "isbn"), None)
+    first_issn = next((i.value for i in identifiers if i.scheme == "issn"), None)
+    _add("standard", first_isbn or first_issn)
+
+    return keys
+
+
+def bibframe_entity_keys(
+    manifestation: ManifestationEntity,
+    work: WorkEntity,
+    agents: list[AgentEntity],
+    identifiers: list[IdentifierEntity],
+) -> list[EntityKey]:
+    """Shape `derive_bibframe_keys` output as EntityKey rows bound to the manifestation."""
+    return [
+        EntityKey(
+            entity_type="manifestation",
+            entity_id=0,
+            key_type=key_type,
+            key_value=value,
+            entity_uri=manifestation.manifestation_uri,
+        )
+        for key_type, values in derive_bibframe_keys(work, agents, identifiers).items()
+        for value in values
+    ]
+
+
 def build_target_record_from_bibframe(
     g: Graph,
     instance_node: Optional[IdentifiedNode] = None,
@@ -948,23 +1006,10 @@ def build_target_record_from_bibframe(
     author_name = agents[0].name if agents else None
     author_key = compute_author_key(author_name)
     title_stem = compute_title_stem(work.title, lang=work.original_language)
-    work_blocking_key = compute_work_blocking_key(author_key, title_stem)
 
-    # Music key
-    music_key = None
-    if work.work_type == "music":
-        music_key = compute_music_work_key(author_key, work.title)
-
-    # Standard identifier key
-    first_isbn = None
-    first_issn = None
-    for ident in identifiers:
-        if ident.scheme == "isbn" and not first_isbn:
-            first_isbn = ident.value
-        elif ident.scheme == "issn" and not first_issn:
-            first_issn = ident.value
-
-    standard_key = first_isbn or first_issn
+    # One shared derivation, so the staged record and the persisted entity_keys
+    # rows cannot drift apart.
+    keys = derive_bibframe_keys(work, agents, identifiers, author_key, title_stem)
 
     # Serialize raw RDF representation for lossless payload staging
     raw_payload = g.serialize(format="turtle").encode("utf-8")
@@ -978,14 +1023,10 @@ def build_target_record_from_bibframe(
         language=expression.language,
         author_key=author_key,
         title_stem=title_stem,
-        work_blocking_key=work_blocking_key,
-        music_work_key=music_key,
-        series_key=None,
-        standard_key=standard_key,
+        keys=keys,
         year=manifestation.publication_year,
         volume_designation=None,
         is_component=False,
-        host_citation_key=None,
         serialized_work=work.serialized_text,
         serialized_expression=expression.serialized_text,
         serialized_manifestation=manifestation.serialized_text,

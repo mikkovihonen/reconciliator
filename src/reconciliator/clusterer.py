@@ -27,7 +27,7 @@ from reconciliator.models import (
     TargetRecord,
     WorkCluster,
 )
-from reconciliator.repository import CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 
 
 class UnionFind:
@@ -68,13 +68,13 @@ class CorpusClusterer:
 
     def __init__(
         self,
-        corpus_repo: CorpusRepository,
+        corpus_repo: WEMIRepository,
         wemi_repo: Optional[WEMIRepository] = None,
         matcher: Optional[WorkMatcher] = None,
         config: Optional[ClusterConfig] = None,
     ) -> None:
         self.corpus_repo = corpus_repo
-        self.wemi_repo = wemi_repo
+        self.wemi_repo = wemi_repo if wemi_repo is not None else corpus_repo
         self.matcher = matcher
         self.config = config or ClusterConfig()
 

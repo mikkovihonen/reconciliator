@@ -11,6 +11,7 @@ from reconciliator.loaders.bibframe.base import (
     parse_agent_dict,
 )
 from reconciliator.loaders.bibframe.decomposition import (
+    bibframe_entity_keys,
     build_target_record_from_bibframe,
     decompose_bibframe_work,
     extract_marc_key_components,
@@ -73,6 +74,7 @@ __all__ = [
     "enrich_bibframe_graph",
     "enrich_bibframe_jsonld",
     "decompose_bibframe_work",
+    "bibframe_entity_keys",
     "build_target_record_from_bibframe",
     "extract_marc_key_components",
 ]

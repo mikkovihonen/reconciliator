@@ -5,11 +5,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from reconciliator.config import OAIIngestConfig
-from reconciliator.db import init_authority_db, init_corpus_db
+from reconciliator.db import init_authority_db
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester
-from reconciliator.ingestion.oai import ingest_oai_wemi_pipeline
+from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.models import HarvestState
-from reconciliator.repository import CorpusRepository, WEMIRepository
+from reconciliator.repository import WEMIRepository
 
 
 def test_harvest_partition_resumption_token_callback():
@@ -82,20 +82,12 @@ def test_harvest_partition_resumption_token_callback():
 
 
 def test_harvest_state_persistence(tmp_path: Path):
-    """Verify saving and retrieving HarvestState in both CorpusRepository and WEMIRepository."""
-    corpus_db = tmp_path / "corpus.db"
+    """Verify saving and retrieving HarvestState in unified WEMIRepository."""
     auth_db = tmp_path / "auth.db"
+    repo = WEMIRepository(db_path=auth_db)
 
-    with sqlite3.connect(corpus_db) as conn:
-        init_corpus_db(conn)
-    with sqlite3.connect(auth_db) as conn:
-        init_authority_db(conn)
-
-    c_repo = CorpusRepository(db_path=corpus_db)
-    w_repo = WEMIRepository(db_path=auth_db)
-
-    # 1. Test in CorpusRepository
-    assert c_repo.get_harvest_state("target_oai") is None
+    # 1. Test corpus-style harvest state (target OAI harvest)
+    assert repo.get_harvest_state("target_oai") is None
     c_state = HarvestState(
         source_id="target_oai",
         source_type="oai_pmh",
@@ -106,17 +98,17 @@ def test_harvest_state_persistence(tmp_path: Path):
         status="in_progress",
         records_harvested=50,
     )
-    c_repo.save_harvest_state(c_state)
+    repo.save_harvest_state(c_state)
 
-    loaded_c = c_repo.get_harvest_state("target_oai")
+    loaded_c = repo.get_harvest_state("target_oai")
     assert loaded_c is not None
     assert loaded_c.source_id == "target_oai"
     assert loaded_c.resumption_token == "tok_corp_1"
     assert loaded_c.status == "in_progress"
     assert loaded_c.records_harvested == 50
 
-    # 2. Test in WEMIRepository
-    assert w_repo.get_harvest_state("melinda_oai") is None
+    # 2. Test authority-style harvest state (Melinda OAI harvest)
+    assert repo.get_harvest_state("melinda_oai") is None
     w_state = HarvestState(
         source_id="melinda_oai",
         source_type="oai_pmh",
@@ -127,9 +119,9 @@ def test_harvest_state_persistence(tmp_path: Path):
         status="completed",
         records_harvested=1200,
     )
-    w_repo.save_harvest_state(w_state)
+    repo.save_harvest_state(w_state)
 
-    loaded_w = w_repo.get_harvest_state("melinda_oai")
+    loaded_w = repo.get_harvest_state("melinda_oai")
     assert loaded_w is not None
     assert loaded_w.source_id == "melinda_oai"
     assert loaded_w.resumption_token is None
@@ -137,8 +129,8 @@ def test_harvest_state_persistence(tmp_path: Path):
     assert loaded_w.records_harvested == 1200
 
 
-def test_ingest_oai_wemi_pipeline_dual_routing(tmp_path: Path):
-    """Verify dual-routing dispatch in ingest_oai_wemi_pipeline."""
+def test_ingest_oai_pipeline_dual_routing(tmp_path: Path):
+    """Verify dual-routing dispatch in ingest_oai_pipeline with unified repository."""
     sample_oai_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
     <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
       <ListRecords>
@@ -158,51 +150,43 @@ def test_ingest_oai_wemi_pipeline_dual_routing(tmp_path: Path):
     </OAI-PMH>
     """
 
-    corpus_db = tmp_path / "target_corpus.db"
     auth_db = tmp_path / "authority.db"
-
-    with sqlite3.connect(corpus_db) as conn:
-        init_corpus_db(conn)
-    with sqlite3.connect(auth_db) as conn:
-        init_authority_db(conn)
-
-    c_repo = CorpusRepository(db_path=corpus_db)
-    w_repo = WEMIRepository(db_path=auth_db)
-
-    # Route A: Target Routing -> stages TargetRecord in corpus_db
-    target_config = OAIIngestConfig(
-        oai_url="http://example.org/oai_target",
-        metadata_prefix="marc21",
-        target_database=str(corpus_db),
-        batch_size=1,
-    )
+    repo = WEMIRepository(db_path=auth_db)
 
     mock_resp = MagicMock()
     mock_resp.content = sample_oai_xml
     mock_resp.raise_for_status = MagicMock()
 
+    # Route A: Target Routing -> stages TargetRecord in corpus database
+    target_config = OAIIngestConfig(
+        oai_url="http://example.org/oai_target",
+        metadata_prefix="marc21",
+        target_database="corpus",
+        batch_size=1,
+    )
+
     with patch("httpx2.Client.get", return_value=mock_resp):
-        total_a = ingest_oai_wemi_pipeline(
+        total_a = ingest_oai_pipeline(
             source_name="target_src",
             config=target_config,
-            corpus_repo=c_repo,
+            store=repo,
         )
         assert total_a == 1
 
-    # Verify TargetRecord staged in corpus.db
-    staged = c_repo.get_target_record("FI-MEL-101")
+    # Verify TargetRecord staged in corpus database
+    staged = repo.get_target_record("FI-MEL-101")
     assert staged is not None
     assert staged.record_id == "FI-MEL-101"
     assert staged.work_type == "text"
     assert staged.standard_key == "9789510000012"
     assert "Testikirja" in staged.serialized_work
 
-    # Verify checkpoint in corpus.db
-    c_ckpt = c_repo.get_harvest_state("target_src")
+    # Verify checkpoint (unified harvest_state)
+    c_ckpt = repo.get_harvest_state("target_src")
     assert c_ckpt is not None
     assert c_ckpt.status == "completed"
 
-    # Route B: Authority Routing -> decomposes into WEMI in auth.db
+    # Route B: Authority Routing -> decomposes into WEMI in authority.db
     auth_config = OAIIngestConfig(
         oai_url="http://example.org/oai_auth",
         metadata_prefix="marc21",
@@ -211,25 +195,25 @@ def test_ingest_oai_wemi_pipeline_dual_routing(tmp_path: Path):
     )
 
     with patch("httpx2.Client.get", return_value=mock_resp):
-        total_b = ingest_oai_wemi_pipeline(
+        total_b = ingest_oai_pipeline(
             source_name="melinda_src",
             config=auth_config,
-            wemi_repo=w_repo,
+            store=repo,
         )
         assert total_b == 1
 
     # Verify WEMI entities created in authority.db
-    w = w_repo.get_work_by_source("melinda_src", "FI-MEL-101")
+    w = repo.get_work_by_source("melinda_src", "FI-MEL-101")
     assert w is not None
     assert w.title == "Testikirja :"
     assert w.work_type == "text"
     assert w.original_language == "fin"
 
-    m = w_repo.get_manifestation_by_source("melinda_src", "FI-MEL-101")
+    m = repo.get_manifestation_by_source("melinda_src", "FI-MEL-101")
     assert m is not None
     assert m.title == "Testikirja :"
 
-    # Verify checkpoint in authority.db
-    w_ckpt = w_repo.get_harvest_state("melinda_src")
+    # Verify checkpoint (unified harvest_state)
+    w_ckpt = repo.get_harvest_state("melinda_src")
     assert w_ckpt is not None
     assert w_ckpt.status == "completed"

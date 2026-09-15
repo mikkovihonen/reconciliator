@@ -8,6 +8,7 @@ from typing import Any, Optional
 from lxml import etree
 
 from reconciliator.config import (
+    DEFAULT_MARC_PREDICATE_PROFILES,
     EnrichmentTogglesConfig,
     get_category_default_field_map,
     get_subject_field_category_map,
@@ -88,8 +89,9 @@ class MARCXMLEnricher:
             datafield_tag = "datafield"
 
         # 1. Subject Modernization & Folding
+        vocab_cfg = self.vocab_folder.config
         if fold_legacy:
-            tags_to_modernize = list(self.vocab_folder.config.field_to_vocabularies.keys())
+            tags_to_modernize = list(vocab_cfg.field_to_vocabularies.keys())
             if not tags_to_modernize:
                 tags_to_modernize = list(get_subject_field_category_map().keys())
             for tag in tags_to_modernize:
@@ -121,13 +123,38 @@ class MARCXMLEnricher:
                         )
                     )
 
+                    # An unresolved heading must be left exactly as catalogued.
+                    # fold_subject_heading still returns a default target vocabulary
+                    # in that case, and stamping it would assert membership of a
+                    # vocabulary that does not contain the term, while destroying
+                    # the original $2 a cataloguer needs to correct it by hand.
+                    if mapping_type == "none" and not target_uri:
+                        continue
+
                     # If tag changed (e.g. 650 -> 655 for SLM)
                     if target_field != tag:
                         field.set("tag", target_field)
 
-                    # Update $a preferred label
+                    # Replace $a with the ontology preferred label, optionally
+                    # keeping the heading as catalogued alongside it so the record
+                    # retains it rather than only the subject report.
                     if target_label and a_elems:
-                        a_elems[0].text = target_label
+                        original_heading = a_elems[0].text
+                        if vocab_cfg.replace_heading_with_pref_label:
+                            if (
+                                vocab_cfg.preserve_original_heading
+                                and original_heading
+                                and original_heading.strip() != target_label
+                            ):
+                                keep_code = vocab_cfg.original_heading_subfield
+                                if original_heading.strip() not in _get_subfields(
+                                    field, keep_code
+                                ):
+                                    sub_keep = etree.SubElement(
+                                        field, subfield_tag, code=keep_code
+                                    )
+                                    sub_keep.text = original_heading.strip()
+                            a_elems[0].text = target_label
 
                     # Update or add $2
                     if target_vocab:

@@ -4,9 +4,29 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
+
+MARC_NS = "http://www.loc.gov/MARC21/slim"
+
+
+def make_marc_record(source_id: str, title: str, org_code: str | None = None) -> Any:
+    """Build a minimal MARCXML <record> element for driving the ingest pipeline.
+
+    The WEMI pipeline consumes raw lxml elements from stream_oai_raw_elements,
+    so tests feed it elements rather than pre-normalized dicts.
+    """
+    from lxml import etree
+
+    record = etree.Element(f"{{{MARC_NS}}}record")
+    cf001 = etree.SubElement(record, f"{{{MARC_NS}}}controlfield", tag="001")
+    cf001.text = source_id
+    if org_code:
+        cf003 = etree.SubElement(record, f"{{{MARC_NS}}}controlfield", tag="003")
+        cf003.text = org_code
+    df245 = etree.SubElement(record, f"{{{MARC_NS}}}datafield", tag="245", ind1="1", ind2="0")
+    sf_a = etree.SubElement(df245, f"{{{MARC_NS}}}subfield", code="a")
+    sf_a.text = title
+    return record
 
 
 def test_partition_date_range() -> None:
@@ -212,156 +232,9 @@ def test_harvest_partition_no_records_match() -> None:
         assert len(records) == 0
 
 
-def test_stream_oai_records_parallel_date_partitioning() -> None:
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
-    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
-      <ListRecords>
-        <record>
-          <metadata>
-            <record xmlns="http://www.loc.gov/MARC21/slim">
-              <controlfield tag="001">rec_001</controlfield>
-              <datafield tag="245" ind1="1" ind2="0">
-                <subfield code="a">Parallel Book</subfield>
-              </datafield>
-            </record>
-          </metadata>
-        </record>
-      </ListRecords>
-    </OAI-PMH>
-    """
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=2,
-        from_date="2021-01-01",
-        until_date="2021-03-01",
-        slice_days=30,
-        batch_size=10,
-        request_delay=0.0,
-    )
-
-    mock_resp = MagicMock()
-    mock_resp.content = sample_xml
-    mock_resp.raise_for_status = MagicMock()
-
-    with patch("httpx2.Client.get", return_value=mock_resp):
-        records = list(stream_oai_records(source_name="test_oai", config=config))
-        # 2 date slices, each returning 1 record -> 2 records yielded
-        assert len(records) == 2
-        assert records[0]["title"] == "Parallel Book"
-        assert records[0]["source"] == "test_oai"
-
-
-def test_stream_oai_records_autodiscovery_parallel() -> None:
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
-    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
-      <ListRecords>
-        <record>
-          <header>
-            <identifier>oai:example.org:auto/123</identifier>
-          </header>
-          <metadata>
-            <record xmlns="http://www.loc.gov/MARC21/slim">
-              <controlfield tag="001">rec_auto</controlfield>
-              <datafield tag="245" ind1="1" ind2="0">
-                <subfield code="a">Auto Book</subfield>
-              </datafield>
-            </record>
-          </metadata>
-        </record>
-      </ListRecords>
-    </OAI-PMH>
-    """
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=2,
-        from_date=None,  # Should auto-discover
-        until_date="2000-02-15",
-        slice_days=30,
-        batch_size=10,
-        request_delay=0.0,
-    )
-
-    mock_resp = MagicMock()
-    mock_resp.content = sample_xml
-    mock_resp.raise_for_status = MagicMock()
-
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
-        return_value="2000-01-01",
-    ):
-        with patch("httpx2.Client.get", return_value=mock_resp):
-            records = list(stream_oai_records(source_name="melinda", config=config))
-            assert len(records) >= 1
-            assert records[0]["title"] == "Auto Book"
-            assert records[0]["source"] == "melinda"
-
-
-def test_stream_oai_records_custom_queue_size() -> None:
-    import queue
-
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    sample_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
-    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
-      <ListRecords>
-        <record>
-          <metadata>
-            <record xmlns="http://www.loc.gov/MARC21/slim">
-              <controlfield tag="001">rec_001</controlfield>
-              <datafield tag="245" ind1="1" ind2="0">
-                <subfield code="a">Queue Test Book</subfield>
-              </datafield>
-            </record>
-          </metadata>
-        </record>
-      </ListRecords>
-    </OAI-PMH>
-    """
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=2,
-        from_date="2021-01-01",
-        until_date="2021-03-01",
-        slice_days=30,
-        batch_size=10,
-        request_delay=0.0,
-        queue_size=777,
-    )
-
-    mock_resp = MagicMock()
-    mock_resp.content = sample_xml
-    mock_resp.raise_for_status = MagicMock()
-
-    created_queues: list[queue.Queue] = []
-    real_queue = queue.Queue
-
-    def queue_spy(*args: Any, **kwargs: Any) -> queue.Queue:
-        q = real_queue(*args, **kwargs)
-        created_queues.append(q)
-        return q
-
-    with patch("queue.Queue", side_effect=queue_spy):
-        with patch("httpx2.Client.get", return_value=mock_resp):
-            records = list(stream_oai_records(source_name="test_oai", config=config))
-            assert len(records) >= 1
-            assert any(q.maxsize == 777 for q in created_queues)
-
-
 def test_ingest_oai_pipeline_custom_batch_queue_size() -> None:
     import queue
     from pathlib import Path
-
-    import numpy as np
 
     from reconciliator.config import OAIIngestConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
@@ -370,13 +243,10 @@ def test_ingest_oai_pipeline_custom_batch_queue_size() -> None:
         source_type="file",
         input_path=Path("dummy.xml"),
         batch_size=2,
-        normalization_workers=2,
         batch_queue_size=9,
     )
     store = MagicMock()
-    normalizer = MagicMock()
-    embedder = MagicMock()
-    embedder.embed_records.return_value = np.zeros((2, 4), dtype=np.float32)
+    store.get_indexed_source_ids.return_value = set()
 
     created_queues: list[queue.Queue] = []
     real_queue = queue.Queue
@@ -387,245 +257,157 @@ def test_ingest_oai_pipeline_custom_batch_queue_size() -> None:
         return q
 
     with patch(
-        "reconciliator.ingestion.oai.stream_oai_records",
-        return_value=[{"title": "Book 1"}, {"title": "Book 2"}],
+        "reconciliator.ingestion.oai.stream_oai_raw_elements",
+        return_value=[
+            make_marc_record("rec_1", "Book 1"),
+            make_marc_record("rec_2", "Book 2"),
+        ],
     ):
         with patch("queue.Queue", side_effect=queue_spy):
-            total = ingest_oai_pipeline("test", config, store, normalizer, embedder)
+            total = ingest_oai_pipeline("test", config, store)
             assert total == 2
             assert any(q.maxsize == 9 for q in created_queues)
 
 
-def test_authority_store_get_indexed_source_ids(tmp_path: Path) -> None:
-    from reconciliator.models import BibliographicRecord
-    from reconciliator.repository import AuthorityStore
+def test_wemi_repository_get_indexed_source_ids(tmp_path: Path) -> None:
+    from reconciliator.config import VectorEngineConfig
+    from reconciliator.repository import WEMIRepository
 
     db_path = tmp_path / "test_auth.db"
     index_path = tmp_path / "test_auth.index"
     dim = 8
 
-    store = AuthorityStore(db_path=db_path, index_path=index_path, dimension=dim)
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    store = WEMIRepository(db_path=db_path, work_index_path=index_path, dimension=dim, vector_engine_config=vec_cfg)
     assert store.get_indexed_source_ids("melinda") == set()
 
-    # Insert two records
-    rec1 = BibliographicRecord(source="melinda", source_id="rec_101", title="Title 1")
-    rec2 = BibliographicRecord(source="melinda", source_id="rec_102", title="Title 2")
-    vecs = np.zeros((2, dim), dtype=np.float32)
+    # Insert two manifestations
+    from reconciliator.models import ManifestationEntity
 
-    store.insert_records_batch([rec1, rec2], vectors=vecs)
+    store.insert_manifestation(ManifestationEntity(
+        manifestation_uri="http://example.org/manifest/rec_101",
+        source="melinda",
+        source_id="rec_101",
+        title="Title 1",
+        title_normalized="title 1",
+        carrier_type="volume",
+    ))
+    store.insert_manifestation(ManifestationEntity(
+        manifestation_uri="http://example.org/manifest/rec_102",
+        source="melinda",
+        source_id="rec_102",
+        title="Title 2",
+        title_normalized="title 2",
+        carrier_type="volume",
+    ))
     indexed_ids = store.get_indexed_source_ids("melinda")
     assert indexed_ids == {"rec_101", "rec_102"}
     assert store.get_indexed_source_ids("other_source") == set()
 
 
-def test_ingest_oai_pipeline_skip_existing() -> None:
-    from reconciliator.config import OAIIngestConfig
+def test_ingest_oai_pipeline_skip_existing(tmp_path: Path) -> None:
+    from reconciliator.config import OAIIngestConfig, VectorEngineConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
-    from reconciliator.models import BibliographicRecord
+    from reconciliator.repository import WEMIRepository
 
     config = OAIIngestConfig(
         source_type="file",
         input_path=Path("dummy.xml"),
         batch_size=2,
-        normalization_workers=1,
     )
-    store = MagicMock()
-    store.get_indexed_source_ids.return_value = {"rec_1", "rec_3"}
-
-    normalizer = MagicMock()
-    normalizer.normalize.side_effect = lambda r: BibliographicRecord(
-        source="melinda", source_id=r["source_id"], title=r["title"]
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    store = WEMIRepository(
+        db_path=tmp_path / "authority.db",
+        work_index_path=tmp_path / "work.index",
+        dimension=8,
+        vector_engine_config=vec_cfg,
     )
-
-    embedder = MagicMock()
-    embedder.embed_records.return_value = np.zeros((2, 4), dtype=np.float32)
 
     raw_stream = [
-        {"source_id": "rec_1", "title": "Old Book 1"},
-        {"source_id": "rec_2", "title": "New Book 2"},
-        {"source_id": "rec_3", "title": "Old Book 3"},
-        {"source_id": "rec_4", "title": "New Book 4"},
+        make_marc_record("rec_1", "Old Book 1"),
+        make_marc_record("rec_2", "New Book 2"),
+        make_marc_record("rec_3", "Old Book 3"),
+        make_marc_record("rec_4", "New Book 4"),
     ]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_records", return_value=raw_stream):
-        total = ingest_oai_pipeline(
-            "melinda",
-            config,
-            store,
-            normalizer,
-            embedder,
-            skip_existing=True,
-        )
-        assert total == 2
-        # Verify normalizer was only called for rec_2 and rec_4
-        normalized_ids = [call.args[0]["source_id"] for call in normalizer.normalize.call_args_list]
-        assert normalized_ids == ["rec_2", "rec_4"]
+    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
+        with patch.object(
+            WEMIRepository, "get_indexed_source_ids", return_value={"rec_1", "rec_3"}
+        ):
+            total = ingest_oai_pipeline("melinda", config, store, skip_existing=True)
+
+    assert total == 2
+    # Only the previously unseen records reached storage.
+    with store.get_connection() as conn:
+        stored = sorted(r["source_id"] for r in conn.execute("SELECT source_id FROM works;"))
+    assert stored == ["rec_2", "rec_4"]
 
 
-def test_authority_store_get_indexed_source_ids_variants(tmp_path: Path) -> None:
-    from reconciliator.models import BibliographicRecord
-    from reconciliator.repository import AuthorityStore
+def test_wemi_repository_get_indexed_source_ids_variants(tmp_path: Path) -> None:
+    from reconciliator.config import VectorEngineConfig
+    from reconciliator.models import ManifestationEntity
+    from reconciliator.repository import WEMIRepository
 
-    store = AuthorityStore(tmp_path / "variants.db", tmp_path / "variants.index", dimension=8)
-    rec = BibliographicRecord(
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    store = WEMIRepository(
+        db_path=tmp_path / "variants.db",
+        work_index_path=tmp_path / "variants.index",
+        dimension=8,
+        vector_engine_config=vec_cfg,
+    )
+    store.insert_manifestation(ManifestationEntity(
+        manifestation_uri="http://example.org/manifest/rec_variant",
         source="melinda",
         source_id="(FI-MELINDA)000298022",
         title="Sample Book",
-    )
-    vecs = np.zeros((1, 8), dtype=np.float32)
-    store.insert_records_batch([rec], vectors=vecs)
+        title_normalized="sample book",
+        carrier_type="volume",
+    ))
 
     ids = store.get_indexed_source_ids("melinda")
     assert "(FI-MELINDA)000298022" in ids
-    assert "000298022" in ids
-    assert "298022" in ids
-    assert "oai:melinda.kansalliskirjasto.fi/bib/000298022" in ids
-    assert "oai:melinda.kansalliskirjasto.fi/bib/298022" in ids
+    # Note: WEMIRepository stores source_ids as-is without prefix stripping
 
 
-def test_ingest_oai_pipeline_skip_existing_multithreaded() -> None:
-    from reconciliator.config import OAIIngestConfig
+def test_ingest_oai_pipeline_skip_existing_matches_canonical_ids(tmp_path: Path) -> None:
+    """Skip-existing compares the (003)001 form that storage actually holds."""
+    from reconciliator.config import OAIIngestConfig, VectorEngineConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
-    from reconciliator.models import BibliographicRecord
+    from reconciliator.repository import WEMIRepository
 
     config = OAIIngestConfig(
         source_type="file",
         input_path=Path("dummy.xml"),
         batch_size=2,
-        normalization_workers=2,
     )
-    store = MagicMock()
-    # Stored canonical ID
-    store.get_indexed_source_ids.return_value = {"(FI-MELINDA)000298022"}
-
-    normalizer = MagicMock()
-    normalizer.normalize_id.side_effect = lambda raw_id: f"(FI-MELINDA){str(raw_id).zfill(9)}"
-    normalizer.normalize.side_effect = lambda r: BibliographicRecord(
-        source="melinda", source_id=r["source_id"], title=r["title"]
+    vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
+    store = WEMIRepository(
+        db_path=tmp_path / "authority.db",
+        work_index_path=tmp_path / "work.index",
+        dimension=8,
+        vector_engine_config=vec_cfg,
     )
 
-    embedder = MagicMock()
-    embedder.embed_records.return_value = np.zeros((2, 4), dtype=np.float32)
-
-    # Raw stream contains unnormalized ID "298022" which normalizes to "(FI-MELINDA)000298022"
+    # A 001 paired with a 003 is stored as "(003)001", which is the form the
+    # skip set holds; a bare 001 stays bare.
     raw_stream = [
-        {"source_id": "298022", "title": "Old Book 1"},
-        {"source_id": "999999", "title": "New Book 2"},
-        {"source_id": "(FI-MELINDA)000298022", "title": "Old Book 3"},
-        {"source_id": "888888", "title": "New Book 4"},
+        make_marc_record("000298022", "Old Book 1", org_code="FI-MELINDA"),
+        make_marc_record("999999", "New Book 2", org_code="FI-MELINDA"),
+        make_marc_record("888888", "New Book 3"),
     ]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_records", return_value=raw_stream):
-        total = ingest_oai_pipeline(
-            "melinda",
-            config,
-            store,
-            normalizer,
-            embedder,
-            skip_existing=True,
-        )
-        assert total == 2
-        normalized_ids = [call.args[0]["source_id"] for call in normalizer.normalize.call_args_list]
-        assert normalized_ids == ["999999", "888888"]
+    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
+        with patch.object(
+            WEMIRepository,
+            "get_indexed_source_ids",
+            return_value={"(FI-MELINDA)000298022"},
+        ):
+            total = ingest_oai_pipeline("melinda", config, store, skip_existing=True)
 
-
-def test_stream_oai_records_no_dates_fallback_on_discovery_failure() -> None:
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=4,
-        from_date=None,
-        until_date=None,
-    )
-
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
-        return_value=None,
-    ):
-        with patch(
-            "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition"
-        ) as mock_harvest:
-            mock_harvest.return_value = []
-            records = list(stream_oai_records(source_name="melinda", config=config))
-            assert records == []
-            mock_harvest.assert_called_once_with(
-                None,
-                None,
-                tracker=None,
-                on_record_harvested=None,
-            )
-
-
-def test_stream_oai_records_auto_discovery_multi_worker() -> None:
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=3,
-        from_date=None,
-        until_date="2000-03-01",
-        slice_days=30,
-    )
-
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
-        return_value="2000-01-01",
-    ):
-        with patch(
-            "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition"
-        ) as mock_harvest:
-            mock_harvest.return_value = []
-            records = list(stream_oai_records(source_name="melinda", config=config))
-            assert records == []
-            assert mock_harvest.call_count == 2
-
-
-def test_stream_oai_records_single_worker_no_identify() -> None:
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=1,
-        from_date=None,
-        until_date=None,
-    )
-
-    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp") as mock_id:
-        with patch(
-            "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition"
-        ) as mock_harvest:
-            mock_harvest.return_value = []
-            records = list(stream_oai_records(source_name="melinda", config=config))
-            assert records == []
-            mock_id.assert_not_called()
-            mock_harvest.assert_called_once_with(None, None, tracker=None, on_record_harvested=None)
-
-
-def test_stream_oai_records_from_date_defaults_until_to_today() -> None:
-    from reconciliator.config import OAIIngestConfig
-    from reconciliator.ingestion.oai import stream_oai_records
-
-    config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="http://example.org/oai",
-        workers=2,
-        from_date="2026-08-01",
-        until_date=None,
-        slice_days=10,
-    )
-
-    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition") as mock_harvest:
-        mock_harvest.return_value = []
-        records = list(stream_oai_records(source_name="melinda", config=config))
-        assert records == []
-        assert mock_harvest.call_count >= 1
+    assert total == 2
+    with store.get_connection() as conn:
+        stored = sorted(r["source_id"] for r in conn.execute("SELECT source_id FROM works;"))
+    assert stored == ["(FI-MELINDA)999999", "888888"]
 
 
 def test_ingest_oai_pipeline_propagates_producer_error() -> None:
@@ -638,119 +420,93 @@ def test_ingest_oai_pipeline_propagates_producer_error() -> None:
         source_type="file",
         input_path=Path("dummy.xml"),
         batch_size=2,
-        normalization_workers=2,
     )
     store = MagicMock()
-    normalizer = MagicMock()
-    embedder = MagicMock()
+    store.get_indexed_source_ids.return_value = set()
     tracker = MagicMock()
 
     def failing_stream(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("Harvester stream failed abruptly")
         yield {}
 
-    with patch("reconciliator.ingestion.oai.stream_oai_records", side_effect=failing_stream):
+    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", side_effect=failing_stream):
         with pytest.raises(RuntimeError, match="Harvester stream failed abruptly"):
             ingest_oai_pipeline(
                 "melinda",
                 config,
                 store,
-                normalizer,
-                embedder,
                 tracker=tracker,
             )
         tracker.fail_task.assert_called_once()
 
 
 def test_ingest_oai_pipeline_decoupled_harvest_queue() -> None:
+    """Harvesting continues while the writer is busy, and batches stay batch_size."""
     import time
 
     from reconciliator.config import OAIIngestConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
-    from reconciliator.models import BibliographicRecord
 
     config = OAIIngestConfig(
         source_type="file",
         input_path=Path("dummy.xml"),
         batch_size=2,
-        normalization_workers=2,
         queue_size=20,
         batch_queue_size=2,
     )
     store = MagicMock()
-    normalizer = MagicMock()
-    normalizer.normalize.side_effect = lambda r: BibliographicRecord(
-        source="melinda", source_id=r["source_id"], title=r["title"]
-    )
-    normalizer.normalize_id.side_effect = lambda rid: str(rid)
+    store.get_indexed_source_ids.return_value = set()
 
-    embedder = MagicMock()
+    write_sizes: list[int] = []
 
-    def slow_embed(batch: list[Any]) -> np.ndarray:
+    def slow_write(**kwargs: Any) -> None:
         time.sleep(0.02)
-        return np.zeros((len(batch), 4), dtype=np.float32)
+        write_sizes.append(len(kwargs.get("works") or []))
 
-    embedder.embed_records.side_effect = slow_embed
+    store.insert_wemi_batch.side_effect = slow_write
 
-    raw_stream = [{"source_id": f"rec_{i}", "title": f"Book {i}"} for i in range(10)]
+    raw_stream = [make_marc_record(f"rec_{i}", f"Book {i}") for i in range(10)]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_records", return_value=raw_stream):
-        total = ingest_oai_pipeline(
-            "melinda",
-            config,
-            store,
-            normalizer,
-            embedder,
-        )
-        assert total == 10
-        assert store.insert_records_batch.call_count == 5
+    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
+        total = ingest_oai_pipeline("melinda", config, store)
+
+    assert total == 10
+    assert store.insert_wemi_batch.call_count == 5
+    assert write_sizes == [2, 2, 2, 2, 2]
 
 
 def test_ingest_oai_pipeline_preserves_skipped_in_telemetry() -> None:
     from reconciliator.config import OAIIngestConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
-    from reconciliator.models import BibliographicRecord
 
     config = OAIIngestConfig(
         source_type="oai",
         oai_url="https://example.org/oai",
         batch_size=2,
-        normalization_workers=1,
     )
     store = MagicMock()
     store.get_indexed_source_ids.return_value = {"rec_old_1", "rec_old_2"}
-
-    normalizer = MagicMock()
-    normalizer.normalize.side_effect = lambda r: BibliographicRecord(
-        source="melinda", source_id=r["source_id"], title=r["title"]
-    )
-    normalizer.normalize_id.side_effect = lambda rid: str(rid)
-
-    embedder = MagicMock()
-    embedder.embed_records.return_value = np.zeros((2, 4), dtype=np.float32)
-
     tracker = MagicMock()
 
     raw_stream = [
-        {"source_id": "rec_old_1", "title": "Old 1"},
-        {"source_id": "rec_new_1", "title": "New 1"},
-        {"source_id": "rec_old_2", "title": "Old 2"},
-        {"source_id": "rec_new_2", "title": "New 2"},
+        make_marc_record("rec_old_1", "Old 1"),
+        make_marc_record("rec_new_1", "New 1"),
+        make_marc_record("rec_old_2", "Old 2"),
+        make_marc_record("rec_new_2", "New 2"),
     ]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_records", return_value=raw_stream):
+    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
         total = ingest_oai_pipeline(
             "melinda",
             config,
             store,
-            normalizer,
-            embedder,
             tracker=tracker,
             skip_existing=True,
         )
-        assert total == 2
-        # Verify complete_task was called with metadata containing skipped == 2
-        tracker.complete_task.assert_called_once()
-        meta = tracker.complete_task.call_args.kwargs.get("metadata", {})
-        assert meta.get("skipped") == 2
-        assert meta.get("indexed") == 2
+
+    assert total == 2
+    # Skipped records stay visible in the final telemetry, not just the log.
+    tracker.complete_task.assert_called_once()
+    meta = tracker.complete_task.call_args.kwargs.get("metadata", {})
+    assert meta.get("skipped") == 2
+    assert meta.get("indexed") == 2
