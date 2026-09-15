@@ -2280,6 +2280,108 @@ a source with `authoritative: true`, `PID` becoming the work `source_id`, and
 
 618 passing.
 
+### 14.19 KAVI is harvestable over OAI-PMH today, in EN 15907 🔬 RESEARCH
+
+**Answer to "is there an open OAI-PMH": yes, but not KAVI's own.**
+
+`kavi.verkkokirjasto.fi` is Axiell Arena on Liferay 7.0.6 and exposes no OAI-PMH
+at any of fifteen probed paths. That OPAC is the library catalogue whose
+publications use the FIAF Classification Scheme for Literature on Film and
+Television - literature *about* film, not the films.
+
+The films are in **Finna**, which does have one:
+
+```
+endpoint   https://api.finna.fi/OAI/Server
+formats    oai_dc  marc21  oai_vufind_json  oai_ead  oai_ead3
+           oai_forward  oai_lido  oai_qdc  oai_finna_json
+sets       non_dedup   (only - there is no per-organisation set)
+```
+
+#### The format is itself the filter
+
+`ListIdentifiers&metadataPrefix=oai_forward` returns **only** `kavi.*`
+identifiers, `completeListSize=138149` - exactly the count the REST API reports
+for `datasource_str_mv:"kavi"`. No other Finna datasource offers that format, so
+requesting it is an effective KAVI-only harvest, with standard resumptionToken
+paging. `set=kavi` is rejected as `badArgument`; the filtering happens through
+the format instead.
+
+`oai_forward` is **EN 15907** (`forward.cineca.it/schema/EN15907-forward-v1.0.xsd`),
+the European standard for moving-image metadata - consistent with the FIAF
+classification the OPAC mentions.
+
+**KAVI film records have no MARC representation**: `metadataPrefix=marc21` on a
+`kavi.elonet_elokuva_*` identifier returns `cannotDisseminateFormat`. So this
+cannot be ingested through the existing MARCXML path.
+
+#### Scale is tractable
+
+| | |
+|---|---|
+| works | 138 149 |
+| page size | 1 000 records / 3.5 MB |
+| record size | median 2.8 kB (max seen 218 kB, a fully-credited feature) |
+| full harvest | ~0.4 GB uncompressed, 139 pages |
+| agent links | ~6 per work, so roughly 830 000 contributions |
+
+#### EN 15907 maps onto WEMI almost directly
+
+```xml
+<CinematographicWork>
+  <Identifier scheme="KAVI" IDTypeName="elonet_elokuva">100001</Identifier>
+  <IdentifyingTitle>Aaltoska orkaniseeraa</IdentifyingTitle>
+  <Title><TitleText>Aaltoska orkaniseeraa</TitleText>
+         <TitleRelationship>original</TitleRelationship></Title>
+  <Title><TitleText lang="swe">Aaltoska i sitt ässe</TitleText>
+         <TitleRelationship>translated</TitleRelationship></Title>
+  <Title><TitleText>Musta veljeskunta</TitleText>
+         <TitleRelationship>working</TitleRelationship></Title>
+  <YearOfReference>1949</YearOfReference>
+  <HasAgent>
+    <Activity tehtava="ohjaus" finna-activity-code="D02">D02</Activity>
+    <AgentName>Edvin Laine</AgentName>
+    <AgentIdentifier><IDTypeName>elonet_henkilo</IDTypeName>
+                     <IDValue>100002</IDValue></AgentIdentifier>
+  </HasAgent>
+</CinematographicWork>
+```
+
+| EN 15907 | WEMI |
+|---|---|
+| `CinematographicWork` | `WorkEntity`, work_type `moving_image` |
+| `Identifier` (`elonet_elokuva`) | `source_id` plus an `IdentifierEntity` |
+| `IdentifyingTitle` | work title |
+| `Title` + `TitleRelationship=original` | work title / uniform title |
+| `Title` + `translated` with `lang` | expression-level titles, one per language |
+| `Title` + `working` | variant title |
+| `YearOfReference` | production year |
+| `HasAgent` / `Activity` / `AgentName` | `ContributionEntity` with a role |
+| `AgentIdentifier` | **persistent agent identifier** |
+
+Three persistent agent id types: `elonet_henkilo` (person),
+`elonet_kokoonpano` (ensemble), `elonet_yhtio` (company).
+
+**That last row is the significant one.** The project's agent reconciliation
+exists to attach authority URIs to bare names; this source supplies name, role
+and a persistent identifier together, for ~830 000 contributions. It is an
+authority source for film people, not only for films.
+
+#### What it would take
+
+The existing OAI-PMH harvester needs no changes - resume, checkpointing, date
+partitioning and the batch writer all work against any `metadataPrefix`. What is
+missing is one decomposer: EN 15907 -> WEMI, alongside `marcxml` and `bibframe`.
+Roles arrive as a mix of MARC relator codes (`aus`) and Finna/EN 15907 codes
+(`D02`, `A99` with `finna-activity-text`), so the relator normaliser needs a
+second code list.
+
+Still the same decision as 14.18, now much better specified: a third loader is a
+feature, not a refactor. The difference from the Yle dataset is that this one is
+live, paged, standards-based, 138 149 works deep, and carries persistent
+identifiers for both works and people - where Yle's is a 2018 CSV snapshot whose
+series structure Yle itself calls automatically inferred and error-prone.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
