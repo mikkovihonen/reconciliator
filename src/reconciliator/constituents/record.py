@@ -40,6 +40,9 @@ class Constituent:
     component_type: Optional[ComponentType] = None
     container_key: Optional[str] = None
 
+    #: The container's record control number, as the record states it.
+    container_ref: Optional[str] = None
+
     #: Whether the agent named beside this constituent is also a contributor to
     #: the container. See ConstituentField.contributes_to_container.
     contributes_to_container: bool = False

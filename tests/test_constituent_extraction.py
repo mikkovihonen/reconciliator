@@ -220,7 +220,9 @@ def test_a_host_item_entry_yields_a_component_not_an_embodied_constituent():
     record = _record(
         '<datafield tag="773" ind1="0" ind2=" ">'
         '<subfield code="t">Virittäjä</subfield>'
-        '<subfield code="g">s. 12-34</subfield>'
+        '<subfield code="g">2020, s. 12-34</subfield>'
+        '<subfield code="q">12</subfield>'
+        '<subfield code="w">(FI-MELINDA)000900111</subfield>'
         "</datafield>",
         leader="00000cab a2200000 i 4500",
     )
@@ -228,8 +230,13 @@ def test_a_host_item_entry_yields_a_component_not_an_embodied_constituent():
     assert len(got) == 1
     assert got[0].shape == "component"
     assert got[0].component_type == "article"
-    assert got[0].container_key == "citation"
-    assert got[0].pagination == "s. 12-34"
+    # $q, "enumeration and first page", which is what the existing citation key
+    # already reads. $g is "related parts" - here a year *and* a page range - so
+    # reading it as pagination would put a year in a column named for pages.
+    assert got[0].pagination == "12"
+    # $w is the host's record control number - the only subfield in a host-item
+    # entry that identifies a row rather than describing one.
+    assert got[0].container_ref == "(FI-MELINDA)000900111"
     assert got[0].ordinal is None  # a component is not track n of anything
 
 

@@ -46,13 +46,23 @@ fields:
     contributes_to_container: false
     creator_controlled: true
 
-  # 773 host item: this record is itself a part, so it becomes a component
-  # manifestation hanging off the container found through its citation key.
+  # 773 host item: this record is itself a part, so its own manifestation is a
+  # component of the host's.
+  #
+  # $w carries the host's record control number, and it is the only subfield here
+  # that identifies a row rather than describing one. The `citation` key is not
+  # usable for this: it is ISSN::year::page::author, which identifies the
+  # *article* and matches nothing on the host record.
   - tag: "773"
     shape: component
     component_type: article
     title: "t"
     creator: "a"
-    pagination: "g"
-    container_key: citation
+    # $q is MARC's "enumeration and first page", and it is what the existing
+    # `citation` key already reads for the start page. $g is "related parts" - a
+    # composite like "2020, s. 12-34" - so mapping pagination to it stores a
+    # volume and a year in a column named for pages. A source that does write its
+    # pages in $g says so in its own profile.
+    pagination: "q"
+    container_source_id: "w"
     ordinal: none

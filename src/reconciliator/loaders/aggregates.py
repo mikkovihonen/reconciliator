@@ -203,6 +203,47 @@ def build_embodied_constituents(
     return rows
 
 
+def apply_component_containment(
+    constituents: list[Constituent],
+    *,
+    manifestation: ManifestationEntity,
+    source: str,
+) -> bool:
+    """Mark this record's own manifestation as a component of its host's.
+
+    Shape B is not "emit more rows": a host-item entry describes the *container*,
+    so what it yields is a fact about the record already in hand. An article's
+    manifestation becomes a component of the journal issue's, with its own
+    pagination, which it already had.
+
+    `is_component` has been set from the presence of a 773 all along, and
+    `container_id` was resolved from nothing, so the hierarchy had no rows in it
+    and could not be walked in either direction. The link is the host's record
+    control number - MARC 773 `$w` - turned into the manifestation URI the host's
+    own record produces. `insert_wemi_batch` resolves that against the batch and
+    then against the store, since the host is usually ingested long before the
+    article.
+
+    A host-item entry with no `$w` describes a container it cannot identify. The
+    component is still marked as one, because it is one; it just has nothing to
+    point at.
+    """
+    component = next((c for c in constituents if c.shape == "component"), None)
+    if component is None:
+        return False
+
+    manifestation.is_component = True
+    if component.component_type:
+        manifestation.component_type = component.component_type
+    if component.pagination and not manifestation.pagination:
+        manifestation.pagination = component.pagination
+    if component.title and not manifestation.host_title:
+        manifestation.host_title = component.title
+    if component.container_ref:
+        manifestation.container_uri = f"urn:manif:{source}:{component.container_ref}"
+    return True
+
+
 def reassign_constituent_contributions(
     *,
     agents: list[AgentEntity],

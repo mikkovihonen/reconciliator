@@ -212,6 +212,7 @@ def _add_constituents(
         return
 
     from reconciliator.loaders.aggregates import (
+        apply_component_containment,
         build_embodied_constituents,
         reassign_constituent_contributions,
     )
@@ -225,6 +226,13 @@ def _add_constituents(
     )
     if not constituents:
         return
+
+    # A record that is itself a part: the host-item entry describes its
+    # container, so this is a fact about the manifestation already in hand rather
+    # than more rows.
+    apply_component_containment(
+        constituents, manifestation=manifestation, source=ctx.source
+    )
 
     main_entry = marc_main_entry_name(item)
     rows = build_embodied_constituents(

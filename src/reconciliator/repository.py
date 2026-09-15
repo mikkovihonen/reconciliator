@@ -969,6 +969,12 @@ class WEMIRepository:
                 for i in component_idx:
                     component = manifestations[i]
                     resolved = manif_key_to_id.get(component.container_uri)
+                    if not resolved and component.container_uri:
+                        # Then the store: a journal issue is ingested long before
+                        # the articles that cite it, so the container is usually
+                        # in an earlier batch or an earlier run.
+                        existing = self.get_manifestation_by_uri(component.container_uri)
+                        resolved = existing.id if existing else None
                     if resolved:
                         component.container_id = resolved
                     else:
@@ -1240,6 +1246,19 @@ class WEMIRepository:
                     "SELECT * FROM expressions WHERE work_id = ? ORDER BY id;", (work_id,)
                 ).fetchall()
             return [_row_to_expression(r) for r in rows]
+
+    def get_manifestation_by_uri(self, manifestation_uri: str) -> Optional[ManifestationEntity]:
+        """One manifestation by its URI, for resolving a component's container.
+
+        The host of an article is normally ingested long before the article, so
+        batch-local resolution is not enough on its own.
+        """
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM manifestations WHERE manifestation_uri = ? LIMIT 1;",
+                (manifestation_uri,),
+            ).fetchone()
+            return _row_to_manifestation(row) if row else None
 
     def get_manifestations_for_work(
         self, work_id: int, record_origin: Optional[RecordOrigin | str] = None

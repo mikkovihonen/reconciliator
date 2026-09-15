@@ -76,8 +76,15 @@ class ConstituentField(BaseModel):
     shape: Optional[ConstituentShape] = None
     component_type: Optional[ComponentType] = None
 
-    #: For a record that is itself a part: the entity key through which its
-    #: container is found (`citation` for MARC 773).
+    #: For a record that is itself a part: the subfield carrying its container's
+    #: *record control number*, which is the only link in a host-item entry that
+    #: identifies a row rather than describing one - MARC 773 `$w`.
+    container_source_id: Optional[str] = None
+
+    #: An entity key that identifies the container instead, for a source whose
+    #: parts name their host some other way. Not used by `marc_enhanced`: the
+    #: `citation` key is ISSN::year::page::author, which identifies the *article*
+    #: and matches nothing on the host record.
     container_key: Optional[str] = None
 
     #: Whether the agent named beside the constituent is also a contributor to

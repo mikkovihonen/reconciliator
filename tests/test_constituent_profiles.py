@@ -91,7 +91,12 @@ def test_the_marc_profile_yields_both_shapes():
     assert shapes["700"] == "embodied"
     assert shapes["773"] == "component"
     host = profile.fields_for_tag("773")[0]
-    assert host.container_key == "citation"
+    # $w, the host's record control number: the only subfield in a host-item
+    # entry that identifies a row rather than describing one. The `citation` key
+    # cannot serve - it is ISSN::year::page::author, which identifies the
+    # article and matches nothing on the host record.
+    assert host.container_source_id == "w"
+    assert host.container_key is None
     assert host.component_type == "article"
 
 

@@ -2229,6 +2229,7 @@ def extract_marc_constituents(
                         shape=profile.shape_of(field),
                         component_type=field.component_type,
                         container_key=field.container_key,
+                        container_ref=value(field.container_source_id),
                         contributes_to_container=field.contributes_to_container,
                         source_field=field.tag,
                         precedence=precedence,

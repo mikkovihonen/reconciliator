@@ -503,3 +503,122 @@ def test_the_blocking_keys_do_not_move():
     }
     assert keys["keys_only"] == keys["entities"]
     assert ("author", "waltari") in keys["entities"]
+
+
+# --- stage 6: a record that is itself a part ------------------------------
+
+HOST_ID = "(FI-MELINDA)000900111"
+
+ISSUE = etree.fromstring(
+    """<record xmlns="http://www.loc.gov/MARC21/slim">
+      <leader>00000cas a2200000 i 4500</leader>
+      <controlfield tag="001">000900111</controlfield>
+      <controlfield tag="003">FI-MELINDA</controlfield>
+      <controlfield tag="008">200101c20209999fi |||||||||||||||fin d</controlfield>
+      <datafield tag="022" ind1=" " ind2=" "><subfield code="a">0042-6806</subfield></datafield>
+      <datafield tag="245" ind1="0" ind2="0"><subfield code="a">Virittaja</subfield></datafield>
+    </record>""".encode()
+)
+
+
+def _article(control: str, title: str, host: str | None = HOST_ID) -> etree._Element:
+    link = f'<subfield code="w">{host}</subfield>' if host else ""
+    return etree.fromstring(
+        f"""<record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>00000cab a2200000 i 4500</leader>
+          <controlfield tag="001">{control}</controlfield>
+          <controlfield tag="003">FI-MELINDA</controlfield>
+          <controlfield tag="008">200101s2020    fi |||||||||||||||fin d</controlfield>
+          <datafield tag="100" ind1="1" ind2=" ">
+            <subfield code="a">Virtanen, Liisa</subfield></datafield>
+          <datafield tag="245" ind1="1" ind2="0"><subfield code="a">{title}</subfield></datafield>
+          <datafield tag="773" ind1="0" ind2=" ">
+            <subfield code="t">Virittaja</subfield>
+            <subfield code="x">0042-6806</subfield>
+            <subfield code="q">12</subfield>
+            {link}
+          </datafield>
+        </record>""".encode()
+    )
+
+
+def test_a_host_item_entry_describes_the_container_not_a_new_row():
+    """Shape B is not "emit more rows": a host-item entry describes the
+    container, so what it yields is a fact about the record already in hand."""
+    record = load_record(_article("000900222", "Suomen murteista"), _ctx("entities"))
+    assert len(record.works) == 1
+    assert len(record.manifestations) == 1
+    manifestation = record.manifestations[0]
+    assert manifestation.is_component is True
+    assert manifestation.component_type == "article"
+    assert manifestation.host_title == "Virittaja"
+    assert manifestation.container_uri == f"urn:manif:{SRC}:{HOST_ID}"
+
+
+def test_an_article_finds_a_host_ingested_in_an_earlier_batch(repo: WEMIRepository):
+    """The usual case by a wide margin: a journal issue is ingested long before
+    the articles that cite it, so batch-local resolution is not enough."""
+    _ingest(repo, load_record(ISSUE, _ctx("entities")))
+    _ingest(repo, load_record(_article("000900222", "Suomen murteista"), _ctx("entities")))
+
+    issue = repo.get_manifestation_by_source(SRC, HOST_ID)
+    article = repo.get_manifestation_by_source(SRC, "(FI-MELINDA)000900222")
+    assert article.container_id == issue.id
+    assert article.component_type == "article"
+
+
+def test_the_container_can_be_asked_for_its_parts(repo: WEMIRepository):
+    """Which was the whole complaint: `container_id` had a self-FK, two indexes
+    and a cascade, and no row ever carried a value."""
+    _ingest(repo, load_record(ISSUE, _ctx("entities")))
+    for control, title in (("000900222", "Suomen murteista"), ("000900333", "Nimistontutkimus")):
+        _ingest(repo, load_record(_article(control, title), _ctx("entities")))
+
+    issue = repo.get_manifestation_by_source(SRC, HOST_ID)
+    with repo.get_connection() as conn:
+        parts = [
+            row["source_id"]
+            for row in conn.execute(
+                "SELECT source_id FROM manifestations WHERE container_id = ? ORDER BY source_id;",
+                (issue.id,),
+            )
+        ]
+    assert parts == ["(FI-MELINDA)000900222", "(FI-MELINDA)000900333"]
+
+
+def test_an_article_naming_no_host_record_is_still_a_component(repo: WEMIRepository):
+    """It is a component - that is what a 773 says - it just has nothing to
+    point at. Dropping it would lose a real publication."""
+    _ingest(repo, load_record(_article("000900444", "Irrallinen", host=None), _ctx("entities")))
+    article = repo.get_manifestation_by_source(SRC, "(FI-MELINDA)000900444")
+    assert article.is_component is True
+    assert article.container_id is None
+
+
+def test_a_host_that_is_not_in_the_store_leaves_the_component_unlinked(repo: WEMIRepository):
+    _ingest(repo, load_record(_article("000900555", "Orpo"), _ctx("entities")))
+    article = repo.get_manifestation_by_source(SRC, "(FI-MELINDA)000900555")
+    assert article.container_id is None
+    assert article.host_title == "Virittaja"
+
+
+def test_deleting_the_host_cascades_to_its_parts(repo: WEMIRepository):
+    """`container_id` is declared `ON DELETE CASCADE`, and now that rows carry
+    values the cascade is reachable."""
+    _ingest(repo, load_record(ISSUE, _ctx("entities")))
+    _ingest(repo, load_record(_article("000900222", "Suomen murteista"), _ctx("entities")))
+    issue = repo.get_manifestation_by_source(SRC, HOST_ID)
+    with repo.get_connection() as conn:
+        conn.execute("DELETE FROM manifestations WHERE id = ?;", (issue.id,))
+        remaining = conn.execute("SELECT COUNT(*) c FROM manifestations;").fetchone()["c"]
+    assert remaining == 0
+
+
+def test_containment_needs_no_profile_change_for_a_source_with_none():
+    """A source with no constituent profile keeps the behaviour it had:
+    `is_component` from the presence of a 773, and no container."""
+    record = load_record(_article("000900666", "Vanhaan tapaan"), _ctx("entities", profile=None))
+    manifestation = record.manifestations[0]
+    assert manifestation.is_component is True
+    assert manifestation.component_type is None
+    assert manifestation.container_uri is None

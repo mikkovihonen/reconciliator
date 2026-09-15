@@ -364,8 +364,7 @@ Each is its own diff with its own verification, in this order:
 3. ✅ **Profile-driven MARC extraction.** *Done — see the log below.*
 4. ✅ **Shape A emission.** *Done — see the log below.*
 5. ✅ **The contributor fix.** *Done — see the log below.*
-6. **Shape B**: `container_id` resolution for records that are themselves parts,
-   through the profile's `container_key`, plus `component_type`.
+6. ✅ **Shape B: component manifestations.** *Done — see the log below.*
 7. **BIBFRAME `bf:hasPart`** as a predicate-carrying profile, including the
    series mis-mapping fix in the three schema profiles.
 8. **Rewire the consumers**: funnel G and recorded sound read stored rows;
@@ -733,3 +732,63 @@ term. The project has `fold_label` and a `preserved_diacritics` setting, so the
 machinery exists. Out of this stage's scope — it belongs with relator
 normalisation, not with aggregates — but it is a live gap for any source that
 ASCII-folds its Finnish.
+
+## Stage 6 ✅ COMPLETE
+
+Shape B turned out not to be "emit more rows". A host-item entry describes the
+*container*, so what it yields is a fact about the record already in hand: this
+manifestation is a component of that one. `apply_component_containment` sets
+`is_component`, `component_type`, `host_title`, `pagination` and — the part that
+never existed — `container_uri`.
+
+An article and its journal issue, ingested in separate batches:
+
+```
+batch 1: the journal issue, on its own
+  (FI-MELINDA)000900111  is_component=False container_uri=None
+batch 2: two articles, a separate run
+  (FI-MELINDA)000900222  is_component=True type=article
+                         container_uri=urn:manif:melinda:(FI-MELINDA)000900111
+  (FI-MELINDA)000900333  is_component=True type=article container_uri=None   (no $w)
+
+issue manifestation id = 1
+  000900222: container_id=1
+  000900333: container_id=None
+
+components of the issue (1): 000900222  type=article
+manifestations left after deleting the issue: 1   (the cascade took the linked one)
+```
+
+### The link is `$w`, and the `citation` key cannot serve
+
+The plan said the container would be found "through the profile's
+`container_key`", naming `citation`. That does not work, and the reason is worth
+recording: the citation key is `ISSN::year::page::author`, which identifies the
+*article*. Nothing on the host's record derives anything equal to it. MARC 773
+`$w` carries the host's record control number, and it is the only subfield in a
+host-item entry that identifies a row rather than describing one — so
+`container_source_id` is the profile field that matters, and `container_key`
+stays in the spec for a source whose parts genuinely name their host by a key.
+
+### Resolution has to reach the store, not just the batch
+
+Stage 1 resolved `container_uri` within a batch, which is the rare case: a
+journal issue is ingested long before the articles that cite it. `insert_wemi_batch`
+now falls back to `get_manifestation_by_uri`, so containment works across batches
+and across runs.
+
+### One mapping corrected on the way
+
+The first profile read pagination from 773 `$g`, which is MARC's "related parts"
+— a composite like `"2020, s. 12-34"` — so a year and a volume would have been
+stored in a column named for pages. `$q` is "enumeration and first page", and it
+is what the existing `citation` key already reads. A source that really does
+write its pages in `$g` says so in its own profile.
+
+### Verified
+
+7 more tests (33 in `tests/test_aggregate_emission.py`): the fact-not-rows shape,
+resolution from an earlier batch, asking a container for its parts, an article
+with no `$w`, a host absent from the store, the delete cascade now that rows
+carry values, and a source with no profile keeping exactly its old behaviour.
+783 → **790 passing**, lint clean, pipeline unchanged.
