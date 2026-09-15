@@ -52,8 +52,20 @@ class FunnelContext:
         )
 
 
-def _constituents(record: Any, ctx: FunnelContext) -> list[Any]:
-    """Build constituent-work matches from the analytics extracted at ingest."""
+def _constituents(record: Any, ctx: FunnelContext, work: Any = None) -> list[Any]:
+    """Build constituent-work matches from the analytics extracted at ingest.
+
+    `mode: resolve` used to run one `find_works_by_author_and_title` per
+    constituent title, hardcoded to `work_type="text"` - so an album's tracks
+    could never resolve however they were catalogued, and an anthology's stories
+    cost a query each. The matched container now answers the question directly:
+    its stored `has_constituent` rows are the works it contains, in one indexed
+    lookup, and the target's titles are aligned against them.
+
+    The per-title lookup remains as a fallback, without the hardcoded work type,
+    for a container ingested before constituents existed or under
+    `constituents_mode: keys_only`.
+    """
     from reconciliator.matcher import extract_target_analytics
 
     mode = ctx.spec.constituents
@@ -63,22 +75,39 @@ def _constituents(record: Any, ctx: FunnelContext) -> list[Any]:
     if mode == "titles":
         return [ctx.constituent_cls(title=t) for t, _a in analytics]
 
-    # "resolve": look each constituent up as a work of its own.
+    stored = _stored_constituents(work, ctx)
     out = []
     for title, author in analytics:
-        found = ctx.repo.find_works_by_author_and_title(author, title, work_type="text")
-        if found:
-            out.append(
-                ctx.constituent_cls(
-                    title=title,
-                    matched_work=found[0],
-                    work_uri=found[0].work_uri,
-                    relationship_type="constituent_of",
-                )
+        match = stored.get(_stem(title))
+        if match is None:
+            candidates = ctx.repo.find_works_by_author_and_title(
+                author, title, work_type=getattr(work, "work_type", None)
             )
-        else:
-            out.append(ctx.constituent_cls(title=title, relationship_type="constituent_of"))
+            match = candidates[0] if candidates else None
+        out.append(
+            ctx.constituent_cls(
+                title=title,
+                matched_work=match,
+                work_uri=match.work_uri if match else None,
+                relationship_type="constituent_of",
+            )
+        )
     return out
+
+
+def _stored_constituents(work: Any, ctx: FunnelContext) -> dict[str, Any]:
+    """The matched container's own constituents, keyed by title stem."""
+    if work is None or not getattr(work, "id", None):
+        return {}
+    if not hasattr(ctx.repo, "get_constituent_works"):
+        return {}
+    return {_stem(c.title): c for c in ctx.repo.get_constituent_works(work.id) if c.title}
+
+
+def _stem(title: str) -> str:
+    from reconciliator.normalizers.blocking import compute_title_stem
+
+    return compute_title_stem(title) or title.strip().casefold()
 
 
 def _relationships(work: Any, ctx: FunnelContext) -> list[Any]:
@@ -153,7 +182,7 @@ def default_tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
         # tier that compares candidates should report which one it found.
         confidence_score=float(verdict.match_score),
         relationships=_relationships(work, ctx),
-        constituent_matches=_constituents(record, ctx),
+        constituent_matches=_constituents(record, ctx, work),
     )
 
 
@@ -163,7 +192,15 @@ def run_funnel(
     ctx: FunnelContext,
     handler: Optional[Any] = None,
 ) -> Any:
-    """Run one funnel: tier 1, then tier 2, then tier 3, then unmatched."""
+    """Run one funnel: tier 1, then tier 2, then tier 3, then unmatched.
+
+    A tier decides *what matched*; the funnel decides what to report about it.
+    That split is why `_report` runs over every tier's result: constituents and
+    stored relationships were filled in by `default_tier2` alone, so an anthology
+    matched on its ISBN - the strongest match there is - reported no
+    constituents, while the same anthology matched by author and title reported
+    all of them.
+    """
     tier1 = getattr(handler, "tier1", None) if handler else None
     result = (
         tier1(record, ctx)
@@ -171,12 +208,12 @@ def run_funnel(
         else ctx.try_identifiers(record, ctx.identifiers, spec.id, spec.identifier_schemes)
     )
     if result:
-        return result
+        return _report(result, record, ctx)
 
     tier2 = getattr(handler, "tier2", None) if handler else None
     result = tier2(record, ctx) if tier2 else default_tier2(record, ctx)
     if result:
-        return result
+        return _report(result, record, ctx)
 
     tier3 = getattr(handler, "tier3", None) if handler else None
     result = (
@@ -185,6 +222,21 @@ def run_funnel(
         else ctx.vector_or_fts(record, spec.fallback_work_type, spec.id)
     )
     if result:
-        return result
+        return _report(result, record, ctx)
 
     return ctx.unmatched(record)
+
+
+def _report(result: Any, record: Any, ctx: FunnelContext) -> Any:
+    """Fill in what the funnel reports about a match, whichever tier found it."""
+    work = getattr(result, "matched_work", None)
+    if work is None:
+        return result
+
+    if not getattr(result, "constituent_matches", None):
+        result.constituent_matches = _constituents(record, ctx, work)
+    # Only the stored kind: an asserted relationship is a claim the matching tier
+    # makes, and a tier that did not make it should not have one attributed to it.
+    if ctx.spec.relationships and not getattr(result, "relationships", None):
+        result.relationships = ctx.repo.get_work_relationships(work.id)
+    return result

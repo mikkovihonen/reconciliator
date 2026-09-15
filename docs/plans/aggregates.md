@@ -366,8 +366,7 @@ Each is its own diff with its own verification, in this order:
 5. ✅ **The contributor fix.** *Done — see the log below.*
 6. ✅ **Shape B: component manifestations.** *Done — see the log below.*
 7. ✅ **BIBFRAME `bf:hasPart`.** *Done — see the log below.*
-8. **Rewire the consumers**: funnel G and recorded sound read stored rows;
-   capability declarations, funnel reachability, `pipeline_check`.
+8. ✅ **Rewire the consumers.** *Done — see the log below.*
 9. **Decide indexing and clustering treatment**, with a measurement rather than a
    guess.
 
@@ -861,3 +860,76 @@ container's manifestation, and both `keys_only` and no-profile behaviour.
 
 790 → **806 passing**, lint clean, legacy analytic parity still PASS, stage-4
 convergence harness unchanged, pipeline unchanged.
+
+## Stage 8 ✅ COMPLETE
+
+```
+matched via funnel_g_anthology at tier1_exact_identifier
+work: urn:work:fennica:ANTH-1
+constituent matches:
+   'Kuun maisema'  -> urn:work:fennica:c:336d5fc518e71acc  constituent_of
+   'Agnes'         -> urn:work:fennica:c:6ab8da0b7bf30d9d  constituent_of
+```
+
+`get_constituent_works(work_id)` answers a whole tracklist in one indexed
+lookup, ordered by the junction's disc and track number. Funnel G's `resolve`
+mode aligns the target's analytic titles against it, and the recorded-sound tier
+reports the matched album's own tracks rather than the target's claimed ones.
+The per-title lookup remains as a fallback — without the hardcoded
+`work_type="text"` that made it useless for music — for a container ingested
+under `keys_only`.
+
+### The blocking query was a full table scan
+
+Raised mid-stage, and worth the measurement. `find_works_by_author_and_title`
+matched `title_normalized LIKE '%stem%'`, which `EXPLAIN QUERY PLAN` reports as
+`SCAN w`. At 60,000 works:
+
+| form | plan | cost |
+|---|---|---|
+| `LIKE '%stem%'` | **SCAN w** | **6.38 ms** |
+| `= stem` | `SEARCH w USING INDEX idx_works_title_norm` | < 0.01 ms |
+
+It is called at least once per target record, so the scan was the dominant cost
+of tier 2 — and constituent works multiply the table it scans. Resolving one
+20-track album cost **135 ms**.
+
+The fix is a ladder — equality, then a prefix `LIKE 'stem%'` (both indexed),
+then the substring scan — each rung tried only when the one before found
+nothing, so recall is preserved exactly. **6.38 ms → 0.22 ms**, and the 20-track
+album **135 ms → 4 ms**.
+
+A vector index was considered and declined *for this lookup*: equality is
+already a thousand times faster on an existing index, both sides compute the
+same stem through `compute_title_stem`, and an approximate neighbour cannot
+deliver the exact-blocking contract tier 2 promises. Tier 3 already does dense
+retrieval and FTS for titles that do not match exactly, which is where such a
+title is supposed to go. Stage 9 is where a constituent-specific index gets
+measured rather than assumed.
+
+One behaviour change falls out: when an exact stem exists, a work whose title
+merely *contains* the probe is no longer a tier-2 candidate. It has a different
+stem, which is what tier 2 blocks on. A test in `test_rerank_wiring.py` had been
+leaning on exactly that noise for its precondition — it asserted that the
+blocking query returned the *weaker* candidate first — so it now constructs two
+candidates with the same stem, which is the case it meant: ranking beating "take
+the first row".
+
+### Constituents were reported from one tier out of three
+
+`default_tier2` filled in `constituent_matches`; tier 1 and tier 3 build their
+own results and did not. So an anthology matched on its **ISBN** — the strongest
+match available — reported no constituents, while the same anthology matched by
+author and title reported all of them. `run_funnel` now fills in what the funnel
+reports over whichever tier answered: a tier decides *what matched*, the funnel
+decides what to report about it. Stored relationships are filled the same way;
+an *asserted* relationship is not, because it is a claim the matching tier makes
+and a tier that did not make it should not have one attributed to it.
+
+### Verified
+
+7 tests in `tests/test_aggregate_consumers.py`: track-ordered constituents, a
+work with none, only `has_constituent` edges followed, the index in the query
+plan, recall preserved through the ladder, exact preferred over longer, and
+constituents reported from a tier-1 match end to end through `WorkMatcher`.
+806 → **813 passing**, lint clean, pipeline unchanged.

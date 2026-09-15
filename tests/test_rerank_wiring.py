@@ -115,19 +115,28 @@ def test_the_better_candidate_wins_over_the_first_one(store: WEMIRepository):
     For a prolific author under a common title that is several genuinely
     different works, and the first row is whichever the index happened to
     return. This is the capability the matcher previously did not have.
+
+    Both candidates share the title stem, which is what tier 2 blocks on: the
+    two are separated by the year discriminator and by nothing else. An earlier
+    version of this test used a candidate whose title merely *contained* the
+    stem, which stopped being returned when the blocking query learned to try
+    equality before a substring scan - it was leaning on blocking noise for its
+    precondition rather than on ranking.
     """
-    _add_work(store, "A_FAR", "Sinuhe egyptilainen ja jotain aivan muuta")
-    _add_work(store, "B_NEAR", "Sinuhe egyptilainen")
+    _add_work(store, "A_FAR", "Sinuhe egyptilainen", editions=((1902, None),))
+    _add_work(store, "B_NEAR", "Sinuhe egyptilainen", editions=((1945, None),))
     matcher = _matcher(store)
+    record = _record(year=1945)
 
     blocking = store.find_works_by_author_and_title("waltari", "sinuhe egyptilainen")
+    assert [w.source_id for w in blocking] == ["A_FAR", "B_NEAR"]
     assert blocking[0].source_id == "A_FAR", "precondition: the weaker candidate is first"
 
-    ranked = _rank(matcher, store, _record(), require_threshold=False)
+    ranked = _rank(matcher, store, record, require_threshold=False)
     assert ranked[0][0].source_id == "B_NEAR"
     assert ranked[0][1].match_score > ranked[1][1].match_score
 
-    result = matcher.match_target(_record())
+    result = matcher.match_target(record)
     assert result.matched_work is not None
     assert result.matched_work.source_id == "B_NEAR"
 

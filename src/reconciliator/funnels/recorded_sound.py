@@ -48,6 +48,37 @@ def _tracks_of(manifestation_id: int, ctx: FunnelContext) -> set[str]:
     return {t for t in bag.get("analytic_title", []) if t}
 
 
+def _constituent_matches(work: Any, tracks: set[str], ctx: FunnelContext) -> list[Any]:
+    """The matched album's own tracks, resolved to works, in track order.
+
+    This reported the *target's* track titles and nothing else, which told a
+    reader what the target said and not what it matched. The accepted album's
+    stored constituents are the works it contains, in one indexed lookup, so
+    each target track can be reported with the work it corresponds to.
+
+    Falls back to the target's titles for an album ingested before constituents
+    existed, or under `constituents_mode: keys_only`, where the store has the
+    tracklist as keys and not as rows.
+    """
+    stored = []
+    if work is not None and getattr(work, "id", None) and hasattr(
+        ctx.repo, "get_constituent_works"
+    ):
+        stored = ctx.repo.get_constituent_works(work.id)
+    if not stored:
+        return [ctx.constituent_cls(title=t) for t in sorted(tracks)]
+
+    return [
+        ctx.constituent_cls(
+            title=constituent.title,
+            matched_work=constituent,
+            work_uri=constituent.work_uri,
+            relationship_type="constituent_of",
+        )
+        for constituent in stored
+    ]
+
+
 def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
     from reconciliator.matcher import compute_jaccard_overlap, extract_target_track_titles
 
@@ -85,7 +116,7 @@ def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
                     # The overlap itself, rather than a fixed 0.85: a tier that
                     # accepts a range of agreement should report which it found.
                     confidence_score=float(overlap),
-                    constituent_matches=[ctx.constituent_cls(title=t) for t in sorted(tracks)],
+                    constituent_matches=_constituent_matches(work, tracks, ctx),
                 )
 
     return ctx.vector_or_fts(record, ctx.spec.fallback_work_type, ctx.spec.id)
