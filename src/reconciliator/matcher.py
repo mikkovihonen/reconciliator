@@ -1,4 +1,15 @@
-"""Offline multi-tier reconciliation engine combining exact lookup, dense FAISS, and sparse reranking."""
+"""Offline multi-tier WEMI reconciliation: exact identifiers, domain keys, then fallback.
+
+Tier 1 resolves a standard identifier. Tier 2 matches on an author key plus title
+stem, filtered by the work type its funnel declares. Tier 3 falls back to dense
+vector search, then to SQLite FTS5.
+
+The engine names a specific backend nowhere: the dense tier searches whatever
+vector index the repository was constructed with, and the CLI currently
+constructs none, so tier 3 reaches only FTS in practice. Building and wiring the
+work and manifestation indexes is Phase 14.10; until then the dense branch is
+unreachable outside tests, and this docstring says so rather than advertising it.
+"""
 
 from __future__ import annotations
 
@@ -83,36 +94,6 @@ class WEMIMatchResult:
     relationships: list[WorkRelationship] = field(default_factory=list)
 
 
-def compute_bounding_box_iou(
-    bbox1: tuple[float, float, float, float],
-    bbox2: tuple[float, float, float, float],
-) -> float:
-    """Compute Intersection over Union (IoU) of two bounding boxes (west, east, north, south)."""
-    w1, e1, n1, s1 = bbox1
-    w2, e2, n2, s2 = bbox2
-
-    w1, e1 = min(w1, e1), max(w1, e1)
-    w2, e2 = min(w2, e2), max(w2, e2)
-    s1, n1 = min(s1, n1), max(s1, n1)
-    s2, n2 = min(s2, n2), max(s2, n2)
-
-    inter_w = max(w1, w2)
-    inter_e = min(e1, e2)
-    inter_s = max(s1, s2)
-    inter_n = min(n1, n2)
-
-    if inter_w < inter_e and inter_s < inter_n:
-        inter_area = (inter_e - inter_w) * (inter_n - inter_s)
-    else:
-        inter_area = 0.0
-
-    area1 = (e1 - w1) * (n1 - s1)
-    area2 = (e2 - w2) * (n2 - s2)
-    union_area = area1 + area2 - inter_area
-
-    if union_area <= 0.0:
-        return 0.0
-    return inter_area / union_area
 
 
 def compute_jaccard_overlap(set1: set[str], set2: set[str]) -> float:
@@ -271,7 +252,13 @@ def _merge_funnel_specs(overrides: Optional[list[FunnelSpec]]) -> list[FunnelSpe
 
 
 class WorkMatcher:
-    """Multi-tier WEMI resolution and authority linking engine across 42 specialized domains."""
+    """Multi-tier WEMI resolution and authority linking.
+
+    Domain behaviour lives in the funnel specs rather than here: see
+    `reconciliator.funnels`, which declares 42 built-in funnels and the predicates
+    that route a record to one. This class owns the three tiers they share, the
+    agent resolution that follows a match, and canonicalisation of the result.
+    """
 
     def __init__(
         self,

@@ -123,13 +123,11 @@ class WEMIRepository:
         self,
         db_path: Path | str,
         work_index_path: Optional[Path | str] = None,
-        expression_index_path: Optional[Path | str] = None,
         manifestation_index_path: Optional[Path | str] = None,
         dimension: int = 768,
         vector_engine_config: Optional[VectorEngineConfig] = None,
         fts_config: Optional["RepositoryFTSConfig"] = None,
         work_indexer: Optional[VectorIndex] = None,
-        expression_indexer: Optional[VectorIndex] = None,
         manifestation_indexer: Optional[VectorIndex] = None,
         corpus_db_path: Optional[Path | str] = None,
     ) -> None:
@@ -161,14 +159,6 @@ class WEMIRepository:
             self.work_indexer = None
 
         # Expression indexer
-        if expression_indexer is not None:
-            self.expression_indexer = expression_indexer
-        elif expression_index_path is not None:
-            self.expression_indexer = create_vector_engine(
-                Path(expression_index_path), dimension=self.dimension, config=vector_engine_config
-            )
-        else:
-            self.expression_indexer = None
 
         # Manifestation indexer
         if manifestation_indexer is not None:
@@ -341,7 +331,6 @@ class WEMIRepository:
     def insert_expressions_batch(
         self,
         expressions: list[ExpressionEntity],
-        vectors: Optional[np.ndarray] = None,
     ) -> list[int]:
         """Insert or update ExpressionEntity records and optional dense vectors in batch."""
         if not expressions:
@@ -388,19 +377,6 @@ class WEMIRepository:
                     ),
                 )
                 expression_ids.append(cursor.fetchone()["id"])
-
-        if (
-            vectors is not None
-            and self.expression_indexer is not None
-            and len(vectors) == len(expressions)
-        ):
-            vector_ids = self.expression_indexer.add_vectors(vectors, ids=expression_ids)
-            with self.get_connection() as conn:
-                mapping_rows = list(zip(vector_ids, expression_ids))
-                conn.executemany(
-                    "INSERT OR REPLACE INTO expression_vectors (vector_id, expression_id) VALUES (?, ?);",
-                    mapping_rows,
-                )
 
         return expression_ids
 
@@ -545,11 +521,17 @@ class WEMIRepository:
         return self.insert_works_batch([work], vectors=vectors)[0]
 
     def insert_expression(
-        self, expression: ExpressionEntity, vector: Optional[np.ndarray] = None
+        self, expression: ExpressionEntity
     ) -> int:
-        """Convenience method to insert a single ExpressionEntity."""
-        vectors = np.expand_dims(vector, axis=0) if vector is not None else None
-        return self.insert_expressions_batch([expression], vectors=vectors)[0]
+        """Insert a single ExpressionEntity.
+
+        Takes no vector: expressions are not embedded. The expression tier added
+        no discrimination the work and manifestation tiers do not already
+        provide, and its search APIs had no callers. The parameter is removed
+        rather than ignored, so a caller still passing one gets an error instead
+        of silently storing nothing.
+        """
+        return self.insert_expressions_batch([expression])[0]
 
     def insert_manifestation(
         self, manifestation: ManifestationEntity, vector: Optional[np.ndarray] = None
@@ -885,7 +867,6 @@ class WEMIRepository:
         contributions: Optional[list[ContributionEntity]] = None,
         entity_keys: Optional[list[EntityKey]] = None,
         work_vectors: Optional[Any] = None,
-        expression_vectors: Optional[Any] = None,
         manifestation_vectors: Optional[Any] = None,
         record_origin: Optional[RecordOrigin | str] = None,
     ) -> None:
@@ -933,7 +914,7 @@ class WEMIRepository:
                         cand_id = works[0].id
                     if cand_id:
                         exp.work_id = cand_id
-            e_ids = self.insert_expressions_batch(expressions, vectors=expression_vectors)
+            e_ids = self.insert_expressions_batch(expressions)
             for exp, eid in zip(expressions, e_ids):
                 exp.id = eid
                 expr_key_to_id[exp.expression_uri] = eid
@@ -1598,38 +1579,6 @@ class WEMIRepository:
             )
             return [(_row_to_work(row), float(row["rank"])) for row in cursor]
 
-    def search_expressions_fts(
-        self,
-        query: str,
-        limit: Optional[int] = None,
-        ranking_function: Optional[str] = None,
-        weights: Optional[list[float]] = None,
-        prefix_search: Optional[bool] = None,
-        authoritative_only: bool = False,
-    ) -> list[tuple[ExpressionEntity, float]]:
-        """Search expressions via SQLite FTS5. Returns list of (ExpressionEntity, bm25_rank)."""
-        if not query or not query.strip():
-            return []
-        match_query, order_clause, eff_limit = self._build_fts_query_and_order(
-            query, "expressions_fts", limit, ranking_function, weights, prefix_search
-        )
-        origin_clause, origin_params = self._origin_clause(
-            "e.record_origin", authoritative_only
-        )
-        params: list[Any] = [match_query, *origin_params, eff_limit]
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                f"""
-                SELECT e.*, {order_clause} AS rank
-                FROM expressions_fts f
-                JOIN expressions e ON f.rowid = e.id
-                WHERE expressions_fts MATCH ? {origin_clause}
-                ORDER BY rank
-                LIMIT ?;
-                """,
-                params,
-            )
-            return [(_row_to_expression(row), float(row["rank"])) for row in cursor]
 
     def search_manifestations_fts(
         self,
@@ -1719,56 +1668,6 @@ class WEMIRepository:
 
         return results
 
-    def search_expression_vectors(
-        self,
-        query_vector: np.ndarray,
-        top_k: int = 20,
-        authoritative_only: bool = False,
-        overfetch: int = 4,
-    ) -> list[tuple[ExpressionEntity, float]]:
-        """Retrieve top-k candidate expressions from the expression vector index."""
-        if self.expression_indexer is None or self.expression_indexer.total_vectors == 0:
-            return []
-
-        # Over-fetch when a filter will be applied: the index cannot filter, so
-        # asking for exactly top_k and discarding afterwards silently returns
-        # fewer candidates than requested - or none, when a large source fills
-        # the whole budget.
-        fetch_k = top_k * max(1, overfetch) if authoritative_only else top_k
-        scores, indices = self.expression_indexer.search(query_vector, top_k=fetch_k)
-        if len(scores) == 0 or len(indices) == 0:
-            return []
-
-        allowed = set(self.authoritative_sources()) if authoritative_only else None
-        if not allowed:
-            allowed = None
-
-        vector_indices = indices[0].tolist()
-        dense_scores = scores[0].tolist()
-
-        vector_to_exp_id: dict[int, int] = {}
-        with self.get_connection() as conn:
-            placeholders = ",".join("?" for _ in vector_indices)
-            rows = conn.execute(
-                f"SELECT vector_id, expression_id FROM expression_vectors WHERE vector_id IN ({placeholders});",
-                vector_indices,
-            ).fetchall()
-            for r in rows:
-                vector_to_exp_id[r["vector_id"]] = r["expression_id"]
-
-        results: list[tuple[ExpressionEntity, float]] = []
-        seen_exp_ids: set[int] = set()
-        for v_id, score in zip(vector_indices, dense_scores):
-            exp_id = vector_to_exp_id.get(v_id, v_id if v_id >= 0 else None)
-            if exp_id is not None and exp_id not in seen_exp_ids:
-                seen_exp_ids.add(exp_id)
-                expression = self.get_expression(exp_id)
-                if expression and (allowed is None or expression.record_origin in allowed):
-                    results.append((expression, float(score)))
-                    if len(results) >= top_k:
-                        break
-
-        return results
 
     def search_manifestation_vectors(
         self,
@@ -2298,8 +2197,6 @@ class WEMIRepository:
         """Persist all active vector indices to disk."""
         if self.work_indexer is not None:
             self.work_indexer.save(metadata=metadata)
-        if self.expression_indexer is not None:
-            self.expression_indexer.save(metadata=metadata)
         if self.manifestation_indexer is not None:
             self.manifestation_indexer.save(metadata=metadata)
         if hasattr(self, "agent_indexer") and self.agent_indexer is not None:

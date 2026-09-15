@@ -31,7 +31,6 @@ def repo(tmp_path: Path) -> WEMIRepository:
         db_path=tmp_path / "authority.db",
         dimension=4,
         work_indexer=TorchVectorEngine(tmp_path / "work.pt", dimension=4),
-        expression_indexer=TorchVectorEngine(tmp_path / "exp.pt", dimension=4),
         manifestation_indexer=TorchVectorEngine(tmp_path / "manif.pt", dimension=4),
     )
 

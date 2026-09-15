@@ -9,7 +9,6 @@ import pytest
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.matcher import (
     WorkMatcher,
-    compute_bounding_box_iou,
     compute_jaccard_overlap,
     extract_identifiers_from_target,
 )
@@ -32,35 +31,23 @@ def repo(tmp_path: Path) -> WEMIRepository:
     """Fixture providing initialized WEMIRepository with vector indexes."""
     db_path = tmp_path / "authority.db"
     w_idx = TorchVectorEngine(tmp_path / "work.pt", dimension=4)
-    e_idx = TorchVectorEngine(tmp_path / "exp.pt", dimension=4)
     m_idx = TorchVectorEngine(tmp_path / "manif.pt", dimension=4)
     return WEMIRepository(
         db_path=db_path,
         dimension=4,
         work_indexer=w_idx,
-        expression_indexer=e_idx,
         manifestation_indexer=m_idx,
     )
 
 
-def test_bounding_box_iou_and_jaccard():
-    """Verify geometric IoU and set Jaccard helpers."""
-    # Identical bounding boxes
-    bbox1 = (24.0, 25.0, 61.0, 60.0)
-    assert compute_bounding_box_iou(bbox1, bbox1) == 1.0
+def test_jaccard_overlap_helper():
+    """Verify the set Jaccard helper.
 
-    # Disjoint bounding boxes
-    bbox2 = (30.0, 31.0, 65.0, 64.0)
-    assert compute_bounding_box_iou(bbox1, bbox2) == 0.0
-
-    # Partial overlap
-    bbox_a = (0.0, 2.0, 2.0, 0.0)
-    bbox_b = (1.0, 3.0, 2.0, 0.0)
-    iou = compute_bounding_box_iou(bbox_a, bbox_b)
-    # intersection: width 1, height 2 -> area 2. union: 4 + 4 - 2 = 6 -> 2/6 = 0.3333
-    assert 0.33 < iou < 0.34
-
-    # Jaccard overlap
+    The bounding-box IoU helper it used to share this test with is gone: it had
+    no production caller, and funnel L's docstring promising "bounding box IoU
+    (034)" never called it either. Spatial overlap matching is now a handler-sized
+    job if it is wanted.
+    """
     s1 = {"Track 1", "Track 2", "Track 3"}
     s2 = {"Track 2", "Track 3", "Track 4"}
     assert compute_jaccard_overlap(s1, s2) == 0.5

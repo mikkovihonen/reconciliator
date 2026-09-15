@@ -349,16 +349,6 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
         )
 
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS expression_vectors (
-                vector_id INTEGER PRIMARY KEY,
-                expression_id INTEGER NOT NULL REFERENCES expressions(id) ON DELETE CASCADE
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_expression_vectors_exp_id ON expression_vectors(expression_id);"
-        )
-
-        conn.execute("""
             CREATE TABLE IF NOT EXISTS manifestation_vectors (
                 vector_id INTEGER PRIMARY KEY,
                 manifestation_id INTEGER NOT NULL REFERENCES manifestations(id) ON DELETE CASCADE
@@ -603,7 +593,6 @@ def reset_all_storage(storage_config: StorageConfig) -> None:
 
     for index_path in (
         storage_config.work_index,
-        storage_config.expression_index,
         storage_config.manifestation_index,
         storage_config.agent_index,
     ):

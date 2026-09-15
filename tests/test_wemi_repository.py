@@ -28,13 +28,11 @@ from tests.conftest import persist_match_records
 def repo(tmp_path: Path) -> WEMIRepository:
     db_path = tmp_path / "authority.db"
     w_idx = TorchVectorEngine(tmp_path / "work.pt", dimension=4)
-    e_idx = TorchVectorEngine(tmp_path / "exp.pt", dimension=4)
     m_idx = TorchVectorEngine(tmp_path / "manif.pt", dimension=4)
     return WEMIRepository(
         db_path=db_path,
         dimension=4,
         work_indexer=w_idx,
-        expression_indexer=e_idx,
         manifestation_indexer=m_idx,
     )
 

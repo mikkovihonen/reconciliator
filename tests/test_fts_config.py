@@ -79,7 +79,6 @@ def test_fts_config_defaults_and_validation():
 def test_repo(tmp_path: Path) -> WEMIRepository:
     db_path = tmp_path / "authority.db"
     w_idx = TorchVectorEngine(tmp_path / "work.pt", dimension=4)
-    e_idx = TorchVectorEngine(tmp_path / "exp.pt", dimension=4)
     m_idx = TorchVectorEngine(tmp_path / "manif.pt", dimension=4)
     fts_cfg = RepositoryFTSConfig(
         ranking_function="bm25",
@@ -91,7 +90,6 @@ def test_repo(tmp_path: Path) -> WEMIRepository:
         db_path=db_path,
         dimension=4,
         work_indexer=w_idx,
-        expression_indexer=e_idx,
         manifestation_indexer=m_idx,
         fts_config=fts_cfg,
     )
@@ -150,13 +148,11 @@ def test_wemi_repository_fts_config(test_repo: WEMIRepository):
 def test_work_matcher_fts_fallback_config(tmp_path: Path):
     db_path = tmp_path / "authority.db"
     w_idx = TorchVectorEngine(tmp_path / "work.pt", dimension=4)
-    e_idx = TorchVectorEngine(tmp_path / "exp.pt", dimension=4)
     m_idx = TorchVectorEngine(tmp_path / "manif.pt", dimension=4)
     repo = WEMIRepository(
         db_path=db_path,
         dimension=4,
         work_indexer=w_idx,
-        expression_indexer=e_idx,
         manifestation_indexer=m_idx,
     )
 

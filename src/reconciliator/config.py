@@ -293,7 +293,6 @@ class StorageConfig(BaseModel):
     vocab_db: Optional[Path] = None
     progress_db: Optional[Path] = None
     work_index: Optional[Path] = None
-    expression_index: Optional[Path] = None
     manifestation_index: Optional[Path] = None
     agent_index: Optional[Path] = None
     vector_engine: VectorEngineConfig = Field(default_factory=VectorEngineConfig)
@@ -310,8 +309,6 @@ class StorageConfig(BaseModel):
             self.progress_db = d / "progress.db"
         if self.work_index is None:
             self.work_index = d / "work.index"
-        if self.expression_index is None:
-            self.expression_index = d / "expression.index"
         if self.manifestation_index is None:
             self.manifestation_index = d / "manifestation.index"
         if self.agent_index is None:
@@ -1489,7 +1486,6 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
     config.storage.vocab_db = resolve_p(config.storage.vocab_db)
     config.storage.progress_db = resolve_p(config.storage.progress_db)
     config.storage.work_index = resolve_p(config.storage.work_index)
-    config.storage.expression_index = resolve_p(config.storage.expression_index)
     config.storage.manifestation_index = resolve_p(config.storage.manifestation_index)
     config.storage.agent_index = resolve_p(config.storage.agent_index)
 

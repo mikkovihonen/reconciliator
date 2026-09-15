@@ -27,7 +27,6 @@ def test_init_authority_db_tables_and_indexes():
         "work_relationships",
         "work_medium_of_performance",
         "work_vectors",
-        "expression_vectors",
         "manifestation_vectors",
         "works_fts",
         "expressions_fts",
@@ -190,7 +189,6 @@ def test_reset_all_storage_wemi(tmp_path: Path):
 
     auth_db = tmp_path / "authority.db"
     w_idx = tmp_path / "work.index"
-    e_idx = tmp_path / "expression.index"
     m_idx = tmp_path / "manifestation.index"
     a_idx = tmp_path / "agent.index"
 
@@ -198,13 +196,12 @@ def test_reset_all_storage_wemi(tmp_path: Path):
         data_dir=tmp_path,
         authority_db=auth_db,
         work_index=w_idx,
-        expression_index=e_idx,
         manifestation_index=m_idx,
         agent_index=a_idx,
     )
 
     # Create dummy files
-    for p in [auth_db, w_idx, e_idx, m_idx, a_idx]:
+    for p in [auth_db, w_idx, m_idx, a_idx]:
         p.write_text("test")
         assert p.exists()
 
@@ -220,7 +217,7 @@ def test_reset_all_storage_wemi(tmp_path: Path):
         assert conn.execute("SELECT COUNT(*) FROM entity_keys;").fetchone()[0] == 0
 
     # Vector indices are deleted
-    for p in [w_idx, e_idx, m_idx, a_idx]:
+    for p in [w_idx, m_idx, a_idx]:
         assert not p.exists()
 
 
