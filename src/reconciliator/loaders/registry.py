@@ -122,6 +122,7 @@ class BibframeLoader(RecordLoader):
                 profile=ctx.profile,
                 source=ctx.source,
                 serialization_engine=ctx.serialization_engine,
+                relator_mappings=ctx.relator_mappings,
             )
         )
         return DecomposedRecord(
@@ -303,15 +304,14 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         # circulates - carries the punctuation in its literals.
         normalises_isbd=True,
         folds_subject_vocabularies=False,
-        normalises_relators=False,
+        # The profile still resolves roles first, so a deployment can override
+        # any of them; what it does not resolve now goes to the same relator
+        # registry the MARC path uses, and ctx.relator_mappings reaches it.
+        normalises_relators=True,
         not_produced={
             "subject_vocabulary_folding": (
                 "takes no vocab_store, so legacy subject headings are not folded "
                 "to their modern ontology as they are on the MARC path"
-            ),
-            "relator_normalisation": (
-                "ignores ctx.relator_mappings and uses its own "
-                "normalize_role_uri_or_label against the schema profile instead"
             ),
             "citation": "BIBFRAME has no host-item concept equivalent to MARC 773",
             "analytic": (

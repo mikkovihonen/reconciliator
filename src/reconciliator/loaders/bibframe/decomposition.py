@@ -177,6 +177,7 @@ def _extract_node_agents(
     node: IdentifiedNode,
     profile: BIBFRAMESchemaProfile,
     source: str = "bibframe",
+    relator_mappings: Optional[dict[str, str]] = None,
 ) -> list[tuple[AgentEntity, str, bool, Optional[str]]]:
     """Extract agents associated with a node.
 
@@ -214,7 +215,24 @@ def _extract_node_agents(
             role = "aut" if is_primary else "ctb"
             for role_pred in profile.expanded_role_predicates:
                 for role_obj in g.objects(contrib_obj, URIRef(role_pred)):
-                    norm = normalize_role_uri_or_label(str(role_obj), profile=profile)
+                    # A role is usually a blank node carrying a label -
+                    # `bf:role [ rdfs:label "kääntäjä" ]` - and the label was
+                    # never read here, so `str(role_obj)` handed the normaliser
+                    # rdflib's parse-local node label. The stored role was that
+                    # label: unusable as a role, and different on every parse.
+                    role_label: Optional[str] = None
+                    if isinstance(role_obj, IdentifiedNode):
+                        role_labels = _get_literals(
+                            g, role_obj, profile.expanded_role_label_predicates
+                        )
+                        role_label = role_labels[0] if role_labels else None
+                    role_text = "" if is_blank_node(role_obj) else str(role_obj)
+                    norm = normalize_role_uri_or_label(
+                        role_text,
+                        label=role_label,
+                        profile=profile,
+                        relator_mappings=relator_mappings,
+                    )
                     if norm:
                         role = norm
                         break
@@ -438,6 +456,7 @@ def decompose_bibframe_work(
     profile: Optional[BIBFRAMESchemaProfile] = None,
     source: str = "bibframe",
     serialization_engine: Optional[WEMISerializationEngine] = None,
+    relator_mappings: Optional[dict[str, str]] = None,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -778,9 +797,19 @@ def decompose_bibframe_work(
 
     extracted_agents_with_role: list[tuple[AgentEntity, str]] = []
     for n in nodes_to_scan:
-        extracted = _extract_node_agents(g, n, profile, source=source)
+        extracted = _extract_node_agents(
+            g, n, profile, source=source, relator_mappings=relator_mappings
+        )
         for agent_ent, role, is_primary, marc_key in extracted:
+            existing = all_agents_map.get(agent_ent.agent_uri)
+            if existing is not None:
+                agent_ent = existing
             all_agents_map[agent_ent.agent_uri] = agent_ent
+            # The MARC path stores a role histogram per agent and the enricher
+            # reads it (`next(iter(agent.role_counts))` for the export role), so
+            # leaving it empty here made every BibFrame agent roleless in the
+            # output while the same agent from Melinda carried {"aut": 1}.
+            agent_ent.role_counts[role] = agent_ent.role_counts.get(role, 0) + 1
             extracted_agents_with_role.append((agent_ent, role))
             # Determine target entity partition: Work vs Expression
             target_ent = "work" if (role in profile.work_creator_roles or is_primary) else "expression"

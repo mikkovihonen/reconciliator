@@ -52,6 +52,12 @@ agent_predicates:
 
 role_predicates:
   - "bf:role"
+# Where a role node keeps its label. A role is usually a blank node carrying a
+# label rather than a URI, so these decide whether the role is readable at all.
+role_label_predicates:
+  - "rdfs:label"
+  - "skos:prefLabel"
+  - "rdf:value"
 
 identifier_predicates:
   - "bf:identifiedBy"

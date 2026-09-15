@@ -32,6 +32,7 @@ from reconciliator.loaders.registry import (
     load_record,
     select_loader,
 )
+from reconciliator.models import AgentEntity
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 MARC_NS = "{http://www.loc.gov/MARC21/slim}"
@@ -198,10 +199,7 @@ def test_check_output_catches_an_unstable_id_under_a_determinism_claim():
 
 def test_bibframe_declares_the_normalisation_it_still_does_not_apply():
     caps = BibframeLoader.capabilities
-    for flag, key in (
-        ("folds_subject_vocabularies", "subject_vocabulary_folding"),
-        ("normalises_relators", "relator_normalisation"),
-    ):
+    for flag, key in (("folds_subject_vocabularies", "subject_vocabulary_folding"),):
         assert getattr(caps, flag) is False, flag
         assert key in caps.not_produced, f"{flag} is False but undeclared"
 
@@ -293,6 +291,113 @@ ISBD_TTL = """
 
 def _isbd_graph(title: str = "Sinuhe egyptilainen /") -> Graph:
     return Graph().parse(data=ISBD_TTL % {"t": title}, format="turtle")
+
+
+# --- relator normalisation ------------------------------------------------
+
+ROLE_TTL = """
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<http://example.org/w1> a bf:Work ;
+    bf:title [ a bf:Title ; bf:mainTitle "Sinuhe" ] ;
+    bf:contribution [ a bf:Contribution ;
+        bf:agent [ a bf:Person ; rdfs:label "Waltari, Mika" ] ;
+        bf:role [ rdfs:label "kirjoittaja" ] ] ;
+    bf:contribution [ a bf:Contribution ;
+        bf:agent [ a bf:Person ; rdfs:label "Virtanen, Liisa" ] ;
+        bf:role [ rdfs:label "kääntäjä" ] ] .
+<http://example.org/i1> a bf:Instance ; bf:instanceOf <http://example.org/w1> ;
+    bf:title [ a bf:Title ; bf:mainTitle "Sinuhe" ] .
+"""
+
+MARC_ROLES = (
+    '<datafield tag="700" ind1="1" ind2=" ">'
+    '<subfield code="a">Virtanen, Liisa</subfield>'
+    '<subfield code="e">kääntäjä</subfield></datafield>'
+)
+
+
+def test_bibframe_now_claims_relator_normalisation():
+    caps = BibframeLoader.capabilities
+    assert caps.normalises_relators is True
+    assert "relator_normalisation" not in caps.not_produced
+
+
+def test_a_finnish_relator_term_yields_the_same_code_from_both_formats(ctx: LoadContext):
+    """BFFI writes Finnish relator terms as labels. The profile resolved the
+    English ones and returned the rest verbatim, so one agent's role histogram
+    merged across a Melinda source and a BFFI source read
+    `{"trl": 2, "kääntäjä": 3}` - the same role under two names, on the field the
+    agent footprint compares."""
+    marc = load_record(_marc(MARC_ROLES), ctx)
+    bibframe = load_record(Graph().parse(data=ROLE_TTL, format="turtle"), ctx)
+
+    def by_name(record):
+        return {a.name: dict(a.role_counts) for a in record.agents}
+
+    assert by_name(marc) == {"Waltari, Mika": {"aut": 1}, "Virtanen, Liisa": {"trl": 1}}
+    assert by_name(bibframe) == by_name(marc)
+
+
+def test_a_blank_node_role_is_read_from_its_label(ctx: LoadContext):
+    """`bf:role [ rdfs:label "kääntäjä" ]` is the normal shape. The label was
+    never read, so `str()` of the blank node became the role - a different role
+    string on every parse, and nothing that could match a MARC relator code."""
+    record = load_record(Graph().parse(data=ROLE_TTL, format="turtle"), ctx)
+    roles = sorted({c.role for c in record.contributions})
+    assert roles == ["aut", "trl"]
+    assert not any(_looks_like_blank_node(r) for r in roles)
+
+
+def test_a_configured_relator_mapping_reaches_the_bibframe_path():
+    """`ctx.relator_mappings` is how a deployment adds a term the registry does
+    not know; the BibFrame path used to ignore the field entirely."""
+    graph = Graph().parse(
+        data=ROLE_TTL.replace('"kääntäjä"', '"tulkitsija"'), format="turtle"
+    )
+    ctx = LoadContext(source="melinda", relator_mappings={"tulkitsija": "trl"})
+    record = load_record(graph, ctx)
+    assert sorted({c.role for c in record.contributions}) == ["aut", "trl"]
+
+
+def test_a_role_the_registry_does_not_know_survives_as_itself(ctx: LoadContext):
+    """Normalising is not the same as discarding: an unmapped role is still the
+    best description available, and `check_output` must not treat it as a
+    violation."""
+    graph = Graph().parse(
+        data=ROLE_TTL.replace('"kääntäjä"', '"kuvanveistaja-avustaja"'), format="turtle"
+    )
+    record = load_record(graph, ctx)
+    assert "kuvanveistaja-avustaja" in {c.role for c in record.contributions}
+    assert BibframeLoader().check_output(record, ctx) == []
+
+
+def test_marc_contributions_carry_the_agent_role(ctx: LoadContext):
+    """`role = a.get("role") or "aut"` read a key nothing ever set, so every
+    contribution row was aut/primary/work: a translator was filed against the
+    work as its author, and the expression tier held no contributions at all -
+    which is why the matcher's expression-level contributor lookup never had a
+    name to compare."""
+    record = load_record(_marc(MARC_ROLES), ctx)
+    rows = sorted((c.entity_type, c.role, c.is_primary) for c in record.contributions)
+    assert rows == [("expression", "trl", False), ("work", "aut", True)]
+
+
+def test_check_output_catches_a_role_left_unnormalised():
+    loader = BibframeLoader()
+    record = DecomposedRecord(
+        agents=[
+            AgentEntity(
+                agent_uri="urn:agent:x",
+                source="s",
+                name="X",
+                name_normalized="x",
+                role_counts={"kääntäjä": 1},
+            )
+        ]
+    )
+    findings = loader.check_output(record)
+    assert any("normalises_relators" in f for f in findings), findings
 
 
 # --- BibFrame identity ----------------------------------------------------

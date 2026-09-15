@@ -342,6 +342,36 @@ class RecordLoader(ABC):
                     f"still carrying ISBD punctuation: {dirty[:3]}"
                 )
 
+        if caps.normalises_relators:
+            # Not "every role is a MARC code" - an unrecognised role legitimately
+            # passes through as its own token - but "the shared normaliser has
+            # nothing left to change". That distinguishes "kääntäjä", which maps
+            # to trl, from a genuinely unknown role, which does not map at all.
+            from reconciliator.normalizers.relators import normalize_role
+
+            def unnormalised(role: Optional[str]) -> bool:
+                # A blank-node label is never a role: a BIBFRAME role is usually
+                # `bf:role [ rdfs:label "..." ]`, and reading the node instead of
+                # its label put rdflib's parse label in the role column.
+                return bool(role) and (
+                    normalize_role(role) != role or _looks_like_blank_node(role)
+                )
+
+            raw_roles = sorted(
+                {
+                    role
+                    for entity in record.agents
+                    for role in (entity.role_counts or {})
+                    if unnormalised(role)
+                }
+                | {c.role for c in record.contributions if unnormalised(c.role)}
+            )
+            if raw_roles:
+                findings.append(
+                    f"{caps.name} claims normalises_relators but stored roles the "
+                    f"shared registry would still change: {raw_roles[:3]}"
+                )
+
         if caps.stamps_record_origin:
             unstamped = [
                 w.source_id

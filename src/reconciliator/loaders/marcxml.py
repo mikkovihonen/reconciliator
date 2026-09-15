@@ -61,6 +61,11 @@ from reconciliator.vocabularies import (
 
 logger = logging.getLogger(__name__)
 
+#: 1XX main entry: the record's principal creator, whose relator MARC leaves
+#: implicit. 7XX added entries carry a relator or none at all by design.
+MAIN_ENTRY_TAGS = frozenset({"100", "110", "111"})
+IMPLIED_MAIN_ENTRY_ROLE = "aut"
+
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}
 
 
@@ -568,6 +573,14 @@ def parse_marc_record_elem(
                 raw_roles = [r.strip(" ,;.") for r in (_get_subfields(f, "4") + _get_subfields(f, "e")) if r.strip(" ,;.")]
                 norm_roles = [normalize_role(r, relator_mappings) for r in raw_roles]
                 norm_roles = [r for r in norm_roles if r]
+                if not norm_roles and tag in MAIN_ENTRY_TAGS:
+                    # A main entry with no $e or $4 is the creator; MARC leaves
+                    # the relator implicit. Without this the agent's role
+                    # histogram was empty for most records - the BibFrame path
+                    # records "aut" from the primary contribution, and the target
+                    # path already assumes it for a 245 $c name - so the same
+                    # person read from two formats had two different footprints.
+                    norm_roles = [IMPLIED_MAIN_ENTRY_ROLE]
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
                 orcid_val: Optional[str] = None
@@ -608,6 +621,14 @@ def parse_marc_record_elem(
                 raw_roles = [r.strip(" ,;.") for r in (_get_subfields(f, "4") + _get_subfields(f, "e")) if r.strip(" ,;.")]
                 norm_roles = [normalize_role(r, relator_mappings) for r in raw_roles]
                 norm_roles = [r for r in norm_roles if r]
+                if not norm_roles and tag in MAIN_ENTRY_TAGS:
+                    # A main entry with no $e or $4 is the creator; MARC leaves
+                    # the relator implicit. Without this the agent's role
+                    # histogram was empty for most records - the BibFrame path
+                    # records "aut" from the primary contribution, and the target
+                    # path already assumes it for a 245 $c name - so the same
+                    # person read from two formats had two different footprints.
+                    norm_roles = [IMPLIED_MAIN_ENTRY_ROLE]
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
                 orcid_val = None
@@ -2012,7 +2033,18 @@ def decompose_marc_wemi(
             )
         )
 
-        role = a.get("role") or "aut"
+        # The agent's own role, from the histogram the parse already built. This
+        # read `a.get("role")`, which no code ever set, so every contribution row
+        # came out "aut"/is_primary/work - a translator's contribution was filed
+        # against the work as its author, and the expression tier held no
+        # contributions at all, which is why the matcher's expression-level
+        # contributor lookup never found a name to compare.
+        agent_role_counts = a.get("role_counts") or {}
+        role = a.get("role") or (
+            max(agent_role_counts, key=lambda r: (agent_role_counts[r], r))
+            if agent_role_counts
+            else "aut"
+        )
         is_work_role = role in work_roles
         contributions.append(
             ContributionEntity(

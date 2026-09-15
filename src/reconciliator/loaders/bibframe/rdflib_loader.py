@@ -167,12 +167,16 @@ def _extract_agents(
                             )
                             if r_labels:
                                 r_label = r_labels[0]
+                        # Every branch goes through the normaliser. A literal
+                        # role and a bare label used to be stored verbatim, so a
+                        # BFFI record's "kääntäjä" reached the matcher as its own
+                        # role while the MARC path called the same thing "trl".
                         if isinstance(role_obj, URIRef):
                             role = normalize_role_uri_or_label(str(role_obj), label=r_label, profile=profile)
                         elif isinstance(role_obj, Literal):
-                            role = str(role_obj).strip()
+                            role = normalize_role_uri_or_label(str(role_obj).strip(), profile=profile)
                         elif r_label:
-                            role = r_label
+                            role = normalize_role_uri_or_label(r_label, profile=profile)
 
                 # Extract agents within contribution
                 for agent_pred in profile.expanded_agent_predicates:

@@ -18,8 +18,20 @@ def normalize_role_uri_or_label(
     role_str: str,
     label: Optional[str] = None,
     profile: Optional[BIBFRAMESchemaProfile] = None,
+    relator_mappings: Optional[dict[str, str]] = None,
 ) -> Optional[str]:
-    """Normalize a role URI or label into a standard role code/string driven by configuration."""
+    """Normalize a role URI or label into a MARC relator code.
+
+    The profile is consulted first, so a deployment can override any role, and
+    whatever it does not resolve goes to the shared relator registry rather than
+    being returned as it stands. That last step is the point: the registry is
+    where Finnish relator terms live, and BFFI - the Finnish BIBFRAME profile -
+    writes exactly those as `rdfs:label`. Before it, "kääntäjä" stayed
+    "kääntäjä" here while the MARC path turned it into "trl", so one agent's
+    `role_counts` merged across a Melinda source and a BFFI source read
+    `{"trl": 2, "kääntäjä": 3}` - the same role counted twice under two names,
+    on the field the agent footprint compares.
+    """
     clean = role_str.strip() if role_str else ""
     lbl = label.strip() if label else ""
 
@@ -30,7 +42,7 @@ def normalize_role_uri_or_label(
         return p.role_label_mappings[lbl.lower()]
 
     if not clean:
-        return lbl or None
+        return _shared_role(lbl, relator_mappings) if lbl else None
 
     c_lower = clean.lower()
 
@@ -44,11 +56,11 @@ def normalize_role_uri_or_label(
                 return mts_map[token]
             if token in p.role_label_mappings:
                 return p.role_label_mappings[token]
-            return token
+            return _shared_role(token, relator_mappings)
 
     # 3. If label exists and not mapped yet
     if lbl:
-        return lbl
+        return _shared_role(lbl, relator_mappings)
 
     # 4. Fall back to URI fragment or tail
     if "#" in clean:
@@ -58,7 +70,18 @@ def normalize_role_uri_or_label(
 
     if tail in p.role_label_mappings:
         return p.role_label_mappings[tail]
-    return tail
+    return _shared_role(tail, relator_mappings)
+
+
+def _shared_role(token: str, relator_mappings: Optional[dict[str, str]]) -> str:
+    """The MARC path's normaliser, applied to whatever the profile left alone.
+
+    Returns the token casefolded when nothing matches, which is what this
+    function used to return for every unrecognised role.
+    """
+    from reconciliator.normalizers.relators import normalize_role
+
+    return normalize_role(token, relator_mappings)
 
 
 def extract_provenance_tag(

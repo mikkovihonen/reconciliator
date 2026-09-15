@@ -39,6 +39,13 @@ class BIBFRAMESchemaProfile(BaseModel):
     contribution_predicates: list[str] = Field(default_factory=list)
     agent_predicates: list[str] = Field(default_factory=list)
     role_predicates: list[str] = Field(default_factory=list)
+    #: Where a role node keeps its human label. A role is usually a blank node
+    #: with a label rather than a URI, so without these the role cannot be read
+    #: at all. Defaulted rather than left empty: every profile needs them, and an
+    #: empty list silently yields roleless contributions.
+    role_label_predicates: list[str] = Field(
+        default_factory=lambda: ["rdfs:label", "skos:prefLabel", "rdf:value"]
+    )
 
     identifier_predicates: list[str] = Field(default_factory=list)
     subject_predicates: list[str] = Field(default_factory=list)
@@ -184,6 +191,12 @@ class BIBFRAMESchemaProfile(BaseModel):
     @functools.cached_property
     def expanded_role_predicates(self) -> set[str]:
         return {self.expand_curie(p) for p in self.role_predicates} | set(self.role_predicates)
+
+    @functools.cached_property
+    def expanded_role_label_predicates(self) -> set[str]:
+        return {self.expand_curie(p) for p in self.role_label_predicates} | set(
+            self.role_label_predicates
+        )
 
     @functools.cached_property
     def expanded_identifier_predicates(self) -> set[str]:

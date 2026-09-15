@@ -405,7 +405,10 @@ def parse_jsonld_dict(
                         if r_id:
                             role = normalize_role_uri_or_label(r_id, label=r_label, profile=profile)
                         elif r_label:
-                            role = r_label
+                            # Through the normaliser like every other branch: a
+                            # bare label was stored verbatim, so a BFFI role read
+                            # "kääntäjä" where MARC read "trl".
+                            role = normalize_role_uri_or_label(r_label, profile=profile)
 
                 # Extract agent
                 for ag_val in _extract_values(res_contrib, agent_keys):
