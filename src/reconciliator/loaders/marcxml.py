@@ -1954,6 +1954,15 @@ def derive_domain_keys(
     agents = parsed.get("agents") or []
     author_surname = agents[0].get("surname") if agents else None
 
+    # Persisted so a MatchRecord can be projected back out of WEMI rows exactly,
+    # rather than re-derived from stored titles and hoped to agree.
+    _add("author", author_key)
+    _add("title_stem", title_stem)
+    # Only when the record carries a 240/130. The work row stores the preferred
+    # title, which falls back to the 245, so projecting uniform_title from it
+    # would invent one for every record that has none.
+    _add("uniform_title", parsed.get("uniform_title"))
+
     _add("work", compute_work_blocking_key(author_key, title_stem))
 
     if work_type == "music":

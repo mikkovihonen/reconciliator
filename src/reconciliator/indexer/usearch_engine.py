@@ -9,8 +9,6 @@ from typing import Any, Literal, Optional
 import numpy as np
 from usearch.index import Index
 
-from reconciliator.indexer.base import VectorIndex
-
 
 class USearchVectorEngine:
     """Manages dense vector index using Unum USearch (HNSW) with zero-copy mmap and quantization.

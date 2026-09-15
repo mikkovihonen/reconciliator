@@ -21,6 +21,7 @@ from reconciliator.models import (
     WorkEntity,
 )
 from reconciliator.repository import WEMIRepository
+from tests.conftest import persist_match_records
 
 
 @pytest.fixture
@@ -259,7 +260,7 @@ def test_cluster_corpus_monograph_reprints_and_translations(temp_dbs):
         raw_payload=b"",
     )
 
-    c_repo.insert_target_records_batch([r1, r2, r3])
+    persist_match_records(c_repo, [r1, r2, r3])
 
     res = clusterer.cluster_corpus()
     assert res.records_clustered == 3
@@ -321,7 +322,7 @@ def test_cluster_corpus_cross_format_audiobook_print(temp_dbs):
         raw_payload=b"",
     )
 
-    c_repo.insert_target_records_batch([r_print, r_audio])
+    persist_match_records(c_repo, [r_print, r_audio])
 
     res = clusterer.cluster_corpus()
     assert res.records_clustered == 2
@@ -366,7 +367,7 @@ def test_cluster_corpus_notated_music_and_recorded_sound(temp_dbs):
         raw_payload=b"",
     )
 
-    c_repo.insert_target_records_batch([r_score, r_audio])
+    persist_match_records(c_repo, [r_score, r_audio])
 
     res = clusterer.cluster_corpus()
     assert res.records_clustered == 2
@@ -409,7 +410,7 @@ def test_cluster_corpus_sammelband_bound_with(temp_dbs):
         raw_payload=b"",
     )
 
-    c_repo.insert_target_records_batch([r1, r2])
+    persist_match_records(c_repo, [r1, r2])
 
     res = clusterer.cluster_corpus()
     assert res.records_clustered == 2
@@ -428,8 +429,12 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
     """Verify clusterer hoists canonical external authority URI when WorkMatcher matches a record."""
     c_repo, w_repo = temp_dbs
 
-    # Authority database setup
+    # Authority database setup. The source has to be registered: corpus and
+    # authority share one database now, so "which rows may be matched against"
+    # is answered by the source registry, not by which file a row came from.
+    w_repo.register_source("melinda", is_authoritative=True)
     auth_work = WorkEntity(
+        record_origin="melinda",
         work_uri="http://urn.fi/URN:NBN:fi:au:pn:000000042",
         source="melinda",
         source_id="kivi_veljekset",
@@ -442,6 +447,7 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
     w_id = w_repo.insert_works_batch([auth_work])[0]
 
     auth_expr = ExpressionEntity(
+        record_origin="melinda",
         work_id=w_id,
         expression_uri="http://urn.fi/URN:NBN:fi:au:pn:000000042#fin",
         source="melinda",
@@ -453,6 +459,7 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
     e_id = w_repo.insert_expressions_batch([auth_expr])[0]
 
     auth_manif = ManifestationEntity(
+        record_origin="melinda",
         manifestation_uri="http://example.org/manif/veljekset_1870",
         source="melinda",
         source_id="veljekset_m1",
@@ -502,7 +509,7 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
         raw_payload=b"",
     )
 
-    c_repo.insert_target_records_batch([r1, r2])
+    persist_match_records(c_repo, [r1, r2])
 
     matcher = WorkMatcher(wemi_repo=w_repo)
     clusterer = CorpusClusterer(corpus_repo=c_repo, wemi_repo=w_repo, matcher=matcher)
@@ -593,7 +600,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
         raw_payload=b"",
     )
 
-    c_repo.insert_target_records_batch([p1, p2, s1, s2, bg1, bg2])
+    persist_match_records(c_repo, [p1, p2, s1, s2, bg1, bg2])
 
     res = clusterer.cluster_corpus()
     assert res.records_clustered == 6

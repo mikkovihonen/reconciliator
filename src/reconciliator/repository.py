@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -427,7 +426,7 @@ class WEMIRepository:
                         issue_enumeration, pagination, extent, carrier_type,
                         host_title, serialized_text
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(source_id) DO UPDATE SET
+                    ON CONFLICT(source, source_id) DO UPDATE SET
                         work_id = COALESCE(excluded.work_id, manifestations.work_id),
                         container_id = COALESCE(excluded.container_id, manifestations.container_id),
                         is_component = excluded.is_component,
@@ -668,6 +667,122 @@ class WEMIRepository:
                 row["key_value"]
             )
         return out
+
+    def get_all_match_records(
+        self, origins: Optional[list[str]] = None
+    ) -> list[MatchRecord]:
+        """Project every stored record back out of WEMI rows as MatchRecords.
+
+        Replaces `get_all_target_records()`, which read a parallel staging table.
+        A record is its manifestation joined to the expression and work above it,
+        plus its `entity_keys` and `identifiers` - no separate staging, so a
+        corpus is queried exactly like any other source.
+
+        `origins` restricts to given `record_origin` values; omitting it returns
+        every source.
+        """
+        clause, params = "", []
+        if origins:
+            placeholders = ", ".join("?" for _ in origins)
+            clause = f" WHERE m.record_origin IN ({placeholders})"
+            params = list(origins)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    m.id AS manif_id, m.source_id, m.title AS m_title,
+                    m.publication_year, m.volume_designation, m.is_component,
+                    m.manifestation_uri, m.serialized_text AS m_serialized,
+                    m.record_origin,
+                    w.id AS work_id, w.title AS w_title, w.work_type,
+                    w.work_uri, w.serialized_text AS w_serialized,
+                    e.language, e.content_type, e.expression_uri,
+                    e.serialized_text AS e_serialized
+                FROM manifestations m
+                LEFT JOIN works w ON w.id = m.work_id
+                LEFT JOIN expressions e ON e.work_id = w.id
+                {clause}
+                GROUP BY m.id
+                ORDER BY m.id;
+                """,
+                params,
+            ).fetchall()
+
+            key_bags = self.get_all_entity_keys("manifestation")
+
+            ident_rows = conn.execute(
+                """
+                SELECT entity_type, entity_id, scheme, value FROM identifiers
+                WHERE entity_type IN ('manifestation', 'work', 'expression');
+                """
+            ).fetchall()
+
+        ident_by_entity: dict[tuple[str, int], dict[str, list[str]]] = {}
+        for r in ident_rows:
+            bag = ident_by_entity.setdefault((r["entity_type"], r["entity_id"]), {})
+            bucket = bag.setdefault(r["scheme"].lower(), [])
+            if r["value"] not in bucket:
+                bucket.append(r["value"])
+
+        records: list[MatchRecord] = []
+        for row in rows:
+            keys = key_bags.get(row["manif_id"], {})
+            # A record's identifiers are those of its manifestation and of the
+            # work and expression above it: an ISBN sits on the manifestation, a
+            # DOI often on the work, and tier 1 has to see both.
+            identifiers: dict[str, list[str]] = {}
+            for et, eid in (
+                ("manifestation", row["manif_id"]),
+                ("work", row["work_id"]),
+                ("expression", None),
+            ):
+                if eid is None:
+                    continue
+                for scheme, values in ident_by_entity.get((et, eid), {}).items():
+                    bucket = identifiers.setdefault(scheme, [])
+                    for v in values:
+                        if v not in bucket:
+                            bucket.append(v)
+
+            # The control number is the manifestation's source_id; it is not
+            # stored as an identifier row, but tier 1 looks it up by scheme.
+            if row["source_id"]:
+                bucket = identifiers.setdefault("control_number", [])
+                if row["source_id"] not in bucket:
+                    bucket.append(row["source_id"])
+
+            title = row["m_title"] or row["w_title"] or ""
+            records.append(
+                MatchRecord(
+                    record_id=row["source_id"],
+                    format="wemi",
+                    work_type=row["work_type"] or "text",
+                    title=title,
+                    uniform_title=(keys.get("uniform_title") or [None])[0],
+                    # "und" is how the expression row spells "undetermined"; the
+                    # matcher treats a language of None as "do not filter", which
+                    # is the same intent, so it must not come back as a literal.
+                    language=(
+                        None if (row["language"] or "").lower() == "und" else row["language"]
+                    ),
+                    author_key=(keys.get("author") or [None])[0],
+                    title_stem=(keys.get("title_stem") or [None])[0] or title,
+                    keys=keys,
+                    identifiers=identifiers,
+                    content_type=row["content_type"],
+                    work_uri=row["work_uri"],
+                    expression_uri=row["expression_uri"],
+                    manifestation_uri=row["manifestation_uri"],
+                    year=row["publication_year"],
+                    volume_designation=row["volume_designation"],
+                    is_component=bool(row["is_component"]),
+                    serialized_work=row["w_serialized"],
+                    serialized_expression=row["e_serialized"],
+                    serialized_manifestation=row["m_serialized"],
+                )
+            )
+        return records
 
     def find_entities_by_key(
         self, key_type: str, key_value: str, entity_type: str = "manifestation"
@@ -1183,6 +1298,10 @@ class WEMIRepository:
                     "SELECT name FROM sources WHERE is_authoritative = 1 ORDER BY name;"
                 )
             ]
+
+    def non_authoritative_sources(self) -> list[str]:
+        """Source names registered as non-authoritative, i.e. corpora to cluster."""
+        return sorted(name for name, auth in self.get_sources().items() if not auth)
 
     def _origin_clause(
         self, column: str = "record_origin", authoritative_only: bool = True
@@ -2188,127 +2307,8 @@ class WEMIRepository:
 
 
 
-    def insert_target_records_batch(self, records: list[MatchRecord]) -> None:
-        """Batch upsert staged target records, normalized keys, and detached payloads."""
-        if not records:
-            return
-        meta_rows = [
-            (
-                r.record_id,
-                r.format,
-                r.work_type,
-                r.title,
-                r.uniform_title,
-                r.language,
-                r.author_key,
-                r.title_stem,
-                r.year,
-                r.volume_designation,
-                1 if r.is_component else 0,
-            )
-            for r in records
-        ]
-        payload_rows = [
-            (
-                r.record_id,
-                r.raw_payload,
-                r.serialized_work,
-                r.serialized_expression,
-                r.serialized_manifestation,
-            )
-            for r in records
-        ]
-        rec_ids = [(r.record_id,) for r in records]
-        key_rows = [
-            (r.record_id, k_type, k_val.strip())
-            for r in records
-            for k_type, k_vals in r.keys.items()
-            for k_val in k_vals
-            if k_val and k_val.strip()
-        ]
 
-        with self.get_corpus_connection() as conn:
-            # 1. Upsert core metadata
-            conn.executemany(
-                """
-                INSERT INTO target_records (
-                    record_id, format, work_type, title, uniform_title, language,
-                    author_key, title_stem, year, volume_designation, is_component
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(record_id) DO UPDATE SET
-                    format = excluded.format,
-                    work_type = excluded.work_type,
-                    title = excluded.title,
-                    uniform_title = excluded.uniform_title,
-                    language = excluded.language,
-                    author_key = excluded.author_key,
-                    title_stem = excluded.title_stem,
-                    year = excluded.year,
-                    volume_designation = excluded.volume_designation,
-                    is_component = excluded.is_component;
-                """,
-                meta_rows,
-            )
 
-            # 2. Upsert payloads
-            conn.executemany(
-                """
-                INSERT INTO target_payloads (
-                    record_id, raw_payload, serialized_work, serialized_expression,
-                    serialized_manifestation
-                ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(record_id) DO UPDATE SET
-                    raw_payload = excluded.raw_payload,
-                    serialized_work = excluded.serialized_work,
-                    serialized_expression = excluded.serialized_expression,
-                    serialized_manifestation = excluded.serialized_manifestation;
-                """,
-                payload_rows,
-            )
-
-            # 3. Replace keys
-            conn.executemany("DELETE FROM target_keys WHERE record_id = ?;", rec_ids)
-            if key_rows:
-                conn.executemany(
-                    """
-                    INSERT OR REPLACE INTO target_keys (record_id, key_type, key_value)
-                    VALUES (?, ?, ?);
-                    """,
-                    key_rows,
-                )
-
-    def get_target_record(self, record_id: str) -> Optional[MatchRecord]:
-        """Fetch a single staged target record by its ID, reconstructing keys and payloads."""
-        with self.get_corpus_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT r.*, p.raw_payload, p.serialized_work, p.serialized_expression, p.serialized_manifestation
-                FROM target_records r
-                LEFT JOIN target_payloads p ON r.record_id = p.record_id
-                WHERE r.record_id = ?;
-                """,
-                (record_id,),
-            ).fetchone()
-            if not row:
-                return None
-            d = dict(row)
-            key_rows = conn.execute(
-                "SELECT key_type, key_value FROM target_keys WHERE record_id = ? ORDER BY id;",
-                (record_id,),
-            ).fetchall()
-            keys: dict[str, list[str]] = {}
-            for kr in key_rows:
-                kt, kv = kr["key_type"], kr["key_value"]
-                if kt not in keys:
-                    keys[kt] = []
-                keys[kt].append(kv)
-            d["keys"] = keys
-            return MatchRecord.model_validate(d)
-
-    def count_target_records(self) -> int:
-        """Count total target records staged in corpus."""
-        with self.get_corpus_connection() as conn:
-            return conn.execute("SELECT COUNT(*) FROM target_records;").fetchone()[0]
 
     def insert_manifestation_clusters_batch(self, clusters: list[ManifestationCluster]) -> None:
         """Batch insert or replace carrier duplicate clusters."""
@@ -2444,71 +2444,46 @@ class WEMIRepository:
                 rows,
             )
 
-    def get_all_target_records(self) -> list[MatchRecord]:
-        """Fetch all staged target records with their keys and payloads."""
-        with self.get_corpus_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT r.*, p.raw_payload, p.serialized_work, p.serialized_expression, p.serialized_manifestation
-                FROM target_records r
-                LEFT JOIN target_payloads p ON r.record_id = p.record_id
-                ORDER BY r.record_id;
-                """
-            ).fetchall()
-            if not rows:
-                return []
-
-            key_rows = conn.execute(
-                "SELECT record_id, key_type, key_value FROM target_keys ORDER BY record_id, id;"
-            ).fetchall()
-            keys_by_record: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
-            for kr in key_rows:
-                keys_by_record[kr["record_id"]][kr["key_type"]].append(kr["key_value"])
-
-            records = []
-            for r in rows:
-                d = dict(r)
-                d["keys"] = dict(keys_by_record.get(d["record_id"], {}))
-                records.append(MatchRecord.model_validate(d))
-            return records
 
     def find_records_by_key(self, key_type: str, key_value: str) -> list[str]:
-        """Find record IDs matching a specific key type and value."""
-        with self.get_corpus_connection() as conn:
+        """Find record ids (manifestation source_ids) carrying a key.
+
+        Reads `entity_keys` rather than the removed `target_keys` staging table.
+        """
+        with self.get_connection() as conn:
             rows = conn.execute(
-                "SELECT record_id FROM target_keys WHERE key_type = ? AND key_value = ?;",
+                """
+                SELECT m.source_id FROM entity_keys k
+                JOIN manifestations m ON m.id = k.entity_id
+                WHERE k.entity_type = 'manifestation'
+                  AND k.key_type = ? AND k.key_value = ?;
+                """,
                 (key_type, key_value),
             ).fetchall()
             return [r[0] for r in rows]
 
-    def get_blocking_groups(self, key_types: Optional[list[str]] = None) -> dict[tuple[str, str], list[str]]:
-        """Find all blocking key collision groups directly in SQL."""
-        with self.get_corpus_connection() as conn:
-            if key_types:
-                placeholders = ",".join("?" for _ in key_types)
-                rows = conn.execute(
-                    f"""
-                    SELECT key_type, key_value, GROUP_CONCAT(record_id)
-                    FROM target_keys
-                    WHERE key_type IN ({placeholders})
-                    GROUP BY key_type, key_value
-                    HAVING COUNT(*) > 1;
-                    """,
-                    key_types,
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT key_type, key_value, GROUP_CONCAT(record_id)
-                    FROM target_keys
-                    GROUP BY key_type, key_value
-                    HAVING COUNT(*) > 1;
-                    """
-                ).fetchall()
-            groups = {}
-            for r in rows:
-                groups[(r[0], r[1])] = r[2].split(",")
-            return groups
+    def get_blocking_groups(
+        self, key_types: Optional[list[str]] = None
+    ) -> dict[tuple[str, str], list[str]]:
+        """Find blocking key collision groups in SQL, over `entity_keys`."""
+        clause, params = "", []
+        if key_types:
+            placeholders = ",".join("?" for _ in key_types)
+            clause = f" AND k.key_type IN ({placeholders})"
+            params = list(key_types)
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT k.key_type, k.key_value, GROUP_CONCAT(m.source_id)
+                FROM entity_keys k
+                JOIN manifestations m ON m.id = k.entity_id
+                WHERE k.entity_type = 'manifestation'{clause}
+                GROUP BY k.key_type, k.key_value
+                HAVING COUNT(*) > 1;
+                """,
+                params,
+            ).fetchall()
+            return {(r[0], r[1]): r[2].split(",") for r in rows}
 
     def get_work_cluster(self, cluster_id: str) -> Optional[WorkCluster]:
         """Fetch a work cluster by ID."""

@@ -20,6 +20,8 @@ from rdflib import Graph, URIRef
 from reconciliator.cli import reconcile_cmd, reset_cmd
 from reconciliator.clusterer import CorpusClusterer
 from reconciliator.config import AppConfig
+from tests.conftest import persist_match_records
+
 OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
 from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
@@ -810,9 +812,10 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
         )
         target_records_list.append(t_rec)
 
-    # 1. Test Staging and Clustering
-    repo.insert_target_records_batch(target_records_list)
-    assert repo.count_target_records() == len(domain_specs)
+    # 1. Persist as WEMI rows and cluster. There is no staging table: the corpus
+    # is stored like any other source, under its own record_origin.
+    persist_match_records(repo, target_records_list, origin="corpus")
+    assert len(repo.get_all_match_records(origins=["corpus"])) == len(domain_specs)
 
     res_cluster = clusterer.cluster_corpus()
     assert res_cluster.records_clustered == len(domain_specs)

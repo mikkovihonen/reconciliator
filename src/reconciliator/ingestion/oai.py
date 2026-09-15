@@ -23,19 +23,17 @@ from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.harvest.resourcesync import ResourceSyncHarvester
 from reconciliator.loaders.bibframe import (
     bibframe_entity_keys,
-    build_target_record_from_bibframe,
     decompose_bibframe_work,
     get_profile,
     stream_bibframe_records,
 )
 from reconciliator.loaders.marcxml import (
-    build_target_record_from_marc,
     decompose_marc_authority,
     decompose_marc_wemi,
     extract_marc_source_id,
     is_marc_authority_record,
 )
-from reconciliator.models import HarvestState, MatchRecord
+from reconciliator.models import HarvestState
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import WEMIRepository
 
@@ -197,13 +195,11 @@ class _WEMIBatchAccumulator:
         self.config = config
         self.relator_mappings = relator_mappings
         self.vocab_store = vocab_store
-        self.is_target = config.target_database is not None
         # Harvested records staged since the last take(). Counted separately from
         # the entity lists because one record can decompose into several agents,
         # and the resume watermark has to advance in records, not entities.
         self.staged_records = 0
 
-        self.target_records: list[MatchRecord] = []
         self.works: list[Any] = []
         self.expressions: list[Any] = []
         self.manifestations: list[Any] = []
@@ -224,19 +220,6 @@ class _WEMIBatchAccumulator:
     def add(self, item: Any) -> None:
         """Decompose one harvested MARCXML element or RDF graph into the staging batch."""
         self.staged_records += 1
-        if self.is_target:
-            if isinstance(item, Graph):
-                rec = build_target_record_from_bibframe(item, source=self.source_name)
-            else:
-                rec = build_target_record_from_marc(
-                    item,
-                    source=self.source_name,
-                    id_source=self.config.id_source,
-                    relator_mappings=self.relator_mappings,
-                    vocab_store=self.vocab_store,
-                )
-            self.target_records.append(rec)
-            return
 
         if isinstance(item, Graph):
             w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
@@ -295,15 +278,6 @@ class _WEMIBatchAccumulator:
         record_count = self.staged_records
         self.staged_records = 0
 
-        if self.is_target:
-            payload = {
-                "targets": self.target_records,
-                "record_count": record_count,
-                "record_origin": self.source_name,
-            }
-            self.target_records = []
-            return payload
-
         payload = {
             "works": self.works,
             "expressions": self.expressions,
@@ -336,7 +310,6 @@ class _WEMIBatchAccumulator:
 def write_wemi_batch(
     repo: WEMIRepository,
     payload: dict[str, Any],
-    is_target: bool = False,
 ) -> int:
     """Persist a batch detached by `_WEMIBatchAccumulator.take()`.
 
@@ -347,13 +320,6 @@ def write_wemi_batch(
     """
     record_count = int(payload.get("record_count") or 0)
     record_origin = str(payload.get("record_origin") or "unknown")
-
-    if is_target:
-        targets = payload.get("targets") or []
-        if not targets:
-            return 0
-        repo.insert_target_records_batch(targets)
-        return record_count or len(targets)
 
     works = payload.get("works") or []
     agents = payload.get("agents") or []
@@ -732,7 +698,7 @@ def ingest_oai_pipeline(
             return
 
         written = write_wemi_batch(
-            store, payload["batch"], is_target=effective_config.target_database is not None
+            store, payload["batch"]
         )
         with counters_lock:
             total_ingested += written

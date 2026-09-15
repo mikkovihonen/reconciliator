@@ -471,7 +471,13 @@ def test_cli_consolidation_gives_both_sources_one_identity(consolidated_run: dic
     mapping = repo.get_work_equivalence_map()
     assert len(mapping) == 1, "one of the two source works should fold into the other"
     with repo.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) c FROM works").fetchone()["c"] == 2
+        # Scoped to authority rows: the reconciled corpus is stored as WEMI in
+        # the same database now and contributes works of its own.
+        auth = repo.authoritative_sources()
+        ph = ", ".join("?" for _ in auth)
+        assert conn.execute(
+            f"SELECT COUNT(*) c FROM works WHERE record_origin IN ({ph})", auth
+        ).fetchone()["c"] == 2
 
 
 def test_records_matching_different_sources_export_one_work_uri(

@@ -47,9 +47,6 @@ def test_init_corpus_db_tables():
     names = {row["name"] for row in cursor}
 
     expected_corpus_tables = {
-        "target_records",
-        "target_keys",
-        "target_payloads",
         "corpus_manifestation_clusters",
         "corpus_work_clusters",
         "corpus_expression_clusters",
@@ -220,50 +217,61 @@ def test_reset_all_storage_wemi(tmp_path: Path):
         assert conn.execute("SELECT COUNT(*) FROM works;").fetchone()[0] == 0
 
     with get_db_connection(auth_db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM target_records;").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM entity_keys;").fetchone()[0] == 0
 
     # Vector indices are deleted
     for p in [w_idx, e_idx, m_idx, a_idx]:
         assert not p.exists()
 
 
-def test_target_schema_normalization_and_cascades():
-    """Verify target_records, target_keys, and target_payloads relationships and cascade deletion."""
+def test_entity_keys_are_not_cascade_deleted_with_their_owner():
+    """entity_keys is polymorphic, so it carries no foreign key and no cascade.
+
+    entity_type/entity_id can name a work, expression, manifestation, item or
+    agent, which SQLite cannot express as one foreign key. Deleting an owning row
+    therefore leaves its keys behind, and anything that removes rows - the
+    `replace` ingest mode in particular - has to delete them explicitly.
+    """
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
-    init_corpus_db(conn)
+    init_authority_db(conn)
 
-    # 1. Insert target metadata
     conn.execute(
         """
-        INSERT INTO target_records (record_id, format, work_type, title, title_stem)
-        VALUES ('rec_001', 'marcxml', 'patent', 'Novel Battery Method', 'novel battery method');
+        INSERT INTO manifestations (manifestation_uri, source, source_id, title, title_normalized)
+        VALUES ('urn:manif:s:r1', 's', 'r1', 'T', 't');
         """
     )
+    mid = conn.execute("SELECT id FROM manifestations WHERE source_id = 'r1';").fetchone()["id"]
+    for key_type, value in (("patent", "FI129456B"), ("patent", "EP999888"), ("custom", "xyz")):
+        conn.execute(
+            "INSERT INTO entity_keys (entity_type, entity_id, key_type, key_value) VALUES (?,?,?,?);",
+            ("manifestation", mid, key_type, value),
+        )
+    assert conn.execute(
+        "SELECT COUNT(*) FROM entity_keys WHERE entity_id = ?;", (mid,)
+    ).fetchone()[0] == 3
 
-    # 2. Insert detached payload
-    conn.execute(
-        """
-        INSERT INTO target_payloads (record_id, raw_payload, serialized_work)
-        VALUES ('rec_001', X'1234', 'Novel Battery Method Serialized');
-        """
-    )
+    conn.execute("DELETE FROM manifestations WHERE id = ?;", (mid,))
+    assert conn.execute(
+        "SELECT COUNT(*) FROM entity_keys WHERE entity_id = ?;", (mid,)
+    ).fetchone()[0] == 3, "no cascade: cleanup must be explicit"
 
-    # 3. Insert arbitrary and multi-valued keys
-    conn.execute("INSERT INTO target_keys (record_id, key_type, key_value) VALUES ('rec_001', 'patent', 'FI129456B');")
-    conn.execute("INSERT INTO target_keys (record_id, key_type, key_value) VALUES ('rec_001', 'patent', 'EP999888');")
-    conn.execute("INSERT INTO target_keys (record_id, key_type, key_value) VALUES ('rec_001', 'custom_novel_type', 'val_xyz');")
 
-    assert conn.execute("SELECT COUNT(*) FROM target_records WHERE record_id = 'rec_001';").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM target_payloads WHERE record_id = 'rec_001';").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM target_keys WHERE record_id = 'rec_001';").fetchone()[0] == 3
-
-    # 4. Delete target_record -> verify cascade to keys and payloads
-    conn.execute("DELETE FROM target_records WHERE record_id = 'rec_001';")
-    assert conn.execute("SELECT COUNT(*) FROM target_records WHERE record_id = 'rec_001';").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM target_payloads WHERE record_id = 'rec_001';").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM target_keys WHERE record_id = 'rec_001';").fetchone()[0] == 0
+def test_entity_keys_reject_duplicate_rows():
+    """The UNIQUE constraint is what makes re-ingesting a record idempotent."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_authority_db(conn)
+    for _ in range(2):
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO entity_keys (entity_type, entity_id, key_type, key_value)
+            VALUES ('manifestation', 1, 'work', 'abc');
+            """
+        )
+    assert conn.execute("SELECT COUNT(*) FROM entity_keys;").fetchone()[0] == 1
 
 
 def test_extensible_types_in_authority_db():

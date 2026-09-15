@@ -160,7 +160,6 @@ def test_wikidata_composer_and_author_string_and_publisher(tmp_path: Path) -> No
 
 
 def test_wikidata_author_authority_filtering(tmp_path: Path) -> None:
-    from reconciliator.config import WikidataIngestConfig
     from reconciliator.ingestion.wikidata import _extract_author_data
 
     # Human with no authority IDs (e.g. footballer)

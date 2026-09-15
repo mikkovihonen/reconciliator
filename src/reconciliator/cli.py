@@ -24,6 +24,8 @@ from reconciliator.config import (
 )
 from reconciliator.db import reset_all_storage
 from reconciliator.embedder import SentenceEmbedder
+from reconciliator.indexer.ipc.client import DaemonLifecycleManager
+from reconciliator.indexer.ipc.protocol import get_default_socket_path
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file
@@ -61,8 +63,6 @@ from reconciliator.normalizers.blocking import (
     compute_work_blocking_key,
 )
 from reconciliator.normalizers.record import RecordNormalizer
-from reconciliator.indexer.ipc.client import DaemonLifecycleManager
-from reconciliator.indexer.ipc.protocol import get_default_socket_path
 from reconciliator.progress import (
     ProgressTracker,
     format_task_table,
@@ -71,7 +71,6 @@ from reconciliator.progress import (
     parse_duration_seconds,
     prune_tasks,
     render_status_json,
-    render_telemetry_tui,
     render_vector_daemon_panel,
     run_telemetry_tui,
 )
@@ -763,6 +762,90 @@ def ingest_wikidata_cmd(
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
 
 
+def _ingest_corpus_as_wemi(
+    repo: Any,
+    records: Any,
+    source_name: str,
+    profile: Optional[BIBFRAMESchemaProfile] = None,
+    batch_size: int = 500,
+) -> int:
+    """Persist the corpus being reconciled as ordinary WEMI rows.
+
+    Replaces the `target_records` staging path. Every ingested record, corpus or
+    authority, becomes works/expressions/manifestations plus identifiers and
+    entity_keys; `authoritative: false` on the source is what keeps a corpus from
+    being matched against as if it were authority data.
+    """
+    from reconciliator.loaders.bibframe import bibframe_entity_keys, decompose_bibframe_work
+    from reconciliator.loaders.marcxml import decompose_marc_wemi
+
+    total = 0
+    batch: dict[str, list[Any]] = {}
+
+    def _flush() -> None:
+        if not batch.get("works"):
+            return
+        repo.insert_wemi_batch(
+            works=batch.get("works") or [],
+            expressions=batch.get("expressions") or [],
+            manifestations=batch.get("manifestations") or [],
+            agents=batch.get("agents") or [],
+            relationships=batch.get("relationships") or [],
+            identifiers=batch.get("identifiers") or [],
+            manifestation_expressions=batch.get("associations") or [],
+            mediums_of_performance=batch.get("mediums") or [],
+            contributions=batch.get("contributions") or [],
+            entity_keys=batch.get("entity_keys") or [],
+            record_origin=source_name,
+        )
+        batch.clear()
+
+    def _stage(key: str, values: Any) -> None:
+        batch.setdefault(key, []).extend(values)
+
+    for rec_fmt, orig_payload, _raw_rec, _offset in records:
+        keys: list[Any] = []
+        try:
+            if rec_fmt == "marcxml":
+                w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+                    orig_payload, source=source_name, record_origin=source_name, key_sink=keys
+                )
+            elif rec_fmt in ("bibframe_rdf", "bibframe_jsonld"):
+                if rec_fmt == "bibframe_rdf":
+                    g, nodes = orig_payload
+                    node = nodes[0] if nodes else None
+                else:
+                    g = Graph()
+                    g.parse(data=json.dumps(orig_payload), format="json-ld")
+                    node = None
+                w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
+                    g=g, instance_node=node, profile=profile, source=source_name
+                )
+                keys = bibframe_entity_keys(m, w, agts, idents)
+            else:
+                continue
+        except Exception:
+            continue
+
+        _stage("works", [w])
+        _stage("expressions", [e])
+        _stage("manifestations", [m])
+        _stage("items", itms)
+        _stage("agents", agts)
+        _stage("relationships", rels)
+        _stage("identifiers", idents)
+        _stage("associations", assoc)
+        _stage("mediums", mops)
+        _stage("contributions", contribs)
+        _stage("entity_keys", keys)
+        total += 1
+        if total % batch_size == 0:
+            _flush()
+
+    _flush()
+    return total
+
+
 def _to_target_record(
     rec_fmt: str,
     orig_payload: Any,
@@ -985,14 +1068,17 @@ def reconcile_cmd(
             "[cyan]Staging target records and running intra-corpus graph clusterer...[/cyan]"
         )
         corpus_repo = wemi_repo
-        staged_targets: list[MatchRecord] = []
-        for rec_fmt_s, orig_payload_s, raw_rec_s, _ in _iter_records():
-            staged_targets.append(
-                _to_target_record(rec_fmt_s, orig_payload_s, raw_rec_s, bf_profile)
-            )
 
-        if staged_targets:
-            corpus_repo.insert_target_records_batch(staged_targets)
+        # The corpus is ingested exactly like any other source: WEMI rows carrying
+        # its own record_origin, registered as non-authoritative. There is no
+        # staging table, so clustering and reconciliation read the same store.
+        corpus_source = r_cfg.corpus_source_name or r_cfg.target_file.stem
+        corpus_repo.register_source(corpus_source, is_authoritative=False)
+        staged = _ingest_corpus_as_wemi(
+            corpus_repo, _iter_records(), corpus_source, bf_profile
+        )
+
+        if staged:
             clusterer = CorpusClusterer(
                 corpus_repo=corpus_repo,
                 wemi_repo=wemi_repo,

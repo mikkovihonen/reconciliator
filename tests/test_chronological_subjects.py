@@ -1,15 +1,21 @@
 """Unit tests for chronological subject headings (MARC 648) and yso-aika vocabulary integration."""
 
 from pathlib import Path
+
 from lxml import etree
 
-from reconciliator.loaders.marcxml import parse_marc_record_elem, MARC_NS
-from reconciliator.models import BibliographicRecord, SubjectItem, SubjectsContainer, VocabConcept, ConceptMapping
-from reconciliator.normalizers.record import RecordNormalizer
-from reconciliator.vocab_store import VocabStore
-from reconciliator.vocab_folding import VocabFolder
-from reconciliator.xml_enricher import MARCXMLEnricher
 from reconciliator.ingestion.vocab import parse_turtle_simple
+from reconciliator.loaders.marcxml import MARC_NS, parse_marc_record_elem
+from reconciliator.models import (
+    ConceptMapping,
+    SubjectItem,
+    SubjectsContainer,
+    VocabConcept,
+)
+from reconciliator.normalizers.record import RecordNormalizer
+from reconciliator.vocab_folding import VocabFolder
+from reconciliator.vocab_store import VocabStore
+from reconciliator.xml_enricher import MARCXMLEnricher
 
 
 def test_subjects_container_helpers() -> None:
@@ -209,6 +215,7 @@ def test_parse_turtle_simple_detects_yso_aika() -> None:
 
 def test_bibframe_rdflib_temporal_subject() -> None:
     from rdflib import Graph
+
     from reconciliator.loaders.bibframe import get_profile, parse_bibframe_graph
 
     ttl = """
@@ -245,7 +252,8 @@ def test_bibframe_rdflib_temporal_subject() -> None:
 
 def test_bibframe_jsonld_temporal_subject(tmp_path: Path) -> None:
     import json
-    from reconciliator.loaders.bibframe import iter_jsonld_bibframe_records, get_profile
+
+    from reconciliator.loaders.bibframe import get_profile, iter_jsonld_bibframe_records
 
     data = [
         {
@@ -280,9 +288,9 @@ def test_bibframe_jsonld_temporal_subject(tmp_path: Path) -> None:
 
 def test_configurable_subject_field_category_map() -> None:
     from reconciliator.config import (
+        RecordNormalizationConfig,
         get_category_default_field_map,
         get_subject_field_category_map,
-        RecordNormalizationConfig,
     )
 
     cat_map = get_subject_field_category_map()
@@ -305,6 +313,7 @@ def test_configurable_subject_field_category_map() -> None:
 
 def test_bibframe_custom_subject_type_fields() -> None:
     from rdflib import Graph
+
     from reconciliator.loaders.bibframe import get_profile, parse_bibframe_graph
 
     ttl = """
@@ -347,6 +356,7 @@ def test_bibframe_custom_subject_type_fields() -> None:
 
 def test_bibframe_dynamic_default_subject_field() -> None:
     from rdflib import Graph
+
     from reconciliator.config import RecordNormalizationConfig, VocabNormalizationConfig
     from reconciliator.loaders.bibframe import get_profile, parse_bibframe_graph
 

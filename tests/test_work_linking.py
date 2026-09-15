@@ -275,7 +275,15 @@ def test_sources_keep_separate_identities_until_consolidation_runs(linked: dict)
     """
     repo: WEMIRepository = linked["repo"]  # type: ignore[assignment]
     with repo.get_connection() as conn:
-        works = conn.execute("SELECT source, work_uri FROM works ORDER BY id").fetchall()
+        # Scoped to the authoritative sources: the corpus being reconciled is now
+        # stored as WEMI rows in the same database, so an unscoped count includes
+        # its works too.
+        authoritative = repo.authoritative_sources()
+        placeholders = ", ".join("?" for _ in authoritative)
+        works = conn.execute(
+            f"SELECT source, work_uri FROM works WHERE record_origin IN ({placeholders}) ORDER BY id",
+            authoritative,
+        ).fetchall()
         same_work_edges = conn.execute(
             "SELECT COUNT(*) c FROM work_relationships WHERE relationship_type = 'same_work_as';"
         ).fetchone()["c"]

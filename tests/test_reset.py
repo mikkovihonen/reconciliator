@@ -111,7 +111,9 @@ def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
 
     Corpus staging used to live in its own file whose name the repository derived
     itself, while reset cleared the configured one. Staged records consequently
-    survived a reset and leaked into the next corpus run.
+    survived a reset and leaked into the next corpus run. There is no staging
+    table at all now: a corpus is ordinary WEMI rows carrying its own
+    record_origin, with its blocking keys in `entity_keys`.
     """
     from reconciliator.config import StorageConfig
     from reconciliator.repository import WEMIRepository
@@ -124,4 +126,4 @@ def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
     # can be joined to the works it resolves to.
     with repo.get_connection() as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"works", "target_records", "corpus_work_clusters", "sources"} <= tables
+    assert {"works", "entity_keys", "corpus_work_clusters", "sources"} <= tables

@@ -1101,6 +1101,10 @@ class ReconcileConfig(BaseModel):
     """Offline reconciliation and enrichment configuration."""
 
     target_file: Path
+    # Name the corpus is stored under. It becomes `record_origin` on the corpus's
+    # WEMI rows and is registered non-authoritative, so the corpus is ingested
+    # like any other source rather than through a staging table.
+    corpus_source_name: Optional[str] = None
     format: Literal["auto", "marcxml", "bibra", "bibframe"] = "auto"
     schema_profile: Optional[str] = None
     output_file: Optional[Path] = None

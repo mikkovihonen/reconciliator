@@ -13,7 +13,6 @@ from typing import Any, Container, Iterable, Optional
 from reconciliator.config import DEFAULT_RELATOR_MAPPINGS
 from reconciliator.vocab.bridges import get_mts_role_map
 
-
 # Dynamically constructed from loc-relators-bridge.ttl; preserved for module-level compatibility
 MTS_ROLE_MAP: dict[str, str] = get_mts_role_map()
 

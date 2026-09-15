@@ -98,7 +98,11 @@ def test_iter_marc_record_elements(tmp_path: Path) -> None:
 
 
 def test_marc_predicate_profiles_configuration() -> None:
-    from reconciliator.config import DEFAULT_MARC_PREDICATE_PROFILES, EnrichmentTogglesConfig, get_bundled_record_defaults
+    from reconciliator.config import (
+        DEFAULT_MARC_PREDICATE_PROFILES,
+        EnrichmentTogglesConfig,
+        get_bundled_record_defaults,
+    )
 
     # 1. Defaults loaded from YAML
     yaml_defaults = get_bundled_record_defaults()
@@ -140,7 +144,7 @@ def test_marc_predicate_profiles_configuration() -> None:
     elem = etree.fromstring(xml_str.strip())
     enricher = MARCXMLEnricher()
 
-    from reconciliator.models import WorkCluster, ExpressionCluster
+    from reconciliator.models import ExpressionCluster, WorkCluster
     work = WorkCluster(
         cluster_id="w1",
         canonical_title="Test Work",
@@ -179,7 +183,7 @@ def test_marc_predicate_profiles_configuration() -> None:
 
 
 def test_scheme_definition_and_deduplication() -> None:
-    from reconciliator.config import EnrichmentTogglesConfig, SchemeDefinition
+    from reconciliator.config import SchemeDefinition
     from reconciliator.models import MatchRecord
 
     # 1. Test SchemeDefinition coercion and default-in-accepted guarantee

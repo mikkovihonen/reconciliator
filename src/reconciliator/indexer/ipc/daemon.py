@@ -9,7 +9,6 @@ import logging
 import os
 import resource
 import signal
-import socket
 import socketserver
 import sys
 import threading
@@ -19,7 +18,6 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import numpy as np
-import torch
 
 from reconciliator.config import AppConfig, VectorEngineConfig, load_config
 from reconciliator.device import resolve_device
@@ -63,7 +61,6 @@ from reconciliator.indexer.ipc.protocol import (
     encode_error,
     encode_ids_resp,
     encode_json,
-    encode_remove_ids,
     encode_search_resp,
     get_default_socket_path,
     recv_frame,

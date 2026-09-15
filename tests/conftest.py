@@ -84,3 +84,87 @@ def make_config_file(tmp_path: Path):
         return cfg_file
 
     return _make
+
+
+def persist_match_records(repo, records, origin: str = "corpus") -> int:
+    """Persist MatchRecords as WEMI rows so the clusterer can project them back.
+
+    The clusterer reads `get_all_match_records()`, which projects records out of
+    works/expressions/manifestations plus `entity_keys`. There is no staging
+    table any more, so a test that wants records in the store has to put them
+    there the way ingestion does. Tests keep declaring the record shape they care
+    about; this turns that shape into rows.
+    """
+    from reconciliator.models import (
+        EntityKey,
+        ExpressionEntity,
+        IdentifierEntity,
+        ManifestationEntity,
+        WorkEntity,
+    )
+
+    works, exprs, manifs, keys, idents = [], [], [], [], []
+    for rec in records:
+        rid = rec.record_id
+        work_uri = rec.work_uri or f"urn:work:{origin}:{rid}"
+        lang = rec.language or "und"
+        expr_uri = rec.expression_uri or f"urn:exp:{origin}:{rid}:{lang}"
+        manif_uri = rec.manifestation_uri or f"urn:manif:{origin}:{rid}"
+
+        works.append(
+            WorkEntity(
+                work_uri=work_uri, source=origin, source_id=rid, record_origin=origin,
+                title=rec.uniform_title or rec.title, title_normalized=rec.title_stem,
+                work_type=rec.work_type, serialized_text=rec.serialized_work,
+            )
+        )
+        exprs.append(
+            ExpressionEntity(
+                work_id=0, expression_uri=expr_uri, source=origin, source_id=rid,
+                record_origin=origin, language=lang,
+                content_type=rec.content_type or "text", title=rec.title,
+                serialized_text=rec.serialized_expression,
+            )
+        )
+        manifs.append(
+            ManifestationEntity(
+                manifestation_uri=manif_uri, source=origin, source_id=rid,
+                record_origin=origin, title=rec.title, title_normalized=rec.title_stem,
+                publication_year=rec.year, volume_designation=rec.volume_designation,
+                is_component=rec.is_component, serialized_text=rec.serialized_manifestation,
+            )
+        )
+
+        # The projection reads author_key, title_stem and uniform_title back out
+        # of entity_keys, so they have to be written as keys, exactly as the
+        # loaders do at ingest.
+        bag = dict(rec.keys)
+        if rec.author_key:
+            bag.setdefault("author", [rec.author_key])
+        if rec.title_stem:
+            bag.setdefault("title_stem", [rec.title_stem])
+        if rec.uniform_title:
+            bag.setdefault("uniform_title", [rec.uniform_title])
+        for key_type, values in bag.items():
+            for value in values:
+                keys.append(
+                    EntityKey(
+                        entity_type="manifestation", entity_id=0, key_type=key_type,
+                        key_value=value, entity_uri=manif_uri,
+                    )
+                )
+        for scheme, values in (rec.identifiers or {}).items():
+            for value in values:
+                idents.append(
+                    IdentifierEntity(
+                        entity_type="manifestation", entity_id=0, scheme=scheme,
+                        value=value, value_normalized=value.lower(), entity_uri=manif_uri,
+                    )
+                )
+
+    repo.register_source(origin, is_authoritative=False)
+    repo.insert_wemi_batch(
+        works=works, expressions=exprs, manifestations=manifs,
+        identifiers=idents, entity_keys=keys, record_origin=origin,
+    )
+    return len(records)

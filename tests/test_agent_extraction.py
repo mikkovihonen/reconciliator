@@ -6,7 +6,6 @@ from lxml import etree
 
 from reconciliator.ingestion.wikidata import _extract_author_data
 from reconciliator.loaders.marcxml import parse_marc_dates, parse_marc_record_elem
-from reconciliator.models import Agent, AgentEntity
 from reconciliator.normalizers.record import RecordNormalizer
 
 

@@ -15,18 +15,14 @@ from typing import Any, Optional
 import numpy as np
 
 from reconciliator.config import VectorDaemonConfig, VectorEngineConfig
-from reconciliator.indexer.base import VectorIndex
 from reconciliator.indexer.ipc.protocol import (
     OP_ADD_RESP,
     OP_ADD_VECTORS,
     OP_ERROR,
     OP_GET_IDS,
-    OP_GET_METADATA,
     OP_GET_STATUS,
     OP_IDS_RESP,
     OP_LOAD,
-    OP_LOAD_RESP,
-    OP_METADATA_RESP,
     OP_OPEN_INDEX,
     OP_OPEN_RESP,
     OP_PING,
@@ -36,7 +32,6 @@ from reconciliator.indexer.ipc.protocol import (
     OP_RESET,
     OP_RESET_RESP,
     OP_SAVE,
-    OP_SAVE_RESP,
     OP_SEARCH,
     OP_SEARCH_RESP,
     OP_SHUTDOWN,
@@ -45,7 +40,6 @@ from reconciliator.indexer.ipc.protocol import (
     OP_TOTAL_RESP,
     OP_TOTAL_VECTORS,
     OP_VERIFY_METADATA,
-    OP_VERIFY_RESP,
     decode_add_resp,
     decode_error,
     decode_ids_resp,

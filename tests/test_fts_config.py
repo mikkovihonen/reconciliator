@@ -1,6 +1,7 @@
 """Tests for database-level FTS configuration and reconcile FTS fallback configuration."""
 
 from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 

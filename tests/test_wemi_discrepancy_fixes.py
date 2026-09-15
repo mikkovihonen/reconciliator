@@ -1,9 +1,7 @@
 """Tests verifying the resolution of WEMI schema, decomposition, and pre-scan discrepancies."""
 
 import logging
-from pathlib import Path
 
-import pytest
 from rdflib import Graph
 
 from reconciliator.db import get_db_connection, init_authority_db

@@ -6,8 +6,16 @@ from pathlib import Path
 
 from reconciliator.ingestion.vocab import ingest_bridge_files
 from reconciliator.loaders.bibframe.base import normalize_role_uri_or_label
-from reconciliator.normalizers.relators import RelatorRegistry, get_default_relator_registry, normalize_role
-from reconciliator.vocab.bridges import get_bundled_bridge_files, get_mts_role_map, parse_bridge_turtle
+from reconciliator.normalizers.relators import (
+    RelatorRegistry,
+    get_default_relator_registry,
+    normalize_role,
+)
+from reconciliator.vocab.bridges import (
+    get_bundled_bridge_files,
+    get_mts_role_map,
+    parse_bridge_turtle,
+)
 from reconciliator.vocab_store import VocabStore
 from reconciliator.vocabularies import concept_id_to_uri, normalize_concept_id
 

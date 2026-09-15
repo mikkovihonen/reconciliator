@@ -1,9 +1,9 @@
 """Tests for distinguishing authority records and target corpus records in WEMIRepository and MARCXML loaders."""
 
 from lxml import etree
+
 from reconciliator.loaders.marcxml import (
     decompose_marc_authority,
-    decompose_marc_wemi,
     is_marc_authority_record,
 )
 from reconciliator.matcher import WorkMatcher

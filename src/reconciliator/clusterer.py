@@ -72,11 +72,13 @@ class CorpusClusterer:
         wemi_repo: Optional[WEMIRepository] = None,
         matcher: Optional[WorkMatcher] = None,
         config: Optional[ClusterConfig] = None,
+        corpus_origins: Optional[list[str]] = None,
     ) -> None:
         self.corpus_repo = corpus_repo
         self.wemi_repo = wemi_repo if wemi_repo is not None else corpus_repo
         self.matcher = matcher
         self.config = config or ClusterConfig()
+        self.corpus_origins = corpus_origins
 
     def generate_blocking_keys(self, target: MatchRecord) -> list[str]:
         """Generate deterministic blocking keys across all 35 key families and identifiers."""
@@ -314,7 +316,13 @@ class CorpusClusterer:
     def cluster_corpus(self) -> MultiplexClusterResult:
         """Execute full intra-corpus co-reference clustering pipeline across staged records."""
         start_time = time.time()
-        records = self.corpus_repo.get_all_target_records()
+        # Projected out of WEMI rows rather than read from a staging table: a
+        # corpus is stored like any other source, so it is queried like one.
+        # Scoped to the non-authoritative sources, because the authority data now
+        # lives in the same database and must not be clustered as if it were the
+        # corpus. With no source registry at all, everything is the corpus.
+        origins = self.corpus_origins or self.corpus_repo.non_authoritative_sources() or None
+        records = self.corpus_repo.get_all_match_records(origins=origins)
         if not records:
             return MultiplexClusterResult(elapsed_seconds=0.0)
 

@@ -13,6 +13,7 @@ from lxml import etree
 from rdflib import RDF, Graph, IdentifiedNode, URIRef
 
 from reconciliator.config import AppConfig, EnrichmentTogglesConfig
+
 OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
 BF_INSTANCE_OF = URIRef("http://id.loc.gov/ontologies/bibframe/instanceOf")
 BF_EXPRESSION_OF = URIRef("http://id.loc.gov/ontologies/bibframe/expressionOf")

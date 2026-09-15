@@ -5,10 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from reconciliator.config import AppConfig, USearchEngineConfig, VectorEngineConfig
+from reconciliator.config import USearchEngineConfig, VectorEngineConfig
 from reconciliator.indexer import (
     FAISSIndexEngine,
-    TorchVectorEngine,
     USearchVectorEngine,
     create_vector_engine,
 )

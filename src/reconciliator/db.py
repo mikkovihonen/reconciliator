@@ -159,9 +159,9 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 container_id INTEGER REFERENCES manifestations(id) ON DELETE CASCADE,
                 is_component BOOLEAN NOT NULL DEFAULT 0,
                 component_type TEXT,
-                manifestation_uri TEXT UNIQUE,
+                manifestation_uri TEXT,
                 source TEXT NOT NULL,
-                source_id TEXT NOT NULL UNIQUE,
+                source_id TEXT NOT NULL,
                 record_origin TEXT NOT NULL DEFAULT 'unknown',
                 title TEXT NOT NULL,
                 title_normalized TEXT NOT NULL,
@@ -180,7 +180,16 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 carrier_type TEXT NOT NULL DEFAULT 'volume',
                 host_title TEXT,
                 serialized_text TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- A manifestation row is one source's record of a manifestation,
+                -- so identity is (source, source_id). Neither half works alone:
+                -- source_id is only unique within a source (two catalogues both
+                -- use control number "R1"), and manifestation_uri is not unique
+                -- either, because a BIBFRAME instance URI is shared by every
+                -- source describing that instance - keying on it let a corpus
+                -- ingest overwrite the authority row it should have matched.
+                -- Cross-source identity is consolidation's job, not the schema's.
+                UNIQUE(source, source_id)
             );
         """)
         conn.execute(
@@ -495,66 +504,9 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
     """Initialize target staging and clustering tables in reconcile_corpus.db."""
     with conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS target_records (
-                record_id TEXT PRIMARY KEY,
-                format TEXT NOT NULL,
-                work_type TEXT NOT NULL DEFAULT 'text',
-                title TEXT NOT NULL,
-                uniform_title TEXT,
-                language TEXT,
-                author_key TEXT,
-                title_stem TEXT NOT NULL,
-                year INTEGER,
-                volume_designation TEXT,
-                is_component BOOLEAN NOT NULL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_records_work_type ON target_records(work_type);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_records_author ON target_records(author_key);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_records_created ON target_records(created_at);"
-        )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS target_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                record_id TEXT NOT NULL REFERENCES target_records(record_id) ON DELETE CASCADE,
-                key_type TEXT NOT NULL,
-                key_value TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_keys_record ON target_keys(record_id);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_keys_lookup ON target_keys(key_type, key_value);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_keys_val ON target_keys(key_value);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_target_keys_record_type ON target_keys(record_id, key_type);"
-        )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS target_payloads (
-                record_id TEXT PRIMARY KEY REFERENCES target_records(record_id) ON DELETE CASCADE,
-                raw_payload BLOB NOT NULL,
-                serialized_work TEXT,
-                serialized_expression TEXT,
-                serialized_manifestation TEXT
-            );
-        """)
-
-        conn.execute("""
             CREATE TABLE IF NOT EXISTS corpus_manifestation_clusters (
                 cluster_id TEXT PRIMARY KEY,
-                canonical_record_id TEXT NOT NULL REFERENCES target_records(record_id),
+                canonical_record_id TEXT NOT NULL,
                 publisher TEXT,
                 publication_year INTEGER,
                 edition_statement TEXT,
@@ -593,7 +545,7 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS corpus_linkages (
-                record_id TEXT PRIMARY KEY REFERENCES target_records(record_id),
+                record_id TEXT PRIMARY KEY,
                 manifestation_cluster_id TEXT REFERENCES corpus_manifestation_clusters(cluster_id),
                 work_cluster_id TEXT NOT NULL REFERENCES corpus_work_clusters(cluster_id),
                 expression_cluster_id TEXT NOT NULL REFERENCES corpus_expression_clusters(cluster_id),
@@ -612,7 +564,7 @@ def init_corpus_db(conn: sqlite3.Connection) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sammelband_bindings (
                 binding_id TEXT NOT NULL,
-                record_id TEXT NOT NULL REFERENCES target_records(record_id),
+                record_id TEXT NOT NULL,
                 sequence_in_binding INTEGER NOT NULL DEFAULT 1,
                 binding_notes TEXT,
                 PRIMARY KEY (binding_id, record_id)

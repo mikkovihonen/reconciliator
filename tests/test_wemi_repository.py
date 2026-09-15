@@ -15,12 +15,13 @@ from reconciliator.models import (
     ItemEntity,
     ManifestationEntity,
     ManifestationExpressionAssociation,
-    MediumOfPerformance,
     MatchRecord,
+    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
 )
 from reconciliator.repository import WEMIRepository
+from tests.conftest import persist_match_records
 
 
 @pytest.fixture
@@ -416,23 +417,20 @@ def test_corpus_repository_normalized_staging(tmp_path: Path):
     )
 
     # 2. Insert batch
-    c_repo.insert_target_records_batch([t1, t2])
-    assert c_repo.count_target_records() == 2
+    persist_match_records(c_repo, [t1, t2])
 
-    # 3. Retrieve single record and verify reconstructed keys and payload
-    fetched_1 = c_repo.get_target_record("target_001")
-    assert fetched_1 is not None
+    # 3. Project the records back out and verify the reconstructed key bag.
+    # raw_payload is deliberately absent: the record is rebuilt from rows, and
+    # nothing re-parses a payload at match time any more.
+    all_recs = c_repo.get_all_match_records()
+    assert len(all_recs) == 2
+    rec_map = {r.record_id: r for r in all_recs}
+    fetched_1 = rec_map["target_001"]
     assert fetched_1.title == "Finlandia op. 26"
     assert fetched_1.get_first_key("music_work") == "sibelius::finlandia::op26"
     assert fetched_1.get_keys("standard") == ["M-042-08955-4", "979-0-042-08955-4"]
     assert fetched_1.get_first_key("custom_archive") == "ark_12345/x987"
-    assert b"Finlandia" in fetched_1.raw_payload
     assert fetched_1.serialized_work == "Sibelius Finlandia"
-
-    # 4. Retrieve all records
-    all_recs = c_repo.get_all_target_records()
-    assert len(all_recs) == 2
-    rec_map = {r.record_id: r for r in all_recs}
     assert rec_map["target_002"].get_first_key("music_work") == "sibelius::finlandia::op26"
 
     # 5. Query records by key

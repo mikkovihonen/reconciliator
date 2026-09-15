@@ -1,11 +1,9 @@
 """Tests for OAI-PMH checkpointing, resumption tokens, and dual-routing WEMI ingestion."""
 
-import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from reconciliator.config import OAIIngestConfig
-from reconciliator.db import init_authority_db
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.models import HarvestState
@@ -129,8 +127,14 @@ def test_harvest_state_persistence(tmp_path: Path):
     assert loaded_w.records_harvested == 1200
 
 
-def test_ingest_oai_pipeline_dual_routing(tmp_path: Path):
-    """Verify dual-routing dispatch in ingest_oai_pipeline with unified repository."""
+def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
+    """Every source decomposes into WEMI; only `authoritative` differs.
+
+    There used to be two routes: a source with `target_database` set was staged
+    as MatchRecords in a separate corpus table and never decomposed, while every
+    other source became WEMI rows. A corpus is now ingested exactly like an
+    authority, and `authoritative: false` is the only distinction.
+    """
     sample_oai_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
     <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
       <ListRecords>
@@ -157,11 +161,11 @@ def test_ingest_oai_pipeline_dual_routing(tmp_path: Path):
     mock_resp.content = sample_oai_xml
     mock_resp.raise_for_status = MagicMock()
 
-    # Route A: Target Routing -> stages MatchRecord in corpus database
+    # Route A: a corpus source - WEMI rows, registered non-authoritative
     target_config = OAIIngestConfig(
         oai_url="http://example.org/oai_target",
         metadata_prefix="marc21",
-        target_database="corpus",
+        authoritative=False,
         batch_size=1,
     )
 
@@ -173,24 +177,27 @@ def test_ingest_oai_pipeline_dual_routing(tmp_path: Path):
         )
         assert total_a == 1
 
-    # Verify MatchRecord staged in corpus database
-    staged = repo.get_target_record("FI-MEL-101")
-    assert staged is not None
-    assert staged.record_id == "FI-MEL-101"
+    # The corpus record is WEMI, not staging, and projects back out as a record
+    # carrying its blocking keys.
+    staged = next(
+        r for r in repo.get_all_match_records(origins=["target_src"])
+        if r.record_id == "FI-MEL-101"
+    )
     assert staged.work_type == "text"
     assert staged.get_first_key("standard") == "9789510000012"
     assert "Testikirja" in staged.serialized_work
+    assert repo.get_sources()["target_src"] is False
 
     # Verify checkpoint (unified harvest_state)
     c_ckpt = repo.get_harvest_state("target_src")
     assert c_ckpt is not None
     assert c_ckpt.status == "completed"
 
-    # Route B: Authority Routing -> decomposes into WEMI in authority.db
+    # Route B: an authority source - the same decomposition, marked authoritative
     auth_config = OAIIngestConfig(
         oai_url="http://example.org/oai_auth",
         metadata_prefix="marc21",
-        target_database=None,
+        authoritative=True,
         batch_size=1,
     )
 

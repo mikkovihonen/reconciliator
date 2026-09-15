@@ -7,12 +7,11 @@ import socket
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
 
-from reconciliator.config import AppConfig, StorageConfig, VectorDaemonConfig, VectorEngineConfig
+from reconciliator.config import AppConfig, StorageConfig, VectorEngineConfig
 from reconciliator.indexer.ipc.client import DaemonLifecycleManager, IPCVectorIndexClient
 from reconciliator.indexer.ipc.daemon import (
     IndexPoolManager,
@@ -20,26 +19,14 @@ from reconciliator.indexer.ipc.daemon import (
     VectorDaemonServer,
 )
 from reconciliator.indexer.ipc.protocol import (
-    OP_ADD_RESP,
-    OP_ADD_VECTORS,
-    OP_ERROR,
-    OP_GET_STATUS,
     OP_PING,
-    OP_PONG,
-    OP_SEARCH,
-    OP_SEARCH_RESP,
-    OP_STATUS_RESP,
-    decode_add_resp,
     decode_add_vectors,
     decode_error,
-    decode_json,
     decode_remove_ids,
     decode_search,
     decode_search_resp,
-    encode_add_resp,
     encode_add_vectors,
     encode_error,
-    encode_json,
     encode_remove_ids,
     encode_search,
     encode_search_resp,

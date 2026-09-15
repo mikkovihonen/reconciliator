@@ -7,6 +7,7 @@ from typing import Any, Iterable, Literal, Optional
 
 from reconciliator.config import get_bundled_vocab_defaults
 
+
 def strip_vocabulary_subcode(vocab: Optional[str]) -> str:
     """Strip language or sub-scheme specifiers from a vocabulary identifier (e.g. 'yso/fin' -> 'yso')."""
     if not vocab:

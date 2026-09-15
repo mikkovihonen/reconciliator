@@ -954,6 +954,8 @@ def derive_bibframe_keys(
             if clean not in keys[key_type]:
                 keys[key_type].append(clean)
 
+    _add("author", author_key)
+    _add("title_stem", title_stem)
     _add("work", compute_work_blocking_key(author_key, title_stem))
     if work.work_type == "music":
         _add("music_work", compute_music_work_key(author_key, work.title))
