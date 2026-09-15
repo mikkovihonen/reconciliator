@@ -731,6 +731,9 @@ def ingest_oai_cmd(
             strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
             isbd_punctuation=cfg.record_normalization.isbd_punctuation,
             resume=not (bool(restart) if isinstance(restart, bool) else False),
+            constituents_default_profile=cfg.constituents.profile,
+            constituents_default_mode=cfg.constituents.mode,
+            config_dir=cfg.config_dir,
         )
         console.print(
             f"[green]Successfully ingested {total} records from source '{src_name}'.[/green]"

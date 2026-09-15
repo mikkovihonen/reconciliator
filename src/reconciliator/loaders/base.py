@@ -145,6 +145,21 @@ class LoadContext:
     legacy_to_modern: Optional[dict[str, str]] = None
     profile: Optional[Any] = None
 
+    #: How this source records what a publication contains, and what to do with
+    #: it: a resolved `constituents.SourceConstituents`. None means the source
+    #: named no profile, which is the default and means "look for nothing".
+    constituents: Optional[Any] = None
+
+    @property
+    def constituent_profile(self) -> Optional[Any]:
+        """The profile to read constituents with, if this source has one."""
+        return getattr(self.constituents, "profile", None)
+
+    @property
+    def writes_constituent_entities(self) -> bool:
+        """Whether constituents become rows rather than only blocking keys."""
+        return bool(getattr(self.constituents, "writes_entities", False))
+
     @property
     def origin(self) -> str:
         """The record_origin to stamp: explicit value, else the source name."""
@@ -172,6 +187,11 @@ class LoaderCapabilities(BaseModel):
     # One flag per LoadContext normalisation concern.
     deterministic_ids: bool = False
     stamps_record_origin: bool = False
+    #: Whether this loader can turn a record's constituents into rows when the
+    #: source's profile asks for them. A loader that cannot says so in
+    #: `not_produced`, so an aggregate silently arriving as a single work is a
+    #: declared boundary rather than an oversight.
+    emits_constituents: bool = False
     normalises_isbd: bool = False
     folds_subject_vocabularies: bool = False
     normalises_relators: bool = False

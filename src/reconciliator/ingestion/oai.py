@@ -13,12 +13,14 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from lxml import etree
 from rdflib import Graph
 
 from reconciliator.config import OAIIngestConfig
+from reconciliator.constituents import resolve_for_source
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.harvest.resourcesync import ResourceSyncHarvester
 from reconciliator.loaders.base import LoadContext
@@ -189,6 +191,7 @@ class _WEMIBatchAccumulator:
         vocab_store: Optional[Any] = None,
         strip_isbd_punctuation: bool = True,
         isbd_punctuation: str = " ./,;:",
+        constituents: Optional[Any] = None,
     ) -> None:
         self.source_name = source_name
         self.strip_isbd_punctuation = strip_isbd_punctuation
@@ -196,6 +199,7 @@ class _WEMIBatchAccumulator:
         self.config = config
         self.relator_mappings = relator_mappings
         self.vocab_store = vocab_store
+        self.constituents = constituents
         # Harvested records staged since the last take(). Counted separately from
         # the entity lists because one record can decompose into several agents,
         # and the resume watermark has to advance in records, not entities.
@@ -251,6 +255,7 @@ class _WEMIBatchAccumulator:
             vocab_store=self.vocab_store,
             strip_isbd_punctuation=self.strip_isbd_punctuation,
             isbd_punctuation=self.isbd_punctuation,
+            constituents=self.constituents,
         )
 
     def take(self) -> dict[str, Any]:
@@ -383,6 +388,9 @@ def ingest_oai_pipeline(
     resume: bool = True,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = " ./,;:",
+    constituents_default_profile: Optional[str] = None,
+    constituents_default_mode: str = "keys_only",
+    config_dir: Optional[Path] = None,
 ) -> int:
     """Ingest a configured OAI/file source into WEMI storage over a decoupled pipeline.
 
@@ -418,6 +426,24 @@ def ingest_oai_pipeline(
             "Skip-existing active: found %d already ingested records for source '%s'.",
             len(existing_ids),
             source_name,
+        )
+
+    # Resolved once, before any record is read, so a bad profile name stops the
+    # harvest at the start rather than after 200,000 records.
+    source_constituents = resolve_for_source(
+        source_name,
+        config.constituents,
+        config.constituents_mode,
+        default_profile=constituents_default_profile,
+        default_mode=constituents_default_mode,  # type: ignore[arg-type]
+        config_dir=config_dir,
+    )
+    if source_constituents.enabled:
+        logger.info(
+            "Source %r reads constituents with profile %r (mode: %s).",
+            source_name,
+            source_constituents.profile.name if source_constituents.profile else None,
+            source_constituents.mode,
         )
 
     # ------------------------------------------------------------------
@@ -601,6 +627,7 @@ def ingest_oai_pipeline(
             vocab_store=vocab_store,
             strip_isbd_punctuation=strip_isbd_punctuation,
             isbd_punctuation=isbd_punctuation,
+            constituents=source_constituents,
         )
 
         def note_token(token: Optional[str]) -> None:

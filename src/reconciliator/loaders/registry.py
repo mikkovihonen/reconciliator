@@ -49,12 +49,14 @@ class MarcBibliographicLoader(RecordLoader):
             isbd_punctuation=ctx.isbd_punctuation,
             key_sink=keys,
         )
-        return DecomposedRecord(
+        record = DecomposedRecord(
             works=[w], expressions=[e], manifestations=[m], items=list(items),
             agents=list(agents), relationships=list(rels), identifiers=list(idents),
             associations=list(assoc), mediums=list(mops), contributions=list(contribs),
             entity_keys=keys,
         )
+        _add_constituents(record, item, ctx, w, e, m)
+        return record
 
 
 # --- MARC authority -------------------------------------------------------
@@ -186,6 +188,56 @@ def _is_xml_element(item: Any) -> bool:
     return isinstance(item, etree._Element)
 
 
+def _add_constituents(
+    record: DecomposedRecord,
+    item: Any,
+    ctx: LoadContext,
+    work: Any,
+    expression: Any,
+    manifestation: Any,
+) -> None:
+    """Append the constituent rows this source's profile asks for.
+
+    Here rather than inside `decompose_marc_wemi` because a record's constituents
+    are *more works*, and that function returns one of each tier; the loader
+    holds a `DecomposedRecord`, which has held lists since the loader contract
+    landed. The blocking keys are derived either way, as they always were - this
+    only adds rows, and only when the source asked for them.
+    """
+    profile = ctx.constituent_profile
+    if profile is None or not ctx.writes_constituent_entities:
+        return
+
+    from reconciliator.loaders.aggregates import build_embodied_constituents
+    from reconciliator.loaders.marcxml import (
+        extract_marc_constituents,
+        marc_main_entry_name,
+    )
+
+    constituents = extract_marc_constituents(
+        item, profile, record_id=f"{ctx.source}/{work.source_id}"
+    )
+    if not constituents:
+        return
+
+    rows = build_embodied_constituents(
+        constituents,
+        container_work=work,
+        container_manifestation=manifestation,
+        source=ctx.source,
+        record_origin=ctx.origin,
+        language=expression.language or "und",
+        work_type=work.work_type,
+        content_type=expression.content_type,
+        container_creator=marc_main_entry_name(item),
+        serialization_engine=ctx.serialization_engine,
+    )
+    record.works.extend(rows.works)
+    record.expressions.extend(rows.expressions)
+    record.associations.extend(rows.associations)
+    record.relationships.extend(rows.relationships)
+
+
 # --- capability declarations ----------------------------------------------
 #
 # Derived from what each loader actually does, and verified by
@@ -248,6 +300,9 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         not_produced["relator_normalisation"] = (
             "takes no relator_mappings; authority headings carry no relator codes"
         )
+        not_produced["constituents"] = (
+            "an authority record describes a work, not a publication with contents"
+        )
 
     return LoaderCapabilities(
         name=name,
@@ -272,6 +327,9 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         ),
         deterministic_ids=True,
         stamps_record_origin=True,
+        # Only the bibliographic path: an authority record describes a work, not
+        # a publication with contents.
+        emits_constituents=keys,
         normalises_isbd=True,
         folds_subject_vocabularies=folds,
         normalises_relators=folds,
@@ -318,6 +376,11 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         # registry the MARC path uses, and ctx.relator_mappings reaches it.
         normalises_relators=True,
         not_produced={
+            "constituents": (
+                "reads no bf:hasPart: constituent works arrive as related Works "
+                "and the predicate is currently mapped to series membership. "
+                "See plans/aggregates.md stage 7"
+            ),
             "citation": "BIBFRAME has no host-item concept equivalent to MARC 773",
             "analytic": (
                 "constituent works are modelled as related Works rather than as "

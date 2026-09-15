@@ -2283,6 +2283,26 @@ def _clean_duration(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def marc_main_entry_name(record_elem: etree._Element) -> Optional[str]:
+    """The 1XX main entry's name, or None when the record has no main entry.
+
+    A contents note listed under a single main entry is that main entry's work:
+    a track on a composer's album is by that composer whether or not the note
+    repeats the name. Constituent identity needs this, because a track named with
+    its composer in one release and without in another would otherwise be two
+    works.
+
+    None for a record with no 1XX - a various-artists compilation, catalogued
+    under title - which is exactly the case where inheriting would be wrong.
+    """
+    for tag in ("100", "110", "111"):
+        for field in _get_datafields(record_elem, tag):
+            name = strip_isbd(_get_subfield(field, "a"))
+            if name:
+                return name
+    return None
+
+
 def extract_marc_analytics(record_elem: etree._Element) -> list[tuple[str, Optional[str]]]:
     """Extract constituent works (title, creator) from 700 $t / 710 $t / 505 $t.
 

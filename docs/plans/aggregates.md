@@ -362,11 +362,7 @@ Each is its own diff with its own verification, in this order:
    below.*
 2. ✅ **The profile mechanism.** *Done — see the log below.*
 3. ✅ **Profile-driven MARC extraction.** *Done — see the log below.*
-4. **Shape A emission** through `loaders/aggregates.py`, gated by
-   `constituents_mode`. Verified: an album yields 1 + N works and N ordered M-E
-   rows; two albums sharing a track converge on one constituent work row;
-   `delete_source` still removes everything; `mode: keys_only` reproduces today's
-   output exactly.
+4. ✅ **Shape A emission.** *Done — see the log below.*
 5. **The contributor fix** — a 7XX with `$t` stops contributing to the container
    where the profile says `contributes_to_container: false` — with a measured
    before/after on matching, alone in its diff.
@@ -593,3 +589,77 @@ stated ordinals, disc numbers, the cap logging the record id, a `component`
 from 773, an RDF entry ignored, and the legacy path byte-for-byte.
 
 733 → **757 passing**, lint clean, pipeline unchanged.
+
+## Stage 4 ✅ COMPLETE
+
+`loaders/aggregates.py` turns `Constituent` objects into rows — the shared half,
+so two formats describing one album cannot store two shapes of the same fact.
+Emission happens in the *loader*, not in `decompose_marc_wemi`: a record's
+constituents are more works, and that function returns one of each tier, while
+the loader holds a `DecomposedRecord`, which has held lists since the loader
+contract landed.
+
+`LoadContext` carries a resolved `SourceConstituents`; `ingest_oai_pipeline`
+resolves it once before reading any record, so a bad profile name stops the
+harvest at the start rather than after 200,000 records.
+`LoaderCapabilities.emits_constituents` declares it, and the other two loaders
+declare the gap: an authority record describes a work rather than a publication
+with contents, and the BibFrame path reads no `bf:hasPart` yet.
+
+Two albums, one shared track, ingested through the real loader path:
+
+```
+work ALB-1                'Cantus arcticus'        (container)
+work c:36383d9b726368ed   'Cantus arcticus'        containers=2
+work c:f77a6a61f9211418   'Angel of light'         containers=1
+work ALB-2                'Rautavaara collection'  (container)
+work c:42319cf2bb747398   'Isle of bliss'          containers=1
+
+ALB-1 junction: [primary, None] [track 1, 18:20] [track 2, 31:05]
+ALB-2 junction: [primary, None] [track 1, 12:00] [track 2, 18:25]
+
+after delete_source: every table empty
+```
+
+Five work rows for two albums and three distinct pieces: the shared track is one
+work with two containers, while each release keeps its own timing on its own
+junction row — duration belongs to the embodiment, not to the work.
+
+### Convergence needed a cataloguing rule, not a digest tweak
+
+The first run produced *six* works: the shared track came out twice, because one
+release's note names its composer in `$r` and the other's does not, so one digest
+had an author key and the other had none. A constituent that states no creator
+now inherits the container's **main entry** — which is the cataloguing rule, that
+contents listed under a single main entry are that main entry's work — and
+`compute_author_key` already folds "Rautavaara" and "Rautavaara, Einojuhani" to
+the same key, so the two forms were never the problem. `marc_main_entry_name`
+returns None for a record with no 1XX, which is precisely the various-artists
+compilation where inheriting would attribute every track to one artist.
+
+### And a guard that was dead, then wrong
+
+A release whose note lists one work, itself, *is* that work, and the container row
+already represents it. The first guard compared the constituent's URI with the
+container's — a digest URI against a control-number URI, which can never be equal,
+so it never fired at all. Fixing the comparison then made it too broad: an album
+named after one of its several pieces lost that piece from its own tracklist. It
+now applies only when the note lists exactly one work, which is the case where
+the container and the constituent really are the same work.
+
+That is the fourth guard this project has had that could not fire. The pattern
+worth naming: a guard written against an identifier whose *shape* the author had
+not checked.
+
+### Verified
+
+19 tests in `tests/test_aggregate_emission.py`: all three modes (and `keys_only`
+reproducing today's rows exactly), identical blocking keys in every mode, ordered
+junctions with durations, edges in both directions from one row, convergence
+across releases, per-release timings, main-entry inheritance and its absence on a
+compilation, the single-work release, re-ingest stability, `record_origin` and
+ISBD stripping applied by `finalise` for free, serialisation, the capability
+declarations, and a 773 skipped rather than half-written.
+
+757 → **776 passing**, lint clean, legacy analytic parity still PASS, pipeline
+unchanged.
