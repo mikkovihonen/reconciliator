@@ -32,8 +32,10 @@ LOADER = pathlib.Path(__file__).resolve().parents[1] / "src/reconciliator/loader
 
 # Funnels no MARC record can currently reach, each because the loader does not
 # classify the record type they key on. Fixing one means teaching
-# `determine_work_type` or `derive_domain_keys` to recognise its signal - a
-# bibliographic decision, not a refactor - and then removing it from this list.
+# `determine_work_type` or `derive_domain_keys` to recognise its signal, which
+# needs a citable rule from the Finnish RDA application guidelines rather than a
+# guess - see docs/plans/wemi_data_structure.md 14.17 for the ones researched so
+# far and the open questions to put to the National Library.
 KNOWN_UNREACHABLE_FROM_MARC = {
     "funnel_dd_sammelband",            # no 'sammelband' key: bound-with is not parsed
     "funnel_ee_web_archive",           # no 'web_harvest' work type
@@ -43,7 +45,6 @@ KNOWN_UNREACHABLE_FROM_MARC = {
     "funnel_jj_medieval_fragment",     # no 'codex_fragment' work type
     "funnel_nn_geodata",               # no 'geodata_service' work type
     "funnel_t_legal",                  # no 'legal' work type, no 'statute' key
-    "funnel_z_tactile",                # no 'tactile' work type
 }
 
 
@@ -295,3 +296,130 @@ def test_bibframe_reaches_substantially_more_funnels_than_before():
     }
     reachable = len(BUILTIN_SPECS) - len(_unreachable(caps))
     assert reachable >= 17, f"only {reachable} funnels reachable from BibFrame"
+
+
+# --- RDA content types (336 $b, $2 rdacontent) ----------------------------
+#
+# Codes checked against the LoC "Term and Code List for RDA Content Types". The
+# previous mapping was written from memory and had four codes pointing at the
+# wrong concept and three that do not exist in the vocabulary at all.
+#
+# Sources:
+#   https://loc.gov/standards/valuelist/rdacontent.html
+#   https://wiki.helsinki.fi/xwiki/bin/view/rdasovellusohje/
+#     RDA-kuvailu MARC 21 -formaatilla/RDA-sovellusohje/3XX Fyysisen kuvailun jne. kentät/
+
+RDA_CONTENT_TYPE_STANDARD = {
+    "crd": "cartographic dataset",
+    "cri": "cartographic image",
+    "crm": "cartographic moving image",
+    "crt": "cartographic tactile image",
+    "crn": "cartographic tactile three-dimensional form",
+    "crf": "cartographic three-dimensional form",
+    "cod": "computer dataset",
+    "cop": "computer program",
+    "ntv": "notated movement",
+    "ntm": "notated music",
+    "prm": "performed music",
+    "snd": "sounds",
+    "spw": "spoken word",
+    "sti": "still image",
+    "tci": "tactile image",
+    "tcm": "tactile notated music",
+    "tcn": "tactile notated movement",
+    "tct": "tactile text",
+    "tcf": "tactile three-dimensional form",
+    "txt": "text",
+    "tdf": "three-dimensional form",
+    "tdm": "three-dimensional moving image",
+    "tdi": "two-dimensional moving image",
+}
+
+
+def test_every_mapped_content_code_is_a_real_rda_code():
+    """The loader once mapped `dta`, `dcr` and `tcg`, none of which exist."""
+    from reconciliator.loaders.marcxml import RDA_CONTENT_TYPES
+
+    invented = set(RDA_CONTENT_TYPES) - set(RDA_CONTENT_TYPE_STANDARD)
+    assert invented == set(), f"not RDA content codes: {sorted(invented)}"
+
+
+def test_the_moving_image_codes_are_not_transposed():
+    """`tdi` is two-dimensional - ordinary film and video - and was mapped to 3-D.
+
+    This is the code the overwhelming majority of moving-image records carry, so
+    the transposition mislabelled essentially every film in a corpus.
+    """
+    from reconciliator.loaders.marcxml import RDA_CONTENT_TYPES
+
+    assert RDA_CONTENT_TYPES["tdi"] == "moving_image"
+    assert RDA_CONTENT_TYPES["tdm"] == "three_dimensional_moving_image"
+
+
+def test_the_tactile_codes_are_not_swapped():
+    """`tcf` is a tactile three-dimensional form, `tcm` tactile notated music."""
+    from reconciliator.loaders.marcxml import RDA_CONTENT_TYPES
+
+    assert RDA_CONTENT_TYPES["tcm"] == "tactile_notated_music"
+    assert RDA_CONTENT_TYPES["tcf"] != "tactile_notated_music"
+
+
+def test_computer_dataset_is_mapped():
+    """`cod` is the real code; the loader had mapped a non-existent `dta`."""
+    from reconciliator.loaders.marcxml import RDA_CONTENT_TYPES
+
+    assert RDA_CONTENT_TYPES["cod"] == "dataset"
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_work_type"),
+    [
+        ("tdi", "moving_image"),
+        ("cod", "dataset"),
+        ("cri", "cartography"),
+        ("tct", "tactile"),
+        ("tcm", "tactile"),
+    ],
+)
+def test_a_content_type_classifies_a_record_with_a_generic_leader(
+    code: str, expected_work_type: str
+):
+    """An RDA record must carry 336, and electronic resources often have a
+    generic Leader/06, so the content type has to be able to classify."""
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    record = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>00000cam a2200000 i 4500</leader>
+            <controlfield tag="001">X1</controlfield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Teos</subfield></datafield>
+            <datafield tag="336" ind1=" " ind2=" "><subfield code="b">{code}</subfield><subfield code="2">rdacontent</subfield></datafield>
+        </record>""".encode()
+    )
+    assert build_target_record_from_marc(record, source="m").work_type == expected_work_type
+
+
+def test_the_accessibility_field_marks_a_braille_book_as_tactile():
+    """`341 0# $a tactile $e braille $2 sapdv` is what the Finnish accessibility
+    guidance tells cataloguers to record for a pistekirja (braille book)."""
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    record = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>00000cam a2200000 i 4500</leader>
+            <controlfield tag="001">B1</controlfield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Pistekirja</subfield></datafield>
+            <datafield tag="341" ind1="0" ind2=" ">
+                <subfield code="a">tactile</subfield>
+                <subfield code="e">braille</subfield>
+                <subfield code="2">sapdv</subfield>
+            </datafield>
+        </record>""".encode()
+    )
+    assert build_target_record_from_marc(record, source="m").work_type == "tactile"

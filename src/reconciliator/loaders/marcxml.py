@@ -839,6 +839,25 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
         if "rahat" in gh or "mitalit" in gh:
             return "numismatic"
 
+    # Tactile resources, from either the machine-readable accessibility field or
+    # a tactile RDA content type. The Finnish accessibility guidance directs
+    # cataloguers to 341 (`341 0# $a tactile $e braille $2 sapdv` for a braille
+    # book), and 336 $b carries the tactile content codes independently.
+    #
+    # Placed after the genre headings but before the leader checks: a braille
+    # book has Leader/06 = "a" like any text, so a leader-first order would never
+    # see it. Whether a braille *score* should be "tactile" or "music" is a
+    # genuine cataloguing question and this order answers "tactile" - flagged for
+    # the National Library rather than settled here.
+    for f in _get_datafields(record_elem, "341"):
+        for val in _get_subfields(f, "a"):
+            if val.strip().lower() == "tactile":
+                return "tactile"
+    for f in _get_datafields(record_elem, "336"):
+        for sub in _get_subfields(f, "b"):
+            if sub.strip().lower() in TACTILE_CONTENT_CODES:
+                return "tactile"
+
     # A 111 meeting main entry is a conference. Without this no MARC record ever
     # became work_type "conference" or "event", so funnel J was unreachable
     # despite 111 already being parsed as a corporate agent.
@@ -882,6 +901,17 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     if date1 and int(date1) < 1800:
         return "early_print"
 
+    # RDA content type as a work-type signal, before the serial/default fall
+    # through. Leader/06 wins where it is specific, but an RDA record is required
+    # to carry 336 and many electronic resources carry a generic leader with a
+    # precise content type - so a dataset coded `336 $b cod` under Leader/06 "a"
+    # was arriving as plain text.
+    for f in _get_datafields(record_elem, "336"):
+        for sub in _get_subfields(f, "b"):
+            implied = CONTENT_TYPE_WORK_TYPES.get(sub.strip().lower())
+            if implied:
+                return implied  # type: ignore[return-value]
+
     # Serials / Integrating
     if l07 in ("s", "b"):
         return "serial"
@@ -891,47 +921,80 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     return "text"
 
 
+# MARC 336 $b (rdacontent) -> ExpressionContentType.
+#
+# The full LoC "Term and Code List for RDA Content Types", mapped onto the
+# internal vocabulary. Where RDA is finer-grained than ExpressionContentType the
+# nearest internal value is used and the RDA term is named in the comment, so a
+# future widening of the internal type has the original distinction to hand.
+RDA_CONTENT_TYPES: dict[str, ExpressionContentType] = {
+    "txt": "text",
+    "ntm": "notated_music",
+    "prm": "audio_music",              # performed music
+    "spw": "spoken_word",
+    "snd": "sounds",
+    "sti": "still_image",
+    "tdi": "moving_image",             # two-dimensional moving image: film, video
+    "tdm": "three_dimensional_moving_image",
+    "tdf": "three_dimensional",        # three-dimensional form
+    "cri": "cartographic_image",
+    "crd": "cartographic_dataset",
+    "crm": "moving_image",             # cartographic moving image
+    "crf": "cartographic_image",       # cartographic three-dimensional form
+    "crt": "tactile_cartographic",     # cartographic tactile image
+    "crn": "tactile_cartographic",     # cartographic tactile 3-D form
+    "cod": "dataset",                  # computer dataset
+    "cop": "computer_program",
+    "ntv": "choreographic_movement",   # notated movement
+    "tci": "tactile_graphic",          # tactile image
+    "tcm": "tactile_notated_music",
+    "tcn": "tactile_notated_music",    # tactile notated movement
+    "tct": "tactile_text",
+    "tcf": "three_dimensional",        # tactile three-dimensional form
+}
+
+# RDA content type -> WorkType, used only when Leader/06 was not specific.
+# Deliberately partial: codes whose work type the leader already handles well, or
+# which imply nothing about the work type, are left out.
+CONTENT_TYPE_WORK_TYPES: dict[str, str] = {
+    "cri": "cartography",
+    "crd": "cartography",
+    "crm": "cartography",
+    "crf": "cartography",
+    "cod": "dataset",              # computer dataset
+    "cop": "software",             # computer program
+    "ntm": "music",                # notated music
+    "prm": "music",                # performed music
+    "spw": "audio_nonmusic",       # spoken word
+    "sti": "still_image",
+    "tdi": "moving_image",         # two-dimensional moving image
+    "tdm": "moving_image",         # three-dimensional moving image
+    "tdf": "realia",               # three-dimensional form
+    "ntv": "choreography",         # notated movement
+}
+
+# The tactile subset, which is what makes a resource tactile regardless of what
+# else it is. 341 $a "tactile" (‡2 sapdv) says the same thing in machine-readable
+# form and is the field the accessibility guidance directs cataloguers to.
+TACTILE_CONTENT_CODES = frozenset({"tci", "tcm", "tcn", "tct", "tcf", "crt", "crn"})
+
+
 def determine_content_type(
     record_elem: etree._Element, work_type: WorkType = "text"
 ) -> ExpressionContentType:
     """Determine WEMI ExpressionContentType from 336 $b, Leader/06, or work_type."""
+    # RDA content types (336 $b, $2 rdacontent). Codes verified against the LoC
+    # "Term and Code List for RDA Content Types" rather than transcribed from
+    # memory: the previous mapping had `tdi` (two-dimensional moving image - the
+    # code ordinary film and video carry) pointing at three-dimensional moving
+    # image, `tdm` at a static three-dimensional form, `tcf` and `tcm` swapped
+    # with each other's meanings, and three codes that do not exist in the
+    # vocabulary at all (`dta`, `dcr`, `tcg`).
     for f in _get_datafields(record_elem, "336"):
         for sub in _get_subfields(f, "b"):
-            code = sub.lower()
-            if code == "txt":
-                return "text"
-            if code == "ntm":
-                return "notated_music"
-            if code == "prm":
-                return "audio_music"
-            if code == "spw":
-                return "spoken_word"
-            if code == "snd":
-                return "sounds"
-            if code == "tdi":
-                return "three_dimensional_moving_image"
-            if code == "tdm":
-                return "three_dimensional"
-            if code == "tcf":
-                return "tactile_notated_music"
-            if code == "tcm":
-                return "tactile_cartographic"
-            if code == "tct":
-                return "tactile_text"
-            if code == "tcg":
-                return "tactile_graphic"
-            if code == "cop":
-                return "computer_program"
-            if code == "dcr":
-                return "choreographic_movement"
-            if code == "crd":
-                return "cartographic_dataset"
-            if code == "cri":
-                return "cartographic_image"
-            if code == "sti":
-                return "still_image"
-            if code == "dta":
-                return "dataset"
+            resolved = RDA_CONTENT_TYPES.get(sub.lower().strip())
+            if resolved:
+                return resolved
 
     # Fallbacks based on work_type
     if work_type == "music":
