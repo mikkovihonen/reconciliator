@@ -373,3 +373,110 @@ def test_match_record_carries_identifiers_and_wemi_context():
     assert record.get_identifiers("publisher_number") == ["ODE 1234-2"]
     assert record.work_uri and record.expression_uri and record.manifestation_uri
     assert record.content_type
+
+
+def test_isbd_punctuation_is_stripped_consistently_on_both_paths():
+    """Phase 12's discrepancy: the two ingest paths disagreed on agent name form.
+
+    The authority decomposer stripped trailing ISBD punctuation and the
+    bibliographic one did not, so the same person arrived as "Waltari, Mika"
+    from one path and "Waltari, Mika," from the other in the stored agent row.
+    Blocking keys were unaffected - see the test below - so this is about the
+    name that gets stored and exported, not about matching.
+    """
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import decompose_marc_authority, decompose_marc_wemi
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    bib = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">B1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Waltari, Mika,</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Sinuhe egyptilainen</subfield></datafield>
+        </record>""".encode()
+    )
+    auth = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>00000nz  a2200000n  4500</leader>
+            <controlfield tag="001">A1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Waltari, Mika,</subfield></datafield>
+        </record>""".encode()
+    )
+
+    _w, _e, _m, _i, bib_agents, *_ = decompose_marc_wemi(bib, source="melinda")
+    _wl, _el, _ml, _il, auth_agents, *_ = decompose_marc_authority(auth, source="kanto")
+
+    assert bib_agents[0].name == "Waltari, Mika"
+    assert auth_agents[0].name == "Waltari, Mika"
+    assert bib_agents[0].name == auth_agents[0].name
+
+
+def test_isbd_stripping_can_be_turned_off():
+    """Retaining the literal subfield is the opt-in, for callers who need it."""
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import decompose_marc_wemi
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    rec = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">B1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Waltari, Mika,</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Sinuhe</subfield></datafield>
+        </record>""".encode()
+    )
+    _w, _e, _m, _i, agents, *_ = decompose_marc_wemi(
+        rec, source="melinda", strip_isbd_punctuation=False
+    )
+    assert agents[0].name == "Waltari, Mika,"
+
+
+def test_isbd_stripping_does_not_move_any_blocking_key():
+    """Bounds the blast radius: matching is unaffected, only the stored name changes.
+
+    `compute_author_key` and `compute_title_stem` already discard punctuation, so
+    both forms have always produced the same keys. The discrepancy was therefore
+    in the stored and exported name string, not in record identity - which is
+    what makes turning stripping on safe to do in one step.
+    """
+    from reconciliator.normalizers.blocking import compute_author_key, compute_title_stem
+
+    assert compute_author_key("Waltari, Mika,", "Waltari,") == compute_author_key(
+        "Waltari, Mika", "Waltari"
+    )
+    assert compute_title_stem("Sinuhe egyptilainen.") == compute_title_stem(
+        "Sinuhe egyptilainen"
+    )
+
+
+def test_configured_isbd_character_set_reaches_both_paths():
+    """Regression guard: two call sites once ignored the configured set.
+
+    The character set is threaded alongside the on/off flag, and a half-wired
+    setting is worse than no setting - it silently does nothing on some records.
+    """
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import decompose_marc_authority, decompose_marc_wemi
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    bib = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">B1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Waltari, Mika,</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Sinuhe</subfield></datafield>
+        </record>""".encode()
+    )
+    auth = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>00000nz  a2200000n  4500</leader>
+            <controlfield tag="001">A1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Waltari, Mika,</subfield></datafield>
+        </record>""".encode()
+    )
+    # Stripping spaces only must leave the comma, on both paths alike.
+    bib_agent = decompose_marc_wemi(bib, source="melinda", isbd_punctuation=" ")[4][0]
+    auth_agent = decompose_marc_authority(auth, source="kanto", isbd_punctuation=" ")[4][0]
+    assert bib_agent.name == "Waltari, Mika,"
+    assert auth_agent.name == "Waltari, Mika,"

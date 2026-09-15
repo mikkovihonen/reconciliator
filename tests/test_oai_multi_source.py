@@ -157,13 +157,16 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
         ]
         assert manif_sources == ["catalog_a", "catalog_b"]
 
-        # Names keep the MARC $a trailing comma on the bibliographic path; the
-        # agent-authority path strips it. Both sides of reconciliation agree, so
-        # matching is unaffected.
+        # ISBD punctuation is stripped on both ingest paths now. It used to be
+        # stripped on the authority path only, so the same person arrived as
+        # "Waltari, Mika" from one and "Waltari, Mika," from the other - and
+        # author keys derive from these strings, so the paths disagreed about
+        # identity. `record_normalization.strip_isbd_punctuation: false` retains
+        # the literal subfield.
         agent_names = sorted(
             r["name"] for r in conn.execute("SELECT name FROM agents;").fetchall()
         )
-        assert agent_names == ["Author Alpha,", "Author Beta,"]
+        assert agent_names == ["Author Alpha", "Author Beta"]
 
 
 def test_cli_ingest_oai_options(tmp_path: Path) -> None:

@@ -93,6 +93,26 @@ def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
     return f"{prefix}:{digest}"
 
 
+# ISBD presentation punctuation. Default matches the authority decomposer's
+# historical behaviour; `strip_isbd_punctuation: false` retains the literal
+# subfield instead. See RecordNormalizationConfig.
+DEFAULT_ISBD_PUNCTUATION = " ./,;:"
+
+
+def strip_isbd(value: Optional[str], enabled: bool = True, chars: str = DEFAULT_ISBD_PUNCTUATION) -> Optional[str]:
+    """Strip trailing ISBD punctuation from a heading string.
+
+    Single definition, because the authority path stripped it and the
+    bibliographic path did not, so the same agent was stored as "Waltari, Mika"
+    from one and "Waltari, Mika," from the other. Blocking keys already discarded
+    punctuation, so this governs the name that is stored and exported rather than
+    how records match.
+    """
+    if value is None:
+        return None
+    return value.rstrip(chars) if enabled else value
+
+
 def _get_subfields(elem: etree._Element, code: str) -> list[str]:
     """Get text values of all subfields matching given code."""
     res: list[str] = []
@@ -218,6 +238,8 @@ def parse_marc_record_elem(
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
+    strip_isbd_punctuation: bool = True,
+    isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
 ) -> dict[str, Any]:
     """Extract raw bibliographic fields from an lxml MARCXML <record> element."""
     # Control numbers
@@ -500,7 +522,7 @@ def parse_marc_record_elem(
     agents: list[dict[str, Any]] = []
     for tag in ("100", "700"):
         for f in _get_datafields(record_elem, tag):
-            name = _get_subfield(f, "a")
+            name = strip_isbd(_get_subfield(f, "a"), strip_isbd_punctuation, isbd_punctuation)
             if name:
                 sub_cs = [c.strip(" ,;.") for c in _get_subfields(f, "c") if c.strip(" ,;.")]
                 sub_d = _get_subfield(f, "d")
@@ -542,7 +564,7 @@ def parse_marc_record_elem(
 
     for tag in ("110", "710", "111", "711"):
         for f in _get_datafields(record_elem, tag):
-            name = _get_subfield(f, "a")
+            name = strip_isbd(_get_subfield(f, "a"), strip_isbd_punctuation, isbd_punctuation)
             if name:
                 sub_cs = [c.strip(" ,;.") for c in _get_subfields(f, "c") if c.strip(" ,;.")]
                 sub_d = _get_subfield(f, "d")
@@ -1047,6 +1069,8 @@ def decompose_marc_authority(
     id_source: str = "marc_001",
     record_origin: RecordOrigin = "authority",
     serialization_engine: Optional[WEMISerializationEngine] = None,
+    strip_isbd_punctuation: bool = True,
+    isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
 ) -> tuple[
     list[WorkEntity],
     list[ExpressionEntity],
@@ -1120,14 +1144,14 @@ def decompose_marc_authority(
             agent_field = cand_heading
 
         # Clean trailing punctuation
-        title = title.rstrip(" ./,")
+        title = strip_isbd(title, strip_isbd_punctuation, isbd_punctuation) or title
 
         agents_list: list[AgentEntity] = []
         contributions: list[ContributionEntity] = []
         if agent_field is not None:
             agent_name = _get_subfield(agent_field, "a")
             if agent_name:
-                agent_name_clean = agent_name.rstrip(" ./,")
+                agent_name_clean = strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
                 agent_dates = _get_subfield(agent_field, "d")
                 b_yr, d_yr = parse_marc_dates(agent_dates)
                 sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
@@ -1181,12 +1205,12 @@ def decompose_marc_authority(
         for f in _get_datafields(record_elem, "430"):
             vt = _get_subfield(f, "a")
             if vt:
-                variant_titles.append(vt.rstrip(" ./,"))
+                variant_titles.append(strip_isbd(vt, strip_isbd_punctuation, isbd_punctuation) or vt)
         for tag in ("400", "410", "411"):
             for f in _get_datafields(record_elem, tag):
                 vt = _get_subfield(f, "t")
                 if vt:
-                    variant_titles.append(vt.rstrip(" ./,"))
+                    variant_titles.append(strip_isbd(vt, strip_isbd_punctuation, isbd_punctuation) or vt)
 
         # Relationships from 5xx
         relationships: list[WorkRelationship] = []
@@ -1286,7 +1310,7 @@ def decompose_marc_authority(
         # -------------------------------------------------------------
         agent_field = (f100 or f110 or f111)[0]
         agent_name = _get_subfield(agent_field, "a") or "Unknown Agent"
-        agent_name_clean = agent_name.rstrip(" ./,")
+        agent_name_clean = strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
         agent_dates = _get_subfield(agent_field, "d")
         birth_yr, death_yr = parse_marc_dates(agent_dates)
 
@@ -1306,7 +1330,7 @@ def decompose_marc_authority(
             for f in _get_datafields(record_elem, tag):
                 v = _get_subfield(f, "a")
                 if v:
-                    variant_names.append(v.rstrip(" ./,"))
+                    variant_names.append(strip_isbd(v, strip_isbd_punctuation, isbd_punctuation) or v)
 
         # Affiliations from 373
         affiliations: dict[str, int] = {}
@@ -1400,6 +1424,8 @@ def decompose_marc_wemi(
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     key_sink: Optional[list[EntityKey]] = None,
+    strip_isbd_punctuation: bool = True,
+    isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -1430,6 +1456,8 @@ def decompose_marc_wemi(
         legacy_to_modern=legacy_to_modern,
         relator_mappings=relator_mappings,
         vocab_store=vocab_store,
+        strip_isbd_punctuation=strip_isbd_punctuation,
+        isbd_punctuation=isbd_punctuation,
     )
     source_id = parsed["source_id"]
     if not source_id or source_id == "unknown_id":
@@ -2004,6 +2032,8 @@ def build_target_record_from_marc(
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
+    strip_isbd_punctuation: bool = True,
+    isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
 ) -> MatchRecord:
     """Extract and stage a MatchRecord with all 42 domain blocking keys and pre-rendered serializations."""
     parsed = parse_marc_record_elem(
@@ -2014,6 +2044,8 @@ def build_target_record_from_marc(
         legacy_to_modern=legacy_to_modern,
         relator_mappings=relator_mappings,
         vocab_store=vocab_store,
+        strip_isbd_punctuation=strip_isbd_punctuation,
+        isbd_punctuation=isbd_punctuation,
     )
     source_id = parsed["source_id"] or "unknown_target"
 

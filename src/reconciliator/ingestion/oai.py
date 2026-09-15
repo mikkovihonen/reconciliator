@@ -190,8 +190,12 @@ class _WEMIBatchAccumulator:
         config: OAIIngestConfig,
         relator_mappings: Optional[dict[str, str]] = None,
         vocab_store: Optional[Any] = None,
+        strip_isbd_punctuation: bool = True,
+        isbd_punctuation: str = " ./,;:",
     ) -> None:
         self.source_name = source_name
+        self.strip_isbd_punctuation = strip_isbd_punctuation
+        self.isbd_punctuation = isbd_punctuation
         self.config = config
         self.relator_mappings = relator_mappings
         self.vocab_store = vocab_store
@@ -246,6 +250,8 @@ class _WEMIBatchAccumulator:
                 source=self.source_name,
                 id_source=self.config.id_source,
                 record_origin=self.source_name,
+                strip_isbd_punctuation=self.strip_isbd_punctuation,
+                isbd_punctuation=self.isbd_punctuation,
             )
             self.works.extend(w_list)
             self.expressions.extend(e_list)
@@ -259,6 +265,8 @@ class _WEMIBatchAccumulator:
                 record_origin=self.source_name,
                 relator_mappings=self.relator_mappings,
                 vocab_store=self.vocab_store,
+                strip_isbd_punctuation=self.strip_isbd_punctuation,
+                isbd_punctuation=self.isbd_punctuation,
                 key_sink=self.entity_keys,
             )
             self.works.append(w)
@@ -401,6 +409,8 @@ def ingest_oai_pipeline(
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     resume: bool = True,
+    strip_isbd_punctuation: bool = True,
+    isbd_punctuation: str = " ./,;:",
 ) -> int:
     """Ingest a configured OAI/file source into WEMI storage over a decoupled pipeline.
 
@@ -592,6 +602,8 @@ def ingest_oai_pipeline(
             config=effective_config,
             relator_mappings=relator_mappings,
             vocab_store=vocab_store,
+            strip_isbd_punctuation=strip_isbd_punctuation,
+            isbd_punctuation=isbd_punctuation,
         )
 
         def note_token(token: Optional[str]) -> None:

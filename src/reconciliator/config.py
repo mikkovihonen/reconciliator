@@ -562,6 +562,18 @@ VocabNormalizationConfig = VocabulariesConfig
 class RecordNormalizationConfig(BaseModel):
     """Configuration for bibliographic record parsing and normalization heuristics."""
 
+    # ISBD presentation punctuation trailing a heading: "Waltari, Mika," ->
+    # "Waltari, Mika". The authority decomposer always stripped it and the
+    # bibliographic one never did, so the same person arrived in two forms
+    # depending on which path ingested them (Phase 12's known discrepancy).
+    # Stripping is the default because the punctuation is presentational. It does
+    # not move any blocking key - compute_author_key and compute_title_stem
+    # already discard punctuation - so it governs the stored and exported form.
+    strip_isbd_punctuation: bool = True
+    # Characters treated as ISBD punctuation when stripping. Not just the comma:
+    # "." and "/" are equally presentational in a MARC $a.
+    isbd_punctuation: str = " ./,;:"
+
     non_filing_articles: dict[str, list[str]] = Field(
         default_factory=lambda: {k: list(v) for k, v in DEFAULT_NON_FILING_ARTICLES.items()}
     )

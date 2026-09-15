@@ -728,6 +728,8 @@ def ingest_oai_cmd(
             skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
             relator_mappings=relator_mappings,
             vocab_store=vocab_store,
+            strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
+            isbd_punctuation=cfg.record_normalization.isbd_punctuation,
             resume=not (bool(restart) if isinstance(restart, bool) else False),
         )
         console.print(
@@ -767,6 +769,8 @@ def _ingest_corpus_as_wemi(
     records: Any,
     source_name: str,
     profile: Optional[BIBFRAMESchemaProfile] = None,
+    strip_isbd_punctuation: bool = True,
+    isbd_punctuation: str = " ./,;:",
     batch_size: int = 500,
 ) -> int:
     """Persist the corpus being reconciled as ordinary WEMI rows.
@@ -808,7 +812,12 @@ def _ingest_corpus_as_wemi(
         try:
             if rec_fmt == "marcxml":
                 w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
-                    orig_payload, source=source_name, record_origin=source_name, key_sink=keys
+                    orig_payload,
+                    source=source_name,
+                    record_origin=source_name,
+                    strip_isbd_punctuation=strip_isbd_punctuation,
+                    isbd_punctuation=isbd_punctuation,
+                    key_sink=keys,
                 )
             elif rec_fmt in ("bibframe_rdf", "bibframe_jsonld"):
                 if rec_fmt == "bibframe_rdf":
@@ -1075,7 +1084,12 @@ def reconcile_cmd(
         corpus_source = r_cfg.corpus_source_name or r_cfg.target_file.stem
         corpus_repo.register_source(corpus_source, is_authoritative=False)
         staged = _ingest_corpus_as_wemi(
-            corpus_repo, _iter_records(), corpus_source, bf_profile
+            corpus_repo,
+            _iter_records(),
+            corpus_source,
+            bf_profile,
+            strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
+            isbd_punctuation=cfg.record_normalization.isbd_punctuation,
         )
 
         if staged:

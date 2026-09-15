@@ -479,6 +479,17 @@ vocabularies:
 # 6. Record Normalization Heuristics
 # ==============================================================================
 record_normalization:
+  # Trailing ISBD presentation punctuation on a MARC $a heading: "Waltari, Mika,"
+  # becomes "Waltari, Mika". The authority ingest path always stripped it and the
+  # bibliographic path never did, so the same person was stored in two forms
+  # depending on which path ingested them. Stripping both is the default.
+  #
+  # This does NOT move any blocking key - compute_author_key and
+  # compute_title_stem already discard punctuation - so it governs the name that
+  # is stored and exported, not how records match.
+  strip_isbd_punctuation: true
+  isbd_punctuation: " ./,;:"   # Characters treated as ISBD punctuation
+
   # Non-filing articles to strip from beginning of title strings by language
   non_filing_articles:
     fi: ["yksi ", "eräs "]
