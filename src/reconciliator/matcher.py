@@ -698,9 +698,6 @@ class WorkMatcher:
             self._equivalence_cache = cached
         return cached
 
-    def refresh_work_equivalences(self) -> None:
-        """Drop the cached equivalence map, e.g. after re-running consolidation."""
-        self._equivalence_cache = None
 
     def _agent_uris_from_identifiers(self, agent: AgentEntity) -> tuple[list[str], list[str]]:
         """Collect an authority agent's $0 and $1 URIs from the identifiers table and its own columns."""

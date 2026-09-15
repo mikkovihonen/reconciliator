@@ -1113,13 +1113,6 @@ class WEMIRepository:
             ).fetchone()
             return _row_to_expression(row) if row else None
 
-    def get_expression_by_uri(self, expression_uri: str) -> Optional[ExpressionEntity]:
-        """Fetch ExpressionEntity by expression_uri."""
-        with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM expressions WHERE expression_uri = ?;", (expression_uri,)
-            ).fetchone()
-            return _row_to_expression(row) if row else None
 
     def get_manifestation(self, manifestation_id: int) -> Optional[ManifestationEntity]:
         """Fetch ManifestationEntity by ID."""
@@ -1129,13 +1122,6 @@ class WEMIRepository:
             ).fetchone()
             return _row_to_manifestation(row) if row else None
 
-    def get_manifestation_by_uri(self, manifestation_uri: str) -> Optional[ManifestationEntity]:
-        """Fetch ManifestationEntity by manifestation_uri."""
-        with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM manifestations WHERE manifestation_uri = ?;", (manifestation_uri,)
-            ).fetchone()
-            return _row_to_manifestation(row) if row else None
 
     def get_manifestation_by_source(
         self, source: str, source_id: str
@@ -1338,17 +1324,6 @@ class WEMIRepository:
                 )
             }
 
-    def resolve_canonical_work(self, work: Optional[WorkEntity]) -> Optional[WorkEntity]:
-        """Return the canonical work of a consolidated group, or the work itself."""
-        if work is None or work.id is None:
-            return work
-        with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT canonical_work_id FROM works WHERE id = ?;", (work.id,)
-            ).fetchone()
-        if not row or not row["canonical_work_id"] or row["canonical_work_id"] == work.id:
-            return work
-        return self.get_work(row["canonical_work_id"]) or work
 
     def get_identifiers_for_entity(
         self, entity_type: EntityType, entity_id: int
@@ -1470,13 +1445,6 @@ class WEMIRepository:
             rows = conn.execute(query, params).fetchall()
             return [_row_to_work(r) for r in rows]
 
-    def get_indexed_manifestation_source_ids(self, source: str) -> set[str]:
-        """Return set of manifestation source_ids stored in authority.db for a given source."""
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT source_id FROM manifestations WHERE source = ?;", (source,)
-            )
-            return {row["source_id"] for row in cursor if row["source_id"]}
 
     def get_indexed_source_ids(self, source: str) -> set[str]:
         """Return set of manifestation source_ids stored and indexed for a given source."""
@@ -1580,38 +1548,6 @@ class WEMIRepository:
             return [(_row_to_work(row), float(row["rank"])) for row in cursor]
 
 
-    def search_manifestations_fts(
-        self,
-        query: str,
-        limit: Optional[int] = None,
-        ranking_function: Optional[str] = None,
-        weights: Optional[list[float]] = None,
-        prefix_search: Optional[bool] = None,
-        authoritative_only: bool = False,
-    ) -> list[tuple[ManifestationEntity, float]]:
-        """Search manifestations via SQLite FTS5. Returns list of (ManifestationEntity, bm25_rank)."""
-        if not query or not query.strip():
-            return []
-        match_query, order_clause, eff_limit = self._build_fts_query_and_order(
-            query, "manifestations_fts", limit, ranking_function, weights, prefix_search
-        )
-        origin_clause, origin_params = self._origin_clause(
-            "m.record_origin", authoritative_only
-        )
-        params: list[Any] = [match_query, *origin_params, eff_limit]
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                f"""
-                SELECT m.*, {order_clause} AS rank
-                FROM manifestations_fts f
-                JOIN manifestations m ON f.rowid = m.id
-                WHERE manifestations_fts MATCH ? {origin_clause}
-                ORDER BY rank
-                LIMIT ?;
-                """,
-                params,
-            )
-            return [(_row_to_manifestation(row), float(row["rank"])) for row in cursor]
 
     # -----------------------------------------------------------------------
     # Dense Vector Search
@@ -1961,10 +1897,6 @@ class WEMIRepository:
                 pass
         return results
 
-    def get_agent_by_id(self, agent_id: int) -> dict[str, Any] | None:
-        """Fetch a single rich agent profile by ID."""
-        batch = self.get_agents_by_ids([agent_id])
-        return batch.get(agent_id)
 
     def check_source_registry(self) -> list[str]:
         """Report mismatches between the `sources` registry and the stored rows.
@@ -2589,13 +2521,6 @@ class WEMIRepository:
             ).fetchall()
             return {(r[0], r[1]): r[2].split(",") for r in rows}
 
-    def get_work_cluster(self, cluster_id: str) -> Optional[WorkCluster]:
-        """Fetch a work cluster by ID."""
-        with self.get_corpus_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM corpus_work_clusters WHERE cluster_id = ?;", (cluster_id,)
-            ).fetchone()
-            return WorkCluster.model_validate(dict(row)) if row else None
 
     def get_all_work_clusters(self) -> list[WorkCluster]:
         """Fetch all work clusters."""
@@ -2605,18 +2530,6 @@ class WEMIRepository:
             ).fetchall()
             return [WorkCluster.model_validate(dict(r)) for r in rows]
 
-    def get_expression_cluster(self, cluster_id: str) -> Optional[ExpressionCluster]:
-        """Fetch an expression cluster by ID."""
-        with self.get_corpus_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM corpus_expression_clusters WHERE cluster_id = ?;", (cluster_id,)
-            ).fetchone()
-            if not row:
-                return None
-            d = dict(row)
-            d["translators_json"] = json.loads(d.get("translators_json") or "[]")
-            d["performers_json"] = json.loads(d.get("performers_json") or "[]")
-            return ExpressionCluster.model_validate(d)
 
     def get_expression_clusters_for_work(self, work_cluster_id: str) -> list[ExpressionCluster]:
         """Fetch all expression clusters under a work cluster."""
@@ -2647,13 +2560,6 @@ class WEMIRepository:
                 clusters.append(ExpressionCluster.model_validate(d))
             return clusters
 
-    def get_manifestation_cluster(self, cluster_id: str) -> Optional[ManifestationCluster]:
-        """Fetch a manifestation cluster by ID."""
-        with self.get_corpus_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM corpus_manifestation_clusters WHERE cluster_id = ?;", (cluster_id,)
-            ).fetchone()
-            return ManifestationCluster.model_validate(dict(row)) if row else None
 
     def get_all_manifestation_clusters(self) -> list[ManifestationCluster]:
         """Fetch all manifestation clusters."""

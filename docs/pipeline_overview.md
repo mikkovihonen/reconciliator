@@ -1,0 +1,372 @@
+# Pipeline overview
+
+Written for an engineer new to this codebase.
+
+Reconciliator ingests bibliographic corpora, decomposes them into a WEMI
+(Work / Expression / Manifestation / Item) structure, links records to each other
+and to authority data, and writes enriched records back out. This describes how
+it actually works today, not how it is intended to work.
+
+For the refactoring history see
+[plans/wemi_data_structure.md](plans/wemi_data_structure.md); for the
+moving-image research see [plans/kavi.md](plans/kavi.md).
+
+---
+
+## 1. The shape of it
+
+```
+                  ┌──────────────┐
+  MARCXML ──────► │              │
+  BIBFRAME ─────► │   ingest     │──► works / expressions / manifestations
+  (OAI-PMH,       │  (decompose) │    + agents, identifiers, entity_keys,
+   file,          └──────────────┘      contributions, relationships
+   ResourceSync)                                    │
+                                                    ▼
+                                        ┌───────────────────────┐
+                                        │  authority.db         │
+                                        │  one SQLite database  │
+                                        └───────────────────────┘
+                                          │        │          │
+                          ┌───────────────┘        │          └──────────────┐
+                          ▼                        ▼                         ▼
+                  ┌──────────────┐        ┌─────────────────┐       ┌────────────────┐
+                  │ build-index  │        │ consolidate-    │       │   reconcile    │
+                  │ (embeddings) │        │ works           │       │                │
+                  └──────────────┘        │ (cross-source   │       │ cluster ─►     │
+                          │               │  work identity) │       │ match ─►       │
+                          └──────────────►└─────────────────┘──────►│ resolve agents │
+                                                                    │ ─► enrich      │
+                                                                    └────────────────┘
+                                                                             │
+                                                                             ▼
+                                                                    enriched records
+                                                                    + TSV reports
+```
+
+Everything lives in **one SQLite database** (`authority.db`, 36 tables). There
+used to be a separate corpus-staging database; it was merged so a cluster can be
+joined to the works it resolves to.
+
+## 2. Commands
+
+| command | what it does |
+|---|---|
+| `ingest-vocab` | Load controlled vocabularies (YSO, SLM, KANTO…) into `vocab.db` |
+| `download-skosmos` | Fetch those vocabularies from Finto |
+| `ingest-oai` | Harvest a source (OAI-PMH, file or ResourceSync) into WEMI rows |
+| `ingest-wikidata` | Stream a Wikidata dump into the same structure |
+| `build-index` | Embed stored works and manifestations into their vector indexes |
+| `build-agent-index` | Embed agents into the agent vector index |
+| `consolidate-works` | Elect one canonical work per cross-source equivalence group |
+| `reconcile` | Cluster, match, resolve agents, enrich, report |
+| `run` | ingest-vocab → ingest-oai → ingest-wikidata → **build-index** → reconcile |
+| `status` | Task progress and telemetry from `progress.db` |
+| `reset` / `prune` | Clear storage; drop completed tasks |
+
+## 3. Ingest
+
+Every source is ingested the same way. There is no separate path for "the corpus
+being reconciled" — that distinction is a per-source flag, not a code path.
+
+```yaml
+ingest_oai:
+  melinda:
+    source_type: oai          # oai | file | resourcesync
+    format: marcxml           # marcxml | bibframe
+    authoritative: true       # may this source be matched *against*?
+    ingest_mode: accumulate   # accumulate | replace
+```
+
+**Flow.** `ingest_oai_pipeline` runs a producer/consumer pair: harvester threads
+yield records, a `_WEMIBatchAccumulator` decomposes each into entities, and a
+writer thread persists batches through `insert_wemi_batch`. Harvest progress is
+checkpointed to `harvest_state`, so an interrupted run resumes from its
+resumptionToken and a completed run harvests incrementally next time. With
+`workers > 1` and a resolvable date window the harvest is partitioned into
+`slice_days` slices fetched concurrently.
+
+**Decomposition** (`loaders/marcxml.py`, `loaders/bibframe/`) produces, per
+record:
+
+- one `WorkEntity`, one `ExpressionEntity`, one `ManifestationEntity`
+- `AgentEntity` rows with `ContributionEntity` links carrying relator roles
+- `IdentifierEntity` rows (ISBN, ISSN, ISMN, DOI, URN, publisher number, …)
+- `EntityKey` rows — the *derived* blocking keys, see below
+- `WorkRelationship` rows, mediums of performance, item rows when enabled
+
+**Identity is deterministic.** A record with no usable control number gets an id
+derived from a digest of its own fields — leader, controlfields, datafields with
+indicators and subfields — so re-ingesting the same input yields the same work,
+expression, manifestation and agent URIs. Agent URIs derive from the agent's
+name and dates rather than its ordinal position among the `7XX` fields.
+
+**`record_origin`** on every row is the name of the source that produced it. The
+`sources` table records which of those names are authoritative. Together these
+answer "which rows may be matched against", so both halves must agree — if a
+source is registered authoritative but its rows carry a different origin, the
+allow-list filters out every candidate and matching silently finds nothing.
+`reconcile` warns about that mismatch before it starts.
+
+## 4. The two key tables beside the entities
+
+**`identifiers`** holds externally-meaningful standard numbers, polymorphically
+(`entity_type` + `entity_id`).
+
+**`entity_keys`** holds *derived* keys, in the same shape: the blocking keys the
+clusterer groups on and the funnels dispatch on. Both are computed once at
+ingest, where the record is already parsed, rather than by re-parsing a stored
+payload at match time.
+
+Key types the MARC loader emits: `work` (author + title stem), `author`,
+`title_stem`, `uniform_title`, `music_work`, `series`, `standard`, `citation`,
+`patent`, `fingerprint`, `geodata_spatial`, `heritage_model`,
+`translators_signature`, `sammelband`, `analytic` and `analytic_title` (MARC
+505/700/710 `$t` constituent works).
+
+Neither table has a foreign key — `entity_type` can name any tier, which SQLite
+cannot express as one constraint — so deleting an owning row does **not** cascade
+and cleanup has to be explicit. `delete_source()` does that, which is what backs
+`ingest_mode: replace`.
+
+## 5. Classification
+
+`determine_work_type()` decides what kind of thing a record is, in this order:
+
+1. `502` → thesis
+2. **655 genre/form headings**, matched exactly against SLM terms
+   (*Suomalainen lajityyppi- ja muotosanasto*, `$2 slm/fin`) — broadcast
+   programmes, juridical works, anthologies, comics, games and so on
+3. `341 $a tactile` or a tactile `336 $b` code → tactile
+4. `111` meeting main entry → conference
+5. Leader/06 and /07, `007`, `008` → music, cartography, moving image, still
+   image, dataset, software, manuscript, serial, integrating…
+6. `857` electronic archive location → web harvest, or preservation surrogate
+   when its second indicator says the archived copy is a version of a physical
+   item; `533` reproduction note says the same
+7. **RDA `336 $b` content type** — an RDA record must carry 336 and electronic
+   resources often have a generic leader, so a dataset coded `cod` under
+   `Leader/06 = a` still classifies
+8. default → text
+
+Rules 2, 3, 6 and 7 were derived from the Finnish RDA application guidelines and
+verified against Finto and the LoC code lists. `determine_content_type()` maps
+the full 23-code `rdacontent` vocabulary.
+
+BibFrame classifies from BIBFRAME Work subclasses and `bf:content`.
+
+## 6. Matching: funnels
+
+A `MatchRecord` is the record-level view the matcher consumes:
+manifestation-centric, resolving the Expression and Work above it, carrying the
+key bag and the identifier bag.
+
+Domain behaviour is **declared, not coded**. `funnels/builtin.py` holds 42
+`FunnelSpec` entries in precedence order; the first whose `when` predicate claims
+a record wins, and one is marked `default`.
+
+```yaml
+- id: funnel_l_cartography
+  when: { work_type: [cartography] }
+  identifier_schemes: [sheet_number, isbn]
+  work_types: [cartography]
+  content_type: cartographic_image
+  align_expression: true
+  confidence: 0.90
+```
+
+`when` is in disjunctive normal form — a list of alternatives, each a
+conjunction — over seven predicate kinds: `work_type`, `content_type`,
+`is_component`, `has_key`, `has_identifier`, and regexes in `title_matches`,
+`key_matches` and `identifier_matches`.
+
+Every funnel runs the same three tiers (`funnels/engine.py`):
+
+| tier | how |
+|---|---|
+| 1 | exact standard identifier, trying the spec's `identifier_schemes` first |
+| 2 | author key + title stem, filtered by the spec's `work_types` in order |
+| 3 | dense vector search over the work index, then SQLite FTS5 |
+
+A spec may name a `handler` — a built-in name or a path to a Python file under
+`funnels/` — whose module defines any of `tier1`/`tier2`/`tier3`. Omitted tiers
+fall back to the generic template. Three exist: recorded sound (tracklist
+overlap), notated music, audiobooks (cross-format resolution to the textual
+work).
+
+`reconcile.funnels` in config overrides or extends: an entry whose `id` matches a
+built-in replaces it *in place*, keeping its precedence; a new id goes where its
+`before:` says.
+
+**Retrieval depth** comes from `rerank.top_k`. Where a filter will be applied the
+vector searches over-fetch and stop once enough survivors are found, because a
+filter applied after retrieval can only return fewer candidates than were
+fetched.
+
+## 7. Agent resolution
+
+Matching a record and resolving its agents are two questions, so they are two
+calls:
+
+```python
+record = _to_target_record(payload, fmt, profile)   # one construction
+match  = matcher.match_target(record)               # one dispatch
+result = matcher.resolve_agents(match, bib_record)  # hydrate, align, fallback
+```
+
+`resolve_agents` hydrates the matched WEMI entities so their agents' authority
+URIs are available, aligns the record's agents against them (`AgentAligner`),
+falls back to the standalone agent index for any still unlinked, then applies the
+vocabulary filter and `link_policy` priority selection that decide which URIs get
+injected.
+
+## 8. Clustering
+
+`CorpusClusterer` finds records that describe the same work, expression or
+manifestation *within* the corpus. It reads `get_all_match_records()` scoped to
+the non-authoritative sources — authority data lives in the same database and
+must not be clustered as if it were the corpus.
+
+- **blocking** over the key families, then pairwise similarity within blocks,
+  unioned with `UnionFind`
+- **expression** sub-clustering by content type, language and translator
+- **manifestation** grouping by `standard::year::volume`, then merged further by
+  manifestation-embedding similarity above `cluster.thresholds.manifestation` —
+  records of one edition that share no standard number never meet in a key group
+- **authority hoisting**: each cluster member is matched, and a cluster adopts the
+  authority work URI of any member that resolved, so every member exports the
+  same identity
+
+Results go to `corpus_work_clusters`, `corpus_expression_clusters`,
+`corpus_manifestation_clusters` and `corpus_linkages`.
+
+## 9. Consolidation
+
+Each source mints its own work URI, so one work held by several catalogues
+arrives as several rows. `consolidate-works` elects one canonical row per
+equivalence group on three tiers of evidence — shared Wikidata QID (a *differing*
+QID vetoes a merge), shared strong identifier, then metadata agreement — and
+writes symmetric `same_work_as` edges recording *why* plus a
+`works.canonical_work_id` recording *the decision*. Nothing is deleted.
+
+The matcher resolves matches through that election, so the corpus clusterer's
+hoisting and the reconcile loop cannot disagree about a work's identity.
+
+## 10. Enrichment and output
+
+`MARCXMLEnricher` and the BibFrame enricher write resolved URIs back into the
+records: agent `$0`/`$1`, subject URIs folded to their modern vocabulary,
+work/expression links. Subject heading rewriting is configurable — whether to
+replace a legacy heading with the ontology's preferred label or retain it, and
+whether to append the `$2 yso/fin`-style language subcode.
+
+`ReportGenerator` emits TSV report sets for agents, subjects, works and
+expressions, each row naming the match tier, the funnel used and the confidence.
+
+## 11. Vector indexes
+
+Three indexes, each with exactly one consumer:
+
+| index | consumer |
+|---|---|
+| `work_index` | the matcher's tier-3 semantic fallback |
+| `manifestation_index` | the clusterer's near-duplicate merge |
+| `agent_index` | the standalone agent fallback |
+
+There is no expression index — that tier added no discrimination the other two do
+not already provide, and nothing searched it.
+
+The embedder supplies the dimension, so a command without one gets no indexes
+rather than a guessed dimension that would not match the stored vectors. Both the
+matcher and the clusterer guard on an empty index, so wiring them before
+`build-index` has run is safe.
+
+## 12. Testing conventions
+
+619 tests. Three patterns carry most of the weight:
+
+- **Dispatch on loader output.** Tests that build a probe record from a funnel's
+  own predicate prove only that the spec claims its own probe. The tests that
+  catch real defects run actual MARC leaders and fields through the loader and
+  assert *which funnel claimed the record*.
+- **Sets that fail in both directions.** `KNOWN_UNREACHABLE_FROM_MARC` and
+  `KEYS_READ_BUT_NEVER_WRITTEN` in `tests/test_funnel_reachability.py` assert
+  equality, not membership. Growing means a regression; shrinking means a gap was
+  closed and the list is stale.
+- **Capability extraction over the real tables.** The reachability audit reads
+  the loader's lookup tables from the imported module rather than parsing for
+  string literals — two earlier static-analysis shortcuts silently under-reported
+  what the loader emits.
+
+---
+
+## 13. Development ideas
+
+Ten public methods had no caller anywhere. Each was examined for a place in the
+architecture as it now stands; the verdicts differ, and are recorded here because
+the methods themselves have been removed.
+
+### Genuinely useful, and worth building deliberately
+
+**`search_manifestations_fts` — a no-embedder fallback for clustering.**
+The matcher degrades from vector search to FTS5 when no index is built. The
+clusterer does not: its manifestation merge is a no-op without an embedder, so
+records of one edition that share no standard number stay apart until
+`build-index` has run. A lexical fallback would mirror the matcher's own shape
+and make clustering useful before any embedding exists. This is the strongest of
+the ten.
+
+**Single-cluster fetches — a step toward not loading everything.**
+`get_work_cluster`, `get_expression_cluster` and `get_manifestation_cluster` fetch
+one cluster by id. The reconcile loop instead loads all three cluster tables into
+in-memory dicts up front, because it visits every record. That is fine for
+fixtures and a scalability ceiling for a real corpus: cluster state grows with
+the corpus and is held entirely in memory. Per-record fetches behind a bounded
+cache would remove that ceiling, and would also give an inspection or API path
+something to call that is not "load the whole table".
+
+**URI lookups — tier-1 matching on URI-valued identifiers.**
+`get_expression_by_uri` and `get_manifestation_by_uri` had no caller, and their
+work- and agent-level siblings are exercised only by tests. Meanwhile two funnel
+specs (`funnel_hh_parallel_multilingual`, `funnel_mm_critical_edition`) list
+`work_uri` among their `identifier_schemes`, which resolves through
+`lookup_by_identifier` against the `identifiers` table — where a URI-valued
+identifier is not what is stored. Records carrying an external work URI (MARC
+`758 $0`, BIBFRAME `instanceOf`) currently dedupe only through the
+`ON CONFLICT(work_uri)` upsert at write time. Resolving such a URI to an existing
+entity at *match* time is a real capability that nothing presently has.
+
+**`refresh_work_equivalences` — needed the moment `run` chains consolidation.**
+The matcher caches the work-equivalence map for its lifetime. Nothing invalidates
+it because nothing runs consolidation in the same process as matching. `run`
+executes its steps as direct calls within one process, and does not currently
+include `consolidate-works` — the moment it does, and it is sequenced before
+`reconcile`, the matcher will hold a map built before consolidation ran. Whoever
+adds that step needs to invalidate the cache, or build the matcher afterwards.
+
+### Redundant: a second way to do something the code already does
+
+**`resolve_canonical_work`** duplicates `WorkMatcher._canonicalize_match`, which
+resolves through a cached equivalence map rather than a per-call query. Two
+implementations of one rule is how the two came to disagree in Phase 12 — the
+earlier draft recomputed the canonical election instead of reading the stored
+one, and diverged whenever a source priority was configured. If a non-matcher
+caller ever needs canonical resolution, it should share the matcher's path rather
+than reintroduce a parallel one.
+
+**`get_indexed_manifestation_source_ids`** is byte-identical to
+`get_indexed_source_ids` — same SQL, same return type, different name. Ingest's
+`skip_existing` uses the latter.
+
+**`get_agent_by_id`** wraps `get_agents_by_ids([id])` for a single id. Callers use
+the batch form, which is the right default for a pipeline that processes records
+in batches.
+
+### A note on how these accumulated
+
+None of the ten were wrong when written; they are the shape of an API built
+outward from a data model rather than inward from its callers. The pattern worth
+noticing is that the *redundant* three each duplicate something that already
+existed — and in one case the duplicate had already caused a real divergence.
+Symmetry in a repository API is cheap to add and quietly expensive: every
+uncalled method is a second place a rule can be implemented differently.
