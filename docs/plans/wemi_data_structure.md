@@ -1138,12 +1138,89 @@ identifiers and analytics the WEMI decomposer already extracted at ingest.
 "Bounding box IoU (034)" but never calls `compute_bounding_box_iou`, which has no
 production caller at all. Declared funnels make this class of drift impossible.
 
-### 14.3 `MatchSubject` replaces `TargetRecord`
+### 14.2.1 Critical review of `match_target_record`
+
+Asked to review it rather than merely de-duplicate it, the finding is worse than
+"every record is matched twice". The two matches are not redundant — they see
+**different records**, and the degraded one drives the output that matters.
+
+The reconcile loop builds two `TargetRecord`s from the same raw record:
+
+- `normalizer.normalize(raw_rec)` produces a `BibliographicRecord`, which
+  `match_target_record` converts internally to a `TargetRecord`.
+- `_to_target_record(rec_fmt, orig_payload, ...)` produces a second one through
+  `build_target_record_from_marc`.
+
+For a sound recording carrying a publisher number and an EAN:
+
+```
+A  match_target_record (drives agent reconciliation)
+     work_type  : text
+     keys       : []
+     identifiers: {}
+
+B  match_target (drives the WEMI report columns)
+     work_type  : music
+     keys       : ['music_work', 'work']
+     identifiers: {'control_number': ['M1'], 'ean': [...], 'publisher_number': ['ODE 1234-2']}
+```
+
+Path A is crippled three ways at once. `work_type` is **hardcoded to `"text"`**
+(`matcher.py:2746`), so dispatch can only ever reach `match_monograph` — no
+record, whatever it is, reaches its own funnel. No domain keys are carried beyond
+`work_blocking_key`. And its payload is a JSON dump labelled `format="marcxml"`,
+so `extract_identifiers_from_target` parses JSON as XML, throws, is swallowed,
+and returns `{}` — tier 1 cannot fire.
+
+Path B, built from the real MARCXML, gets all three right.
+
+**Which half of the output each feeds is the problem.** Path A's result is used
+only for agents: accepted candidates, `align_target_agents`, the tier-3 fallback,
+vocabulary selection. Path B's is used only for report columns. So the authority
+URIs injected into the enriched output — the actual product of reconciliation —
+are transferred from candidates found by the blind record, while a correct match
+for the same record is computed two hundred lines later and used to fill in a
+spreadsheet.
+
+**Redesign.** The split is not between two kinds of record; it is between two
+questions that were fused:
+
+1. *What work is this?* — one `MatchRecord`, built once from the real payload,
+   matched once.
+2. *Which authority URIs do its agents get?* — a separate step taking that match
+   plus the record's agents.
+
+So `match_target_record` dissolves into:
+
+```python
+record = build_match_record(payload, fmt, profile)   # one construction
+match  = matcher.match(record)                        # one dispatch
+agents = matcher.resolve_agents(match, record.agents) # hydrate, align, fallback, select
+```
+
+Agent resolution keeps every step it has today — the hydration, the coupled
+alignment, the standalone fallback, the vocabulary filter, the linkage lookup —
+but anchors on the correct match instead of the blind one. `ReconciliationResult`
+becomes the pairing of the two rather than a thing the matcher builds internally.
+
+This is why stage 2 is the risky stage and why it changes results: it is not only
+tier 1 starting to work, it is agent reconciliation moving onto a match that is
+right about what the record is.
+
+### 14.3 `MatchRecord` replaces `TargetRecord`
 
 Not a staged row — a view over WEMI rows, built from
 `(work, expression, manifestation, keys, identifiers)`. It keeps the generic
 `keys` bag and `get_keys()`; all 24 properties go, because funnels name their
 keys in configuration instead.
+
+**`MatchRecord` is manifestation-centric.** One ingested record is one
+manifestation, which is what `TargetRecord` represented and what the clusterer
+blocks over, so the manifestation is the identity the type carries and the row
+its `entity_keys` attach to. It is not manifestation-*only*: it resolves the
+Expression and Work above it and exposes their fields (language and content type
+from the expression, work type and uniform title from the work), because the
+funnels match at all three tiers.
 
 Two gaps separate `TargetRecord` from what WEMI stores, and both close at ingest,
 where the record is already parsed:
@@ -1221,7 +1298,7 @@ silently degrades to the generic template.
 Contract — deliberately narrow, so handlers cannot reach into matcher internals:
 
 ```python
-def tier2(subject: MatchSubject, ctx: FunnelContext) -> Optional[WEMIMatchResult]: ...
+def tier2(subject: MatchRecord, ctx: FunnelContext) -> Optional[WEMIMatchResult]: ...
 ```
 
 `FunnelContext` exposes exactly `repo`, `config`, `align_expression` and `spec`.
@@ -1243,16 +1320,19 @@ Each lands green. Stages 1 and 2 carry the risk.
 | # | Stage | Net lines |
 |---|---|---|
 | 1 ✅ | `entity_keys` table; emit keys and analytics at decomposition | ~0 |
-| 2 | `MatchSubject` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
+| 2 | `MatchRecord` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
 | 3 | Generic `run_funnel(spec, subject)`; delete the 42 methods; ship the current 42 as built-in specs | **-1400** |
 | 4 | `handler:` resolution; port the 6 custom funnels to handler modules | +150 |
-| 5 | Dead code (`compute_bounding_box_iou` — implement or delete); reconcile docstrings against behaviour | -50 |
+| 5 | Dead code (`compute_bounding_box_iou`; expression-tier search APIs — see 14.10); reconcile docstrings against behaviour | -50 |
 | 6 | Merge `decompose_marc_authority` into `decompose_marc_wemi`; ISBD punctuation stripping becomes configurable (see 14.9) | -300 |
+| 7 | Build, wire and use the W/M vector indexes; honour `rerank.top_k` (see 14.10) | +200 |
+| 8 | Deterministic `agent_uri` (see 14.11) | ~0 |
+| 9 | `accumulate` / `replace` ingest mode per source (see 14.12) | +120 |
 
 `matcher.py` should land near 600-700 lines, plus `funnels.py` (~250) and ~120
 lines of configuration models.
 
-The 53 `TargetRecord` uses in tests are mostly constructor calls; `MatchSubject`
+The 53 `TargetRecord` uses in tests are mostly constructor calls; `MatchRecord`
 takes the same keyword arguments so most tests change only the class name.
 Critically, the assertions are on `funnel_used == "funnel_x_..."` strings, which
 stay byte-identical — so the existing tests act as a behavioural lock on the
@@ -1384,11 +1464,88 @@ Two things to be careful about:
 Sequenced last because it is independent of the `TargetRecord` removal and would
 otherwise add a second source of behavioural change to the same diff.
 
-### 14.8 Intended behaviour change
+### 14.10 Building and using the W/M vector indexes
 
-Every stage is output-identical except the tier-1 fix in stage 2, which will
-change reconcile results — for the better. It deserves a before/after diff on a
-real corpus rather than trust in the test suite alone.
+The tier-2 dense branch is currently unreachable in production: `work_indexer=`
+appears nowhere in `src/`, every `WEMIRepository(...)` the CLI builds receives
+only `db_path` and `fts_config`, and there is a `build-agent-index` command with
+no equivalent for the bibliographic tiers. Embedding configuration, engine
+selection and the IPC daemon all exist to serve a path nothing reaches, and every
+match silently falls through to FTS.
+
+**Two indexes, not three.** Expression-level vector search is dropped — its four
+E/M search APIs have zero callers and the tier adds no discrimination that the
+work and manifestation tiers do not already provide. Manifestation embeddings are
+kept because the clusterer needs them:
+
+| index | purpose |
+|---|---|
+| work | tier-2 semantic fallback when no identifier or domain key resolves |
+| manifestation | clustering — near-duplicate manifestations of one work |
+
+So `search_expression_vectors` and `search_expressions_fts` go, while
+`search_manifestation_vectors` and `search_manifestations_fts` stay and acquire
+their first callers. This supersedes the stage-5 note that treated all four as
+dead.
+
+Work:
+
+- A `build-index` command covering both tiers, mirroring `build-agent-index`.
+- CLI repository construction passes the indexers, so the tier-2 branch is live.
+- The clusterer consults the manifestation index instead of relying on blocking
+  keys alone, which is what makes the vectors earn their cost.
+- `rerank.top_k` is honoured. It is currently ignored: `top_k=5` is hardcoded at
+  `matcher.py:547` and `:2603` while the config declares 50. Retrieval depth has
+  to be configurable before over-fetching under `authoritative_only` (Phase 13.2)
+  can be reasoned about at all.
+
+Expect real result changes: a tier that never fired will start firing.
+
+### 14.11 Deterministic agent identity
+
+`decompose_marc_wemi` mints `f"urn:agent:{source}:{source_id}:{idx + 1}"`, so an
+agent's URI depends on its ordinal position among the record's `700` fields.
+Reordering those fields silently changes agent identity — the same instability
+Phase 13 removed from records via `derive_content_id`, still present for agents.
+
+The three decomposition paths disagree three ways: `:{idx + 1}` at
+`marcxml.py:1732`, a hardcoded `:1` at `:1102`, and no suffix at `:1329`. The fix
+is one scheme derived from the agent's own content (name, dates, authority
+identifiers) rather than its position, applied in one place — which is a further
+argument for doing this alongside the decomposer merge in 14.9.
+
+### 14.12 Ingest accumulate or replace
+
+Re-ingesting a source currently accumulates: there is no `delete_source`, no
+`DELETE FROM works`, and no dedupe to catch the duplication. Now that a corpus is
+just another source, re-harvesting an authority and re-ingesting a corpus are the
+same operation, and both behaviours are wanted.
+
+A per-source `ingest_mode: accumulate | replace` setting. `replace` clears the
+rows carrying that `record_origin` before writing — works, expressions,
+manifestations, items, their identifiers, `entity_keys` and contributions — while
+leaving every other source untouched. Deterministic ids (Phase 13.1) are what
+make `replace` safe to reason about: the same input yields the same URIs, so a
+replace is a true refresh rather than a churn of identity.
+
+Interacts with resume: `replace` has to clear on the first batch of a run, not on
+every batch, or a resumed harvest deletes what the earlier slices just wrote.
+
+### 14.13 Intended behaviour changes
+
+Four stages change results, and each deserves its own before/after diff on a real
+corpus rather than trust in the test suite:
+
+| stage | change |
+|---|---|
+| 2 | tier-1 starts working, and agent reconciliation moves onto a match that knows the record's work type (14.2, 14.2.1) |
+| 6 | ISBD stripping alters agent names, and so blocking keys (14.9) |
+| 7 | the dense tier fires for the first time; `rerank.top_k` takes effect (14.10) |
+| 8 | agent URIs change shape once, to become position-independent (14.11) |
+
+Stages 1, 3, 4, 5 and 9 are intended to be output-identical. Sequencing them
+apart is deliberate: one source of behavioural change per diff, so a regression
+can be attributed.
 
 ## Test Results Summary
 
