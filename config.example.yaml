@@ -833,6 +833,17 @@ constituents:
   #               manifestation_expressions rows and has_constituent edges
   mode: "keys_only"
 
+  # Whether constituent works enter the work vector index.
+  #
+  # Off by default, measured rather than assumed: on 200 albums of 12 tracks
+  # they are 82% of the work index, and a title-only query returns six tracks
+  # and no album, so tier 3's top-k window fills with things that are not what
+  # the target is. Constituents stay reachable exactly - by their
+  # `analytic_title` key and from a matched container - so nothing is lost.
+  #
+  # Turn it on for a source whose *targets* are tracks rather than releases.
+  index_works: false
+
 # ==============================================================================
 # 9. OAI-PMH & MARCXML Authority Sources Ingestion
 # ==============================================================================

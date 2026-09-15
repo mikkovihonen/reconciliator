@@ -1296,6 +1296,12 @@ class ConstituentsConfig(BaseModel):
 
     profile: Optional[str] = None
     mode: Literal["off", "keys_only", "entities"] = "keys_only"
+    #: Whether constituent works enter the work vector index. Off by default:
+    #: measured on 200 albums of 12 tracks they are 82% of the index, and a
+    #: title-only query returns tracks and no albums, so tier 3's top-k window
+    #: fills with things that are not what the target is. A source that
+    #: reconciles track-level targets wants them indexed.
+    index_works: bool = False
 
 
 class AppConfig(BaseModel):

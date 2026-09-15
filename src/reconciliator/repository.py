@@ -2237,6 +2237,7 @@ class WEMIRepository:
         work_indexer: Optional[VectorIndex] = None,
         manifestation_indexer: Optional[VectorIndex] = None,
         batch_size: int = 128,
+        include_constituent_works: bool = False,
     ) -> dict[str, int]:
         """Embed stored works and manifestations into their vector indexes.
 
@@ -2248,6 +2249,30 @@ class WEMIRepository:
         Records are embedded from their stored `serialized_text`, which the
         loaders render at ingest, so building an index never re-parses a record.
         Rows without serialized text are skipped rather than embedded blank.
+
+        Constituent works - an album's tracks, an anthology's stories - are
+        excluded by default, and the measurement is the argument. On a corpus of
+        200 albums of 12 tracks they are **82%** of the work index, and a
+        title-only query returns six tracks and no album at all:
+
+            query 'Finlandia'
+               1. constituent 'Finlandia nro 4'
+               2. constituent 'Finlandia nro 3'
+               ...
+
+        Tier 3 takes the top *k* candidates, so for a target album with a short
+        or common title the real album candidates are pushed out of the window
+        entirely - a recall regression in album matching caused by indexing
+        things that are not albums. Constituents are reachable exactly anyway:
+        by `analytic_title` key, and by `get_constituent_works` from a matched
+        container.
+
+        A source that reconciles *track-level* targets wants the opposite, so
+        this is a flag (`constituents.index_works`) rather than a rule. The test
+        for "is this only a constituent" is having no manifestation of its own: a
+        work nobody published separately is not something a record can match at
+        the manifestation level, and a track that *was* released as a single is a
+        row of its own with its own manifestation.
         """
         counts = {"works": 0, "manifestations": 0}
 
@@ -2263,11 +2288,24 @@ class WEMIRepository:
         ):
             if indexer is None:
                 continue
+            exclude_sql = ""
+            if kind == "works" and not include_constituent_works:
+                exclude_sql = """
+                    AND id NOT IN (
+                        SELECT r.target_work_id FROM work_relationships r
+                        WHERE r.relationship_type = 'has_constituent'
+                          AND NOT EXISTS (
+                              SELECT 1 FROM manifestations m
+                              WHERE m.work_id = r.target_work_id
+                          )
+                    )
+                """
             with self.get_connection() as conn:
                 cur = conn.execute(
                     f"""
                     SELECT id, serialized_text FROM {table}
                     WHERE serialized_text IS NOT NULL AND TRIM(serialized_text) != ''
+                    {exclude_sql}
                     ORDER BY id;
                     """
                 )

@@ -1768,6 +1768,7 @@ def build_index_cmd(
         work_indexer=work_indexer,
         manifestation_indexer=manifestation_indexer,
         batch_size=batch_size,
+        include_constituent_works=cfg.constituents.index_works,
     )
     console.print(
         f"[green]Indexed {counts['works']} works into {cfg.storage.work_index} and "

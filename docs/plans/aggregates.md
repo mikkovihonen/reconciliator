@@ -367,8 +367,7 @@ Each is its own diff with its own verification, in this order:
 6. ✅ **Shape B: component manifestations.** *Done — see the log below.*
 7. ✅ **BIBFRAME `bf:hasPart`.** *Done — see the log below.*
 8. ✅ **Rewire the consumers.** *Done — see the log below.*
-9. **Decide indexing and clustering treatment**, with a measurement rather than a
-   guess.
+9. ✅ **Indexing and clustering, measured.** *Done — see the log below.*
 
 ## Open questions
 
@@ -398,7 +397,14 @@ stages 2-4 and a wrong answer is a config edit rather than a rewrite.
    `manifestations.work_id` is nullable, so both are expressible; an article's
    manifestation pointing at the article's work is the FRBR-correct answer and
    the one that makes `get_manifestations_for_work` useless for the container.
-8. **Should an aggregate's `author_key` come from its first analytic entry?**
+8. **Should a constituent work carry its inherited creator as a contribution?**
+   The container's main entry is inherited for *identity* but not recorded, so
+   cross-source consolidation of constituents has only the title to compare and
+   falls just under the metadata threshold. Recording it would let the same track
+   from two catalogues consolidate — and would also give constituent works a
+   creator in reports.
+
+9. **Should an aggregate's `author_key` come from its first analytic entry?**
    Today an anthology's key is its first story author's surname, so two
    catalogues listing the same stories in a different order derive different
    keys and never block together. Changing it needs the target path to carry a
@@ -933,3 +939,96 @@ work with none, only `has_constituent` edges followed, the index in the query
 plan, recall preserved through the ladder, exact preferred over longer, and
 constituents reported from a tier-1 match end to end through `WorkMatcher`.
 806 → **813 passing**, lint clean, pipeline unchanged.
+
+## Stage 9 ✅ COMPLETE
+
+Measured on 200 albums of 12 tracks, not assumed.
+
+| | keys_only | entities | |
+|---|---|---|---|
+| works | 200 | 1088 | 5.4× |
+| expressions | 200 | 1088 | 5.4× |
+| **manifestations** | 200 | 200 | **1.0×** |
+| junction rows | 200 | 2600 | 13× |
+| `has_constituent` edges | 0 | 2400 | — |
+| entity_keys | 5600 | 5600 | 1.0× |
+
+Two of those confirm the design: manifestations do not grow, because an embodied
+constituent has no carrier; and entity_keys do not grow, because constituents
+emit none. Works grow 5.4× rather than 13×, because convergence merged tracks
+shared between releases — 888 work rows for 2400 track slots.
+
+### The index decision: exclude, and the argument is the measurement
+
+Constituents would be **82%** of the work index, and BM25 over the same
+`serialized_text` the index embeds shows what that does:
+
+```
+query 'Finlandia ja muita teoksia 3'   ->  1. ALBUM 'Finlandia ja muita teoksia 3'
+query 'Finlandia'                      ->  1. constituent 'Finlandia nro 4'
+                                           2. constituent 'Finlandia nro 3'
+                                           ... six tracks, no album at all
+```
+
+Tier 3 takes the top *k*, so for a target album with a short or common title the
+real album candidates are pushed out of the window — a recall regression in album
+matching caused by indexing things that are not albums. So
+`build_wemi_indexes` excludes them, and the corpus above goes from 1088 indexed
+works to exactly 200.
+
+Nothing is lost: a constituent is reachable exactly by its `analytic_title` key
+and from a matched container through `get_constituent_works`. And the opposite
+case is real — a source whose *targets* are tracks rather than releases wants
+them indexed — so it is `constituents.index_works`, a setting, not a rule.
+
+The test for "only a constituent" is **having no manifestation of its own**,
+which needs no naming convention: a work nobody published separately is not
+something a record can match at the manifestation level, and a track released as
+a single is a row with its own carrier and stays indexed.
+
+This is also where the vector-index question raised during stage 8 lands. A
+constituent-specific index would serve track-level *targets*, which no source in
+scope ingests; the flag above is the cheaper version of the same capability, and
+the exact key path already covers the retrieval that exists.
+
+### Clustering: constituents are fine, and one finding is not
+
+Consolidation loads every authoritative work, so constituents take part. On two
+sources ingesting the same 60 albums it grouped **60 groups of exactly 2** with
+120 symmetric `same_work_as` edges — the containers — and left the constituents
+ungrouped. Nothing blew up: no group exceeded 2 members, nowhere near the 500
+cap.
+
+The constituents did not group because a 505-derived track has no *contribution*:
+the main entry is inherited for **identity** but never recorded as a creator, so
+consolidation has only the title to compare and scores 0.90 against a 0.93
+threshold. That is open question 9.
+
+### The finding that nearly became a false one
+
+The first consolidation run reported **zero** groups, including for the
+containers, and it looked like a pre-existing consolidation defect. It was my
+fixture: it wrote `$e saveltaja` without diacritics. The chain is worth keeping,
+because every link is silent:
+
+1. the relator registry does not fold diacritics, so `saveltaja` does not
+   normalise to `cmp` (the finding filed in stage 5);
+2. a role that is not a work role files the contribution against the
+   **expression** instead of the work;
+3. `load_signatures` reads `contributions WHERE entity_type = 'work'`, so the
+   work has no creators;
+4. the metadata score drops from clearing 0.93 to 0.90, and **nothing
+   consolidates at all**.
+
+Spelled `säveltäjä`, the same corpus consolidates perfectly. So the diacritic
+gap is not cosmetic: one unfolded relator term silently disables cross-source
+work consolidation for every record that uses it. It is cheap to fix and belongs
+with relator normalisation rather than here, but it should be fixed.
+
+### Verified
+
+6 tests in `tests/test_aggregate_indexing.py`: exclusion by default, the flag
+restoring inclusion, a constituent that was also published staying indexed,
+manifestations never filtered, the config default, and a constituent still
+reachable from its container. 813 → **819 passing**, lint clean, pipeline
+unchanged.
