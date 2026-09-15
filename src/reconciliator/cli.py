@@ -1786,6 +1786,10 @@ def run_cmd(
     if cfg.ingest_wikidata:
         steps.append(("ingest-wikidata", ingest_wikidata_cmd, {"config": config}))
     if cfg.reconcile:
+        # Between ingest and reconcile: the matcher's dense tier searches the work
+        # index, and ingest does not populate it. Without this step the pipeline
+        # would reconcile against an empty index and silently reach only FTS.
+        steps.append(("build-index", build_index_cmd, {"config_path": config}))
         steps.append(("reconcile", reconcile_cmd, {"config": config}))
 
     if not steps:

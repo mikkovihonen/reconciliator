@@ -1325,7 +1325,7 @@ Each lands green. Stages 1 and 2 carry the risk.
 | 4 ✅ | `handler:` resolution; port the custom funnels to handler modules (folded into stage 3) | +150 |
 | 5 ✅ | Dead code (`compute_bounding_box_iou`; the whole expression vector tier); reconcile docstrings against behaviour | -50 |
 | 6 ◐ | ISBD punctuation stripping configurable and consistent; the decomposer merge is **declined** (see 14.9.1) | +80 |
-| 7 | Build, wire and use the W/M vector indexes; honour `rerank.top_k` (see 14.10) | +200 |
+| 7 ✅ | Build, wire and use the W/M vector indexes; honour `rerank.top_k` (see 14.10) | +200 |
 | 8 | Deterministic `agent_uri` (see 14.11) | ~0 |
 | 9 | `accumulate` / `replace` ingest mode per source (see 14.12) | +120 |
 
@@ -1749,6 +1749,59 @@ Work:
   can be reasoned about at all.
 
 Expect real result changes: a tier that never fired will start firing.
+
+### 14.10.1 Stage 7 as built ✅ COMPLETE
+
+The dense tier is reachable in production for the first time:
+
+```
+                                    match tier
+no embedder (the old CLI behaviour) unmatched
+embedder wired                      tier2_vector_fallback
+```
+
+Shipped:
+
+- `WEMIRepository.build_wemi_indexes()` embeds stored works and manifestations
+  from their `serialized_text`, which the loaders render at ingest, so building
+  an index never re-parses a record. Rows with no serialization are skipped
+  rather than embedded blank.
+- `reconciliator build-index`, with `--tier work|manifestation|all`, mirroring
+  `build-agent-index`.
+- `_wemi_repo(cfg, embedder=...)` — one place where the CLI builds a repository.
+  Passing an embedder wires the work and manifestation indexes. **The embedder is
+  what supplies the dimension**: there is no configured value, so a command
+  without one gets no indexes rather than a guessed dimension that would not
+  match the vectors already stored.
+- `reconcile` passes its embedder, so the tier is live.
+- `run` gained a `build-index` step **between ingest and reconcile**. Without it
+  the pipeline would reconcile against an empty index and silently reach only
+  FTS — the same failure this stage exists to fix, one level up.
+- The clusterer consults the manifestation index to union key groups the
+  `standard::year::volume` key left apart, gated on
+  `cluster.thresholds.manifestation` (0.92). Additive only: it joins groups,
+  never splits them, and is a no-op with no embedder or an empty index.
+- `rerank.top_k` is honoured. It was hardcoded to 5 at both dense call sites
+  while the config declared 50, so configuring it did nothing — and depth is
+  exactly what the `authoritative_only` over-fetch has to reason about, since a
+  filter applied after retrieval can only ever return fewer candidates than were
+  fetched.
+
+**Three tiers, each with one consumer**, documented in `config.example.yaml`:
+work for the matcher's semantic fallback, manifestation for the clusterer's
+near-duplicate detection, agent for the standalone agent fallback. No expression
+index.
+
+#### Tests
+
+532 passing (+12). `tests/test_vector_tiers.py` builds both tiers, builds one
+tier only, skips blank serializations, and checks a hit resolves back to its row
+through the mapping table. The tier-reachability tests use a record that tiers 1
+and 2 provably cannot resolve, so whether it matches at all *is* the question of
+whether the dense tier ran — and one of them pins the old `embedder=None`
+behaviour so a regression to it is visible rather than silent. The clustering
+tests cover the merge joining two catalogues' records of one edition, leaving
+distinct editions apart, and being a no-op before `build-index` has run.
 
 ### 14.11 Deterministic agent identity
 

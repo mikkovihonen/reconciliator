@@ -23,17 +23,32 @@ compute:
 storage:
   # Base directory for all SQLite databases and vector index files.
   # All standard storage paths (authority_db, vocab_db, progress_db, work_index,
-  # expression_index, manifestation_index, agent_index) automatically derive from
-  # this directory unless individually overridden. Corpus staging, clustering and
-  # linkage live inside authority_db rather than in a database of their own.
+  # manifestation_index, agent_index) automatically derive from this directory
+  # unless individually overridden. Clustering and linkage live inside
+  # authority_db rather than in a database of their own, and a corpus being
+  # reconciled is stored there too, as ordinary WEMI rows under its own
+  # record_origin.
   data_dir: "data"
+
+  # Three vector indexes, each with one consumer. Build them with
+  # `reconciliator build-index` (works and manifestations) and
+  # `reconciliator build-agent-index`; `reconciliator run` builds the first two
+  # for you between ingest and reconcile.
+  #
+  #   work_index          matcher tier-2 semantic fallback, when no identifier
+  #                       and no domain key resolves
+  #   manifestation_index clusterer near-duplicate detection, for records of one
+  #                       edition that share no standard number
+  #   agent_index         standalone agent fallback (reconcile.fallback_agent_reconciliation)
+  #
+  # There is no expression index: that tier added no discrimination the work and
+  # manifestation tiers do not already provide, and nothing searched it.
 
   # Optional path overrides (only needed if storing files in non-standard locations):
   # authority_db: "data/authority.db"
   # vocab_db: "data/vocab.db"
   # progress_db: "data/progress.db"
   # work_index: "data/work.index"
-  # expression_index: "data/expression.index"
   # manifestation_index: "data/manifestation.index"
   # agent_index: "data/agent.index"
 
