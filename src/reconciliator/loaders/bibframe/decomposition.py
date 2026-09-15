@@ -233,10 +233,16 @@ def _extract_node_agents(
                     )
                     agent_name = labels[0] if labels else agent_uri.rstrip("/").split("/")[-1]
 
+                    # A blank-node agent - common in BFFI, where the agent sits
+                    # inside the contribution rather than in an authority file -
+                    # gets an id derived from its own triples. The guard here used
+                    # to test `startswith("_:")`, which `str(BNode())` never
+                    # produces, so the agent_uri was a parse-local label: a fresh
+                    # agent row for the same person on every ingest.
                     agent_uri_clean = (
                         agent_uri
-                        if not agent_uri.startswith("_:")
-                        else f"urn:bnode:{source}:{agent_name}"
+                        if not is_blank_node(agent_obj)
+                        else f"urn:agent:{source}:{derive_bibframe_node_id(g, agent_obj)}"
                     )
                     agent = AgentEntity(
                         agent_uri=agent_uri_clean,

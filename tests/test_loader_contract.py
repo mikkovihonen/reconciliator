@@ -340,6 +340,52 @@ def test_blank_node_uris_follow_the_same_scheme_as_marc(ctx: LoadContext):
     assert record.manifestations[0].manifestation_uri.startswith("urn:manif:melinda:")
 
 
+AGENT_BNODE_TTL = """
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+_:w a bf:Work ; bf:title [ a bf:Title ; bf:mainTitle "Sinuhe" ] ;
+    bf:contribution [ a bf:Contribution ;
+        bf:agent [ a bf:Person ; rdfs:label "Waltari, Mika" ] ] .
+_:i a bf:Instance ; bf:instanceOf _:w ;
+    bf:title [ a bf:Title ; bf:mainTitle "Sinuhe" ] .
+"""
+
+
+def test_a_blank_node_agent_gets_stable_identity(ctx: LoadContext):
+    """BFFI puts the agent inside the contribution rather than in an authority
+    file, so the agent is usually a blank node. The `_:`-prefix guard here was
+    the twelfth of its kind and was missed by the first sweep: the agent_uri was
+    a parse-local label, so re-ingesting one file created a new agent row for the
+    same person every time."""
+    seen = set()
+    for _ in range(3):
+        g = Graph().parse(data=AGENT_BNODE_TTL, format="turtle")
+        record = load_record(g, ctx)
+        seen.add(tuple(a.agent_uri for a in record.agents))
+    assert len(seen) == 1, f"agent identity differed between parses: {seen}"
+    (uris,) = seen
+    assert uris and all(u.startswith("urn:agent:melinda:") for u in uris), uris
+    assert not any(_looks_like_blank_node(u) for u in uris)
+
+
+def test_a_blank_node_instance_gets_a_stable_target_id():
+    """The same defect on the target side: `parse_bibframe_graph` took the record
+    id from the blank node's label, so the same file produced different target
+    ids run to run - and a reconciliation report keyed by them was not
+    comparable between runs."""
+    from reconciliator.loaders.bibframe import get_profile, parse_bibframe_graph
+
+    seen = set()
+    for _ in range(3):
+        g = Graph().parse(data=AGENT_BNODE_TTL, format="turtle")
+        seen.add(
+            tuple(raw["source_id"] for raw, _nodes in parse_bibframe_graph(g, profile=get_profile()))
+        )
+    assert len(seen) == 1, f"target id differed between parses: {seen}"
+    (ids,) = seen
+    assert ids and not any(_looks_like_blank_node(i) for i in ids), ids
+
+
 def test_a_graph_with_real_uris_keeps_them(ctx: LoadContext):
     """Derivation is a fallback: a node with a URI is identified by it."""
     record = load_record(_bibframe_graph(), ctx)

@@ -18,6 +18,10 @@ from reconciliator.loaders.bibframe.base import (
     normalize_role_uri_or_label,
     parse_agent_dict,
 )
+from reconciliator.loaders.bibframe.decomposition import (
+    derive_bibframe_node_id,
+    is_blank_node,
+)
 from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
@@ -562,13 +566,19 @@ def parse_bibframe_graph(
 
         # Source ID
         source_id = str(instance_node)
-        if source_id.startswith("_:"):
-            # Blank node: fallback to identifier or work URI
+        if is_blank_node(instance_node):
+            # A blank-node Instance has no id of its own: prefer a real
+            # identifier, then the work's identity, and only then a digest of the
+            # node's own triples. The test was `startswith("_:")`, which
+            # `str(BNode())` never produces, so this whole branch was dead and the
+            # record id was rdflib's parse-local label - a different target id
+            # for the same input file on every run. Same defect as the ingest
+            # side's work/expression/manifestation URIs, on the target side.
             isbns, issns, urns, other_ids = _extract_identifiers(g, instance_node, profile)
             source_id = (
                 (urns[0] if urns else None)
                 or (isbns[0] if isbns else None)
-                or (str(work_node) if work_node else source_id)
+                or f"bnode:{derive_bibframe_node_id(g, work_node or instance_node)}"
             )
         else:
             isbns, issns, urns, other_ids = _extract_identifiers(g, instance_node, profile)
