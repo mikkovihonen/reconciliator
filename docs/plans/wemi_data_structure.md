@@ -2082,6 +2082,117 @@ failing closed.
 
 583 passing.
 
+### 14.17 Classification rules derived from the Finnish RDA guidelines ✅ IN PROGRESS
+
+The eight remaining MARC reachability gaps needed citable cataloguing rules, not
+guesses. Researched against the National Library's own documentation; **five gaps
+remain.**
+
+Sources used:
+
+| what | where |
+|---|---|
+| RDA application guideline root | `wiki.helsinki.fi/.../RDA-kuvailu MARC 21 -formaatilla/` |
+| 336/337/338/341/347, Finnish terms and codes | `.../RDA-sovellusohje/3XX Fyysisen kuvailun jne. kentät/` |
+| 501 bound-with, 502 thesis, 533 reproduction | `.../RDA-sovellusohje/50X-535 Huomautuskentät/` |
+| braille and tactile encoding | `.../Lisäohjeita/Saavutettavuus/` |
+| online resources | `.../Aineistokohtaiset työohjeet/Verkkoaineistot/` |
+| genre/form uses SLM, `$2 slm/fin` | `.../Sisällönkuvailuopas/01. Lajityyppimuoto/` |
+| **857 electronic archive location** | `marc21.kansalliskirjasto.fi/bib/841-88X.htm` |
+| RDA content type code list | `loc.gov/standards/valuelist/rdacontent.html` |
+
+#### The research found existing bugs, not just gaps
+
+**Four RDA content type codes pointed at the wrong concept and three did not
+exist.** The 336 `$b` table had been written from memory:
+
+| code | official | was mapped to |
+|---|---|---|
+| `tdi` | two-dimensional moving image | three-dimensional moving image |
+| `tdm` | three-dimensional moving image | three-dimensional form |
+| `tcf` | tactile three-dimensional form | tactile notated music |
+| `tcm` | tactile notated music | tactile cartographic |
+
+plus `dta`, `dcr`, `tcg`, which are not in the vocabulary, while `cod`
+(computer dataset) was absent. `tdi` is the code essentially every film and video
+record carries, so the transposition mislabelled the whole moving-image content
+type. The table is now the complete 23-code list, each internal value annotated
+with the RDA term where ours is coarser.
+
+The codes reached me as a *summary* of the Finnish 3XX page, which is exactly
+where a paraphrase can mislead, so they were confirmed against the LoC list
+independently before anything was changed.
+
+#### Rules implemented
+
+- **Tactile** — `341 0# $a tactile $e braille $2 sapdv` is what the accessibility
+  guidance prescribes for a *pistekirja*; the tactile 336 codes say it too.
+  Checked before the leader, because a braille book has Leader/06 = "a" like any
+  text. **A braille score is tactile, not music** (project decision; `336 $b tcm`
+  asserts both).
+- **Web archive** — `857`, "elektronisen arkiston sijainti ja käyttö", for
+  material "saatavissa verkkoarkistossa tai digitaalisessa arkistossa". Its
+  second indicator carries the distinction: `0`/blank means the linked copy *is*
+  the described resource, `1`/`4` that it is an electronic version of a physical
+  one.
+- **Preservation surrogate** — `857` with second indicator `1`/`4`, or `533`
+  *jäljennehuomautus*.
+- **Bound-with** — `501` (and `014`). The guidance records 501 as a local field
+  carrying `$5` with the holding library's ISIL code, so it appears in
+  institutional rather than shared records; read anyway because Melinda is not
+  the only source. **A holdings-level fallback is still needed** for sammelbands
+  described only at item level.
+- **336 classifies when the leader does not.** An RDA record must carry 336 and
+  electronic resources routinely have a generic Leader/06, so a dataset coded
+  `336 $b cod` was arriving as plain text.
+
+Deliberately *not* implemented: **338 `cr` / 007 `cr` / 008-23 `o` do not mean
+"web archive."** They mean online resource, which every e-book is. Keying the
+web-archive funnel on them would have routed the entire electronic collection to
+it. The Verkkoaineistot page has no concept of a harvested or archived resource
+at all, and the Finnish web archive is a separate harvest index
+(`verkkoarkisto.kansalliskirjasto.fi`) collected under *kulttuuriaineistolaki*
+and reachable only at legal-deposit workstations - not catalogued record by
+record. 857 is the link *from* a catalogued resource *into* it.
+
+#### Still unreachable: 5 of 41
+
+`funnel_g_anthology`, `funnel_gg_broadcast`, `funnel_jj_medieval_fragment`,
+`funnel_nn_geodata`, `funnel_t_legal`.
+
+All five plausibly hang off 655 genre/form headings, which the guidance says come
+from **SLM** (Suomalainen lajityyppi- ja muotosanasto) with `$2 slm/fin`. The
+existing classifier already matches SLM terms as substrings, so closing these
+needs the actual SLM terms for antologiat, radio- and television programmes,
+fragments, spatial data and statutes - checked against the vocabulary rather
+than invented.
+
+#### Questions for the National Library
+
+Phrased for cataloguers, to be lifted as-is.
+
+1. **Braille score.** A score in braille carries `336 $b tcm` (tactile notated
+   music) and may have Leader/06 = "c". Should a discovery system treat it
+   primarily as tactile material or as music? We have chosen tactile.
+2. **Digital surrogate as a category.** We classify a record with `533`, or `857`
+   with second indicator 1, as a preservation surrogate - but only when nothing
+   more specific applies, so a digitised map stays a map. Is surrogate-ness
+   better modelled as a property of the manifestation than as a kind of work?
+3. **Bound-with in shared records.** 501 is documented as local, requiring `$5`.
+   Is a sammelband relationship ever expressed in a shared Melinda record, or is
+   it inherently holdings-level - in which case discovery has to read holdings.
+4. **Web archive.** Is `857` the intended signal that a resource is held in the
+   Finnish web archive, and is the second indicator reliably used to separate a
+   born-digital archived resource from a digitised physical one?
+5. **SLM terms.** Which SLM terms should identify anthologies, radio and
+   television programmes, manuscript fragments, spatial data sets and statutes?
+   These are the five material types our dispatch still cannot recognise.
+6. **BFFI.** The Finnish BIBFRAME adaptation is not ready, so BibFrame
+   classification is derived from BIBFRAME Work subclasses and `bf:content`
+   (14.16). When BFFI settles, which of these MARC-derived rules should change?
+
+600 passing.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
