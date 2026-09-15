@@ -2030,6 +2030,58 @@ produce: the audit fails and names it.
 
 572 passing.
 
+### 14.16 The BibFrame path had the same defect, larger ✅ COMPLETE
+
+Asking 14.15's question of the other ingest path: **only 5 of 42 funnels were
+reachable from a BibFrame record.**
+
+`decompose_bibframe_work` set `work_type` under exactly two graph conditions —
+C-3 (hub) and C-5 (music) — and defaulted everything else to `"text"`. So a
+BibFrame cartographic resource, thesis, dataset, still image or manuscript all
+arrived as text and reached the monograph funnel. `derive_bibframe_keys` emits 5
+key types against the MARC path's 14, which narrows it further.
+
+Unlike the nine MARC gaps, this one is a lookup rather than a heuristic: the
+BIBFRAME vocabulary names its Work subclasses explicitly, so there is nothing to
+guess about Finnish cataloguing practice.
+
+`determine_bibframe_work_type()` maps `rdf:type` to `WorkType`, falling back to
+`bf:content` and `bf:genreForm` for a Work carrying only the generic class.
+Matching is on local names, because profiles differ on whether they emit `bf:` or
+the expanded LoC namespace. A condition that already decided is left alone.
+
+```
+bf class         work_type      funnel
+Text             text           funnel_a_monograph
+Cartography      cartography    funnel_l_cartography
+Dataset          dataset        funnel_n_dataset
+MovingImage      moving_image   funnel_f_moving_image
+StillImage       still_image    funnel_s_still_image
+Object           realia         funnel_q_realia
+Manuscript       manuscript     funnel_r_archival
+bf:content cartographic-image   funnel_l_cartography
+```
+
+**And the music split needed content types too.** With work types alone,
+`bf:NotatedMusic` reached `funnel_b_music_sound` — the same defect 14.14 fixed on
+the MARC side, for the same reason: both music kinds are work_type `"music"` and
+only `content_type` separates them. `determine_bibframe_content_type()` supplies
+it, so scores and recordings now split on both paths.
+
+Reachable funnels from BibFrame: **5 → 17 of 42.** What remains is largely the
+same nine MARC gaps plus types BIBFRAME does not model as distinct classes
+(thesis, comic, patent, standard, board game, podcast, oral history and so on).
+Those are expressible through `bf:genreForm`, but mapping Finnish genre
+vocabulary there is the same bibliographic decision the MARC gaps need, so it is
+left named rather than guessed.
+
+The reachability audit now covers both paths, including a floor assertion so a
+regression to "everything is text" fails rather than quietly narrowing dispatch
+again, and a test that an unrecognised class still defaults to text rather than
+failing closed.
+
+583 passing.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
