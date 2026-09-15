@@ -1330,6 +1330,19 @@ def derive_bibframe_keys(
     first_issn = next((i.value for i in identifiers if i.scheme == "issn"), None)
     _add("standard", first_isbn or first_issn)
 
+    # Translators, computed exactly as on the MARC side. This was declared
+    # impossible here because roles were not normalised, so no BibFrame agent
+    # ever carried "trl"; now that they do, the key that funnel HH dispatches on
+    # and the clusterer scores with is derivable from BIBFRAME too.
+    translator_names = [a.name for a in agents if "trl" in (a.role_counts or {})]
+    if translator_names:
+        _add(
+            "translators_signature",
+            " ".join(
+                sorted(compute_author_key(n, None) for n in translator_names if n)
+            ).strip(),
+        )
+
     return keys
 
 

@@ -295,7 +295,10 @@ def _bibframe_capabilities() -> LoaderCapabilities:
             | {"text", "hub", "music"}
         ),
         content_types=set(BIBFRAME_CONTENT_TYPES.values()) | {"text", "audio_music"},
-        key_types={"author", "title_stem", "work", "music_work", "standard"},
+        key_types={
+            "author", "title_stem", "work", "music_work", "standard",
+            "translators_signature",
+        },
         identifier_schemes={"isbn", "issn", "urn", "doi", "other"},
         # Blank-node subjects now get an identifier derived from the node's own
         # triples, so the same input yields the same URIs on every ingest.
@@ -323,10 +326,6 @@ def _bibframe_capabilities() -> LoaderCapabilities:
             "sammelband": (
                 "bound-with is a holdings-level relationship with no BIBFRAME "
                 "equivalent"
-            ),
-            "translators_signature": (
-                "no relator-based translator detection; roles are resolved "
-                "through the profile instead"
             ),
         },
     )
