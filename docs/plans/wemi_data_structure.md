@@ -1320,7 +1320,7 @@ Each lands green. Stages 1 and 2 carry the risk.
 | # | Stage | Net lines |
 |---|---|---|
 | 1 ✅ | `entity_keys` table; emit keys and analytics at decomposition | ~0 |
-| 2 | `MatchRecord` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
+| 2 ✅ | `MatchRecord` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
 | 3 | Generic `run_funnel(spec, subject)`; delete the 42 methods; ship the current 42 as built-in specs | **-1400** |
 | 4 | `handler:` resolution; port the 6 custom funnels to handler modules | +150 |
 | 5 | Dead code (`compute_bounding_box_iou`; expression-tier search APIs — see 14.10); reconcile docstrings against behaviour | -50 |
@@ -1414,6 +1414,89 @@ guard; re-ingest idempotency; bulk and by-key lookups; orphan rejection; and
 BibFrame parity.
 
 Suite: **485 passed** (469 + 16).
+
+### 14.6.2 Stage 2 as built ✅ COMPLETE
+
+`TargetRecord` is gone as a name and as a persisted concept. `target_records`,
+`target_payloads` and `target_keys` are dropped along with
+`insert_target_records_batch`, `get_target_record`, `count_target_records` and
+`get_all_target_records`; `find_records_by_key` and `get_blocking_groups` now read
+`entity_keys`. The `is_target` branch is gone from the ingest accumulator, so
+every source decomposes into WEMI and `authoritative` is the only distinction.
+
+- `MatchRecord` carries `identifiers`, plus `content_type`, `work_uri`,
+  `expression_uri` and `manifestation_uri` for the tiers above the manifestation.
+  The 24 sugar accessors are replaced by explicit `get_first_key("...")` at 99
+  call sites. Only `work_blocking_key` survives as a property, because it encodes
+  a real fallback rule rather than a one-line lookup.
+- `WEMIRepository.get_all_match_records(origins=None)` projects records back out
+  of WEMI rows. Verified field by field against the record built at ingest: all
+  14 fields, the key bag and the identifier bag agree exactly.
+- 94 lines of payload re-parsing deleted from the matcher.
+  `extract_target_analytics` and `extract_target_track_titles` read the
+  `analytic` keys written at ingest.
+- The reconcile command ingests the corpus as ordinary WEMI rows under
+  `reconcile.corpus_source_name` (default: the target file's stem), registered
+  non-authoritative.
+
+**`match_target_record` dissolved.** It is now `resolve_agents(match, record)`,
+and the CLI matches once. Tier 1 works on the reconcile path for the first time:
+
+```
+record work_type   : music
+identifiers seen   : {'ean': [...], 'publisher_number': ['ODE 1234-2'], 'control_number': ['T1']}
+match tier         : tier1_exact_identifier
+matched work uri   : urn:work:melinda:A1
+confidence         : 1.0
+```
+
+#### Four defects found while building it
+
+**Five tier-1 identifier schemes were parsed nowhere.** Moving identifiers off the
+payload exposed that `parse_marc_record_elem` never extracted `publisher_number`
+or `plate_number` (028), `strn` (088), `issn_l` (022 $l) or `control_number`.
+These are the *primary* tier-1 schemes for recorded sound, notated music and
+standards, so neither the `identifiers` table nor the matcher had ever seen them.
+Now extracted at the source, which fixes both sides at once.
+
+**`manifestations.source_id` was globally UNIQUE.** Two sources both using control
+number "R1" collided, and the upsert on `source_id` silently merged a corpus
+record into an authority record. Invisible until now only because corpus records
+lived in the staging table.
+
+**Then keying the upsert on `manifestation_uri` was also wrong.** A BIBFRAME
+instance URI is shared by every source describing that instance, so the corpus
+ingest *overwrote* the authority manifestation it should have matched — the row
+came back stamped with the corpus's non-authoritative origin, and reconciliation
+returned `unmatched`. Identity is now `(source, source_id)`, with
+`manifestation_uri` not unique: a manifestation row is one source's record of a
+manifestation, and cross-source identity is consolidation's job rather than the
+schema's.
+
+**Clustering had to be scoped.** `get_all_match_records()` with no filter returns
+every source, so the clusterer was clustering authority rows as if they were the
+corpus. It now scopes to the non-authoritative sources, falling back to
+everything when no registry exists.
+
+#### An operational hazard this creates
+
+With one database, "which rows may be matched against" is answered entirely by
+`record_origin` plus the `sources` registry. If a source is registered
+authoritative but its rows are not stamped with that origin, `_origin_clause`
+filters every candidate out and matching silently returns nothing. Ingest stamps
+and registers together, so the production paths are consistent — but it is a
+fail-closed mode with no diagnostic, and it cost two debugging rounds here. Worth
+a startup check that every registered authoritative source actually has rows.
+
+#### Test changes
+
+490 passing. `persist_match_records()` in `conftest.py` writes MatchRecords as
+WEMI rows, so tests keep declaring the record shape they care about. The
+dual-routing test became a single-routing test. Two count assertions were scoped
+to authoritative origins, since the reconciled corpus now contributes rows of its
+own. `test_target_schema_normalization_and_cascades` was replaced by tests
+pinning that `entity_keys` has **no** cascade — it is polymorphic, so it carries
+no foreign key, and `ingest_mode: replace` (14.12) must delete keys explicitly.
 
 ### 14.7 Decisions taken
 
