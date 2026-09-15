@@ -379,3 +379,67 @@ def test_a_real_component_record_reaches_the_article_funnel():
         )
         == "funnel_c_article"
     )
+
+
+# --- relator terms with their diacritics folded away ----------------------
+
+
+def test_an_ascii_folded_relator_term_resolves():
+    """One unfolded term silently disabled cross-source work consolidation:
+    `saveltaja` resolved to nothing, so the role was not a work role, so the
+    contribution was filed against the *expression*, so
+    `WorkConsolidator.load_signatures` - which reads contributions on works -
+    found no creators, so the metadata score fell from clearing 0.93 to 0.90 and
+    nothing consolidated at all. Found while measuring stage 9 of
+    plans/aggregates.md."""
+    from reconciliator.normalizers.relators import normalize_role
+
+    for folded, proper in (
+        ("saveltaja", "säveltäjä"),
+        ("kaantaja", "kääntäjä"),
+        ("esittaja", "esittäjä"),
+        ("KAANTAJA", "kääntäjä"),
+    ):
+        assert normalize_role(folded) == normalize_role(proper) != folded
+
+
+def test_an_exact_term_still_resolves_the_same_way():
+    """Folding is consulted only when an exact lookup fails, so every term that
+    resolved before resolves to the same code."""
+    from reconciliator.config import DEFAULT_RELATOR_MAPPINGS
+    from reconciliator.normalizers.relators import normalize_role
+
+    for term, code in DEFAULT_RELATOR_MAPPINGS.items():
+        assert normalize_role(term) == code.strip().lower(), term
+
+
+def test_an_unknown_role_is_still_returned_as_itself():
+    from reconciliator.normalizers.relators import normalize_role
+
+    assert normalize_role("tuntematon-rooli") == "tuntematon-rooli"
+
+
+def test_a_configured_mapping_folds_too():
+    from reconciliator.normalizers.relators import RelatorRegistry
+
+    registry = RelatorRegistry(relator_mappings={"tulkitsijä": "trl"})
+    assert registry.normalize_role("tulkitsija") == "trl"
+
+
+def test_a_folded_term_is_recognised_when_stripping_a_name():
+    """`strip_relator` tests the same vocabulary, so "Jean Sibelius
+    (saveltaja)" must lose its role marker like the properly spelled form."""
+    from reconciliator.normalizers.relators import RelatorRegistry
+
+    registry = RelatorRegistry()
+    assert registry.strip_relator("Sibelius, Jean (saveltaja)") == "Sibelius, Jean"
+    assert registry.strip_relator("Sibelius, Jean (säveltäjä)") == "Sibelius, Jean"
+
+
+def test_names_are_not_folded_by_this():
+    """`fold_label` deliberately preserves Finnish diacritics because it folds
+    *names*, where å and a are different people. Only the relator lookup key is
+    folded, and only a relator term is a closed vocabulary."""
+    from reconciliator.normalizers.linguistic import fold_label
+
+    assert fold_label("Åström, Ann", preserved_diacritics="åäöÅÄÖ").startswith("å")

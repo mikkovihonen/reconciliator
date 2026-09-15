@@ -6,10 +6,45 @@ derived from Finto MTS (Metatietosanasto / RDA-FI) and LoC MARC Relators.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any, Iterable, Optional
 
 from reconciliator.config import DEFAULT_RELATOR_MAPPINGS
 from reconciliator.vocab.bridges import get_mts_role_map
+
+
+def fold_relator_term(token: str) -> str:
+    """A diacritic-insensitive lookup key for a relator term.
+
+    Exports disagree about Finnish diacritics, and an unfolded term is not a
+    cosmetic problem. `säveltäjä` resolves to `cmp`; the ASCII-folded
+    `saveltaja` resolved to nothing, and every link in what followed was silent:
+
+    1. a role that is not a work role files the contribution against the
+       *expression* rather than the work;
+    2. `WorkConsolidator.load_signatures` reads
+       `contributions WHERE entity_type = 'work'`, so the work has no creators;
+    3. the metadata score drops from clearing the 0.93 threshold to 0.90, and
+       **nothing consolidates** - including records whose titles and creators are
+       identical across two sources.
+
+    Found while measuring stage 9 of plans/aggregates.md, on a fixture that
+    happened to write the folded spelling.
+
+    Full decomposition rather than `fold_label`, which deliberately *preserves*
+    Finnish diacritics because it folds names, where å and a are different
+    people. A relator term is a closed vocabulary, so collapsing them is safe
+    here and nowhere near names.
+    """
+    decomposed = unicodedata.normalize("NFKD", token.strip().casefold().rstrip("."))
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+#: Folded view of the configured terms, consulted only when an exact lookup
+#: fails, so a term that resolves today resolves to the same code.
+_FOLDED_DEFAULTS: dict[str, str] = {}
+for _term, _code in DEFAULT_RELATOR_MAPPINGS.items():
+    _FOLDED_DEFAULTS.setdefault(fold_relator_term(_term), _code)
 
 # Dynamically constructed from loc-relators-bridge.ttl; preserved for module-level compatibility
 MTS_ROLE_MAP: dict[str, str] = get_mts_role_map()
@@ -28,6 +63,7 @@ class RelatorRegistry:
         self.vocab_store = vocab_store
         self._custom_terms: set[str] = set()
         self._custom_mappings: dict[str, str] = {}
+        self._folded_custom: dict[str, str] = {}
         if relator_mappings is not None:
             for term, code in relator_mappings.items():
                 self.register(code, term)
@@ -47,6 +83,7 @@ class RelatorRegistry:
             if not hasattr(self, "_custom_mappings"):
                 self._custom_mappings = {}
             self._custom_mappings[clean_term] = clean_code
+            self._folded_custom.setdefault(fold_relator_term(clean_term), clean_code)
 
     def is_relator(self, token: str) -> bool:
         """Check if a token matches a known relator term."""
@@ -61,7 +98,10 @@ class RelatorRegistry:
             if self.vocab_store.is_known_relator(clean):
                 return True
 
-        return clean in DEFAULT_RELATOR_MAPPINGS
+        return (
+            clean in DEFAULT_RELATOR_MAPPINGS
+            or fold_relator_term(clean) in _FOLDED_DEFAULTS
+        )
 
     def strip_relator(self, name: str) -> str:
         """Strip trailing role markers from name literals."""
@@ -99,6 +139,13 @@ class RelatorRegistry:
             code = self.vocab_store.get_relator_code(clean)
             if code:
                 return str(code)
+
+        # Last: the same terms with their diacritics folded away.
+        folded = fold_relator_term(clean)
+        if folded in getattr(self, "_folded_custom", {}):
+            return self._folded_custom[folded]
+        if folded in _FOLDED_DEFAULTS:
+            return _FOLDED_DEFAULTS[folded]
 
         return None
 
@@ -153,6 +200,7 @@ def normalize_role(
 
 __all__ = [
     "MTS_ROLE_MAP",
+    "fold_relator_term",
     "RelatorRegistry",
     "get_default_relator_registry",
     "get_mts_role_map",
