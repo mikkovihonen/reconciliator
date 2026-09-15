@@ -916,6 +916,14 @@ class OAIIngestConfig(BaseModel):
     timeout: float = 60.0
     include_items: bool = False
     normalization: Optional[RecordNormalizationConfig] = None
+    # How this source records what a publication contains: a bundled profile
+    # name, a path to a YAML profile, or "off". Two sources in the same format
+    # disagree about this, so it belongs to the source. See
+    # constituents/spec.py and plans/aggregates.md.
+    constituents: Optional[str] = None
+    # What ingest does with them: off | keys_only | entities. None inherits the
+    # global default.
+    constituents_mode: Optional[Literal["off", "keys_only", "entities"]] = None
 
     @model_validator(mode="after")
     def validate_workers_and_queues(self) -> OAIIngestConfig:
@@ -1125,6 +1133,12 @@ class ReconcileConfig(BaseModel):
     # place; a new id is appended just before the fall-through funnel. Omitting
     # this leaves the 42 built-ins as they are.
     funnels: list[FunnelSpec] = Field(default_factory=list)
+    # The directory the config file was loaded from, set by `load_config`. It is
+    # what a relative `handler` or `constituents` path resolves against, so a
+    # config keeps working wherever the CLI is invoked from. `WorkMatcher` has
+    # read this since funnel handlers gained paths; nothing ever set it, so a
+    # relative path silently resolved against the process working directory.
+    config_dir: Optional[Path] = None
     format: Literal["auto", "marcxml", "bibra", "bibframe"] = "auto"
     schema_profile: Optional[str] = None
     output_file: Optional[Path] = None
@@ -1273,6 +1287,17 @@ class LoggingConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ConstituentsConfig(BaseModel):
+    """Global default for constituent extraction, overridable per source.
+
+    The shipped default profile is the empty one, so a source nobody has
+    described behaves exactly as it did before constituents existed.
+    """
+
+    profile: Optional[str] = None
+    mode: Literal["off", "keys_only", "entities"] = "keys_only"
+
+
 class AppConfig(BaseModel):
     """Root configuration object combining all subsystems."""
 
@@ -1284,6 +1309,10 @@ class AppConfig(BaseModel):
     record_normalization: RecordNormalizationConfig = Field(
         default_factory=RecordNormalizationConfig
     )
+    constituents: ConstituentsConfig = Field(default_factory=ConstituentsConfig)
+    #: Set by `load_config`; anchors every relative path in configuration that
+    #: names code or a profile.
+    config_dir: Optional[Path] = None
     download_skosmos: dict[str, SkosmosDownloadConfig] = Field(default_factory=dict)
     ingest_vocab: Optional[VocabIngestConfig] = None
     ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
@@ -1687,6 +1716,31 @@ def load_config(config_path: Path | str, configure_log: bool = False) -> AppConf
 
     config = AppConfig.model_validate(raw_data)
     resolved = _resolve_config_paths(config, base_dir)
+    resolved.config_dir = base_dir.resolve()
+    if resolved.reconcile is not None:
+        resolved.reconcile.config_dir = resolved.config_dir
+    _validate_constituent_sources(resolved)
     if configure_log:
         configure_logging(resolved.logging)
     return resolved
+
+
+def _validate_constituent_sources(config: AppConfig) -> None:
+    """Resolve every source's constituent profile and extractor, once, here.
+
+    So an unknown profile name or a missing extractor file is a startup error
+    naming the source, rather than a source that quietly ingests no constituents
+    for the rest of the corpus. Same reason `WorkMatcher` resolves funnel
+    handlers in its constructor.
+    """
+    from reconciliator.constituents import resolve_for_source
+
+    for name, source in (config.ingest_oai or {}).items():
+        resolve_for_source(
+            name,
+            source.constituents,
+            source.constituents_mode,
+            default_profile=config.constituents.profile,
+            default_mode=config.constituents.mode,
+            config_dir=config.config_dir,
+        )

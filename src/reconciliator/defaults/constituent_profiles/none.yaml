@@ -1,0 +1,6 @@
+# No constituents. The default for any source nobody has described, so adding
+# constituent extraction changes nothing until a source opts in.
+#
+# Reachable as `none`, `off`, `disabled` or `no`.
+name: none
+fields: []

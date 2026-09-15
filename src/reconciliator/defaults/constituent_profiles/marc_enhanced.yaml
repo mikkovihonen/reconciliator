@@ -1,0 +1,53 @@
+# MARC 21 as catalogued in Melinda: an *enhanced* contents note plus name-title
+# analytic added entries.
+#
+# The indicator filters are the substance of this profile, not decoration. A
+# basic 505 (ind2 blank) holds one `$a` blob - "Cantus arcticus -- Angel of light
+# -- Isle of bliss" - which cannot be split into titles reliably, so this profile
+# does not claim it: no constituents is right, and three wrong works is not.
+name: marc_enhanced
+shape: embodied
+dedup: normalized_title
+max_per_record: 100
+
+fields:
+  # 505 enhanced contents note. One $t per constituent, in tracklist order.
+  - tag: "505"
+    indicators:
+      ind1: "0"
+      ind2: "0"
+    title: "t"
+    creator: "r"        # statement of responsibility for that constituent
+    duration: "g"       # "(4:32)" on sound recordings
+    ordinal: position
+
+  # 700 name-title analytic added entry. $a is the constituent's creator, not the
+  # container's, which is why contributes_to_container is false.
+  - tag: "700"
+    indicators:
+      ind2: "2"
+    title: "t"
+    creator: "a"
+    duration: "g"
+    ordinal: position
+    contributes_to_container: false
+
+  # 710 the same, for a corporate body.
+  - tag: "710"
+    indicators:
+      ind2: "2"
+    title: "t"
+    creator: "a"
+    ordinal: position
+    contributes_to_container: false
+
+  # 773 host item: this record is itself a part, so it becomes a component
+  # manifestation hanging off the container found through its citation key.
+  - tag: "773"
+    shape: component
+    component_type: article
+    title: "t"
+    creator: "a"
+    pagination: "g"
+    container_key: citation
+    ordinal: none

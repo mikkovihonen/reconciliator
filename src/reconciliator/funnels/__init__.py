@@ -19,10 +19,6 @@ degrades to the generic template.
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
-import re
-import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Optional
@@ -30,6 +26,7 @@ from typing import Optional
 from reconciliator.funnels.builtin import BUILTIN_SPECS
 from reconciliator.funnels.engine import FunnelContext, default_tier2, run_funnel
 from reconciliator.funnels.spec import FunnelSpec, FunnelWhen
+from reconciliator.module_ref import resolve_module_ref
 
 __all__ = [
     "BUILTIN_HANDLERS",
@@ -50,15 +47,8 @@ BUILTIN_HANDLERS: dict[str, str] = {
     "audiobook": "reconciliator.funnels.audiobook",
 }
 
-_BARE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
 class FunnelHandlerError(ValueError):
     """A funnel's handler could not be resolved."""
-
-
-def _is_path(value: str) -> bool:
-    return value.endswith(".py") or "/" in value or "\\" in value
 
 
 def resolve_handler(
@@ -68,45 +58,18 @@ def resolve_handler(
 ) -> Optional[ModuleType]:
     """Resolve a handler reference to a module, or None when there is none.
 
-    `config_dir` anchors relative paths - the directory of the config file, not
-    the process working directory, so a config keeps working wherever the CLI is
-    invoked from.
+    The reference rule itself lives in `reconciliator.module_ref`, shared with the
+    `extractor` on a constituent profile: a user who has learned one of the two
+    has learned the other, so they must not drift.
     """
-    if not value:
-        return None
-
-    if not _is_path(value):
-        if not _BARE_NAME.match(value):
-            raise FunnelHandlerError(
-                f"funnel {funnel_id!r}: handler {value!r} is neither a path "
-                f"(ending in .py) nor a valid built-in name"
-            )
-        target = BUILTIN_HANDLERS.get(value)
-        if target is None:
-            raise FunnelHandlerError(
-                f"funnel {funnel_id!r}: unknown built-in handler {value!r}. "
-                f"Available: {', '.join(sorted(BUILTIN_HANDLERS))}"
-            )
-        return importlib.import_module(target)
-
-    path = Path(value)
-    if not path.is_absolute() and config_dir is not None:
-        path = (config_dir / path).resolve()
-    if not path.is_file():
-        raise FunnelHandlerError(
-            f"funnel {funnel_id!r}: handler file not found: {path}"
-        )
-
-    # A synthetic, unique module name, so two funnels whose handler files share a
-    # basename do not collide in sys.modules.
-    mod_name = f"reconciliator_funnel_handler_{funnel_id}_{abs(hash(str(path))):x}"
-    spec = importlib.util.spec_from_file_location(mod_name, path)
-    if spec is None or spec.loader is None:
-        raise FunnelHandlerError(f"funnel {funnel_id!r}: cannot load handler from {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[mod_name] = module
-    spec.loader.exec_module(module)
-    return module
+    return resolve_module_ref(
+        value,
+        registry=BUILTIN_HANDLERS,
+        kind="funnel",
+        subject=funnel_id,
+        config_dir=config_dir,
+        error_cls=FunnelHandlerError,
+    )
 
 
 def resolve_specs(

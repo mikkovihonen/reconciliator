@@ -810,6 +810,30 @@ ingest_vocab:
   # legacy_thesauri: null (automatically uses vocabularies.legacy_to_modern keys)
 
 # ==============================================================================
+# 8b. Constituent extraction (albums, anthologies, articles)
+# ==============================================================================
+# What a publication *contains*: an album's tracks, an anthology's stories, an
+# article inside a journal issue. Two sources in the same format do not agree
+# about how they record it, so the fields to read belong to the source and this
+# is only the default for sources that name nothing.
+#
+# The shipped default is the empty profile, so a source nobody has described
+# behaves exactly as it did before this existed.
+constituents:
+  # A bundled profile name, a path to a YAML profile, or "off".
+  #   none | off        look for nothing (default)
+  #   marc_enhanced     MARC as catalogued in Melinda: enhanced 505 + 700/710 $t
+  #   bibframe_haspart  BIBFRAME / BFFI bf:hasPart
+  profile: null
+
+  # What ingest does with what it finds:
+  #   off         do not look
+  #   keys_only   derive the analytic / analytic_title blocking keys, no rows
+  #   entities    also write constituent works, expressions, ordered
+  #               manifestation_expressions rows and has_constituent edges
+  mode: "keys_only"
+
+# ==============================================================================
 # 9. OAI-PMH & MARCXML Authority Sources Ingestion
 # ==============================================================================
 ingest_oai:
@@ -839,6 +863,29 @@ ingest_oai:
     # identity: the same input yields the same work, expression, manifestation
     # and agent URIs, so re-ingesting returns the store to the same state.
     ingest_mode: "accumulate"
+
+    # How this source records what a publication contains, overriding the global
+    # `constituents` block above. A bundled name, a path to a YAML profile of
+    # this source's own, or "off".
+    #
+    #   constituents: "marc_enhanced"
+    #   constituents: "profiles/fono.yaml"
+    #   constituents: "off"
+    #
+    # A profile is declarative - tags, indicators and subfield codes - and may
+    # name an `extractor` for a source whose conventions cannot be described that
+    # way. That value is either a built-in name or a path to a Python file, the
+    # same rule as a funnel's `handler`:
+    #
+    #   extractor: fono_tracks
+    #   extractor: src/reconciliator/constituents/fono.py
+    #   extractor: /opt/site/constituents/kavi.py
+    #
+    # Profiles and extractors resolve when this file loads, so a bad name or a
+    # missing file is a startup error naming the source.
+    constituents: "marc_enhanced"
+    constituents_mode: "keys_only"
+
     id_source: "marc_001"
     control_number_prefix: "(FI-MELINDA)"
     control_number_padding_digits: 9

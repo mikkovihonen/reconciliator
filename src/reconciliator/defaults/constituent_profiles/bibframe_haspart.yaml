@@ -1,0 +1,16 @@
+# BIBFRAME and BFFI: constituents as related Works under bf:hasPart.
+#
+# Ordering is the open part. BIBFRAME states sequence with bflc:sequence or an
+# RDF list rather than by document order, and which of those a given export uses
+# is a question about that export - so this profile leaves constituents unordered
+# rather than inventing an order from triple iteration, which is not stable.
+name: bibframe_haspart
+shape: embodied
+dedup: normalized_title
+max_per_record: 100
+
+fields:
+  - predicate: "bf:hasPart"
+    title: "bf:title"
+    creator: "bf:contribution"
+    ordinal: none

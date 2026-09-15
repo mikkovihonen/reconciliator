@@ -335,11 +335,9 @@ lookup per title.
 Two levels, matching `normalization`: a global default and a per-source override.
 
 ```yaml
-ingest:
-  # The default for any source that names none. `off` means a source nobody has
-  # described yet behaves exactly as it does today.
-  constituents: marc_enhanced
-  constituents_mode: entities        # off | keys_only | entities
+constituents:
+  profile: null            # the empty profile: look for nothing
+  mode: keys_only          # off | keys_only | entities
 
 ingest_oai:
   melinda:
@@ -362,13 +360,7 @@ Each is its own diff with its own verification, in this order:
 
 1. ✅ **Repository binding and the relationship pair.** *Done — see the log
    below.*
-2. **The profile mechanism.** `ConstituentProfile` and `ConstituentField`
-   models, `get_constituent_profile(name_or_path)`, extractor resolution shared
-   with `funnels.resolve_handler`, the two config fields on `OAIIngestConfig` and
-   the global default, and `config.example.yaml` documenting all of it. Bundled
-   profiles: `marc_enhanced`, `marc_none`, `bibframe_haspart`. No extraction yet
-   — verified by loading every bundled profile, resolving a built-in and a path
-   extractor, and asserting that a bad name fails at startup naming the source.
+2. ✅ **The profile mechanism.** *Done — see the log below.*
 3. **Profile-driven MARC extraction** into an ordered `Constituent`: indicator
    filters, durations, ordinals, dedup. Still no entities; asserted against
    fixtures and against a profile that selects nothing.
@@ -479,3 +471,64 @@ duplicating edges. There is no migration code, on purpose — see
 `plans/wemi_data_structure.md` and the standing decision that nothing is in
 production. Delete `data/authority.db` (or `reconciliator reset`) and re-ingest;
 the local dev database in this checkout is one of the affected ones.
+
+## Stage 2 ✅ COMPLETE
+
+`constituents/spec.py` holds `ConstituentField` and `ConstituentProfile`;
+`constituents/__init__.py` holds the resolution: `get_constituent_profile`
+(bundled name → alias → YAML path, in `get_profile`'s three steps),
+`resolve_extractor`, and `resolve_for_source`, which folds a source's
+configuration and the global default into one `SourceConstituents` answer.
+
+Three profiles ship in `defaults/constituent_profiles/`, beside the BIBFRAME
+schema profiles:
+
+| profile | what it describes |
+|---|---|
+| `none` | nothing — the default, so an undescribed source behaves exactly as before. Reachable as `off`, `disabled`, `no`, `marc_none` |
+| `marc_enhanced` | Melinda MARC: enhanced 505 (`ind1=0 ind2=0`), 700/710 `$t` with `ind2=2`, and 773 as a component |
+| `bibframe_haspart` | `bf:hasPart`, unordered |
+
+Config is two levels, matching `normalization`: a global `constituents` block
+and `constituents` / `constituents_mode` per source on `OAIIngestConfig`.
+
+### The reference rule is now shared, not copied
+
+A funnel's `handler` and a profile's `extractor` mean the same thing — a
+built-in name or a path to a Python file — so the rule moved into
+`module_ref.resolve_module_ref` and `funnels.resolve_handler` became a
+four-line delegation. All 31 funnel tests pass untouched, error messages
+included.
+
+### Two things this turned up
+
+**`config_dir` was read and never set.** `WorkMatcher` has passed
+`getattr(config, "config_dir", None)` to the funnel resolver since handlers
+gained paths, and nothing ever assigned it — so a relative `handler:` path
+resolved against the process working directory, not the config file's
+directory, contrary to what `funnels/__init__.py` documents. `load_config` now
+stamps it on `AppConfig` and on `ReconcileConfig`.
+
+**Indicator filters are load-bearing, not decoration.** A basic 505 (`ind2`
+blank) holds one `$a` blob — `"Cantus arcticus -- Angel of light -- Isle of
+bliss"` — and `extract_marc_analytics` reads *any* 505 today. Filtering on
+indicators is what lets a profile decline to guess: the enhanced form yields
+constituents and the basic form yields none, which is why open question 1 stopped
+being a blocker.
+
+### Verified
+
+```
+--- BAD: exit 1
+    ConstituentProfileError: source 'fono': unknown constituent profile
+    'tracks_by_vibes'. Available: bibframe_haspart, marc_enhanced, none,
+    or a path to a YAML profile.
+--- GOOD: exit 0
+    loaded: {'melinda': ('marc_enhanced', 'entities'), 'kavi': ('off', None)}
+```
+
+41 tests in `tests/test_constituent_profiles.py` — every bundled profile, every
+spelling of "nothing", aliases, a source's own YAML profile, a relative path
+against the config directory, both extractor forms, and the four validation
+refusals (a field with no title, with neither tag nor predicate, with both, and
+an unknown ordinal). 692 → **733 passing**, lint clean, pipeline unchanged.
