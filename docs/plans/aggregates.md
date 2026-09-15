@@ -365,8 +365,7 @@ Each is its own diff with its own verification, in this order:
 4. ✅ **Shape A emission.** *Done — see the log below.*
 5. ✅ **The contributor fix.** *Done — see the log below.*
 6. ✅ **Shape B: component manifestations.** *Done — see the log below.*
-7. **BIBFRAME `bf:hasPart`** as a predicate-carrying profile, including the
-   series mis-mapping fix in the three schema profiles.
+7. ✅ **BIBFRAME `bf:hasPart`.** *Done — see the log below.*
 8. **Rewire the consumers**: funnel G and recorded sound read stored rows;
    capability declarations, funnel reachability, `pipeline_check`.
 9. **Decide indexing and clustering treatment**, with a measurement rather than a
@@ -792,3 +791,73 @@ resolution from an earlier batch, asking a container for its parts, an article
 with no `$w`, a host absent from the store, the delete cascade now that rows
 carry values, and a source with no profile keeping exactly its old behaviour.
 783 → **790 passing**, lint clean, pipeline unchanged.
+
+## Stage 7 ✅ COMPLETE
+
+`bf:hasPart` on a Work is containment. All three shipped schema profiles mapped
+it to `has_series_member`, so every BIBFRAME aggregate was recorded as a series.
+Fixed in all three, with `series_classes` deciding the exception: the same
+predicate pointing at a `bf:Series` *is* series membership, and BIBFRAME 2 states
+that with `bf:hasSeries` anyway.
+
+```
+--- an anthology with two parts and a series
+    series_member_of   -> http://example.org/series1
+    has_constituent    -> http://example.org/p1
+    has_constituent    -> http://example.org/p2
+    works: ['Suomalaisia novelleja', 'Kuun maisema', 'Agnes']
+```
+
+A part keeps its own node URI as its identity — the graph stating it is better
+evidence than a digest of its title — and only a blank-node part falls back to
+the content digest. The constituent profile says *where* the parts are; the
+schema profile says how this dialect writes a title and an agent. Neither
+duplicates the other, which is why `bf:title` pointing at a Title node rather
+than a string is handled without the constituent profile knowing about it.
+
+Extraction reaches the work node through a `constituent_sink` out-parameter, the
+same pattern and the same reason as `key_sink` on the MARC side: the node the
+parts hang off is resolved by seventy lines of decision matrix inside
+`decompose_bibframe_work`, and a caller has no way to find it again.
+
+### Four defects, each invisible until a record produced two works
+
+1. **Relationship edges named neither endpoint.** `source_work_id=0,
+   target_work_id=0` and no URIs, so every edge violated the foreign key on its
+   target — a graph stating any mapped predicate would have failed its batch.
+   Since stage 1 they were dropped with a warning instead, which is how this
+   surfaced quietly rather than as a crash.
+2. **An endpoint has to use the URI the row is stored under.** A work with a real
+   URI is stored under *that*, and only a blank node gets
+   `urn:work:{source}:{digest}`. The first attempt minted
+   `urn:work:bffi:http://example.org/w1` for a work stored as
+   `http://example.org/w1`, so the edge named a row that does not exist.
+   `bibframe_work_uri` now mirrors the storage rule in one place.
+3. **The decomposer deduplicated edges on `(type, source_id, target_id)`** — all
+   zero before binding — so two `bf:hasPart` objects collapsed into a single
+   edge and one part was silently dropped. Keyed on URIs now.
+4. **Expressions and manifestations named no work.** `insert_wemi_batch` matched
+   them by `(source, source_id)`, which agrees for MARC and *disagrees* for
+   BIBFRAME, where the work, the expression and the instance are three different
+   nodes with three different ids. The only thing binding them was the fallback
+   "the single work in this batch" — so the moment a record produced a second
+   work, the insert failed its foreign key. `ExpressionEntity.work_uri` and
+   `ManifestationEntity.work_uri` complete what stage 1 started for
+   associations, relationships and containers.
+
+That last one is the finding worth keeping: **every one of the batch binder's
+heuristic fallbacks was load-bearing only because a record had never produced
+more than one work.** Five row types needed an explicit URI; stage 1 found three
+of them and this stage found the rest.
+
+### Verified
+
+16 tests in `tests/test_aggregate_bibframe.py`: the mapping in all three
+profiles, containment vs series by the other end's type, both endpoints named,
+endpoints matching stored URIs, two parts staying two edges through a real
+insert, no fact stated twice, parts as works with their own URIs, a title read
+from behind its Title node, a blank-node part digesting, embodiment in the
+container's manifestation, and both `keys_only` and no-profile behaviour.
+
+790 → **806 passing**, lint clean, legacy analytic parity still PASS, stage-4
+convergence harness unchanged, pipeline unchanged.

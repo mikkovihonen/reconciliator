@@ -530,6 +530,14 @@ class ExpressionEntity(BaseModel):
 
     id: Optional[int] = None
     work_id: int
+    #: The work this realises, for a batch where neither row has an id yet.
+    #: `insert_wemi_batch` otherwise matches an expression to its work by
+    #: `(source, source_id)` and falls back to "the only work in the batch" - and
+    #: in BIBFRAME the work and the expression are *different nodes* with
+    #: different source ids, so the fallback was the only thing binding them.
+    #: The moment a record produced a second work, the fallback stopped applying
+    #: and the insert failed its foreign key.
+    work_uri: Optional[str] = None
     expression_uri: str
     source: str
     source_id: str
@@ -550,6 +558,12 @@ class ManifestationEntity(BaseModel):
 
     id: Optional[int] = None
     work_id: Optional[int] = None
+    #: The work this embodies, for a batch where neither row has an id yet. Same
+    #: reason as `ExpressionEntity.work_uri`: a manifestation's own
+    #: `(source, source_id)` is its *instance* id in BIBFRAME, which is not a
+    #: work key, so the only thing binding the two was the binder's "the single
+    #: work in this batch" fallback.
+    work_uri: Optional[str] = None
     container_id: Optional[int] = None
     #: The container's `manifestation_uri`, for a component whose container is
     #: inserted in the same batch and so has no id yet. `container_id` was

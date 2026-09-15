@@ -242,8 +242,13 @@ relationship_predicates:
   bf:hasTranslation: "translation_of"
   bf:precededBy: "continues"
   bf:succeededBy: "continued_by"
-  bf:partOf: "series_member_of"
-  bf:hasPart: "has_series_member"
+  # On a Work these are the containment relation - an anthology and its stories,
+  # an album and its tracks - not series membership. They were mapped to series
+  # membership unconditionally, so every BIBFRAME aggregate was recorded as a
+  # series. Series membership is `bf:hasSeries` below, or these predicates when
+  # the other end is typed with one of `series_classes`.
+  bf:partOf: "constituent_of"
+  bf:hasPart: "has_constituent"
   bf:hasSeries: "series_member_of"
   bf:supplement: "has_series_member"
   bf:supplementTo: "series_member_of"
@@ -271,3 +276,8 @@ default_music_vocabulary: "seko"
 synthesize_missing_expression: false
 provenance_regex: "^(\\d{3})([0-9\\s]{2})(.*)$"
 provenance_predicate: null
+
+# What marks the other end of bf:partOf / bf:hasPart as a series rather than a
+# container.
+series_classes:
+  - "bf:Series"

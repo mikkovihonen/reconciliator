@@ -554,27 +554,58 @@ def _extract_items(
     return items
 
 
+#: Part/whole predicates whose meaning depends on what is at the other end, and
+#: the relationship type to use when that end is a series.
+_SERIES_SENSE: dict[str, str] = {
+    "constituent_of": "series_member_of",
+    "has_constituent": "has_series_member",
+}
+
+
 def _extract_work_relationships(
     g: Graph,
     work_node: IdentifiedNode,
     work_id: str,
     profile: BIBFRAMESchemaProfile,
+    source: str = "bibframe",
 ) -> list[WorkRelationship]:
-    """Extract structural and derivative relationships from a work node."""
+    """Extract structural and derivative relationships from a work node.
+
+    Both endpoints are named by URI. They used to be left at id 0 with no URI at
+    all, which made every edge unstorable: the target violated the foreign key,
+    so a graph stating any of these predicates would have failed its batch. An
+    edge whose target is not a work this ingest creates is still dropped by
+    `insert_wemi_batch`, with a warning - a relationship to a row we do not have
+    cannot be stored - but one pointing at a constituent now binds.
+    """
     relationships: list[WorkRelationship] = []
+    source_uri = bibframe_work_uri(g, work_node, source)
 
     for pred_uri, rel_type in profile.expanded_relationship_predicates.items():
         for target_obj in g.objects(work_node, URIRef(pred_uri)):
-            if isinstance(target_obj, IdentifiedNode):
-                relationships.append(
-                    WorkRelationship(
-                        source_work_id=0,
-                        target_work_id=0,
-                        relationship_type=rel_type,
-                    )
+            if not isinstance(target_obj, IdentifiedNode):
+                continue
+            resolved = rel_type
+            if rel_type in _SERIES_SENSE and _is_series(g, target_obj, profile):
+                # `bf:partOf` pointing at a series *is* series membership; the
+                # same predicate pointing at a work is containment.
+                resolved = _SERIES_SENSE[rel_type]
+            relationships.append(
+                WorkRelationship(
+                    source_work_id=0,
+                    target_work_id=0,
+                    source_work_uri=source_uri,
+                    target_work_uri=bibframe_work_uri(g, target_obj, source),
+                    relationship_type=resolved,
                 )
+            )
 
     return relationships
+
+
+def _is_series(g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile) -> bool:
+    types = {str(t) for t in g.objects(node, RDF.type)}
+    return bool(types & profile.expanded_series_classes)
 
 
 def decompose_bibframe_work(
@@ -587,6 +618,8 @@ def decompose_bibframe_work(
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
+    constituent_profile: Optional[Any] = None,
+    constituent_sink: Optional[list[Any]] = None,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -839,10 +872,16 @@ def decompose_bibframe_work(
         expr_title, _, _, _ = _extract_title_elements(g, work_node, profile)
         expr_lang = _extract_language(g, work_node, profile)
 
+        # Named, like every other edge: the translation *is* the work node and
+        # the original is the node it was reached through. Without the URIs this
+        # edge could never bind, and it also read as a second, different fact
+        # from the one the predicate map derives for the same pair.
         work_relationships.append(
             WorkRelationship(
                 source_work_id=0,
                 target_work_id=0,
+                source_work_uri=bibframe_work_uri(g, work_node, source),
+                target_work_uri=bibframe_work_uri(g, translation_orig_node, source),
                 relationship_type="translation_of",
             )
         )
@@ -963,12 +1002,37 @@ def decompose_bibframe_work(
     identifiers = _extract_identifiers(g, instance_node, profile)
 
     # Inter-work relationships
+    if work_node and constituent_profile is not None and constituent_sink is not None:
+        # An out-parameter, like `key_sink` on the MARC side and for the same
+        # reason: the node the parts hang off is resolved by seventy lines of
+        # decision matrix here, and the caller has no way to find it again.
+        constituent_sink.extend(
+            extract_bibframe_constituents(
+                g,
+                work_node,
+                constituent_profile,
+                profile,
+                source=source,
+                record_id=f"{source}/{work_id}",
+            )
+        )
+
     if work_node:
-        work_relationships.extend(_extract_work_relationships(g, work_node, work_id, profile=profile))
+        work_relationships.extend(
+            _extract_work_relationships(g, work_node, work_id, profile=profile, source=source)
+        )
+    # By URI, because the ids are all 0 until `insert_wemi_batch` binds them.
+    # Keyed on the ids alone - as this was - two edges to *different* works
+    # collapsed into one, so a graph with two `bf:hasPart` objects kept a single
+    # part. That was invisible while these edges named no target at all.
     seen_rels = set()
     deduped_rels = []
     for r in work_relationships:
-        key = (r.relationship_type, r.source_work_id, r.target_work_id)
+        key = (
+            r.relationship_type,
+            r.source_work_uri or r.source_work_id,
+            r.target_work_uri or r.target_work_id,
+        )
         if key not in seen_rels:
             seen_rels.add(key)
             deduped_rels.append(r)
@@ -1075,6 +1139,7 @@ def decompose_bibframe_work(
 
     expression = ExpressionEntity(
         work_id=0,
+        work_uri=work.work_uri,
         expression_uri=expr_uri or f"urn:exp:{source}:{expr_id}",
         title=expr_title,
         content_type=expr_content_type,
@@ -1091,6 +1156,7 @@ def decompose_bibframe_work(
     )
 
     manifestation = ManifestationEntity(
+        work_uri=work.work_uri,
         work_id=0,
         manifestation_uri=manif_uri or f"urn:manif:{source}:{manif_id}",
         title=manif_title,
@@ -1292,6 +1358,121 @@ def derive_bibframe_node_id(g: Graph, node: Optional[IdentifiedNode]) -> str:
 
     digest = hashlib.sha1("\n".join(pairs(node, 1)).encode("utf-8")).hexdigest()[:16]
     return f"sha1:{digest}"
+
+
+def extract_bibframe_constituents(
+    g: Graph,
+    work_node: Optional[IdentifiedNode],
+    constituent_profile: Any,
+    profile: BIBFRAMESchemaProfile,
+    *,
+    source: str = "bibframe",
+    record_id: str = "<unknown>",
+) -> list[Any]:
+    """Read the parts a source's constituent profile points at.
+
+    The constituent profile says *where* the parts are - `predicate: bf:hasPart`
+    - and the schema profile says how this dialect writes a title and an agent,
+    because that is what it is for. Neither duplicates the other.
+
+    A part keeps its own node URI as its identity when it has one: the graph
+    stating it is better evidence than a digest of its title. A blank-node part
+    falls back to the content digest, like MARC.
+    """
+    from reconciliator.constituents.record import Constituent
+    from reconciliator.constituents.record import finalise as finalise_constituents
+
+    if work_node is None or constituent_profile is None:
+        return []
+
+    found: list[Constituent] = []
+    for precedence, field in enumerate(getattr(constituent_profile, "fields", [])):
+        if not field.predicate:
+            continue  # a MARC entry; not this format's business
+        for pred_uri in _expand_both(profile, field.predicate):
+            for part in g.objects(work_node, URIRef(pred_uri)):
+                if not isinstance(part, IdentifiedNode):
+                    continue
+                title = _part_title(g, part, field, profile)
+                if not title:
+                    continue
+                found.append(
+                    Constituent(
+                        title=title,
+                        creator=_part_creator(g, part, profile),
+                        shape=constituent_profile.shape_of(field),
+                        component_type=field.component_type,
+                        contributes_to_container=field.contributes_to_container,
+                        source_field=field.predicate,
+                        precedence=precedence,
+                        identity_ref=(
+                            None if is_blank_node(part) else bibframe_work_uri(g, part, source)
+                        ),
+                    )
+                )
+
+    return finalise_constituents(found, constituent_profile, record_id=record_id)
+
+
+def _expand_both(profile: BIBFRAMESchemaProfile, curie: str) -> set[str]:
+    """A predicate as written and as expanded, since profiles use both forms."""
+    return {curie, profile.expand_curie(curie)}
+
+
+def _part_title(
+    g: Graph, part: IdentifiedNode, field: Any, profile: BIBFRAMESchemaProfile
+) -> Optional[str]:
+    """A part's title, through the field's predicate and then the dialect's.
+
+    `bf:title` points at a Title *node* whose string sits behind `bf:mainTitle`,
+    so reading the predicate alone yields a node rather than a title.
+    """
+    for pred_uri in _expand_both(profile, field.title or "bf:title"):
+        for obj in g.objects(part, URIRef(pred_uri)):
+            if isinstance(obj, Literal):
+                text = str(obj).strip()
+                if text:
+                    return text
+            elif isinstance(obj, IdentifiedNode):
+                literals = _get_literals(
+                    g,
+                    obj,
+                    profile.expanded_main_title_predicates
+                    | {str(RDFS.label), str(RDF.value)},
+                )
+                if literals:
+                    return literals[0]
+    # Then the dialect's own title machinery, which handles the shapes a profile
+    # does not spell out.
+    title, _subtitle, _uniform, _variants = _extract_title_elements(g, part, profile)
+    return title or None
+
+
+def _part_creator(
+    g: Graph, part: IdentifiedNode, profile: BIBFRAMESchemaProfile
+) -> Optional[str]:
+    """The first agent named on a part, by the dialect's own rules."""
+    for agent, _role, _is_primary, _marc_key in _extract_node_agents(g, part, profile):
+        if agent.name:
+            return agent.name
+    return None
+
+
+def bibframe_work_uri(g: Graph, node: Optional[IdentifiedNode], source: str) -> str:
+    """The work URI a node will be stored under.
+
+    Mirrors how `decompose_bibframe_work` builds it: a node with a real URI *is*
+    its URI, and only a blank node gets the minted `urn:work:{source}:{digest}`
+    form. An edge endpoint computed any other way names a row that does not
+    exist, so it is dropped at insert - which is how the first attempt at this
+    produced `urn:work:bffi:http://example.org/w1` for a work stored as
+    `http://example.org/w1`.
+    """
+    if node is None:
+        return ""
+    if not is_blank_node(node):
+        return str(node)
+    return f"urn:work:{source}:{derive_bibframe_node_id(g, node)}"
 
 
 def derive_bibframe_keys(

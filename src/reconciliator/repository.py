@@ -914,7 +914,15 @@ class WEMIRepository:
         if expressions:
             for exp in expressions:
                 if not exp.work_id or exp.work_id <= 0:
-                    cand_id = work_key_to_id.get((exp.source, exp.source_id))
+                    # By URI first: it is the only one of the three that is
+                    # certain. `(source, source_id)` agrees for MARC, where the
+                    # work and the expression come from one record, and disagrees
+                    # for BIBFRAME, where they are different nodes.
+                    cand_id = None
+                    if exp.work_uri:
+                        cand_id = work_key_to_id.get(exp.work_uri)
+                    if cand_id is None:
+                        cand_id = work_key_to_id.get((exp.source, exp.source_id))
                     if cand_id is None and len(works) == 1:
                         cand_id = works[0].id
                     if cand_id:
@@ -935,7 +943,11 @@ class WEMIRepository:
         if manifestations:
             for m in manifestations:
                 if not m.work_id or m.work_id <= 0:
-                    cand_id = work_key_to_id.get((m.source, m.source_id))
+                    cand_id = None
+                    if m.work_uri:
+                        cand_id = work_key_to_id.get(m.work_uri)
+                    if cand_id is None:
+                        cand_id = work_key_to_id.get((m.source, m.source_id))
                     if cand_id is None and len(works) == 1:
                         cand_id = works[0].id
                     if cand_id:

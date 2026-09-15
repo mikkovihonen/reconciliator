@@ -1470,6 +1470,7 @@ def decompose_marc_authority(
         expr_lang = orig_lang or "und"
         expression = ExpressionEntity(
             work_id=0,
+            work_uri=work_uri,
             expression_uri=f"urn:exp:{source}:{source_id}:{expr_lang}",
             source=source,
             source_id=source_id,
@@ -1720,7 +1721,8 @@ def decompose_marc_wemi(
     lang = parsed.get("language") or "und"
     expression_uri = f"urn:exp:{source}:{source_id}:{lang}"
     expression = ExpressionEntity(
-        work_id=0,  # Assigned upon DB insertion
+        work_id=0,  # bound by insert_wemi_batch, from work_uri
+        work_uri=work.work_uri,
         expression_uri=expression_uri,
         source=source,
         source_id=source_id,
@@ -1740,6 +1742,7 @@ def decompose_marc_wemi(
     is_component = bool(_get_datafields(record_elem, "773"))
     manifestation_uri = f"urn:manif:{source}:{source_id}"
     manifestation = ManifestationEntity(
+        work_uri=work.work_uri,
         work_id=0,  # Assigned upon DB insertion
         manifestation_uri=manifestation_uri,
         source=source,

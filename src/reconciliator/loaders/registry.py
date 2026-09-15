@@ -8,7 +8,7 @@ satisfy one contract and declare what they produce.
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional
 
 from reconciliator.loaders.base import (
     DecomposedRecord,
@@ -58,7 +58,7 @@ class MarcBibliographicLoader(RecordLoader):
             associations=list(assoc), mediums=list(mops), contributions=list(contribs),
             entity_keys=keys,
         )
-        _add_constituents(record, item, ctx, w, e, m)
+        _add_constituents(record, item, ctx, w, e, m, keys=None)
         return record
 
 
@@ -121,6 +121,7 @@ class BibframeLoader(RecordLoader):
             decompose_bibframe_work,
         )
 
+        constituents: list[Any] = []
         w, e, m, items, agents, rels, idents, assoc, mops, contribs = (
             decompose_bibframe_work(
                 g=item,
@@ -131,14 +132,18 @@ class BibframeLoader(RecordLoader):
                 supported_subject_vocabularies=ctx.supported_subject_vocabularies,
                 legacy_to_modern=ctx.legacy_to_modern,
                 vocab_store=ctx.vocab_store,
+                constituent_profile=ctx.constituent_profile,
+                constituent_sink=constituents,
             )
         )
-        return DecomposedRecord(
+        record = DecomposedRecord(
             works=[w], expressions=[e], manifestations=[m], items=list(items),
             agents=list(agents), relationships=list(rels), identifiers=list(idents),
             associations=list(assoc), mediums=list(mops), contributions=list(contribs),
             entity_keys=bibframe_entity_keys(m, w, list(agents), list(idents)),
         )
+        _add_constituents(record, item, ctx, w, e, m, constituents)
+        return record
 
 
 # --- bibra: an adapter, not a loader -------------------------------------
@@ -185,6 +190,37 @@ def load_record(item: Any, ctx: LoadContext) -> DecomposedRecord:
     return select_loader(item).load(item, ctx)
 
 
+def _extend_relationships(record: DecomposedRecord, incoming: list[Any]) -> None:
+    """Append edges the record does not already state."""
+
+    def key(rel: Any) -> tuple[Any, Any, Any]:
+        return (
+            rel.relationship_type,
+            rel.source_work_uri or rel.source_work_id,
+            rel.target_work_uri or rel.target_work_id,
+        )
+
+    seen = {key(r) for r in record.relationships}
+    for rel in incoming:
+        if key(rel) not in seen:
+            seen.add(key(rel))
+            record.relationships.append(rel)
+
+
+def _container_creator(item: Any, ctx: LoadContext) -> Any:
+    """The container's main entry, for a constituent that names no creator.
+
+    MARC has one: a 1XX heading. BIBFRAME has no equivalent notion of a main
+    entry, and a part there carries its own URI as identity anyway, so nothing is
+    inherited.
+    """
+    if not _is_xml_element(item):
+        return None
+    from reconciliator.loaders.marcxml import marc_main_entry_name
+
+    return marc_main_entry_name(item)
+
+
 def _is_xml_element(item: Any) -> bool:
     from lxml import etree
 
@@ -198,6 +234,8 @@ def _add_constituents(
     work: Any,
     expression: Any,
     manifestation: Any,
+    extracted: Optional[list[Any]] = None,
+    keys: Any = None,
 ) -> None:
     """Append the constituent rows this source's profile asks for.
 
@@ -216,14 +254,15 @@ def _add_constituents(
         build_embodied_constituents,
         reassign_constituent_contributions,
     )
-    from reconciliator.loaders.marcxml import (
-        extract_marc_constituents,
-        marc_main_entry_name,
-    )
+    if extracted is None:
+        # MARC reads them here: the element is in hand and nothing about the
+        # extraction needs anything the decomposer resolved.
+        from reconciliator.loaders.marcxml import extract_marc_constituents
 
-    constituents = extract_marc_constituents(
-        item, profile, record_id=f"{ctx.source}/{work.source_id}"
-    )
+        extracted = extract_marc_constituents(
+            item, profile, record_id=f"{ctx.source}/{work.source_id}"
+        )
+    constituents = extracted
     if not constituents:
         return
 
@@ -234,7 +273,7 @@ def _add_constituents(
         constituents, manifestation=manifestation, source=ctx.source
     )
 
-    main_entry = marc_main_entry_name(item)
+    main_entry = _container_creator(item, ctx)
     rows = build_embodied_constituents(
         constituents,
         container_work=work,
@@ -250,7 +289,12 @@ def _add_constituents(
     record.works.extend(rows.works)
     record.expressions.extend(rows.expressions)
     record.associations.extend(rows.associations)
-    record.relationships.extend(rows.relationships)
+    # A format may already have stated the containment itself - BIBFRAME's
+    # `bf:hasPart` is both where the parts are found and a relationship the
+    # decomposer reads - so the same edge can arrive twice. The unique constraint
+    # would absorb it, but an edge list that says a thing twice is a worse
+    # description of the record.
+    _extend_relationships(record, rows.relationships)
 
     # Only once the constituent works exist: in `keys_only` there is nowhere for
     # the contribution to go, and dropping it would lose the agent link.
@@ -393,6 +437,10 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         # Blank-node subjects now get an identifier derived from the node's own
         # triples, so the same input yields the same URIs on every ingest.
         deterministic_ids=True,
+        # `bf:hasPart` on a Work, through a predicate-carrying profile. A part
+        # keeps its own node URI as its identity; only a blank-node part falls
+        # back to the content digest.
+        emits_constituents=True,
         stamps_record_origin=True,
         # The decomposer still takes no strip_isbd_punctuation; `finalise` applies
         # it to the record afterwards, which is the whole reason the normalisation
@@ -408,11 +456,6 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         # registry the MARC path uses, and ctx.relator_mappings reaches it.
         normalises_relators=True,
         not_produced={
-            "constituents": (
-                "reads no bf:hasPart: constituent works arrive as related Works "
-                "and the predicate is currently mapped to series membership. "
-                "See plans/aggregates.md stage 7"
-            ),
             "citation": "BIBFRAME has no host-item concept equivalent to MARC 773",
             "analytic": (
                 "constituent works are modelled as related Works rather than as "

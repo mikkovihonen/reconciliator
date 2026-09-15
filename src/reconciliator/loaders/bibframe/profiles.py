@@ -70,6 +70,15 @@ class BIBFRAMESchemaProfile(BaseModel):
     role_uri_prefixes: list[str] = Field(default_factory=list)
     role_label_mappings: dict[str, str] = Field(default_factory=dict)
 
+    #: Classes that mark the other end of a part/whole predicate as a *series*
+    #: rather than a container. `bf:partOf` and `bf:hasPart` are the containment
+    #: relation on a Work - an anthology and its stories - and series membership
+    #: only when the other end is a series, which BIBFRAME 2 usually states with
+    #: `bf:hasSeries` instead. All three profiles mapped them to series
+    #: membership unconditionally, so BIBFRAME aggregates were recorded as series
+    #: members.
+    series_classes: list[str] = Field(default_factory=lambda: ["bf:Series"])
+
     title_variant_classes: list[str] = Field(default_factory=list)
     identifier_scheme_mappings: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -191,6 +200,10 @@ class BIBFRAMESchemaProfile(BaseModel):
     @functools.cached_property
     def expanded_role_predicates(self) -> set[str]:
         return {self.expand_curie(p) for p in self.role_predicates} | set(self.role_predicates)
+
+    @functools.cached_property
+    def expanded_series_classes(self) -> set[str]:
+        return {self.expand_curie(c) for c in self.series_classes} | set(self.series_classes)
 
     @functools.cached_property
     def expanded_role_label_predicates(self) -> set[str]:

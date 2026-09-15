@@ -124,7 +124,10 @@ def build_embodied_constituents(
         # its contents note and the next does not, and without this they are two
         # works. `container_creator` is None for a record with no 1XX - a
         # various-artists compilation - which is when inheriting would be wrong.
-        source_id = derive_constituent_id(
+        # An identity the source states wins over one derived from content: an
+        # RDF part carries a URI of its own, and the graph saying so is better
+        # evidence than a digest of its title.
+        source_id = constituent.identity_ref or derive_constituent_id(
             constituent.title,
             constituent.creator or container_creator,
             work_type,
@@ -137,7 +140,11 @@ def build_embodied_constituents(
             # work row for its own work plus an edge to it.
             continue
 
-        work_uri = f"urn:work:{source}:{source_id}"
+        work_uri = (
+            source_id
+            if constituent.identity_ref
+            else f"urn:work:{source}:{source_id}"
+        )
         if source_id in seen:
             # Two constituents that differ in title but agree once stemmed. They
             # are one work row, and a second junction row for the same
@@ -146,6 +153,8 @@ def build_embodied_constituents(
         seen.add(source_id)
 
         expression_uri = f"urn:exp:{source}:{source_id}:{language}"
+        if constituent.identity_ref:
+            expression_uri = f"{source_id}#expr-{language}"
         rows.works.append(
             WorkEntity(
                 work_uri=work_uri,
@@ -162,6 +171,7 @@ def build_embodied_constituents(
         rows.expressions.append(
             ExpressionEntity(
                 work_id=0,
+                work_uri=work_uri,
                 expression_uri=expression_uri,
                 # The same (source, source_id) as its work, which is how
                 # insert_wemi_batch binds an expression to the right work when a

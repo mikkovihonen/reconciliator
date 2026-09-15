@@ -43,6 +43,11 @@ class Constituent:
     #: The container's record control number, as the record states it.
     container_ref: Optional[str] = None
 
+    #: An identity the source states for this constituent, used instead of a
+    #: content digest. An RDF part is a node with a URI of its own, and the graph
+    #: saying so is better evidence than anything derived from its title.
+    identity_ref: Optional[str] = None
+
     #: Whether the agent named beside this constituent is also a contributor to
     #: the container. See ConstituentField.contributes_to_container.
     contributes_to_container: bool = False

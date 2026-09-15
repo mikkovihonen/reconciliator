@@ -352,11 +352,14 @@ def test_constituent_works_are_serialised():
         assert work.serialized_text
 
 
-def test_only_the_bibliographic_loader_claims_constituents():
+def test_the_record_loaders_claim_constituents_and_the_authority_one_does_not():
+    """Stage 7 gave the BibFrame path `bf:hasPart`. An authority record describes
+    a work rather than a publication with contents, so it declares the gap."""
     assert MarcBibliographicLoader.capabilities.emits_constituents is True
-    for loader in (MarcAuthorityLoader, BibframeLoader):
-        assert loader.capabilities.emits_constituents is False
-        assert "constituents" in loader.capabilities.not_produced
+    assert BibframeLoader.capabilities.emits_constituents is True
+    assert "constituents" not in BibframeLoader.capabilities.not_produced
+    assert MarcAuthorityLoader.capabilities.emits_constituents is False
+    assert "constituents" in MarcAuthorityLoader.capabilities.not_produced
 
 
 def test_a_component_shaped_constituent_is_not_emitted_yet():
