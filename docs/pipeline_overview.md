@@ -384,6 +384,42 @@ than reintroduce a parallel one.
 the batch form, which is the right default for a pipeline that processes records
 in batches.
 
+### A second sweep, wider than the first
+
+The first sweep covered four files. A full-tree scan found more, but most of what
+it flagged was framework-invoked and invisible to a caller search: Typer commands
+registered by decorator, and Pydantic field and model validators. Those are not
+dead. What was:
+
+**`vocab/bridges.py`** — shadowed entirely by `vocab/bridges/__init__.py`, since
+Python prefers a package over a same-named module. It re-exported *from the
+package that shadows it*, so importing it would have been a circular self-import.
+It also created phantom references that made `get_bundled_bridge_dir` look
+uncalled when the package uses it internally. Deleted.
+
+**Four report-writer aliases** — `write_work_detailed_report`,
+`write_work_summary_report`, `write_expression_detailed_report`,
+`write_expression_summary_report`, each a one-line forward to a method the CLI
+calls directly, and *two of them forwarding to the same one*. Naming symmetry
+again, and the same risk: two names for one behaviour is two places it can
+diverge.
+
+**`MatchRecord.add_key` / `add_identifier`** — mutators for the key and
+identifier bags. Both bags are populated at construction by the loaders, so
+neither had a caller.
+
+**`get_all_relators`, `is_supported_subject_vocab`, `load_custom_terms`** — each
+a plausible API on a live class, none reached.
+
+**`expanded_agent_personal_classes`** — and this one is worth more than a
+deletion. Its sibling `expanded_agent_corporate_classes` has two callers: the
+BibFrame loader asks whether an agent is *corporate* and never whether it is
+*personal*, treating "not corporate" as personal by omission. So the profile
+field `agent_personal_classes` is **declared, expanded and never read** — the
+same defect as the eleven keys in `KEYS_READ_BUT_NEVER_WRITTEN`. The cached
+property is gone; the config field is deliberately left, because the loader
+arguably ought to consult it rather than infer from absence.
+
 ### Resolved since this chapter was written
 
 The `rerank` package — `CandidateEvaluator`, the four scorers and twelve of

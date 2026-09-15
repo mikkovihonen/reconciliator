@@ -440,20 +440,6 @@ class VocabularyManager:
         """Format a Wikidata entity URI using instance-configured rules."""
         return format_wikidata_uri(qid, rules=self.concept_id_rules)
 
-    def is_supported_subject_vocab(
-        self, vocab: Optional[str], uri: Optional[str] = None
-    ) -> bool:
-        """Check if subject vocabulary is supported according to configuration."""
-        return (
-            normalize_subject_vocabulary(
-                vocab,
-                uri=uri,
-                supported_vocabularies=self.supported_subject_vocabularies,
-                legacy_to_modern=self.legacy_to_modern,
-                vocabulary_patterns=self.vocabulary_patterns,
-            )
-            is not None
-        )
 
     def is_allowed(self, uri: str) -> bool:
         """Check if URI belongs to an allowed vocabulary."""

@@ -764,14 +764,6 @@ class MatchRecord(BaseModel):
         data["keys"] = keys
         return data
 
-    def add_key(self, key_type: str, value: Optional[str]) -> None:
-        """Add a key value under key_type."""
-        if value and value.strip():
-            clean = value.strip()
-            if key_type not in self.keys:
-                self.keys[key_type] = []
-            if clean not in self.keys[key_type]:
-                self.keys[key_type].append(clean)
 
     def get_first_key(self, key_type: str) -> Optional[str]:
         """Get the first value for key_type, or None."""
@@ -782,14 +774,6 @@ class MatchRecord(BaseModel):
         """Get all values for key_type."""
         return self.keys.get(key_type, [])
 
-    def add_identifier(self, scheme: str, value: Optional[str]) -> None:
-        """Add an identifier value under a normalized scheme name."""
-        if value and str(value).strip():
-            s_low = scheme.lower().strip()
-            clean = str(value).strip()
-            bucket = self.identifiers.setdefault(s_low, [])
-            if clean not in bucket:
-                bucket.append(clean)
 
     def get_identifiers(self, scheme: str) -> list[str]:
         """Get all identifier values for a scheme."""

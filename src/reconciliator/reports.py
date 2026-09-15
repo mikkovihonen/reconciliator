@@ -1229,21 +1229,9 @@ class ReportGenerator:
                 ]
                 f.write("\t".join(vals) + "\n")
 
-    def write_work_detailed_report(self, file_path: Path) -> None:
-        """Write detailed work reconciliation TSV report."""
-        self.write_work_report(file_path)
 
-    def write_work_summary_report(self, file_path: Path) -> None:
-        """Write summary work reconciliation TSV report."""
-        self.write_wemi_summary_report(file_path)
 
-    def write_expression_detailed_report(self, file_path: Path) -> None:
-        """Write detailed expression reconciliation TSV report."""
-        self.write_expression_report(file_path)
 
-    def write_expression_summary_report(self, file_path: Path) -> None:
-        """Write summary expression reconciliation TSV report."""
-        self.write_wemi_summary_report(file_path)
 
     def write_wemi_summary_report(self, file_path: Path) -> None:
         """Write wemi_reconciliation_summary.tsv summarizing work & expression reconciliation."""

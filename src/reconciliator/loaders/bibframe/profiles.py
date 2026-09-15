@@ -233,11 +233,6 @@ class BIBFRAMESchemaProfile(BaseModel):
             return None
         return self.expand_curie(self.provenance_predicate)
 
-    @functools.cached_property
-    def expanded_agent_personal_classes(self) -> set[str]:
-        return {self.expand_curie(c) for c in self.agent_personal_classes} | set(
-            self.agent_personal_classes
-        )
 
     @functools.cached_property
     def expanded_agent_corporate_classes(self) -> set[str]:

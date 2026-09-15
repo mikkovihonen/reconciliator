@@ -634,11 +634,6 @@ class VocabStore:
             ).fetchone()
             return row["code"] if row and row["code"] else None
 
-    def get_all_relators(self) -> set[str]:
-        """Retrieve all known folded relator terms."""
-        with self.get_connection() as conn:
-            rows = conn.execute("SELECT folded_term FROM relator_terms;").fetchall()
-            return {r["folded_term"] for r in rows}
 
     def insert_aliases(self, aliases: list[dict[str, Any]]) -> None:
         """Bulk insert alias records into concept_aliases."""

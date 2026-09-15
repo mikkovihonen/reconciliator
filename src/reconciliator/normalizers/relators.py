@@ -6,9 +6,7 @@ derived from Finto MTS (Metatietosanasto / RDA-FI) and LoC MARC Relators.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, Container, Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from reconciliator.config import DEFAULT_RELATOR_MAPPINGS
 from reconciliator.vocab.bridges import get_mts_role_map
@@ -39,29 +37,6 @@ class RelatorRegistry:
             if clean:
                 self._custom_terms.add(clean)
 
-    def load_custom_terms(self, source: Container[str] | Path | str) -> None:
-        """Load additional custom relator terms from file or container."""
-        if isinstance(source, (Path, str)):
-            path = Path(source)
-            if path.is_file():
-                if path.suffix == ".json":
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                    if isinstance(data, list):
-                        for t in data:
-                            self._custom_terms.add(str(t).strip().casefold().rstrip("."))
-                    elif isinstance(data, dict):
-                        for t in data.keys():
-                            self._custom_terms.add(str(t).strip().casefold().rstrip("."))
-                else:
-                    for line in path.read_text(encoding="utf-8").splitlines():
-                        t = line.strip().casefold().rstrip(".")
-                        if t and not t.startswith("#"):
-                            self._custom_terms.add(t)
-        elif isinstance(source, Iterable):
-            for t in source:
-                clean = str(t).strip().casefold().rstrip(".")
-                if clean:
-                    self._custom_terms.add(clean)
 
     def register(self, code: str, term: str) -> None:
         """Register a custom relator term and its mapping to a MARC code."""
