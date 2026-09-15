@@ -1323,8 +1323,8 @@ Each lands green. Stages 1 and 2 carry the risk.
 | 2 ✅ | `MatchRecord` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
 | 3 ✅ | Generic `run_funnel(spec, record)`; delete the 42 methods; ship the current 42 as built-in specs | **-1400** |
 | 4 ✅ | `handler:` resolution; port the custom funnels to handler modules (folded into stage 3) | +150 |
-| 5 | Dead code (`compute_bounding_box_iou`; expression-tier search APIs — see 14.10); reconcile docstrings against behaviour | -50 |
-| 6 | Merge `decompose_marc_authority` into `decompose_marc_wemi`; ISBD punctuation stripping becomes configurable (see 14.9) | -300 |
+| 5 ✅ | Dead code (`compute_bounding_box_iou`; the whole expression vector tier); reconcile docstrings against behaviour | -50 |
+| 6 ◐ | ISBD punctuation stripping configurable and consistent; the decomposer merge is **declined** (see 14.9.1) | +80 |
 | 7 | Build, wire and use the W/M vector indexes; honour `rerank.top_k` (see 14.10) | +200 |
 | 8 | Deterministic `agent_uri` (see 14.11) | ~0 |
 | 9 | `accumulate` / `replace` ingest mode per source (see 14.12) | +120 |
@@ -1586,6 +1586,84 @@ The existing `funnel_used == "funnel_x_..."` assertions carried the collapse
 exactly as intended: deleting 1564 lines produced three failures, two of them
 tests calling a deleted method directly.
 
+### 14.6.4 Stage 5 as built ✅ COMPLETE
+
+`compute_bounding_box_iou` deleted: no production caller, and funnel L's
+docstring promising "bounding box IoU (034)" never called it either. Spatial
+overlap matching is now a handler-sized job if it is wanted.
+
+The **whole expression vector tier** is gone, not just its two search APIs:
+`expression_vectors` table, `expression_indexer`, `expression_index_path`,
+`StorageConfig.expression_index` and the vector argument on the insert paths.
+`insert_expression`'s `vector` parameter was briefly left accepted-and-ignored
+and then removed outright, because a silently-ignored argument is the same class
+of defect as everything else this phase has been fixing.
+
+Docstrings reconciled with behaviour. The module docstring advertised "dense
+FAISS"; it now says the dense tier searches whatever index the repository was
+given, that the CLI gives it none, and that 14.10 is what changes this. The class
+docstring no longer claims to implement 42 domains — the funnel specs do.
+
+### 14.9.1 The decomposer merge, declined ◐
+
+14.9 proposed merging `decompose_marc_authority` into `decompose_marc_wemi` on
+the premise that "most of the 836 lines are the same extraction twice". Measured,
+that premise is wrong:
+
+| | tags read |
+|---|---|
+| bibliographic (`parse_marc_record_elem` + `decompose_marc_wemi`) | 36 |
+| authority (`decompose_marc_authority`) | 12 |
+| shared | **4** — 001, 024, 035, 130 |
+
+And even the shared four diverge: 130 is a uniform title on one path and an
+authority heading on the other. These are two different MARC formats — Authority
+and Bibliographic — that happen to produce the same WEMI entity shape. Merging
+them yields one function with two disjoint bodies behind a Leader/06 branch: a
+concatenation, not a deduplication. The estimate of -300 lines was unfounded; the
+honest figure is roughly zero, for a function twice as hard to read.
+
+**What was real is done.** The discrepancy the merge was meant to fix has a
+single cause, and it is now fixed in one place:
+
+- `strip_isbd()` in the loader, one definition, used by all eight heading-cleaning
+  sites across both paths.
+- `record_normalization.strip_isbd_punctuation` (default `true`) and
+  `isbd_punctuation` (default `" ./,;:"`), threaded from config through the CLI
+  and the ingest pipeline into all four loader entry points.
+
+```
+config                             bibliographic     authority
+strip_isbd_punctuation: true       'Waltari, Mika'   'Waltari, Mika'
+strip_isbd_punctuation: false      'Waltari, Mika,'  'Waltari, Mika,'
+isbd_punctuation: " "              'Waltari, Mika,'  'Waltari, Mika,'
+```
+
+#### A correction to 14.9, and to 14.13
+
+14.9 said this change "alters agent names, and so blocking keys", and listed
+stage 6 among the stages that change results. **That was wrong.**
+`compute_author_key` and `compute_title_stem` already discard punctuation, so
+both name forms have always produced identical keys:
+
+```
+author_key('Waltari, Mika,', 'Waltari,') == author_key('Waltari, Mika', 'Waltari') == 'waltari'
+```
+
+The discrepancy was in the *stored and exported* agent name, not in record
+identity. Matching is unaffected, which is what makes turning stripping on safe
+to do in one step rather than behind a migration. A test pins that the keys do
+not move, so the claim is checked rather than asserted.
+
+#### Caught by verification, not by tests
+
+Threading the character set, a regex missed the two bibliographic agent sites —
+`_get_subfield(f, "a")` contains a comma, so `[^,]+` did not match it. Those two
+kept using the module default and silently ignored the configured set. The full
+suite stayed green; only running the toggle through every combination showed it.
+A half-wired setting is worse than no setting, so there is now a regression test
+that a non-default character set reaches both paths.
+
 ### 14.7 Decisions taken
 
 - The 42 funnel specs ship as **built-in defaults in code**; `config.example.yaml`
@@ -1710,7 +1788,7 @@ corpus rather than trust in the test suite:
 | stage | change |
 |---|---|
 | 2 | tier-1 starts working, and agent reconciliation moves onto a match that knows the record's work type (14.2, 14.2.1) |
-| 6 | ISBD stripping alters agent names, and so blocking keys (14.9) |
+| ~~6~~ | ~~ISBD stripping alters blocking keys~~ — it does not; see 14.9.1 |
 | 7 | the dense tier fires for the first time; `rerank.top_k` takes effect (14.10) |
 | 8 | agent URIs change shape once, to become position-independent (14.11) |
 
