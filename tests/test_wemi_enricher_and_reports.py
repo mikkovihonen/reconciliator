@@ -25,7 +25,7 @@ from reconciliator.loaders.bibframe.enricher import (
 from reconciliator.matcher import ConstituentWorkMatch, WEMIMatchResult
 from reconciliator.models import (
     ExpressionEntity,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
 )
 from reconciliator.reports import (
@@ -151,7 +151,7 @@ def test_marcxml_enricher_specialized_domain_fields():
     root = etree.fromstring(raw_xml.encode("utf-8"))
     enricher = MARCXMLEnricher()
 
-    target = TargetRecord(
+    target = MatchRecord(
         record_id="special_001",
         format="marcxml",
         work_type="tactile",
@@ -547,7 +547,7 @@ def test_marcxml_enricher_fine_grained_toggles():
         expression_uri="urn:reconciliator:exp:e000100201",
         confidence_score=1.0,
     )
-    target_rec = TargetRecord(
+    target_rec = MatchRecord(
         record_id="rec_001",
         format="marcxml",
         work_type="text",

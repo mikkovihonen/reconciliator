@@ -30,7 +30,7 @@ AgentEntity,
     ManifestationExpressionAssociation,
     MediumOfPerformance,
     RecordOrigin,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
     WorkRelationship,
     WorkType,
@@ -1901,7 +1901,7 @@ def derive_domain_keys(
 ) -> dict[str, list[str]]:
     """Derive every domain blocking key for one MARC record.
 
-    Single definition of the key bag, shared by the staged `TargetRecord` and by
+    Single definition of the key bag, shared by the staged `MatchRecord` and by
     the `entity_keys` rows written at ingest, so the two cannot drift apart.
     """
     keys: dict[str, list[str]] = {}
@@ -1963,8 +1963,8 @@ def build_target_record_from_marc(
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
-) -> TargetRecord:
-    """Extract and stage a TargetRecord with all 42 domain blocking keys and pre-rendered serializations."""
+) -> MatchRecord:
+    """Extract and stage a MatchRecord with all 42 domain blocking keys and pre-rendered serializations."""
     parsed = parse_marc_record_elem(
         record_elem,
         source=source,
@@ -2014,7 +2014,7 @@ def build_target_record_from_marc(
 
     raw_payload = etree.tostring(record_elem, encoding="utf-8")
 
-    return TargetRecord(
+    return MatchRecord(
         record_id=source_id,
         format="marcxml",
         work_type=work_type,

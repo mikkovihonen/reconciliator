@@ -1,6 +1,6 @@
 """Intra-corpus co-reference resolution and 3-tier WEMI multiplex graph clusterer.
 
-Discovers shared Works, Expressions, and Manifestations within staged TargetRecords
+Discovers shared Works, Expressions, and Manifestations within staged MatchRecords
 in reconcile_corpus.db using multi-key blocking, pairwise similarity scoring,
 connected-component graph clustering, and external authority URI hoisting.
 """
@@ -24,7 +24,7 @@ from reconciliator.models import (
     ManifestationCluster,
     MultiplexClusterResult,
     SammelbandBinding,
-    TargetRecord,
+    MatchRecord,
     WorkCluster,
 )
 from reconciliator.repository import WEMIRepository
@@ -78,7 +78,7 @@ class CorpusClusterer:
         self.matcher = matcher
         self.config = config or ClusterConfig()
 
-    def generate_blocking_keys(self, target: TargetRecord) -> list[str]:
+    def generate_blocking_keys(self, target: MatchRecord) -> list[str]:
         """Generate deterministic blocking keys across all 35 key families and identifiers."""
         keys: list[str] = []
 
@@ -94,10 +94,10 @@ class CorpusClusterer:
 
         # 2. Material-specific blocking routing
         wt = target.work_type
-        if wt == "serial" and target.series_key:
-            _add("serial", target.series_key)
-        elif wt == "music" and target.standard_key:
-            _add("music", target.standard_key)
+        if wt == "serial" and target.get_first_key("series"):
+            _add("serial", target.get_first_key("series"))
+        elif wt == "music" and target.get_first_key("standard"):
+            _add("music", target.get_first_key("standard"))
         elif wt in ("audio_nonmusic", "tactile") and target.work_blocking_key:
             _add("cross_format", target.work_blocking_key)
 
@@ -111,7 +111,7 @@ class CorpusClusterer:
         elif wt == "thesis":
             _add("thesis", f"{target.author_key or ''}::{target.title_stem}")
         elif wt == "cartography":
-            _add("cartographic", target.geodata_spatial_key or target.work_blocking_key)
+            _add("cartographic", target.get_first_key("geodata_spatial") or target.work_blocking_key)
         elif wt == "still_image":
             _add(
                 "still_image",
@@ -122,7 +122,7 @@ class CorpusClusterer:
 
         if wt == "tactile":
             _add("accessible_repro", target.work_blocking_key)
-        if target.translators_signature and "parallel" in target.translators_signature.lower():
+        if target.get_first_key("translators_signature") and "parallel" in target.get_first_key("translators_signature").lower():
             _add("parallel_multilingual", target.work_blocking_key)
 
         # 3. Standard identifiers extracted from target
@@ -137,8 +137,8 @@ class CorpusClusterer:
 
     def compute_pairwise_score(
         self,
-        r1: TargetRecord,
-        r2: TargetRecord,
+        r1: MatchRecord,
+        r2: MatchRecord,
         ids1: dict[str, list[str]],
         ids2: dict[str, list[str]],
     ) -> tuple[float, str]:
@@ -241,7 +241,7 @@ class CorpusClusterer:
 
         return round(score, 4), "metadata_similarity"
 
-    def extract_expression_key(self, target: TargetRecord) -> tuple[str, str, str]:
+    def extract_expression_key(self, target: MatchRecord) -> tuple[str, str, str]:
         """Extract (content_type, language, sub_key) partition signature for expression sub-clustering."""
         wt = target.work_type
         lang = (target.language or "und").strip().lower()
@@ -256,8 +256,8 @@ class CorpusClusterer:
             is_score = any(t in title_text for t in score_terms) or any(
                 t in vol_text for t in score_terms
             )
-            if target.standard_key and any(
-                x in target.standard_key.lower() for x in ("ismn", "plate")
+            if target.get_first_key("standard") and any(
+                x in target.get_first_key("standard").lower() for x in ("ismn", "plate")
             ):
                 is_score = True
 
@@ -288,9 +288,9 @@ class CorpusClusterer:
 
         # Sub-key for Expression Disambiguation
         if content_type == "text":
-            sub_key = (target.translators_signature or "").strip().lower()
+            sub_key = (target.get_first_key("translators_signature") or "").strip().lower()
         elif content_type == "spoken_word":
-            sub_key = (target.translators_signature or target.author_key or "").strip().lower()
+            sub_key = (target.get_first_key("translators_signature") or target.author_key or "").strip().lower()
         elif content_type == "audio_music":
             sub_key = f"{(target.author_key or '').strip().lower()}_{target.year or ''}"
         elif content_type == "notated_music":
@@ -304,9 +304,9 @@ class CorpusClusterer:
 
         return content_type, lang, sub_key
 
-    def extract_manifestation_key(self, target: TargetRecord) -> str:
+    def extract_manifestation_key(self, target: MatchRecord) -> str:
         """Extract carrier publication signature for manifestation duplicate clustering."""
-        sk = (target.standard_key or "").strip().lower()
+        sk = (target.get_first_key("standard") or "").strip().lower()
         year = str(target.year or 0)
         vol = (target.volume_designation or "").strip().lower()
         return f"{sk}::{year}::{vol}"
@@ -318,7 +318,7 @@ class CorpusClusterer:
         if not records:
             return MultiplexClusterResult(elapsed_seconds=0.0)
 
-        records_map: dict[str, TargetRecord] = {r.record_id: r for r in records}
+        records_map: dict[str, MatchRecord] = {r.record_id: r for r in records}
         ids_cache: dict[str, dict[str, list[str]]] = {
             r.record_id: extract_identifiers_from_target(r) for r in records
         }
@@ -434,7 +434,7 @@ class CorpusClusterer:
             work_clusters.append(w_cluster)
 
             # Step 4: Expression Sub-Clustering within Work Cluster
-            exp_groups: dict[tuple[str, str, str], list[TargetRecord]] = defaultdict(list)
+            exp_groups: dict[tuple[str, str, str], list[MatchRecord]] = defaultdict(list)
             for rec in member_recs:
                 e_key = self.extract_expression_key(rec)
                 exp_groups[e_key].append(rec)
@@ -467,7 +467,7 @@ class CorpusClusterer:
                 expression_clusters.append(e_cluster)
 
                 # Step 5: Manifestation Duplicate Clustering within Expression Cluster
-                manif_groups: dict[str, list[TargetRecord]] = defaultdict(list)
+                manif_groups: dict[str, list[MatchRecord]] = defaultdict(list)
                 for rec in exp_recs:
                     m_key = self.extract_manifestation_key(rec)
                     manif_groups[m_key].append(rec)
@@ -504,10 +504,10 @@ class CorpusClusterer:
                         corpus_linkages.append(linkage)
 
         # Step 6: Sammelband Item Binding Tracking
-        sammelband_groups: dict[str, list[TargetRecord]] = defaultdict(list)
+        sammelband_groups: dict[str, list[MatchRecord]] = defaultdict(list)
         for r in records:
-            if r.sammelband_item_id:
-                sammelband_groups[r.sammelband_item_id].append(r)
+            if r.get_first_key("sammelband"):
+                sammelband_groups[r.get_first_key("sammelband")].append(r)
 
         for b_id, b_recs in sammelband_groups.items():
             for idx, r in enumerate(b_recs):

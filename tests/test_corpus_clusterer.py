@@ -17,7 +17,7 @@ from reconciliator.models import (
     IdentifierEntity,
     ManifestationEntity,
     ManifestationExpressionAssociation,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
 )
 from reconciliator.repository import WEMIRepository
@@ -58,7 +58,7 @@ def test_generate_blocking_keys_multi_family(temp_dbs):
     c_repo, _ = temp_dbs
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
-    target = TargetRecord(
+    target = MatchRecord(
         record_id="t_001",
         format="marcxml",
         work_type="patent",
@@ -82,7 +82,7 @@ def test_pairwise_scoring_identifier_exact_and_fuzzy(temp_dbs):
     c_repo, _ = temp_dbs
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
-    r1 = TargetRecord(
+    r1 = MatchRecord(
         record_id="rec_1",
         format="marcxml",
         work_type="text",
@@ -94,7 +94,7 @@ def test_pairwise_scoring_identifier_exact_and_fuzzy(temp_dbs):
         standard_key="978-951-0-12345-6",
         raw_payload=b"",
     )
-    r2 = TargetRecord(
+    r2 = MatchRecord(
         record_id="rec_2",
         format="marcxml",
         work_type="text",
@@ -116,7 +116,7 @@ def test_pairwise_scoring_identifier_exact_and_fuzzy(temp_dbs):
     assert "identifier:isbn" in evidence
 
     # 2. Fuzzy match without common identifier
-    r3 = TargetRecord(
+    r3 = MatchRecord(
         record_id="rec_3",
         format="marcxml",
         work_type="text",
@@ -139,7 +139,7 @@ def test_expression_partition_keys(temp_dbs):
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
     # Text monograph
-    t_text = TargetRecord(
+    t_text = MatchRecord(
         record_id="t1",
         format="marcxml",
         work_type="text",
@@ -156,7 +156,7 @@ def test_expression_partition_keys(temp_dbs):
     assert sub == "thomas"
 
     # Audiobook
-    t_audio = TargetRecord(
+    t_audio = MatchRecord(
         record_id="t2",
         format="marcxml",
         work_type="audio_nonmusic",
@@ -173,7 +173,7 @@ def test_expression_partition_keys(temp_dbs):
     assert sub == "narrator_erik"
 
     # Printed Music Score
-    t_score = TargetRecord(
+    t_score = MatchRecord(
         record_id="t3",
         format="marcxml",
         work_type="music",
@@ -188,7 +188,7 @@ def test_expression_partition_keys(temp_dbs):
     assert sub == "full score"
 
     # Board Game
-    t_bg = TargetRecord(
+    t_bg = MatchRecord(
         record_id="t4",
         format="marcxml",
         work_type="board_game",
@@ -217,7 +217,7 @@ def test_cluster_corpus_monograph_reprints_and_translations(temp_dbs):
     c_repo, _ = temp_dbs
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
-    r1 = TargetRecord(
+    r1 = MatchRecord(
         record_id="rec_wsoy_1945",
         format="marcxml",
         work_type="text",
@@ -230,7 +230,7 @@ def test_cluster_corpus_monograph_reprints_and_translations(temp_dbs):
         standard_key="WSOY-1945",
         raw_payload=b"",
     )
-    r2 = TargetRecord(
+    r2 = MatchRecord(
         record_id="rec_wsoy_1960",
         format="marcxml",
         work_type="text",
@@ -243,7 +243,7 @@ def test_cluster_corpus_monograph_reprints_and_translations(temp_dbs):
         standard_key="WSOY-1945",  # Same publication carrier -> manifestation duplicate
         raw_payload=b"",
     )
-    r3 = TargetRecord(
+    r3 = MatchRecord(
         record_id="rec_putnam_1949",
         format="marcxml",
         work_type="text",
@@ -295,7 +295,7 @@ def test_cluster_corpus_cross_format_audiobook_print(temp_dbs):
     c_repo, _ = temp_dbs
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
-    r_print = TargetRecord(
+    r_print = MatchRecord(
         record_id="tuntematon_print",
         format="marcxml",
         work_type="text",
@@ -307,7 +307,7 @@ def test_cluster_corpus_cross_format_audiobook_print(temp_dbs):
         year=1954,
         raw_payload=b"",
     )
-    r_audio = TargetRecord(
+    r_audio = MatchRecord(
         record_id="tuntematon_audio",
         format="marcxml",
         work_type="audio_nonmusic",
@@ -339,7 +339,7 @@ def test_cluster_corpus_notated_music_and_recorded_sound(temp_dbs):
     c_repo, _ = temp_dbs
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
-    r_score = TargetRecord(
+    r_score = MatchRecord(
         record_id="finlandia_score",
         format="marcxml",
         work_type="music",
@@ -352,7 +352,7 @@ def test_cluster_corpus_notated_music_and_recorded_sound(temp_dbs):
         volume_designation="partituuri",
         raw_payload=b"",
     )
-    r_audio = TargetRecord(
+    r_audio = MatchRecord(
         record_id="finlandia_cd",
         format="marcxml",
         work_type="music",
@@ -384,7 +384,7 @@ def test_cluster_corpus_sammelband_bound_with(temp_dbs):
     c_repo, _ = temp_dbs
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
-    r1 = TargetRecord(
+    r1 = MatchRecord(
         record_id="agricola_item_1",
         format="marcxml",
         work_type="early_print",
@@ -396,7 +396,7 @@ def test_cluster_corpus_sammelband_bound_with(temp_dbs):
         year=1544,
         raw_payload=b"",
     )
-    r2 = TargetRecord(
+    r2 = MatchRecord(
         record_id="agricola_item_2",
         format="marcxml",
         work_type="early_print",
@@ -478,7 +478,7 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
     )
 
     # Corpus targets: 1 has ISBN matching authority, 1 is reprint without ISBN
-    r1 = TargetRecord(
+    r1 = MatchRecord(
         record_id="kivi_ed1",
         format="marcxml",
         work_type="text",
@@ -490,7 +490,7 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
         standard_key="978-951-0-99999-9",
         raw_payload=b"",
     )
-    r2 = TargetRecord(
+    r2 = MatchRecord(
         record_id="kivi_ed2",
         format="marcxml",
         work_type="text",
@@ -528,7 +528,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
     clusterer = CorpusClusterer(corpus_repo=c_repo)
 
     # 2 Patent records with same patent_key
-    p1 = TargetRecord(
+    p1 = MatchRecord(
         record_id="pat_1",
         format="marcxml",
         work_type="patent",
@@ -538,7 +538,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
         patent_key="FI123456B",
         raw_payload=b"",
     )
-    p2 = TargetRecord(
+    p2 = MatchRecord(
         record_id="pat_2",
         format="marcxml",
         work_type="patent",
@@ -550,7 +550,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
     )
 
     # 2 Software records with same SWHID
-    s1 = TargetRecord(
+    s1 = MatchRecord(
         record_id="sw_1",
         format="marcxml",
         work_type="software",
@@ -560,7 +560,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
         swhid_key="swh:1:dir:abc123def456",
         raw_payload=b"",
     )
-    s2 = TargetRecord(
+    s2 = MatchRecord(
         record_id="sw_2",
         format="marcxml",
         work_type="software",
@@ -572,7 +572,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
     )
 
     # 2 Board games with same board_game_key
-    bg1 = TargetRecord(
+    bg1 = MatchRecord(
         record_id="bg_1",
         format="marcxml",
         work_type="board_game",
@@ -582,7 +582,7 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
         board_game_key="bgg:1234",
         raw_payload=b"",
     )
-    bg2 = TargetRecord(
+    bg2 = MatchRecord(
         record_id="bg_2",
         format="marcxml",
         work_type="board_game",

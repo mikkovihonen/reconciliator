@@ -20,7 +20,7 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MediumOfPerformance,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
     WorkRelationship,
 )
@@ -68,7 +68,7 @@ def test_bounding_box_iou_and_jaccard():
 
 
 def test_extract_identifiers_from_target():
-    """Verify identifier extraction from TargetRecord keys and MARCXML raw payload."""
+    """Verify identifier extraction from MatchRecord keys and MARCXML raw payload."""
     raw_marc = """<record xmlns="http://www.loc.gov/MARC21/slim">
         <controlfield tag="001">rec-12345</controlfield>
         <datafield tag="020" ind1=" " ind2=" ">
@@ -87,7 +87,7 @@ def test_extract_identifiers_from_target():
         </datafield>
     </record>"""
 
-    target = TargetRecord(
+    target = MatchRecord(
         record_id="rec-12345",
         format="marcxml",
         work_type="text",
@@ -171,7 +171,7 @@ def test_work_matcher_fast_path_isbn(repo: WEMIRepository):
 
     matcher = WorkMatcher(wemi_repo=repo)
 
-    target = TargetRecord(
+    target = MatchRecord(
         record_id="target_001",
         format="marcxml",
         work_type="text",
@@ -230,7 +230,7 @@ def test_work_matcher_monograph_author_title_and_vector_fallback(repo: WEMIRepos
     matcher = WorkMatcher(wemi_repo=repo)
 
     # 1. Match via author key and title stem
-    target1 = TargetRecord(
+    target1 = MatchRecord(
         record_id="target_linna_01",
         format="marcxml",
         work_type="text",
@@ -250,7 +250,7 @@ def test_work_matcher_monograph_author_title_and_vector_fallback(repo: WEMIRepos
     mock_embedder.embed_texts.return_value = np.array([[0.99, 0.05, 0.0, 0.0]], dtype=np.float32)
     matcher_vec = WorkMatcher(wemi_repo=repo, embedder=mock_embedder)
 
-    target_uncataloged = TargetRecord(
+    target_uncataloged = MatchRecord(
         record_id="target_uncataloged",
         format="marcxml",
         work_type="text",
@@ -293,7 +293,7 @@ def test_work_matcher_audiobook_cross_format(repo: WEMIRepository):
     matcher = WorkMatcher(wemi_repo=repo)
 
     # Audiobook target record
-    audio_target = TargetRecord(
+    audio_target = MatchRecord(
         record_id="audio_001",
         format="marcxml",
         work_type="audio_nonmusic",
@@ -353,7 +353,7 @@ def test_work_matcher_recorded_sound_and_tracklist(repo: WEMIRepository):
     matcher = WorkMatcher(wemi_repo=repo)
 
     # 1. Fast path publisher number
-    target_cd = TargetRecord(
+    target_cd = MatchRecord(
         record_id="cd_target_01",
         format="marcxml",
         work_type="music",
@@ -408,7 +408,7 @@ def test_work_matcher_notated_music_and_mop(repo: WEMIRepository):
 
     matcher = WorkMatcher(wemi_repo=repo)
 
-    score_target = TargetRecord(
+    score_target = MatchRecord(
         record_id="score_target_01",
         format="marcxml",
         work_type="music",
@@ -441,7 +441,7 @@ def test_work_matcher_articles_host_citation(repo: WEMIRepository):
 
     matcher = WorkMatcher(wemi_repo=repo)
 
-    article_target = TargetRecord(
+    article_target = MatchRecord(
         record_id="art_001",
         format="marcxml",
         work_type="text",
@@ -495,7 +495,7 @@ def test_work_matcher_serials_succession_chain(repo: WEMIRepository):
 
     matcher = WorkMatcher(wemi_repo=repo)
 
-    serial_target = TargetRecord(
+    serial_target = MatchRecord(
         record_id="serial_001",
         format="marcxml",
         work_type="serial",
@@ -546,7 +546,7 @@ def test_work_matcher_board_game_expansion(repo: WEMIRepository):
 
     matcher = WorkMatcher(wemi_repo=repo)
 
-    game_target = TargetRecord(
+    game_target = MatchRecord(
         record_id="game_001",
         format="marcxml",
         work_type="board_game",
@@ -598,7 +598,7 @@ def test_work_matcher_specialized_lineages(repo: WEMIRepository):
     )
 
     matcher = WorkMatcher(wemi_repo=repo)
-    ai_target = TargetRecord(
+    ai_target = MatchRecord(
         record_id="ai_01",
         format="marcxml",
         work_type="ai_model",
@@ -622,7 +622,7 @@ def test_work_matcher_specialized_lineages(repo: WEMIRepository):
     )
     repo.insert_works_batch([crit_work])
 
-    crit_target = TargetRecord(
+    crit_target = MatchRecord(
         record_id="crit_01",
         format="marcxml",
         work_type="critical_edition",
@@ -646,7 +646,7 @@ def test_work_matcher_specialized_lineages(repo: WEMIRepository):
     )
     repo.insert_works_batch([twin_work])
 
-    twin_target = TargetRecord(
+    twin_target = MatchRecord(
         record_id="twin_01",
         format="marcxml",
         work_type="heritage_model",

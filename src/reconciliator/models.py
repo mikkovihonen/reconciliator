@@ -682,8 +682,12 @@ class HarvestState(BaseModel):
         return slices
 
 
-class TargetRecord(BaseModel):
-    """Staged target record in reconcile_corpus.db."""
+class MatchRecord(BaseModel):
+    """Record-level view over WEMI rows, as the matcher and clusterer consume it.
+
+    Manifestation-centric: one ingested record is one manifestation. Resolves the
+    Expression and Work above it so the funnels can match at all three tiers.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -772,101 +776,29 @@ class TargetRecord(BaseModel):
     def work_blocking_key(self) -> str:
         return self.get_first_key("work") or self.get_first_key("work_blocking") or ""
 
-    @property
-    def music_work_key(self) -> Optional[str]:
-        return self.get_first_key("music_work")
 
-    @property
-    def series_key(self) -> Optional[str]:
-        return self.get_first_key("series")
 
-    @property
-    def standard_key(self) -> Optional[str]:
-        return self.get_first_key("standard")
 
-    @property
-    def patent_key(self) -> Optional[str]:
-        return self.get_first_key("patent")
 
-    @property
-    def statute_key(self) -> Optional[str]:
-        return self.get_first_key("statute")
 
-    @property
-    def game_key(self) -> Optional[str]:
-        return self.get_first_key("game")
 
-    @property
-    def board_game_key(self) -> Optional[str]:
-        return self.get_first_key("board_game")
 
-    @property
-    def archival_fonds_key(self) -> Optional[str]:
-        return self.get_first_key("archival_fonds")
 
-    @property
-    def fingerprint_key(self) -> Optional[str]:
-        return self.get_first_key("fingerprint")
 
-    @property
-    def swhid_key(self) -> Optional[str]:
-        return self.get_first_key("swhid")
 
-    @property
-    def podcast_key(self) -> Optional[str]:
-        return self.get_first_key("podcast")
 
-    @property
-    def sammelband_item_id(self) -> Optional[str]:
-        return self.get_first_key("sammelband")
 
-    @property
-    def web_seed_key(self) -> Optional[str]:
-        return self.get_first_key("web_seed")
 
-    @property
-    def broadcast_timecode_key(self) -> Optional[str]:
-        return self.get_first_key("broadcast")
 
-    @property
-    def oral_history_key(self) -> Optional[str]:
-        return self.get_first_key("oral_history")
 
-    @property
-    def fragment_codex_key(self) -> Optional[str]:
-        return self.get_first_key("fragment_codex")
 
-    @property
-    def ephemera_corp_key(self) -> Optional[str]:
-        return self.get_first_key("ephemera_corp")
 
-    @property
-    def exhibition_event_key(self) -> Optional[str]:
-        return self.get_first_key("exhibition_event")
 
-    @property
-    def critical_edition_key(self) -> Optional[str]:
-        return self.get_first_key("critical_edition")
 
-    @property
-    def geodata_spatial_key(self) -> Optional[str]:
-        return self.get_first_key("geodata_spatial")
 
-    @property
-    def numismatic_issue_key(self) -> Optional[str]:
-        return self.get_first_key("numismatic_issue")
 
-    @property
-    def heritage_model_key(self) -> Optional[str]:
-        return self.get_first_key("heritage_model")
 
-    @property
-    def host_citation_key(self) -> Optional[str]:
-        return self.get_first_key("citation")
 
-    @property
-    def translators_signature(self) -> Optional[str]:
-        return self.get_first_key("translators_signature")
 
 
 class ManifestationCluster(BaseModel):

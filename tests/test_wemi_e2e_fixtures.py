@@ -26,7 +26,7 @@ from reconciliator.models import (
     ExpressionEntity,
     IdentifierEntity,
     ManifestationEntity,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
 )
 from reconciliator.reports import (
@@ -749,7 +749,7 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
         ),
     ]
 
-    target_records_list: list[TargetRecord] = []
+    target_records_list: list[MatchRecord] = []
 
     for code, w_type, scheme, id_val, title, author, extra in domain_specs:
         uri = f"http://urn.fi/URN:NBN:fi:test:{code}"
@@ -797,7 +797,7 @@ def test_e2e_all_specialized_domains_coverage(tmp_path: Path):
             ]
         )
 
-        t_rec = TargetRecord(
+        t_rec = MatchRecord(
             record_id=f"target_{code}",
             format="marcxml",
             work_type=w_type,

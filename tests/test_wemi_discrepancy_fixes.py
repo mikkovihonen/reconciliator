@@ -291,10 +291,10 @@ def test_marcxml_domain_fields_parsing():
 
     # 3. Test build_target_record_from_marc keys
     target = build_target_record_from_marc(elem)
-    assert target.fingerprint_key == "e-te e-re r-e- thal 1544R"
-    assert target.patent_key == "FI123456B"
-    assert target.heritage_model_key == "GLTF"
-    assert "d:E0200000" in (target.geodata_spatial_key or "")
+    assert target.get_first_key("fingerprint") == "e-te e-re r-e- thal 1544R"
+    assert target.get_first_key("patent") == "FI123456B"
+    assert target.get_first_key("heritage_model") == "GLTF"
+    assert "d:E0200000" in (target.get_first_key("geodata_spatial") or "")
 
 
 def test_reconcile_config_defaults():
@@ -332,7 +332,7 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
     """Verify H-25: match_target dispatches to anthology, conference, and government funnels."""
     from reconciliator.db import get_db_connection, init_authority_db
     from reconciliator.matcher import WorkMatcher
-    from reconciliator.models import TargetRecord
+    from reconciliator.models import MatchRecord
     from reconciliator.repository import WEMIRepository
 
     db_path = tmp_path / "test_authority.db"
@@ -342,7 +342,7 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
     matcher = WorkMatcher(wemi_repo=repo)
 
     # 1. Anthology funnel dispatch
-    t_anthology = TargetRecord(
+    t_anthology = MatchRecord(
         record_id="rec_anthology",
         format="marcxml",
         work_type="anthology",
@@ -355,7 +355,7 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
     assert res_anth.funnel_used == "funnel_g_anthology"
 
     # 2. Conference funnel dispatch
-    t_conf = TargetRecord(
+    t_conf = MatchRecord(
         record_id="rec_conf",
         format="marcxml",
         work_type="conference",
@@ -368,7 +368,7 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
     assert res_conf.funnel_used == "funnel_j_conference"
 
     # 3. Government funnel dispatch
-    t_gov = TargetRecord(
+    t_gov = MatchRecord(
         record_id="rec_gov",
         format="marcxml",
         work_type="government",
@@ -381,7 +381,7 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
     assert res_gov.funnel_used == "funnel_p_government"
 
     # 4. Government funnel via Valto URN
-    t_gov_valto = TargetRecord(
+    t_gov_valto = MatchRecord(
         record_id="rec_gov_valto",
         format="marcxml",
         work_type="text",
@@ -603,7 +603,7 @@ def test_translator_alignment_via_agent_aligner(tmp_path):
 def test_blocking_key_families_coverage(tmp_path):
     """Verify H-29: generate_blocking_keys covers material-specific blocking families."""
     from reconciliator.clusterer import CorpusClusterer
-    from reconciliator.models import TargetRecord
+    from reconciliator.models import MatchRecord
     from reconciliator.repository import WEMIRepository
 
     db_path = tmp_path / "authority.db"
@@ -611,7 +611,7 @@ def test_blocking_key_families_coverage(tmp_path):
     clusterer = CorpusClusterer(corpus_repo=repo)
 
     # 1. Moving image family
-    t_movie = TargetRecord(
+    t_movie = MatchRecord(
         record_id="m1",
         format="marcxml",
         work_type="moving_image",
@@ -626,7 +626,7 @@ def test_blocking_key_families_coverage(tmp_path):
     assert any(k.startswith("moving_image::mollberg::tuntematon sotilas::1985") for k in keys_movie)
 
     # 2. Drama family
-    t_drama = TargetRecord(
+    t_drama = MatchRecord(
         record_id="d1",
         format="marcxml",
         work_type="drama",
@@ -640,7 +640,7 @@ def test_blocking_key_families_coverage(tmp_path):
     assert any(k.startswith("drama::kivi::nummisuutarit") for k in keys_drama)
 
     # 3. Thesis family
-    t_thesis = TargetRecord(
+    t_thesis = MatchRecord(
         record_id="th1",
         format="marcxml",
         work_type="thesis",
@@ -654,7 +654,7 @@ def test_blocking_key_families_coverage(tmp_path):
     assert any(k.startswith("thesis::virtanen::dissertation on ai") for k in keys_thesis)
 
     # 4. Cartographic family
-    t_map = TargetRecord(
+    t_map = MatchRecord(
         record_id="c1",
         format="marcxml",
         work_type="cartography",
@@ -668,7 +668,7 @@ def test_blocking_key_families_coverage(tmp_path):
     assert any(k.startswith("cartographic::coords:60.1:24.9") for k in keys_map)
 
     # 5. Still image family
-    t_photo = TargetRecord(
+    t_photo = MatchRecord(
         record_id="p1",
         format="marcxml",
         work_type="still_image",
@@ -683,7 +683,7 @@ def test_blocking_key_families_coverage(tmp_path):
     assert any(k.startswith("still_image::into::maisema::1900") for k in keys_photo)
 
     # 6. Preservation surrogate
-    t_surrogate = TargetRecord(
+    t_surrogate = MatchRecord(
         record_id="s1",
         format="marcxml",
         work_type="preservation_surrogate",

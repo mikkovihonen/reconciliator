@@ -13,7 +13,7 @@ from reconciliator.models import (
     IdentifierEntity,
     ItemEntity,
     ManifestationEntity,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
 )
 from reconciliator.repository import WEMIRepository
@@ -551,7 +551,7 @@ def test_work_matcher_authority_isolation(tmp_path):
     matcher = WorkMatcher(wemi_repo=repo)
 
     # 1. Tier 1 fast path match
-    target_rec = TargetRecord(
+    target_rec = MatchRecord(
         record_id="target_001",
         title="Puhdistus",
         title_stem="puhdistus",

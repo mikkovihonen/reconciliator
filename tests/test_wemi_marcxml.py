@@ -1,4 +1,4 @@
-"""Unit tests for MARCXML WEMI decomposition and TargetRecord generation (Milestone 2)."""
+"""Unit tests for MARCXML WEMI decomposition and MatchRecord generation (Milestone 2)."""
 
 from lxml import etree
 
@@ -245,7 +245,7 @@ def test_build_target_record_from_marc():
     assert target.record_id == "TARGET-100"
     assert target.format == "marcxml"
     assert target.work_type == "text"
-    assert target.standard_key == "978-951-0-12345-6"
+    assert target.get_first_key("standard") == "978-951-0-12345-6"
     assert target.author_key is not None
     assert target.title_stem is not None
     assert target.work_blocking_key is not None

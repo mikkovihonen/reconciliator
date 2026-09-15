@@ -13,7 +13,7 @@ from reconciliator.config import (
 )
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.matcher import WorkMatcher
-from reconciliator.models import AgentEntity, ExpressionEntity, TargetRecord, WorkEntity
+from reconciliator.models import AgentEntity, ExpressionEntity, MatchRecord, WorkEntity
 from reconciliator.repository import WEMIRepository
 
 
@@ -206,7 +206,7 @@ def test_work_matcher_fts_fallback_config(tmp_path: Path):
     # Tier 1 (IDs) fails.
     # Tier 2 (Author+Title stem) fails because author surname/name does not match Sofi Oksanen.
     # Tier 3 (FTS5 Lexical Search) matches "Puhdistus" in SQLite FTS5 index.
-    target = TargetRecord(
+    target = MatchRecord(
         record_id="rec1",
         format="marcxml",
         title="Puhdistus",

@@ -51,7 +51,7 @@ from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
     ManifestationCluster,
-    TargetRecord,
+    MatchRecord,
     TaskProgress,
     WorkCluster,
 )
@@ -768,8 +768,8 @@ def _to_target_record(
     orig_payload: Any,
     raw_rec: dict[str, Any],
     profile: Optional[BIBFRAMESchemaProfile] = None,
-) -> TargetRecord:
-    """Decompose or map raw bibliographic items into normalized TargetRecord instances."""
+) -> MatchRecord:
+    """Decompose or map raw bibliographic items into normalized MatchRecord instances."""
     try:
         if rec_fmt == "marcxml":
             return build_target_record_from_marc(orig_payload, source="target")
@@ -802,7 +802,7 @@ def _to_target_record(
     else:
         raw_bytes = str(orig_payload).encode("utf-8")
 
-    return TargetRecord(
+    return MatchRecord(
         record_id=source_id,
         format=rec_fmt,
         work_type="text",
@@ -985,7 +985,7 @@ def reconcile_cmd(
             "[cyan]Staging target records and running intra-corpus graph clusterer...[/cyan]"
         )
         corpus_repo = wemi_repo
-        staged_targets: list[TargetRecord] = []
+        staged_targets: list[MatchRecord] = []
         for rec_fmt_s, orig_payload_s, raw_rec_s, _ in _iter_records():
             staged_targets.append(
                 _to_target_record(rec_fmt_s, orig_payload_s, raw_rec_s, bf_profile)

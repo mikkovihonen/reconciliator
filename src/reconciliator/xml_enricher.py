@@ -19,7 +19,7 @@ from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
     ManifestationCluster,
-    TargetRecord,
+    MatchRecord,
     WorkCluster,
 )
 from reconciliator.normalizers.agent import normalize_agent_name
@@ -68,7 +68,7 @@ class MARCXMLEnricher:
         work_cluster: Optional[WorkCluster] = None,
         expression_cluster: Optional[ExpressionCluster] = None,
         manifestation_cluster: Optional[ManifestationCluster] = None,
-        target_record: Optional[TargetRecord] = None,
+        target_record: Optional[MatchRecord] = None,
         enrichment_config: Optional[EnrichmentTogglesConfig] = None,
     ) -> etree._Element:
         """Enrich a MARCXML <record> element in-place with novel authority links and modernized subjects."""
@@ -428,23 +428,23 @@ class MARCXMLEnricher:
         if (
             toggles.inject_component_links
             and target_record
-            and (target_record.is_component or target_record.host_citation_key)
+            and (target_record.is_component or target_record.get_first_key("citation"))
         ):
             f773_list = _get_datafields(record_elem, "773")
             for f773 in f773_list:
                 existing_w = _get_subfields(f773, "w")
                 if (
-                    target_record.host_citation_key
-                    and target_record.host_citation_key not in existing_w
+                    target_record.get_first_key("citation")
+                    and target_record.get_first_key("citation") not in existing_w
                 ):
                     sw = etree.SubElement(f773, subfield_tag, code="w")
-                    sw.text = target_record.host_citation_key
-            if not f773_list and target_record.host_citation_key:
+                    sw.text = target_record.get_first_key("citation")
+            if not f773_list and target_record.get_first_key("citation"):
                 df773 = etree.SubElement(record_elem, datafield_tag, tag="773", ind1="0", ind2="8")
                 si = etree.SubElement(df773, subfield_tag, code="i")
                 si.text = toggles.get_relationship_label("host_item", lang=record_lang)
                 sw = etree.SubElement(df773, subfield_tag, code="w")
-                sw.text = target_record.host_citation_key
+                sw.text = target_record.get_first_key("citation")
 
         # 3.5 Enrich 775 Sibling Manifestation & 776 Reproduction / Digital Twin
         for sib_id in sibling_ids:
@@ -474,7 +474,7 @@ class MARCXMLEnricher:
                 s0.text = work_uri
 
         # 3.6 Enrich 780 / 785 Serial & Standard Lineage
-        if target_record and target_record.series_key:
+        if target_record and target_record.get_first_key("series"):
             for f780 in _get_datafields(record_elem, "780"):
                 if not _get_subfields(f780, "0") and work_uri:
                     s0 = etree.SubElement(f780, subfield_tag, code="0")
@@ -485,14 +485,14 @@ class MARCXMLEnricher:
                     s0.text = work_uri
 
         # 3.7 Enrich 830 Series Super-Work Entry
-        if target_record and target_record.series_key:
+        if target_record and target_record.get_first_key("series"):
             for f830 in _get_datafields(record_elem, "830"):
                 if not _get_subfields(f830, "0"):
                     s0 = etree.SubElement(f830, subfield_tag, code="0")
-                    s0.text = concept_id_to_uri(f"series:{target_record.series_key}")
+                    s0.text = concept_id_to_uri(f"series:{target_record.get_first_key("series")}")
 
         # 3.8 Enrich 770 / 772 Board Game Dependencies
-        if target_record and target_record.board_game_key:
+        if target_record and target_record.get_first_key("board_game"):
             for f770 in _get_datafields(record_elem, "770"):
                 if not _get_subfields(f770, "0") and work_uri:
                     s0 = etree.SubElement(f770, subfield_tag, code="0")
@@ -504,7 +504,7 @@ class MARCXMLEnricher:
 
         # 3.9 Enrich 026 Early Print Fingerprint & 341/532 Accessibility
         fp_scheme = toggles.get_scheme("fingerprint")
-        if target_record and target_record.fingerprint_key:
+        if target_record and target_record.get_first_key("fingerprint"):
             has_fp = any(
                 c in _get_subfields(f, "2")
                 for f in _get_datafields(record_elem, "026")
@@ -513,7 +513,7 @@ class MARCXMLEnricher:
             if not has_fp:
                 df026 = etree.SubElement(record_elem, datafield_tag, tag="026", ind1=" ", ind2=" ")
                 se = etree.SubElement(df026, subfield_tag, code="e")
-                se.text = target_record.fingerprint_key
+                se.text = target_record.get_first_key("fingerprint")
                 s2 = etree.SubElement(df026, subfield_tag, code="2")
                 s2.text = fp_scheme.default
 
@@ -531,13 +531,13 @@ class MARCXMLEnricher:
                 sa.text = acc_tactile["note"]
 
         # 3.10 Enrich 777 / 501 Sammelband Composite Volume Links
-        if target_record and target_record.sammelband_item_id:
+        if target_record and target_record.get_first_key("sammelband"):
             if not _get_datafields(record_elem, "777"):
                 df777 = etree.SubElement(record_elem, datafield_tag, tag="777", ind1="0", ind2="8")
                 si = etree.SubElement(df777, subfield_tag, code="i")
                 si.text = toggles.get_relationship_label("bound_with", lang=record_lang)
                 so = etree.SubElement(df777, subfield_tag, code="o")
-                so.text = target_record.sammelband_item_id
+                so.text = target_record.get_first_key("sammelband")
 
         # 3.11 Enrich 710 $4 dgg Degree Granting Institution (Theses)
         if target_record and target_record.work_type == "thesis":
@@ -562,12 +562,12 @@ class MARCXMLEnricher:
                             s0.text = match.work_uri
 
         # 3.13 Enrich Patent 013
-        if target_record and target_record.patent_key:
+        if target_record and target_record.get_first_key("patent"):
             f013_list = _get_datafields(record_elem, "013")
             if not f013_list:
                 df013 = etree.SubElement(record_elem, datafield_tag, tag="013", ind1=" ", ind2=" ")
                 sa = etree.SubElement(df013, subfield_tag, code="a")
-                sa.text = target_record.patent_key
+                sa.text = target_record.get_first_key("patent")
                 if work_uri:
                     s0 = etree.SubElement(df013, subfield_tag, code="0")
                     s0.text = work_uri
@@ -579,7 +579,7 @@ class MARCXMLEnricher:
 
         # 3.14 Enrich Web Harvest 024 7
         web_scheme = toggles.get_scheme("web_harvest")
-        if target_record and target_record.web_seed_key:
+        if target_record and target_record.get_first_key("web_seed"):
             if not any(
                 k in _get_subfields(f, "2")
                 for f in _get_datafields(record_elem, "024")
@@ -587,7 +587,7 @@ class MARCXMLEnricher:
             ):
                 df024 = etree.SubElement(record_elem, datafield_tag, tag="024", ind1="7", ind2=" ")
                 sa = etree.SubElement(df024, subfield_tag, code="a")
-                sa.text = target_record.web_seed_key
+                sa.text = target_record.get_first_key("web_seed")
                 s2 = etree.SubElement(df024, subfield_tag, code="2")
                 s2.text = web_scheme.default
                 if work_uri:
@@ -596,7 +596,7 @@ class MARCXMLEnricher:
 
         # 3.15 Enrich Medieval Manuscript Fragment 024 7
         frag_scheme = toggles.get_scheme("manuscript_fragment")
-        if target_record and target_record.fragment_codex_key:
+        if target_record and target_record.get_first_key("fragment_codex"):
             if not any(
                 k in _get_subfields(f, "2")
                 for f in _get_datafields(record_elem, "024")
@@ -604,7 +604,7 @@ class MARCXMLEnricher:
             ):
                 df024 = etree.SubElement(record_elem, datafield_tag, tag="024", ind1="7", ind2=" ")
                 sa = etree.SubElement(df024, subfield_tag, code="a")
-                sa.text = target_record.fragment_codex_key
+                sa.text = target_record.get_first_key("fragment_codex")
                 s2 = etree.SubElement(df024, subfield_tag, code="2")
                 s2.text = frag_scheme.default
                 if work_uri:
@@ -612,7 +612,7 @@ class MARCXMLEnricher:
                     s0.text = work_uri
 
         # 3.16 Enrich Ephemera Corporate Authority 655 #7
-        if target_record and target_record.ephemera_corp_key:
+        if target_record and target_record.get_first_key("ephemera_corp"):
             ephemera_terms: set[str] = {"pienpainatteet", "småtryck", "accidenstryck", "tilapäispainatteet", "ephemera"}
             if self.vocab_folder and self.vocab_folder.vocab_store:
                 e_concept_id = toggles.domain_concepts.get("ephemera", "slm:s1492")
@@ -632,7 +632,7 @@ class MARCXMLEnricher:
                         s0.text = work_uri
 
         # 3.17 Enrich Exhibition Events 111 / 711
-        if target_record and target_record.exhibition_event_key:
+        if target_record and target_record.get_first_key("exhibition_event"):
             for f111 in _get_datafields(record_elem, "111") + _get_datafields(record_elem, "711"):
                 if work_uri and work_uri not in _get_subfields(f111, "0"):
                     s0 = etree.SubElement(f111, subfield_tag, code="0")
@@ -640,7 +640,7 @@ class MARCXMLEnricher:
 
         # 3.18 Enrich Geodata 084 $2 epsg
         geo_scheme = toggles.get_scheme("geodata_spatial")
-        if target_record and target_record.geodata_spatial_key:
+        if target_record and target_record.get_first_key("geodata_spatial"):
             if not any(
                 k in _get_subfields(f, "2")
                 for f in _get_datafields(record_elem, "084")
@@ -648,7 +648,7 @@ class MARCXMLEnricher:
             ):
                 df084 = etree.SubElement(record_elem, datafield_tag, tag="084", ind1=" ", ind2=" ")
                 sa = etree.SubElement(df084, subfield_tag, code="a")
-                sa.text = target_record.geodata_spatial_key
+                sa.text = target_record.get_first_key("geodata_spatial")
                 s2 = etree.SubElement(df084, subfield_tag, code="2")
                 s2.text = geo_scheme.default
                 if work_uri:
@@ -657,7 +657,7 @@ class MARCXMLEnricher:
 
         # 3.19 Enrich Numismatics 024 7 $2 km
         numis_scheme = toggles.get_scheme("numismatics")
-        if target_record and target_record.numismatic_issue_key:
+        if target_record and target_record.get_first_key("numismatic_issue"):
             if not any(
                 k in _get_subfields(f, "2")
                 for f in _get_datafields(record_elem, "024")
@@ -665,7 +665,7 @@ class MARCXMLEnricher:
             ):
                 df024 = etree.SubElement(record_elem, datafield_tag, tag="024", ind1="7", ind2=" ")
                 sa = etree.SubElement(df024, subfield_tag, code="a")
-                sa.text = target_record.numismatic_issue_key
+                sa.text = target_record.get_first_key("numismatic_issue")
                 s2 = etree.SubElement(df024, subfield_tag, code="2")
                 s2.text = numis_scheme.default
                 if work_uri:
@@ -682,7 +682,7 @@ class MARCXMLEnricher:
         work_cluster: Optional[WorkCluster] = None,
         expression_cluster: Optional[ExpressionCluster] = None,
         manifestation_cluster: Optional[ManifestationCluster] = None,
-        target_record: Optional[TargetRecord] = None,
+        target_record: Optional[MatchRecord] = None,
         enrich: bool = True,
         fold_legacy: bool = True,
         enrichment_config: Optional[EnrichmentTogglesConfig] = None,

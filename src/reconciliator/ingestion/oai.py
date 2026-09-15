@@ -35,7 +35,7 @@ from reconciliator.loaders.marcxml import (
     extract_marc_source_id,
     is_marc_authority_record,
 )
-from reconciliator.models import HarvestState, TargetRecord
+from reconciliator.models import HarvestState, MatchRecord
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import WEMIRepository
 
@@ -203,7 +203,7 @@ class _WEMIBatchAccumulator:
         # and the resume watermark has to advance in records, not entities.
         self.staged_records = 0
 
-        self.target_records: list[TargetRecord] = []
+        self.target_records: list[MatchRecord] = []
         self.works: list[Any] = []
         self.expressions: list[Any] = []
         self.manifestations: list[Any] = []

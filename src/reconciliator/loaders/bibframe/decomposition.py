@@ -39,7 +39,7 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MediumOfPerformance,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
     WorkRelationship,
     WorkType,
@@ -981,8 +981,8 @@ def build_target_record_from_bibframe(
     profile: Optional[BIBFRAMESchemaProfile] = None,
     source: str = "bibframe",
     serialization_engine: Optional[WEMISerializationEngine] = None,
-) -> TargetRecord:
-    """Decompose a BIBFRAME graph instance and construct a TargetRecord for staging."""
+) -> MatchRecord:
+    """Decompose a BIBFRAME graph instance and construct a MatchRecord for staging."""
     (
         work,
         expression,
@@ -1014,7 +1014,7 @@ def build_target_record_from_bibframe(
     # Serialize raw RDF representation for lossless payload staging
     raw_payload = g.serialize(format="turtle").encode("utf-8")
 
-    return TargetRecord(
+    return MatchRecord(
         record_id=manifestation.source_id,
         format="bibframe",
         work_type=work.work_type,

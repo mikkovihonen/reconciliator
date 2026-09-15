@@ -16,7 +16,7 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MediumOfPerformance,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
     WorkRelationship,
 )
@@ -381,8 +381,8 @@ def test_corpus_repository_normalized_staging(tmp_path: Path):
     auth_db = tmp_path / "authority.db"
     c_repo = WEMIRepository(auth_db)
 
-    # 1. Create TargetRecord with multi-valued and custom keys
-    t1 = TargetRecord(
+    # 1. Create MatchRecord with multi-valued and custom keys
+    t1 = MatchRecord(
         record_id="target_001",
         format="marcxml",
         work_type="music",
@@ -399,7 +399,7 @@ def test_corpus_repository_normalized_staging(tmp_path: Path):
         serialized_work="Sibelius Finlandia",
     )
 
-    t2 = TargetRecord(
+    t2 = MatchRecord(
         record_id="target_002",
         format="marcxml",
         work_type="music",
@@ -423,7 +423,7 @@ def test_corpus_repository_normalized_staging(tmp_path: Path):
     fetched_1 = c_repo.get_target_record("target_001")
     assert fetched_1 is not None
     assert fetched_1.title == "Finlandia op. 26"
-    assert fetched_1.music_work_key == "sibelius::finlandia::op26"
+    assert fetched_1.get_first_key("music_work") == "sibelius::finlandia::op26"
     assert fetched_1.get_keys("standard") == ["M-042-08955-4", "979-0-042-08955-4"]
     assert fetched_1.get_first_key("custom_archive") == "ark_12345/x987"
     assert b"Finlandia" in fetched_1.raw_payload
@@ -433,7 +433,7 @@ def test_corpus_repository_normalized_staging(tmp_path: Path):
     all_recs = c_repo.get_all_target_records()
     assert len(all_recs) == 2
     rec_map = {r.record_id: r for r in all_recs}
-    assert rec_map["target_002"].music_work_key == "sibelius::finlandia::op26"
+    assert rec_map["target_002"].get_first_key("music_work") == "sibelius::finlandia::op26"
 
     # 5. Query records by key
     by_music_key = c_repo.find_records_by_key("music_work", "sibelius::finlandia::op26")

@@ -180,7 +180,7 @@ def test_marc_predicate_profiles_configuration() -> None:
 
 def test_scheme_definition_and_deduplication() -> None:
     from reconciliator.config import EnrichmentTogglesConfig, SchemeDefinition
-    from reconciliator.models import TargetRecord
+    from reconciliator.models import MatchRecord
 
     # 1. Test SchemeDefinition coercion and default-in-accepted guarantee
     s = SchemeDefinition(default="memento", accepted=["wayback", "archive-it"])
@@ -203,7 +203,7 @@ def test_scheme_definition_and_deduplication() -> None:
     """
     elem = etree.fromstring(xml_with_wayback.strip())
     enricher = MARCXMLEnricher()
-    tr = TargetRecord(record_id="rec2", title="Archived Site", format="marcxml", title_stem="archived site", web_seed_key="http://example.org/new-seed")
+    tr = MatchRecord(record_id="rec2", title="Archived Site", format="marcxml", title_stem="archived site", web_seed_key="http://example.org/new-seed")
 
     enriched = enricher.enrich_record_tree(
         elem,
@@ -219,11 +219,11 @@ def test_scheme_definition_and_deduplication() -> None:
 
 def test_multilingual_linking_labels() -> None:
     from reconciliator.config import EnrichmentTogglesConfig
-    from reconciliator.models import TargetRecord, WorkCluster
+    from reconciliator.models import MatchRecord, WorkCluster
 
     enricher = MARCXMLEnricher()
     work = WorkCluster(cluster_id="w2", canonical_title="Swedish Book", canonical_work_uri="http://example.org/w2")
-    tr = TargetRecord(record_id="rec3", title="Swedish Book", format="marcxml", title_stem="swedish book", host_citation_key="HOST-001")
+    tr = MatchRecord(record_id="rec3", title="Swedish Book", format="marcxml", title_stem="swedish book", host_citation_key="HOST-001")
 
     # 1. Swedish record (via 041 $a)
     xml_swe = """
@@ -278,10 +278,10 @@ def test_multilingual_linking_labels() -> None:
 
 
 def test_series_uri_generation() -> None:
-    from reconciliator.models import TargetRecord
+    from reconciliator.models import MatchRecord
 
     enricher = MARCXMLEnricher()
-    tr = TargetRecord(record_id="rec5", title="Series Item", format="marcxml", title_stem="series item", series_key="otavan-kirjasto-12")
+    tr = MatchRecord(record_id="rec5", title="Series Item", format="marcxml", title_stem="series item", series_key="otavan-kirjasto-12")
 
     xml_str = """
     <record xmlns="http://www.loc.gov/MARC21/slim">

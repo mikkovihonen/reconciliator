@@ -34,7 +34,7 @@ from reconciliator.models import (
     MediumOfPerformance,
     RecordOrigin,
     SammelbandBinding,
-    TargetRecord,
+    MatchRecord,
     WorkCluster,
     WorkEntity,
     WorkRelationship,
@@ -2188,7 +2188,7 @@ class WEMIRepository:
 
 
 
-    def insert_target_records_batch(self, records: list[TargetRecord]) -> None:
+    def insert_target_records_batch(self, records: list[MatchRecord]) -> None:
         """Batch upsert staged target records, normalized keys, and detached payloads."""
         if not records:
             return
@@ -2277,7 +2277,7 @@ class WEMIRepository:
                     key_rows,
                 )
 
-    def get_target_record(self, record_id: str) -> Optional[TargetRecord]:
+    def get_target_record(self, record_id: str) -> Optional[MatchRecord]:
         """Fetch a single staged target record by its ID, reconstructing keys and payloads."""
         with self.get_corpus_connection() as conn:
             row = conn.execute(
@@ -2303,7 +2303,7 @@ class WEMIRepository:
                     keys[kt] = []
                 keys[kt].append(kv)
             d["keys"] = keys
-            return TargetRecord.model_validate(d)
+            return MatchRecord.model_validate(d)
 
     def count_target_records(self) -> int:
         """Count total target records staged in corpus."""
@@ -2444,7 +2444,7 @@ class WEMIRepository:
                 rows,
             )
 
-    def get_all_target_records(self) -> list[TargetRecord]:
+    def get_all_target_records(self) -> list[MatchRecord]:
         """Fetch all staged target records with their keys and payloads."""
         with self.get_corpus_connection() as conn:
             rows = conn.execute(
@@ -2469,7 +2469,7 @@ class WEMIRepository:
             for r in rows:
                 d = dict(r)
                 d["keys"] = dict(keys_by_record.get(d["record_id"], {}))
-                records.append(TargetRecord.model_validate(d))
+                records.append(MatchRecord.model_validate(d))
             return records
 
     def find_records_by_key(self, key_type: str, key_value: str) -> list[str]:

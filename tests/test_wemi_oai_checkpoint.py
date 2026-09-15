@@ -157,7 +157,7 @@ def test_ingest_oai_pipeline_dual_routing(tmp_path: Path):
     mock_resp.content = sample_oai_xml
     mock_resp.raise_for_status = MagicMock()
 
-    # Route A: Target Routing -> stages TargetRecord in corpus database
+    # Route A: Target Routing -> stages MatchRecord in corpus database
     target_config = OAIIngestConfig(
         oai_url="http://example.org/oai_target",
         metadata_prefix="marc21",
@@ -173,12 +173,12 @@ def test_ingest_oai_pipeline_dual_routing(tmp_path: Path):
         )
         assert total_a == 1
 
-    # Verify TargetRecord staged in corpus database
+    # Verify MatchRecord staged in corpus database
     staged = repo.get_target_record("FI-MEL-101")
     assert staged is not None
     assert staged.record_id == "FI-MEL-101"
     assert staged.work_type == "text"
-    assert staged.standard_key == "9789510000012"
+    assert staged.get_first_key("standard") == "9789510000012"
     assert "Testikirja" in staged.serialized_work
 
     # Verify checkpoint (unified harvest_state)

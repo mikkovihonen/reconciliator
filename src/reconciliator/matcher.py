@@ -23,7 +23,7 @@ from reconciliator.models import (
     ExpressionEntity,
     ManifestationEntity,
     ReconciliationMatch,
-    TargetRecord,
+    MatchRecord,
     WorkEntity,
     WorkRelationship,
 )
@@ -126,8 +126,8 @@ def compute_jaccard_overlap(set1: set[str], set2: set[str]) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def extract_identifiers_from_target(target: TargetRecord) -> dict[str, list[str]]:
-    """Extract standard identifiers from TargetRecord fields and raw payload."""
+def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]:
+    """Extract standard identifiers from MatchRecord fields and raw payload."""
     ids: dict[str, list[str]] = {}
 
     def _add(scheme: str, val: Optional[str]) -> None:
@@ -140,8 +140,8 @@ def extract_identifiers_from_target(target: TargetRecord) -> dict[str, list[str]
                 ids[s].append(v)
 
     # From target blocking / domain keys
-    if target.standard_key:
-        sk = target.standard_key.strip()
+    if target.get_first_key("standard"):
+        sk = target.get_first_key("standard").strip()
         sk_clean = re.sub(r"[^0-9a-zA-Z]", "", sk)
         if sk_clean.startswith(("978", "979")) or len(sk_clean) in (10, 13):
             _add("isbn", sk)
@@ -158,46 +158,46 @@ def extract_identifiers_from_target(target: TargetRecord) -> dict[str, list[str]
             if target.work_type in ("music", "audio_nonmusic"):
                 _add("publisher_number", sk)
 
-    if target.series_key and "-" in target.series_key and len(target.series_key) == 9:
-        _add("issn", target.series_key)
+    if target.get_first_key("series") and "-" in target.get_first_key("series") and len(target.get_first_key("series")) == 9:
+        _add("issn", target.get_first_key("series"))
 
-    if target.patent_key:
-        _add("patent_number", target.patent_key)
-        _add("patent", target.patent_key)
+    if target.get_first_key("patent"):
+        _add("patent_number", target.get_first_key("patent"))
+        _add("patent", target.get_first_key("patent"))
 
-    if target.statute_key:
-        _add("sdk", target.statute_key)
-        _add("eli", target.statute_key)
+    if target.get_first_key("statute"):
+        _add("sdk", target.get_first_key("statute"))
+        _add("eli", target.get_first_key("statute"))
 
-    if target.swhid_key:
-        _add("swhid", target.swhid_key)
+    if target.get_first_key("swhid"):
+        _add("swhid", target.get_first_key("swhid"))
 
-    if target.fingerprint_key:
-        _add("fingerprint", target.fingerprint_key)
+    if target.get_first_key("fingerprint"):
+        _add("fingerprint", target.get_first_key("fingerprint"))
 
-    if target.podcast_key:
-        _add("guid_rss", target.podcast_key)
+    if target.get_first_key("podcast"):
+        _add("guid_rss", target.get_first_key("podcast"))
 
-    if target.board_game_key:
-        _add("bgg", target.board_game_key)
-        _add("ean", target.board_game_key)
+    if target.get_first_key("board_game"):
+        _add("bgg", target.get_first_key("board_game"))
+        _add("ean", target.get_first_key("board_game"))
 
-    if target.fragment_codex_key:
-        _add("fragmenta", target.fragment_codex_key)
+    if target.get_first_key("fragment_codex"):
+        _add("fragmenta", target.get_first_key("fragment_codex"))
 
-    if target.numismatic_issue_key:
-        _add("michel", target.numismatic_issue_key)
-        _add("scott", target.numismatic_issue_key)
-        _add("km", target.numismatic_issue_key)
+    if target.get_first_key("numismatic_issue"):
+        _add("michel", target.get_first_key("numismatic_issue"))
+        _add("scott", target.get_first_key("numismatic_issue"))
+        _add("km", target.get_first_key("numismatic_issue"))
 
-    if target.geodata_spatial_key:
-        _add("epsg", target.geodata_spatial_key)
+    if target.get_first_key("geodata_spatial"):
+        _add("epsg", target.get_first_key("geodata_spatial"))
 
-    if target.web_seed_key:
-        _add("memento_uri", target.web_seed_key)
+    if target.get_first_key("web_seed"):
+        _add("memento_uri", target.get_first_key("web_seed"))
 
-    if target.sammelband_item_id:
-        _add("barcode", target.sammelband_item_id)
+    if target.get_first_key("sammelband"):
+        _add("barcode", target.get_first_key("sammelband"))
 
     # From raw_payload if available
     if target.raw_payload:
@@ -296,8 +296,8 @@ def extract_identifiers_from_target(target: TargetRecord) -> dict[str, list[str]
     return ids
 
 
-def extract_target_track_titles(target: TargetRecord) -> set[str]:
-    """Extract constituent track titles from TargetRecord fields or payload."""
+def extract_target_track_titles(target: MatchRecord) -> set[str]:
+    """Extract constituent track titles from MatchRecord fields or payload."""
     tracks: set[str] = set()
     if target.raw_payload and target.format == "marcxml":
         try:
@@ -315,7 +315,7 @@ def extract_target_track_titles(target: TargetRecord) -> set[str]:
     return tracks
 
 
-def extract_target_analytics(target: TargetRecord) -> list[tuple[str, Optional[str]]]:
+def extract_target_analytics(target: MatchRecord) -> list[tuple[str, Optional[str]]]:
     """Extract constituent works (title, creator) from 700 $t / 710 $t / 505."""
     analytics: list[tuple[str, Optional[str]]] = []
     if target.raw_payload and target.format == "marcxml":
@@ -440,7 +440,7 @@ class WorkMatcher:
 
     def _try_fast_path_identifiers(
         self,
-        target: TargetRecord,
+        target: MatchRecord,
         ids: dict[str, list[str]],
         funnel_name: str,
         preferred_schemes: Optional[list[str]] = None,
@@ -472,7 +472,7 @@ class WorkMatcher:
                         if not exps and work:
                             exps = self.repo.get_expressions_for_work(work.id)
                         exp = self._align_expression(
-                            exps, target.language, translator_signature=target.translators_signature
+                            exps, target.language, translator_signature=target.get_first_key("translators_signature")
                         )
                         if not work and exp and exp.work_id:
                             work = self.repo.get_work(exp.work_id)
@@ -513,7 +513,7 @@ class WorkMatcher:
                     if work:
                         exps = self.repo.get_expressions_for_work(work.id)
                         exp = self._align_expression(
-                            exps, target.language, translator_signature=target.translators_signature
+                            exps, target.language, translator_signature=target.get_first_key("translators_signature")
                         )
                         return WEMIMatchResult(
                             target_record_id=target.record_id,
@@ -530,7 +530,7 @@ class WorkMatcher:
 
     def _vector_or_fts_fallback(
         self,
-        target: TargetRecord,
+        target: MatchRecord,
         work_type: Optional[str] = None,
         funnel_name: str = "fallback",
     ) -> Optional[WEMIMatchResult]:
@@ -557,7 +557,7 @@ class WorkMatcher:
                 if score >= thresh:
                     exps = self.repo.get_expressions_for_work(cand_work.id)
                     exp = self._align_expression(
-                        exps, target.language, translator_signature=target.translators_signature
+                        exps, target.language, translator_signature=target.get_first_key("translators_signature")
                     )
                     return WEMIMatchResult(
                         target_record_id=target.record_id,
@@ -592,7 +592,7 @@ class WorkMatcher:
                             continue
                         exps = self.repo.get_expressions_for_work(cand_work.id)
                         exp = self._align_expression(
-                            exps, target.language, translator_signature=target.translators_signature
+                            exps, target.language, translator_signature=target.get_first_key("translators_signature")
                         )
                         return WEMIMatchResult(
                             target_record_id=target.record_id,
@@ -613,7 +613,7 @@ class WorkMatcher:
     # Domain Funnels (A through PP)
     # -----------------------------------------------------------------------
 
-    def match_monograph(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_monograph(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel A (Monographs): ISBN/URN exact -> Author+Title stem -> Vector fallback -> Expression alignment."""
         # Tier 1
         fast = self._try_fast_path_identifiers(
@@ -630,7 +630,7 @@ class WorkMatcher:
             work = cand_works[0]
             exps = self.repo.get_expressions_for_work(work.id)
             exp = self._align_expression(
-                exps, target.language, translator_signature=target.translators_signature
+                exps, target.language, translator_signature=target.get_first_key("translators_signature")
             )
             return WEMIMatchResult(
                 target_record_id=target.record_id,
@@ -655,7 +655,7 @@ class WorkMatcher:
         )
 
     def match_recorded_sound(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel B (Recorded Sound): Publisher number/ISRC/EAN exact -> Album title + performer -> Jaccard tracklist."""
         fast = self._try_fast_path_identifiers(
@@ -717,14 +717,14 @@ class WorkMatcher:
             funnel_used="funnel_b_music_sound",
         )
 
-    def match_article(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_article(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel C (Articles / Serial Components): DOI/URN exact -> Host Citation Key -> Host-restricted search."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_c_article", ["doi", "urn"])
         if fast:
             return fast
 
         # Tier 2: Host Citation Key
-        if target.host_citation_key:
+        if target.get_first_key("citation"):
             cand_works = self.repo.find_works_by_author_and_title(
                 target.author_key, target.title_stem
             )
@@ -754,7 +754,7 @@ class WorkMatcher:
         )
 
     def match_notated_music(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel D (Notated Music): ISMN/Plate number exact -> Music Work Key + Medium -> Score format discrimination."""
         fast = self._try_fast_path_identifiers(
@@ -799,7 +799,7 @@ class WorkMatcher:
             funnel_used="funnel_d_notated_music",
         )
 
-    def match_audiobook(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_audiobook(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel E (Audiobooks): ISBN/Publisher number exact -> Cross-format Work resolution (same Work as print) -> Narrator alignment."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_e_audiobook", ["isbn", "publisher_number"]
@@ -853,7 +853,7 @@ class WorkMatcher:
         )
 
     def match_moving_image(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel F (Moving Image): EAN/UPC exact -> Director + Title + Year -> Compilation analytics."""
         fast = self._try_fast_path_identifiers(
@@ -893,7 +893,7 @@ class WorkMatcher:
             funnel_used="funnel_f_moving_image",
         )
 
-    def match_anthology(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_anthology(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel G (Anthologies): ISBN exact -> Editor/Compiler + Collection title -> Constituent work analytics."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_g_anthology", ["isbn"])
         if fast:
@@ -944,7 +944,7 @@ class WorkMatcher:
             funnel_used="funnel_g_anthology",
         )
 
-    def match_serial(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_serial(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel H (Serials): ISSN/ISSN-L exact -> Title succession chain traversal (780/785) -> Corporate publisher."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_h_serial", ["issn", "issn_l"])
         if fast:
@@ -980,7 +980,7 @@ class WorkMatcher:
             funnel_used="funnel_h_serial",
         )
 
-    def match_series(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_series(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel I (Multi-Part Series): Series uniform title (830) / series ISSN -> Volume anchor ($v) + constituent work."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_i_series", ["issn", "series_number"]
@@ -1021,7 +1021,7 @@ class WorkMatcher:
             funnel_used="funnel_i_series",
         )
 
-    def match_conference(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_conference(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel J (Conference Proceedings): ISBN/DOI exact -> Meeting name/year/place (111/711) -> Constituent paper DOIs."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_j_conference", ["isbn", "doi"])
         if fast:
@@ -1056,7 +1056,7 @@ class WorkMatcher:
             funnel_used="funnel_j_conference",
         )
 
-    def match_thesis(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_thesis(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel K (Theses & Dissertations): Repository URN/handle -> Author + Title + Dissertation note (502) -> Deduplication."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_k_thesis", ["urn", "handle", "doi"]
@@ -1094,7 +1094,7 @@ class WorkMatcher:
             funnel_used="funnel_k_thesis",
         )
 
-    def match_cartography(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_cartography(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel L (Cartography): Sheet index / map ISBN -> Bounding box IoU (034) -> Area + scale ratio (255)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_l_cartography", ["sheet_number", "isbn"]
@@ -1130,7 +1130,7 @@ class WorkMatcher:
             funnel_used="funnel_l_cartography",
         )
 
-    def match_comic(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_comic(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel M (Comics & Manga): ISBN/Series ISSN -> Series + Volume + Writer/Artist pair -> Translated expression."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_m_comic", ["isbn", "issn"])
         if fast:
@@ -1164,7 +1164,7 @@ class WorkMatcher:
             funnel_used="funnel_m_comic",
         )
 
-    def match_dataset(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_dataset(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel N (Datasets): DataCite DOI / Handle -> Creator research group + title -> Version expression discrimination."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_n_dataset", ["doi", "handle"])
         if fast:
@@ -1198,7 +1198,7 @@ class WorkMatcher:
             funnel_used="funnel_n_dataset",
         )
 
-    def match_standard(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_standard(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel O (Standards & Reports): Standard/STRN number exact -> Replacement tracking (780/785) -> Body + ICS code."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_o_standard", ["strn", "standard_number", "standard"]
@@ -1232,7 +1232,7 @@ class WorkMatcher:
             funnel_used="funnel_o_standard",
         )
 
-    def match_government(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_government(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel P (Government Publications): Valto URN:ISBN -> Ministry corporate hierarchy + report number."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_p_government", ["urn", "isbn"])
         if fast:
@@ -1262,7 +1262,7 @@ class WorkMatcher:
             funnel_used="funnel_p_government",
         )
 
-    def match_realia(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_realia(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel Q (3D Objects / Realia): Barcode / product code -> Title + Physical carrier description (300/338)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_q_realia", ["ean", "barcode", "isbn"]
@@ -1294,7 +1294,7 @@ class WorkMatcher:
             funnel_used="funnel_q_realia",
         )
 
-    def match_archival(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_archival(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel R (Archival Manuscripts): Collection signum -> Fonds anchor (cre) + 773 -> Draft-to-published link (draft_of)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_r_archival", ["signum", "call_number", "handle"]
@@ -1342,7 +1342,7 @@ class WorkMatcher:
             funnel_used="funnel_r_archival",
         )
 
-    def match_still_image(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_still_image(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel S (Still Images & Ephemera): Archive photo ID -> Artist/Photographer (art/pht) + Depicted place (751) -> Medium (340)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_s_still_image", ["accession_number", "photo_id"]
@@ -1378,7 +1378,7 @@ class WorkMatcher:
             funnel_used="funnel_s_still_image",
         )
 
-    def match_legal(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_legal(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel T (Legal Norms & Statutes): Säädösnumero (SDK) / ELI / CELEX / ECLI exact -> Uniform title + enactment date -> Amendment chain (amends)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_t_legal", ["sdk", "eli", "celex", "ecli"]
@@ -1412,7 +1412,7 @@ class WorkMatcher:
             funnel_used="funnel_t_legal",
         )
 
-    def match_patent(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_patent(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel U (Patents & IP): Patent number (013) exact -> Priority application family -> Inventor + Assignee + IPC (084)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_u_patent", ["patent_number", "patent"]
@@ -1444,7 +1444,7 @@ class WorkMatcher:
             funnel_used="funnel_u_patent",
         )
 
-    def match_game(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_game(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel V (Video Games): EAN / platform SKU exact -> Studio/Designer (dsr/cre) + title stem -> Platform expression (538)."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_v_game", ["ean", "upc", "sku"])
         if fast:
@@ -1478,7 +1478,7 @@ class WorkMatcher:
             funnel_used="funnel_v_game",
         )
 
-    def match_integrating(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_integrating(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel W (Integrating Resources): ISSN / loose-leaf control ID -> Title + publisher -> Successive iteration (310/362)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_w_integrating", ["issn", "loose_leaf_id"]
@@ -1510,7 +1510,7 @@ class WorkMatcher:
             funnel_used="funnel_w_integrating",
         )
 
-    def match_board_game(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_board_game(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel X (Board Games): EAN / publisher item code / BGG ID exact -> Game Designer (dsr) + Title stem -> Expansion hierarchy (expansion_of)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_x_board_game", ["ean", "publisher_code", "bgg"]
@@ -1547,7 +1547,7 @@ class WorkMatcher:
             funnel_used="funnel_x_board_game",
         )
 
-    def match_early_print(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_early_print(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel Y (Early Printed Books & Incunabula): Fingerprint formula (026) / ISTC / GW exact -> Colophon printer + city + year window."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_y_early_print", ["fingerprint", "istc", "gw"]
@@ -1579,7 +1579,7 @@ class WorkMatcher:
             funnel_used="funnel_y_early_print",
         )
 
-    def match_tactile(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_tactile(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel Z (Tactile & Accessible Media): Source ISBN / control in 776 -> Base canonical Work resolution -> Accessibility discrimination."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_z_tactile", ["isbn", "control_number"]
@@ -1618,7 +1618,7 @@ class WorkMatcher:
             funnel_used="funnel_z_tactile",
         )
 
-    def match_software_ai(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_software_ai(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel AA (Software & Trained AI Models): SWHID / Hugging Face ID exact -> Git commit SHA -> Lineage (fine_tuned_from)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_aa_software_ai", ["swhid", "huggingface"]
@@ -1654,7 +1654,7 @@ class WorkMatcher:
             funnel_used="funnel_aa_software_ai",
         )
 
-    def match_drama(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_drama(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel BB (Dramatic Works & Choreography): Theatrical uniform title (240 10) + Playwright/Choreographer -> Staging resolution (staging_of)."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_bb_drama", ["play_id", "urn"])
         if fast:
@@ -1692,7 +1692,7 @@ class WorkMatcher:
             funnel_used="funnel_bb_drama",
         )
 
-    def match_podcast(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_podcast(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel CC (Broadcast Podcasts & Episodic Media): RSS enclosure GUID / Apple/Spotify URI exact -> Show series title -> Host + timestamp."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_cc_podcast", ["guid_rss", "spotify_uri"]
@@ -1724,7 +1724,7 @@ class WorkMatcher:
             funnel_used="funnel_cc_podcast",
         )
 
-    def match_sammelband(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_sammelband(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel DD (Bound-With / Sammelbände): Shared copy barcode & shelfmark -> Bound-with note (501/777) -> Boundary isolation."""
         # Boundaries remain strictly isolated; match underlying manifestation/work independently
         fast = self._try_fast_path_identifiers(
@@ -1759,7 +1759,7 @@ class WorkMatcher:
             funnel_used="funnel_dd_sammelband",
         )
 
-    def match_web_archive(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_web_archive(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel EE (Web Archives & Harvested Crawls): Memento URI / WARC UUID exact -> Seed domain triad -> harvest_of."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_ee_web_archive", ["memento_uri", "warc_id"]
@@ -1798,7 +1798,7 @@ class WorkMatcher:
         )
 
     def match_oral_history(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel FF (Oral Histories): Archival handle / signum exact -> Informant (ive) + interviewer (ivr) + session (518)."""
         fast = self._try_fast_path_identifiers(
@@ -1835,7 +1835,7 @@ class WorkMatcher:
             funnel_used="funnel_ff_oral_history",
         )
 
-    def match_broadcast(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_broadcast(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel GG (Broadcast TV & Radio Flow): EIDR URI / ISAN exact -> Station + air date + timecode -> broadcast_of."""
         fast = self._try_fast_path_identifiers(target, ids, "funnel_gg_broadcast", ["eidr", "isan"])
         if fast:
@@ -1872,7 +1872,7 @@ class WorkMatcher:
         )
 
     def match_parallel_multilingual(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel HH (Parallel Multilingual Editions): Base Work ID -> Language matrix (041 1#) -> parallel_expression_in."""
         fast = self._try_fast_path_identifiers(
@@ -1912,7 +1912,7 @@ class WorkMatcher:
         )
 
     def match_preservation_surrogate(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel II (Preservation Surrogates & Microforms): Source print control no (776 $w) -> reproduction_of."""
         fast = self._try_fast_path_identifiers(
@@ -1952,7 +1952,7 @@ class WorkMatcher:
         )
 
     def match_medieval_fragment(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel JJ (Medieval Manuscript Fragments): Fragment ID (fragmenta) exact -> Bailiff account binding -> fragment_of_codex."""
         fast = self._try_fast_path_identifiers(
@@ -1991,7 +1991,7 @@ class WorkMatcher:
             funnel_used="funnel_jj_medieval_fragment",
         )
 
-    def match_ephemera(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_ephemera(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel KK (Ephemera & Job Printing): Corporate body (110/710) + Genre heading (655 #7 Pienpainatteet) -> Seasonal window (362)."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_kk_ephemera", ["corporate_authority"]
@@ -2023,7 +2023,7 @@ class WorkMatcher:
             funnel_used="funnel_kk_ephemera",
         )
 
-    def match_exhibition(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_exhibition(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel LL (Exhibition Catalogues & Events): Monograph ISBN / Event triad (111/711) -> Dual Work resolution -> exhibits_work."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_ll_exhibition", ["isbn", "event_id"]
@@ -2070,7 +2070,7 @@ class WorkMatcher:
         )
 
     def match_critical_edition(
-        self, target: TargetRecord, ids: dict[str, list[str]]
+        self, target: MatchRecord, ids: dict[str, list[str]]
     ) -> WEMIMatchResult:
         """Funnel MM (Scholarly Critical Editions): Canonical base Work ID (240 10 $0 / 758) -> Critical editor -> critical_edition_of."""
         fast = self._try_fast_path_identifiers(
@@ -2111,7 +2111,7 @@ class WorkMatcher:
             funnel_used="funnel_mm_critical_edition",
         )
 
-    def match_geodata(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_geodata(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel NN (Spatial Geodata & GIS Web Services): EPSG code + service endpoint -> Bounding polygon IoU -> spatial_layer_of."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_nn_geodata", ["epsg", "service_endpoint"]
@@ -2149,7 +2149,7 @@ class WorkMatcher:
             funnel_used="funnel_nn_geodata",
         )
 
-    def match_numismatic(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_numismatic(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel OO (Numismatics & Historical Seals): Michel / Scott / KM catalog no exact -> Issuing state + denomination + year."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_oo_numismatic", ["michel", "scott", "km"]
@@ -2181,7 +2181,7 @@ class WorkMatcher:
             funnel_used="funnel_oo_numismatic",
         )
 
-    def match_heritage_3d(self, target: TargetRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
+    def match_heritage_3d(self, target: MatchRecord, ids: dict[str, list[str]]) -> WEMIMatchResult:
         """Funnel PP (3D Cultural Heritage Digital Twins): 3D asset hash / URI -> Monument stem + time layer -> digital_twin_of."""
         fast = self._try_fast_path_identifiers(
             target, ids, "funnel_pp_heritage_3d", ["asset_hash", "model_uri"]
@@ -2225,10 +2225,10 @@ class WorkMatcher:
 
     def match_target(
         self,
-        target: TargetRecord,
+        target: MatchRecord,
         identifiers: Optional[dict[str, list[str]]] = None,
     ) -> WEMIMatchResult:
-        """Resolve a staged TargetRecord and map the result to its canonical work.
+        """Resolve a staged MatchRecord and map the result to its canonical work.
 
         Canonicalisation happens here rather than at each call site so that every
         consumer - the corpus clusterer's authority hoisting and the reconcile
@@ -2240,10 +2240,10 @@ class WorkMatcher:
 
     def _dispatch_match(
         self,
-        target: TargetRecord,
+        target: MatchRecord,
         identifiers: Optional[dict[str, list[str]]] = None,
     ) -> WEMIMatchResult:
-        """Route a staged TargetRecord to its specialized domain funnel (A through PP)."""
+        """Route a staged MatchRecord to its specialized domain funnel (A through PP)."""
         # 1. Extract and merge standard identifiers
         extracted_ids = extract_identifiers_from_target(target)
         if identifiers:
@@ -2258,12 +2258,12 @@ class WorkMatcher:
         # 2. Domain Funnel Dispatch
         wt = target.work_type
 
-        if target.is_component or target.host_citation_key or wt in ("article", "chapter"):
+        if target.is_component or target.get_first_key("citation") or wt in ("article", "chapter"):
             return self.match_article(target, extracted_ids)
 
         if wt == "music":
             if (
-                target.music_work_key
+                target.get_first_key("music_work")
                 or "score" in (target.title_stem or "").lower()
                 or any(k in extracted_ids for k in ("ismn", "plate_number"))
             ):
@@ -2271,16 +2271,16 @@ class WorkMatcher:
             return self.match_recorded_sound(target, extracted_ids)
 
         if wt == "audio_nonmusic":
-            if target.podcast_key or "podcast" in (target.title_stem or "").lower():
+            if target.get_first_key("podcast") or "podcast" in (target.title_stem or "").lower():
                 return self.match_podcast(target, extracted_ids)
-            if target.oral_history_key:
+            if target.get_first_key("oral_history"):
                 return self.match_oral_history(target, extracted_ids)
-            if target.broadcast_timecode_key:
+            if target.get_first_key("broadcast"):
                 return self.match_broadcast(target, extracted_ids)
             return self.match_audiobook(target, extracted_ids)
 
         if wt == "moving_image":
-            if target.broadcast_timecode_key:
+            if target.get_first_key("broadcast"):
                 return self.match_broadcast(target, extracted_ids)
             return self.match_moving_image(target, extracted_ids)
 
@@ -2332,7 +2332,7 @@ class WorkMatcher:
         if wt == "podcast":
             return self.match_podcast(target, extracted_ids)
 
-        if target.sammelband_item_id:
+        if target.get_first_key("sammelband"):
             return self.match_sammelband(target, extracted_ids)
 
         if wt == "web_harvest":
@@ -2344,7 +2344,7 @@ class WorkMatcher:
         if wt == "broadcast_program":
             return self.match_broadcast(target, extracted_ids)
 
-        if target.translators_signature and "parallel" in target.translators_signature.lower():
+        if target.get_first_key("translators_signature") and "parallel" in target.get_first_key("translators_signature").lower():
             return self.match_parallel_multilingual(target, extracted_ids)
 
         if wt == "preservation_surrogate":
@@ -2368,7 +2368,7 @@ class WorkMatcher:
             return self.match_government(target, extracted_ids)
 
         if wt in ("exhibition", "event"):
-            if target.exhibition_event_key or "näyttely" in (target.title_stem or "").lower():
+            if target.get_first_key("exhibition_event") or "näyttely" in (target.title_stem or "").lower():
                 return self.match_exhibition(target, extracted_ids)
             return self.match_conference(target, extracted_ids)
 
@@ -2393,7 +2393,7 @@ class WorkMatcher:
         if wt == "still_image":
             return self.match_still_image(target, extracted_ids)
 
-        if target.series_key:
+        if target.get_first_key("series"):
             return self.match_series(target, extracted_ids)
 
         # Default: Monographic Work matching
@@ -2709,7 +2709,7 @@ class WorkMatcher:
     ) -> ReconciliationResult:
         """Resolve a BibliographicRecord using WorkMatcher's multi-tier domain funnels.
 
-        Bridges the BibliographicRecord (CLI input) to TargetRecord (WorkMatcher input)
+        Bridges the BibliographicRecord (CLI input) to MatchRecord (WorkMatcher input)
         and converts the WEMIMatchResult back to ReconciliationResult for CLI compatibility.
         """
         from reconciliator.normalizers.blocking import (
@@ -2718,7 +2718,7 @@ class WorkMatcher:
             compute_work_blocking_key,
         )
 
-        # Convert BibliographicRecord to TargetRecord
+        # Convert BibliographicRecord to MatchRecord
         agents = target_record.agents
         author_name = agents[0].name if agents else None
         author_surname = agents[0].surname if agents else None
@@ -2740,7 +2740,7 @@ class WorkMatcher:
             target_record.model_dump(), ensure_ascii=False
         ).encode("utf-8")
 
-        target = TargetRecord(
+        target = MatchRecord(
             record_id=target_record.source_id,
             format="marcxml",
             work_type="text",

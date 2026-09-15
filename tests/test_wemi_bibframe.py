@@ -3,7 +3,7 @@
 Verifies:
 - 6-condition Graph Decomposition Decision Matrix (C-1 through C-6)
 - bffi:marcKey provenance and component extraction
-- Construction of TargetRecord from BIBFRAME graphs
+- Construction of MatchRecord from BIBFRAME graphs
 - End-to-end insertion into WEMIRepository with FK binding
 """
 
@@ -20,7 +20,7 @@ from reconciliator.loaders.bibframe import (
     extract_marc_key_components,
     get_profile,
 )
-from reconciliator.models import TargetRecord
+from reconciliator.models import MatchRecord
 from reconciliator.repository import WEMIRepository
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -335,19 +335,19 @@ def test_condition_c6_single_work_partitioning():
 
 
 def test_build_target_record_from_bibframe():
-    """Verify build_target_record_from_bibframe for staging TargetRecord in corpus."""
+    """Verify build_target_record_from_bibframe for staging MatchRecord in corpus."""
     ttl_path = FIXTURES_DIR / "sample_bffi_natlibfi.ttl"
     g = Graph()
     g.parse(str(ttl_path), format="turtle")
 
     target_rec = build_target_record_from_bibframe(g, source="melinda")
-    assert isinstance(target_rec, TargetRecord)
+    assert isinstance(target_rec, MatchRecord)
     assert target_rec.record_id == "http://urn.fi/URN:NBN:fi:bib:instance:9912345678"
     assert target_rec.format == "bibframe"
     assert target_rec.title == "Sinuhe egyptiläinen"
     assert target_rec.language == "fin"
     assert target_rec.year == 1945
-    assert target_rec.standard_key == "978-951-0-00001-0"
+    assert target_rec.get_first_key("standard") == "978-951-0-00001-0"
     assert target_rec.author_key is not None
     assert target_rec.title_stem is not None
     assert target_rec.work_blocking_key is not None
