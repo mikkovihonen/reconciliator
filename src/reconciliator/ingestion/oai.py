@@ -21,18 +21,15 @@ from rdflib import Graph
 from reconciliator.config import OAIIngestConfig
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.harvest.resourcesync import ResourceSyncHarvester
+from reconciliator.loaders.base import LoadContext
 from reconciliator.loaders.bibframe import (
-    bibframe_entity_keys,
-    decompose_bibframe_work,
     get_profile,
     stream_bibframe_records,
 )
 from reconciliator.loaders.marcxml import (
-    decompose_marc_authority,
-    decompose_marc_wemi,
     extract_marc_source_id,
-    is_marc_authority_record,
 )
+from reconciliator.loaders.registry import load_record
 from reconciliator.models import HarvestState
 from reconciliator.progress import ProgressTracker
 from reconciliator.repository import WEMIRepository
@@ -222,64 +219,39 @@ class _WEMIBatchAccumulator:
         return self.staged_records
 
     def add(self, item: Any) -> None:
-        """Decompose one harvested MARCXML element or RDF graph into the staging batch."""
+        """Decompose one harvested item into the staging batch.
+
+        Dispatch is the loader registry's job now. This used to be an
+        isinstance/leader-test chain that called three decomposers with three
+        different argument lists, which is how the BibFrame path came to receive
+        none of the normalisation options the MARC path does.
+        """
         self.staged_records += 1
+        record = load_record(item, self._load_context())
+        self.works.extend(record.works)
+        self.expressions.extend(record.expressions)
+        self.manifestations.extend(record.manifestations)
+        self.items.extend(record.items)
+        self.agents.extend(record.agents)
+        self.contributions.extend(record.contributions)
+        self.relationships.extend(record.relationships)
+        self.identifiers.extend(record.identifiers)
+        self.associations.extend(record.associations)
+        self.mediums.extend(record.mediums)
+        self.entity_keys.extend(record.entity_keys)
 
-        if isinstance(item, Graph):
-            w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
-                item, source=self.source_name
-            )
-            self.works.append(w)
-            self.expressions.append(e)
-            self.manifestations.append(m)
-            self.entity_keys.extend(bibframe_entity_keys(m, w, agts, idents))
-        elif is_marc_authority_record(item):
-            (
-                w_list,
-                e_list,
-                m_list,
-                itms,
-                agts,
-                rels,
-                idents,
-                assoc,
-                mops,
-                contribs,
-            ) = decompose_marc_authority(
-                item,
-                source=self.source_name,
-                id_source=self.config.id_source,
-                record_origin=self.source_name,
-                strip_isbd_punctuation=self.strip_isbd_punctuation,
-                isbd_punctuation=self.isbd_punctuation,
-            )
-            self.works.extend(w_list)
-            self.expressions.extend(e_list)
-            self.manifestations.extend(m_list)
-        else:
-            w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
-                item,
-                source=self.source_name,
-                id_source=self.config.id_source,
-                include_items=self.config.include_items,
-                record_origin=self.source_name,
-                relator_mappings=self.relator_mappings,
-                vocab_store=self.vocab_store,
-                strip_isbd_punctuation=self.strip_isbd_punctuation,
-                isbd_punctuation=self.isbd_punctuation,
-                key_sink=self.entity_keys,
-            )
-            self.works.append(w)
-            self.expressions.append(e)
-            self.manifestations.append(m)
-
-        self.items.extend(itms)
-        self.agents.extend(agts)
-        self.contributions.extend(contribs)
-        self.relationships.extend(rels)
-        self.identifiers.extend(idents)
-        self.associations.extend(assoc)
-        self.mediums.extend(mops)
+    def _load_context(self) -> LoadContext:
+        """The options every loader receives, whatever the format."""
+        return LoadContext(
+            source=self.source_name,
+            record_origin=self.source_name,
+            id_source=self.config.id_source,
+            include_items=self.config.include_items,
+            relator_mappings=self.relator_mappings,
+            vocab_store=self.vocab_store,
+            strip_isbd_punctuation=self.strip_isbd_punctuation,
+            isbd_punctuation=self.isbd_punctuation,
+        )
 
     def take(self) -> dict[str, Any]:
         """Detach the staged batch so it can be handed to a writer thread."""
