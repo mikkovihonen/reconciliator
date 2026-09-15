@@ -293,17 +293,14 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         content_types=set(BIBFRAME_CONTENT_TYPES.values()) | {"text", "audio_music"},
         key_types={"author", "title_stem", "work", "music_work", "standard"},
         identifier_schemes={"isbn", "issn", "urn", "doi", "other"},
-        deterministic_ids=False,
+        # Blank-node subjects now get an identifier derived from the node's own
+        # triples, so the same input yields the same URIs on every ingest.
+        deterministic_ids=True,
         stamps_record_origin=True,
         normalises_isbd=False,
         folds_subject_vocabularies=False,
         normalises_relators=False,
         not_produced={
-            "deterministic_ids": (
-                "identity is the graph's node URI; a blank-node subject gets a "
-                "parse-local label, so the same input yields different ids on "
-                "each ingest. See plans/loader_interface.md"
-            ),
             "isbd_normalisation": (
                 "takes no strip_isbd_punctuation: RDF literals are not expected "
                 "to carry ISBD presentation punctuation, though exports converted "

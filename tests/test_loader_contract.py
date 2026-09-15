@@ -196,16 +196,90 @@ def test_check_output_catches_an_unstable_id_under_a_determinism_claim():
 # --- every gap is declared with a reason ---------------------------------
 
 
-def test_bibframe_declares_the_normalisation_it_does_not_apply():
+def test_bibframe_declares_the_normalisation_it_still_does_not_apply():
     caps = BibframeLoader.capabilities
     for flag, key in (
-        ("deterministic_ids", "deterministic_ids"),
         ("normalises_isbd", "isbd_normalisation"),
         ("folds_subject_vocabularies", "subject_vocabulary_folding"),
         ("normalises_relators", "relator_normalisation"),
     ):
         assert getattr(caps, flag) is False, flag
         assert key in caps.not_produced, f"{flag} is False but undeclared"
+
+
+def test_bibframe_now_claims_deterministic_ids():
+    """Closed in stage 5. The claim is verified by the tests below and by
+    `check_output`, which rejects a parse-local identifier under this claim."""
+    caps = BibframeLoader.capabilities
+    assert caps.deterministic_ids is True
+    assert "deterministic_ids" not in caps.not_produced
+
+
+# --- BibFrame identity ----------------------------------------------------
+
+BLANK_NODE_TTL = """
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+_:w a bf:Work ; bf:title [ a bf:Title ; bf:mainTitle "%s" ] .
+_:i a bf:Instance ; bf:instanceOf _:w ;
+    bf:title [ a bf:Title ; bf:mainTitle "%s" ] .
+"""
+
+
+def _blank_node_graph(title: str = "Sinuhe egyptilainen") -> Graph:
+    return Graph().parse(data=BLANK_NODE_TTL % (title, title), format="turtle")
+
+
+def test_blank_node_records_get_stable_identity_across_parses(ctx: LoadContext):
+    """rdflib mints a fresh label per parse, so identity taken from the label
+    changed on every ingest - new URIs, no upsert match, duplicate rows, and an
+    `ingest_mode: replace` that could not help because the ids differed."""
+    seen = set()
+    for _ in range(3):
+        record = load_record(_blank_node_graph(), ctx)
+        seen.add(
+            (
+                record.works[0].work_uri,
+                record.expressions[0].expression_uri,
+                record.manifestations[0].manifestation_uri,
+            )
+        )
+    assert len(seen) == 1, f"identity differed between parses: {seen}"
+
+
+def test_blank_node_identity_follows_content(ctx: LoadContext):
+    a = load_record(_blank_node_graph("Sinuhe egyptilainen"), ctx).works[0].work_uri
+    b = load_record(_blank_node_graph("Turms kuolematon"), ctx).works[0].work_uri
+    assert a != b
+
+
+def test_blank_node_uris_follow_the_same_scheme_as_marc(ctx: LoadContext):
+    """A derived id must still yield a real URI, not a bare parse label."""
+    record = load_record(_blank_node_graph(), ctx)
+    assert record.works[0].work_uri.startswith("urn:work:melinda:")
+    assert record.expressions[0].expression_uri.startswith("urn:exp:melinda:")
+    assert record.manifestations[0].manifestation_uri.startswith("urn:manif:melinda:")
+
+
+def test_a_graph_with_real_uris_keeps_them(ctx: LoadContext):
+    """Derivation is a fallback: a node with a URI is identified by it."""
+    record = load_record(_bibframe_graph(), ctx)
+    assert record.works[0].work_uri.startswith("http://example.org/")
+
+
+def test_str_of_a_blank_node_has_no_prefix():
+    """Why every `startswith("_:")` guard in the decomposer was dead code.
+
+    Only `.n3()` adds the prefix, so the guards never fired and parse-local
+    labels were used as work, expression and manifestation URIs.
+    """
+    from rdflib import BNode
+
+    from reconciliator.loaders.bibframe.decomposition import is_blank_node
+
+    node = BNode()
+    assert not str(node).startswith("_:")
+    assert node.n3().startswith("_:")
+    assert is_blank_node(node) is True
 
 
 def test_the_authority_loader_declares_why_it_emits_no_keys():

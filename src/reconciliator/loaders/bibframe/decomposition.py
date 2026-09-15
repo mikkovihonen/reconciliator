@@ -14,11 +14,12 @@ and physical/electronic item holdings.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
-from rdflib import RDF, RDFS, SKOS, Graph, IdentifiedNode, Literal, URIRef
+from rdflib import RDF, RDFS, SKOS, BNode, Graph, IdentifiedNode, Literal, URIRef
 
 from reconciliator.loaders.bibframe.base import (
     normalize_role_uri_or_label,
@@ -579,8 +580,8 @@ def decompose_bibframe_work(
     logger.debug("Decomposing BIBFRAME node %s under condition %s", instance_node, condition)
 
     # 1. Manifestation Entity Extraction
-    manif_uri = str(instance_node) if not str(instance_node).startswith("_:") else None
-    manif_id = str(instance_node)
+    manif_uri = None if is_blank_node(instance_node) else str(instance_node)
+    manif_id = derive_bibframe_node_id(g, instance_node)
     manif_title, manif_sub, _, manif_variants = _extract_title_elements(g, instance_node, profile)
 
     # Provision activity
@@ -651,8 +652,8 @@ def decompose_bibframe_work(
     if condition == "C-3":
         # Hub Hoisting: hub_node is canonical Work centroid
         assert hub_node is not None
-        work_id = str(hub_node)
-        work_uri = str(hub_node) if not str(hub_node).startswith("_:") else None
+        work_id = derive_bibframe_node_id(g, hub_node)
+        work_uri = None if is_blank_node(hub_node) else str(hub_node)
         work_title, _, _, _ = _extract_title_elements(g, hub_node, profile)
         if not work_title and work_node:
             work_title, _, _, _ = _extract_title_elements(g, work_node, profile)
@@ -660,17 +661,17 @@ def decompose_bibframe_work(
 
         # The work_node acts as an Expression realizing the Hub
         assert work_node is not None
-        expr_id = str(work_node)
-        expr_uri = str(work_node) if not str(work_node).startswith("_:") else None
+        expr_id = derive_bibframe_node_id(g, work_node)
+        expr_uri = None if is_blank_node(work_node) else str(work_node)
         expr_title, _, _, _ = _extract_title_elements(g, work_node, profile)
         expr_lang = _extract_language(g, work_node, profile)
 
     elif condition == "C-4":
         # Translation Expression Decomposition
         assert translation_orig_node is not None
-        work_id = str(translation_orig_node)
+        work_id = derive_bibframe_node_id(g, translation_orig_node)
         work_uri = (
-            str(translation_orig_node) if not str(translation_orig_node).startswith("_:") else None
+            None if is_blank_node(translation_orig_node) else str(translation_orig_node)
         )
         work_title, _, _, _ = _extract_title_elements(g, translation_orig_node, profile)
         if not work_title and work_node:
@@ -678,8 +679,8 @@ def decompose_bibframe_work(
         work_lang = _extract_language(g, translation_orig_node, profile)
 
         assert work_node is not None
-        expr_id = str(work_node)
-        expr_uri = str(work_node) if not str(work_node).startswith("_:") else None
+        expr_id = derive_bibframe_node_id(g, work_node)
+        expr_uri = None if is_blank_node(work_node) else str(work_node)
         expr_title, _, _, _ = _extract_title_elements(g, work_node, profile)
         expr_lang = _extract_language(g, work_node, profile)
 
@@ -695,14 +696,14 @@ def decompose_bibframe_work(
         # Music Performance Realization
         assert work_node is not None
         assert pmo_perf_node is not None
-        work_id = str(work_node)
-        work_uri = str(work_node) if not str(work_node).startswith("_:") else None
+        work_id = derive_bibframe_node_id(g, work_node)
+        work_uri = None if is_blank_node(work_node) else str(work_node)
         work_title, _, _, _ = _extract_title_elements(g, work_node, profile)
         work_type = "music"
         mediums_of_perf.extend(_extract_mediums_of_performance(g, work_node, profile=profile))
 
-        expr_id = str(pmo_perf_node)
-        expr_uri = str(pmo_perf_node) if not str(pmo_perf_node).startswith("_:") else None
+        expr_id = derive_bibframe_node_id(g, pmo_perf_node)
+        expr_uri = None if is_blank_node(pmo_perf_node) else str(pmo_perf_node)
         expr_title, _, _, _ = _extract_title_elements(g, pmo_perf_node, profile)
         if not expr_title:
             expr_title = work_title
@@ -713,21 +714,21 @@ def decompose_bibframe_work(
         # Direct 1:1 Extraction (BFFI)
         assert work_node is not None
         assert expression_node is not None
-        work_id = str(work_node)
-        work_uri = str(work_node) if not str(work_node).startswith("_:") else None
+        work_id = derive_bibframe_node_id(g, work_node)
+        work_uri = None if is_blank_node(work_node) else str(work_node)
         work_title, _, _, _ = _extract_title_elements(g, work_node, profile)
         work_lang = _extract_language(g, work_node, profile)
 
-        expr_id = str(expression_node)
-        expr_uri = str(expression_node) if not str(expression_node).startswith("_:") else None
+        expr_id = derive_bibframe_node_id(g, expression_node)
+        expr_uri = None if is_blank_node(expression_node) else str(expression_node)
         expr_title, _, _, _ = _extract_title_elements(g, expression_node, profile)
         expr_lang = _extract_language(g, expression_node, profile)
 
     elif condition == "C-2":
         # Synthesize Default Expression (BFFI)
         assert work_node is not None
-        work_id = str(work_node)
-        work_uri = str(work_node) if not str(work_node).startswith("_:") else None
+        work_id = derive_bibframe_node_id(g, work_node)
+        work_uri = None if is_blank_node(work_node) else str(work_node)
         work_title, _, _, _ = _extract_title_elements(g, work_node, profile)
         work_lang = _extract_language(g, work_node, profile)
 
@@ -739,8 +740,8 @@ def decompose_bibframe_work(
     else:
         # C-6: Single-Work Partitioning (LC BIBFRAME 2.0)
         target_w = work_node if work_node else instance_node
-        work_id = str(target_w)
-        work_uri = str(target_w) if not str(target_w).startswith("_:") else None
+        work_id = derive_bibframe_node_id(g, target_w)
+        work_uri = None if is_blank_node(target_w) else str(target_w)
         work_title, _, _, _ = _extract_title_elements(g, target_w, profile)
         work_lang = _extract_language(g, target_w, profile)
 
@@ -867,7 +868,7 @@ def decompose_bibframe_work(
     # Build WEMI entities with serialization
     authors_list = [{"name": primary_creator_name}] if primary_creator_name else []
     work = WorkEntity(
-        work_uri=work_uri or work_id,
+        work_uri=work_uri or f"urn:work:{source}:{work_id}",
         title=work_title,
         title_normalized=compute_title_stem(work_title, lang=work_lang),
         original_title=orig_title,
@@ -887,7 +888,7 @@ def decompose_bibframe_work(
 
     expression = ExpressionEntity(
         work_id=0,
-        expression_uri=expr_uri or expr_id,
+        expression_uri=expr_uri or f"urn:exp:{source}:{expr_id}",
         title=expr_title,
         content_type=expr_content_type,
         language=expr_lang or "und",
@@ -904,7 +905,7 @@ def decompose_bibframe_work(
 
     manifestation = ManifestationEntity(
         work_id=0,
-        manifestation_uri=manif_uri,
+        manifestation_uri=manif_uri or f"urn:manif:{source}:{manif_id}",
         title=manif_title,
         title_normalized=compute_title_stem(manif_title, lang=expr_lang),
         carrier_type=carrier,
@@ -1054,6 +1055,56 @@ def determine_bibframe_work_type(
                         return work_type
 
     return default
+
+
+def is_blank_node(node: Any) -> bool:
+    """Whether an RDF term is a blank node.
+
+    `str(BNode())` returns a *bare* label - "Nc5b5385e..." - with no "_:"
+    prefix; only `.n3()` adds one. Every `startswith("_:")` guard in this module
+    was therefore dead code that never fired, which is how parse-local labels
+    came to be used as work, expression and manifestation URIs.
+    """
+    return isinstance(node, BNode)
+
+
+def derive_bibframe_node_id(g: Graph, node: Optional[IdentifiedNode]) -> str:
+    """A stable identifier for a BIBFRAME node.
+
+    A node with a real URI is identified by it. A blank node is not: rdflib mints
+    a fresh label on every parse, so identity taken from the label changes each
+    time the same file is ingested - new work, expression and manifestation URIs,
+    no upsert match, duplicate rows, and an `ingest_mode: replace` that cannot
+    help because the ids differ between runs.
+
+    This mirrors `derive_content_id` on the MARC side: identity from content, not
+    from position or parse order. The digest covers the node's own
+    predicate/object pairs, with a blank-node object replaced by a digest of
+    *its* pairs - one level of recursion, which is what BIBFRAME titles need,
+    since `bf:title [ a bf:Title ; bf:mainTitle "X" ]` puts the title itself
+    behind a blank node.
+    """
+    if node is None:
+        return ""
+    if not is_blank_node(node):
+        return str(node)
+
+    def pairs(subject: Any, depth: int) -> list[str]:
+        out: list[str] = []
+        for predicate, obj in sorted(g.predicate_objects(subject), key=lambda po: str(po[0])):
+            obj_text = str(obj)
+            if is_blank_node(obj):
+                if depth <= 0:
+                    continue
+                inner = hashlib.sha1(
+                    "\n".join(pairs(obj, depth - 1)).encode("utf-8")
+                ).hexdigest()[:16]
+                obj_text = f"_:{inner}"
+            out.append(f"{predicate}\t{obj_text}")
+        return out
+
+    digest = hashlib.sha1("\n".join(pairs(node, 1)).encode("utf-8")).hexdigest()[:16]
+    return f"sha1:{digest}"
 
 
 def derive_bibframe_keys(
