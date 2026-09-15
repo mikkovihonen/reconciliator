@@ -313,6 +313,12 @@ class WorkMatcher:
     # Helper Methods
     # -----------------------------------------------------------------------
 
+    def _retrieval_top_k(self, default: int = 50) -> int:
+        """How many candidates the dense tiers retrieve, from `rerank.top_k`."""
+        rerank = getattr(self.config, "rerank", None)
+        value = getattr(rerank, "top_k", None)
+        return int(value) if value else default
+
     def _align_expression(
         self,
         exps: list[ExpressionEntity],
@@ -470,8 +476,15 @@ class WorkMatcher:
         ):
             query_text = target.serialized_work or f"{target.title} {target.author_key or ''}"
             query_vec = self.embedder.embed_texts([query_text])
+            # Retrieval depth comes from rerank.top_k. It was hardcoded to 5
+            # while the config declared 50, so configuring it did nothing - and
+            # depth is exactly what the authoritative_only over-fetch has to
+            # reason about, since a filter applied after retrieval can only
+            # return fewer candidates than were fetched.
             results = self.repo.search_work_vectors(
-                query_vec, top_k=5, authoritative_only=self.authoritative_only
+                query_vec,
+                top_k=self._retrieval_top_k(),
+                authoritative_only=self.authoritative_only,
             )
             thresh = (
                 self.config.threshold
@@ -850,7 +863,9 @@ class WorkMatcher:
                 continue
 
             q_vec = self.embedder.embed_texts([agent_text])
-            cand_scores, cand_ids = self.agent_indexer.search(q_vec, top_k=5)
+            cand_scores, cand_ids = self.agent_indexer.search(
+                q_vec, top_k=self._retrieval_top_k()
+            )
             if len(cand_ids) == 0 or len(cand_ids[0]) == 0:
                 continue
 

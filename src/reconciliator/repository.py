@@ -1966,6 +1966,64 @@ class WEMIRepository:
         batch = self.get_agents_by_ids([agent_id])
         return batch.get(agent_id)
 
+    def build_wemi_indexes(
+        self,
+        embedder: SentenceEmbedder,
+        work_indexer: Optional[VectorIndex] = None,
+        manifestation_indexer: Optional[VectorIndex] = None,
+        batch_size: int = 128,
+    ) -> dict[str, int]:
+        """Embed stored works and manifestations into their vector indexes.
+
+        Two tiers, each for a different consumer: the work index serves the
+        matcher's tier-2 semantic fallback, the manifestation index serves the
+        clusterer's near-duplicate detection. There is no expression tier - it
+        added no discrimination these two do not already provide.
+
+        Records are embedded from their stored `serialized_text`, which the
+        loaders render at ingest, so building an index never re-parses a record.
+        Rows without serialized text are skipped rather than embedded blank.
+        """
+        counts = {"works": 0, "manifestations": 0}
+
+        for kind, indexer, table, id_column, map_table in (
+            ("works", work_indexer, "works", "work_id", "work_vectors"),
+            (
+                "manifestations",
+                manifestation_indexer,
+                "manifestations",
+                "manifestation_id",
+                "manifestation_vectors",
+            ),
+        ):
+            if indexer is None:
+                continue
+            with self.get_connection() as conn:
+                cur = conn.execute(
+                    f"""
+                    SELECT id, serialized_text FROM {table}
+                    WHERE serialized_text IS NOT NULL AND TRIM(serialized_text) != ''
+                    ORDER BY id;
+                    """
+                )
+                while True:
+                    rows = cur.fetchmany(batch_size)
+                    if not rows:
+                        break
+                    ids = [int(r["id"]) for r in rows]
+                    texts = [str(r["serialized_text"]) for r in rows]
+                    vectors = embedder.embed_texts(texts, batch_size=len(texts))
+                    vector_ids = indexer.add_vectors(vectors, ids=ids)
+                    with self.get_connection() as write_conn:
+                        write_conn.executemany(
+                            f"INSERT OR REPLACE INTO {map_table} (vector_id, {id_column}) VALUES (?, ?);",
+                            list(zip(vector_ids, ids)),
+                        )
+                    counts[kind] += len(ids)
+            indexer.save()
+
+        return counts
+
     def build_agent_index(
         self,
         agent_indexer: VectorIndex,

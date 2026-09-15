@@ -719,7 +719,7 @@ def ingest_oai_cmd(
         )
 
         console.print(f"[cyan]Ingesting authority records from source '{src_name}'...[/cyan]")
-        wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+        wemi_repo = _wemi_repo(cfg)
         total = ingest_oai_pipeline(
             source_name=src_name,
             config=src_cfg,
@@ -758,10 +758,38 @@ def ingest_wikidata_cmd(
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
 
-    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    wemi_repo = _wemi_repo(cfg)
     console.print("[cyan]Streaming Wikidata entities into WEMI authority repository...[/cyan]")
     total = ingest_wikidata_pipeline(cfg.ingest_wikidata, wemi_repo, tracker=tracker)
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
+
+
+def _wemi_repo(cfg: Any, embedder: Optional[Any] = None) -> WEMIRepository:
+    """Build the repository the way every command should.
+
+    Passing an `embedder` wires the work and manifestation vector indexes. Every
+    CLI command used to construct the repository with `db_path` and `fts_config`
+    only, which left `work_indexer` as None and so made the matcher's tier-2
+    dense branch unreachable in production - every match fell through to FTS
+    while the embedding configuration, engine selection and IPC daemon all sat
+    there serving nothing.
+
+    The embedder is what supplies the dimension; there is no configured value, so
+    a command with no embedder gets no indexes rather than a guessed dimension
+    that would not match the vectors already stored. Index files that do not
+    exist yet are created empty, and both the matcher and the clusterer guard on
+    `total_vectors == 0`, so wiring them before `build-index` has run is safe.
+    """
+    if embedder is None:
+        return WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    return WEMIRepository(
+        cfg.storage.authority_db,
+        fts_config=cfg.storage.fts,
+        work_index_path=cfg.storage.work_index,
+        manifestation_index_path=cfg.storage.manifestation_index,
+        dimension=embedder.dimension,
+        vector_engine_config=cfg.storage.vector_engine,
+    )
 
 
 def _ingest_corpus_as_wemi(
@@ -937,7 +965,9 @@ def reconcile_cmd(
         template_engine=embedder.template_engine,
         config=rec_norm_cfg,
     )
-    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    # The embedder is passed so the work and manifestation indexes are live:
+    # without them the matcher's dense tier cannot fire at all.
+    wemi_repo = _wemi_repo(cfg, embedder=embedder)
 
     # Tier 3 standalone agent fallback needs the dedicated agent index; it is
     # optional, so only load it when build-agent-index has produced one.
@@ -1601,7 +1631,7 @@ def consolidate_works_cmd(
     dry_run = dry_run if isinstance(dry_run, bool) else False
     reset = reset if isinstance(reset, bool) else False
 
-    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    wemi_repo = _wemi_repo(cfg)
     if reset:
         wemi_repo.clear_canonical_works()
         console.print("[yellow]Cleared existing work consolidation.[/yellow]")
@@ -1662,7 +1692,7 @@ def build_agent_index_cmd(
     from reconciliator.indexer import create_vector_engine
 
     cfg = load_config(config_path)
-    wemi_repo = WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+    wemi_repo = _wemi_repo(cfg)
     embedder = SentenceEmbedder(cfg.embedding)
     agent_indexer = create_vector_engine(
         cfg.storage.agent_index,
@@ -1679,6 +1709,58 @@ def build_agent_index_cmd(
     )
     console.print(
         f"[green]Successfully indexed {count} agents into {cfg.storage.agent_index}[/green]"
+    )
+
+
+@app.command("build-index")
+def build_index_cmd(
+    config_path: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to config.yaml"
+    ),
+    batch_size: int = typer.Option(128, "--batch-size", "-b", help="Encoding batch size"),
+    tier: str = typer.Option(
+        "all", "--tier", "-t", help="Which index to build: work, manifestation, or all"
+    ),
+) -> None:
+    """Build the work and manifestation vector indexes from stored serializations.
+
+    Two tiers, each with one consumer: the work index serves the matcher's
+    semantic fallback, the manifestation index serves the clusterer's
+    near-duplicate detection. There is no expression tier.
+    """
+    from reconciliator.indexer import create_vector_engine
+
+    cfg = load_config(config_path)
+    embedder = SentenceEmbedder(cfg.embedding)
+    wemi_repo = _wemi_repo(cfg, embedder=embedder)
+
+    chosen = str(tier).lower()
+    if chosen not in ("all", "work", "manifestation"):
+        console.print(f"[red]Unknown tier '{tier}'. Use work, manifestation, or all.[/red]")
+        raise typer.Exit(code=2)
+
+    work_indexer = manifestation_indexer = None
+    if chosen in ("all", "work"):
+        work_indexer = create_vector_engine(
+            cfg.storage.work_index, dimension=embedder.dimension, config=cfg.storage.vector_engine
+        )
+    if chosen in ("all", "manifestation"):
+        manifestation_indexer = create_vector_engine(
+            cfg.storage.manifestation_index,
+            dimension=embedder.dimension,
+            config=cfg.storage.vector_engine,
+        )
+
+    console.print("[cyan]Embedding stored works and manifestations...[/cyan]")
+    counts = wemi_repo.build_wemi_indexes(
+        embedder=embedder,
+        work_indexer=work_indexer,
+        manifestation_indexer=manifestation_indexer,
+        batch_size=batch_size,
+    )
+    console.print(
+        f"[green]Indexed {counts['works']} works into {cfg.storage.work_index} and "
+        f"{counts['manifestations']} manifestations into {cfg.storage.manifestation_index}[/green]"
     )
 
 

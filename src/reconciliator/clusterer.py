@@ -313,6 +313,59 @@ class CorpusClusterer:
         vol = (target.volume_designation or "").strip().lower()
         return f"{sk}::{year}::{vol}"
 
+    def _merge_manifestation_groups_by_vector(
+        self, groups: dict[str, list[MatchRecord]]
+    ) -> dict[str, list[MatchRecord]]:
+        """Union key groups whose representatives are near-duplicates by embedding.
+
+        The manifestation key is `standard::year::volume`, which separates two
+        catalogues' records of the same edition whenever they share no standard
+        number. This consults the manifestation vector index - the reason those
+        embeddings are kept - and unions groups above
+        `cluster.thresholds.manifestation`.
+
+        A no-op without an embedder, without an index, or with an empty one, so
+        clustering still works before `build-index` has run.
+        """
+        if len(groups) < 2:
+            return groups
+        embedder = getattr(self.matcher, "embedder", None) if self.matcher else None
+        indexer = getattr(self.corpus_repo, "manifestation_indexer", None)
+        if embedder is None or indexer is None or indexer.total_vectors == 0:
+            return groups
+
+        threshold = self.config.thresholds.manifestation
+        keys = list(groups)
+        # source_id of each group's representative, to recognise a hit as one of
+        # the groups being clustered rather than some unrelated manifestation.
+        rep_by_source = {groups[k][0].record_id: k for k in keys}
+
+        uf = UnionFind(keys)
+        for key in keys:
+            rep = groups[key][0]
+            text = rep.serialized_manifestation or rep.title
+            if not text:
+                continue
+            try:
+                vector = embedder.embed_texts([text])
+                hits = self.corpus_repo.search_manifestation_vectors(
+                    vector, top_k=min(len(keys), 20)
+                )
+            except Exception:
+                continue
+            for manifestation, score in hits:
+                if score < threshold:
+                    continue
+                other = rep_by_source.get(manifestation.source_id)
+                if other is not None and other != key:
+                    uf.union(key, other)
+
+        merged: dict[str, list[MatchRecord]] = {}
+        for key in keys:
+            root = uf.find(key)
+            merged.setdefault(root, []).extend(groups[key])
+        return merged
+
     def cluster_corpus(self) -> MultiplexClusterResult:
         """Execute full intra-corpus co-reference clustering pipeline across staged records."""
         start_time = time.time()
@@ -479,6 +532,12 @@ class CorpusClusterer:
                 for rec in exp_recs:
                     m_key = self.extract_manifestation_key(rec)
                     manif_groups[m_key].append(rec)
+
+                # Records of one edition that share no standard number and spell
+                # their volume differently never meet in a key group, so the
+                # manifestation index gets consulted to merge groups the keys
+                # left apart. Additive only: it joins groups, never splits them.
+                manif_groups = self._merge_manifestation_groups_by_vector(manif_groups)
 
                 for _, m_recs in manif_groups.items():
                     m_canon = m_recs[0]
