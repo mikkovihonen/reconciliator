@@ -1974,6 +1974,62 @@ component record. Those are the assertions that can catch this class of mistake.
 
 564 passing.
 
+### 14.15 Funnel reachability audit ✅ COMPLETE
+
+Funnel B being dead raised the obvious question: how many others are? Auditing
+the loader's actual capabilities against every funnel's `when` predicates gave
+the answer — **11 of 41 funnels could not be reached by any MARC record.**
+
+The method compares what the loader can emit (which work types
+`determine_work_type` returns, which content types `determine_content_type`
+returns, which keys `derive_domain_keys` adds, which identifier schemes
+`parse_marc_record_elem` extracts) against what each funnel's alternatives
+require. 13 of the 40 work types the predicates name are never produced.
+
+#### Three gaps where the signal existed but was not wired
+
+- **`translators_signature` was never emitted by anything.** The key type was
+  declared on `MatchRecord`, mapped in its validator, read by the clusterer's
+  pairwise scoring *and* by funnel HH's dispatch — and written nowhere, so both
+  consumers read a permanently absent value. It is now derived from the same
+  `trl` relator test the serialization engine already used two lines away.
+- **A 111 meeting main entry did not classify the record.** 111 was parsed as a
+  corporate agent, but `determine_work_type` never looked at it, so no MARC
+  record ever became `conference` and funnel J was reachable only through the
+  `exhibition` genre heading.
+- **Funnel PP keyed only on a work type that is never produced**, while the
+  loader already emits the `heritage_model` key from 347 digital file formats. It
+  now accepts either.
+
+#### Nine remain, and they are classification gaps rather than bugs
+
+`funnel_dd_sammelband`, `funnel_ee_web_archive`, `funnel_g_anthology`,
+`funnel_gg_broadcast`, `funnel_ii_preservation_surrogate`,
+`funnel_jj_medieval_fragment`, `funnel_nn_geodata`, `funnel_t_legal`,
+`funnel_z_tactile`.
+
+Each needs the ingest path taught to recognise a signal it does not read yet — a
+533 reproduction note, a bound-with relationship, a genre heading for statutes or
+fragments. Those are bibliographic decisions about Finnish cataloguing practice,
+not refactoring, so they are named rather than guessed at.
+
+#### The audit is a test, and it fails in both directions
+
+`tests/test_funnel_reachability.py` holds the nine in
+`KNOWN_UNREACHABLE_FROM_MARC`, and asserts the computed set equals it exactly.
+Growing means a change made a funnel unreachable — the regression that hid funnel
+B for the life of the codebase. Shrinking means a gap was closed and the list is
+stale. Capability extraction is AST-based rather than regex: the first hand audit
+used a regex and silently missed a multi-line `_add()` call, reporting a funnel
+as dead when it had just been fixed. The fixture also asserts each extraction
+found *something*, since an extraction returning nothing would make every funnel
+look unreachable and the assertions vacuous.
+
+Verified by temporarily repointing funnel L at a work type the loader cannot
+produce: the audit fails and names it.
+
+572 passing.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
