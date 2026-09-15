@@ -292,14 +292,138 @@ declaration that changes has to be re-stated deliberately.
 
 660 passing, lint clean, all three pipeline modes unchanged.
 
-## Stage 5 remaining
+## Stage 5.2: BibFrame `record_origin` ✅ COMPLETE
 
-In the plan's order, each its own diff:
+Closed incidentally by `finalise`, as recorded above.
 
-2. **BibFrame `record_origin`** — done incidentally by `finalise`
-3. **Uniform ISBD normalisation** — the toggle reaches only MARC
-4. **Uniform subject folding and relator normalisation** — the largest, and the
-   most likely to move matching results, so last and alone
+## Stage 5.3: uniform ISBD normalisation ✅ COMPLETE
 
-The `LoadContext` already carries all of it to the BibFrame loader; what remains
-is for the loader to honour it and for two `not_produced` entries to be deleted.
+The strip moved into `RecordLoader.finalise`, so it is a property of the
+interface: a loader cannot forget it, and a new format gets it without writing
+any code. `ISBD_TEXT_FIELDS` names the fields — titles, names, and the imprint
+statements — and deliberately omits `*_normalized` (the normalisers already
+discard punctuation) and the enumeration fields `volume_designation` and
+`series_numbering`, which feed `check_volume_match` through `normalize_volume`.
+
+Two findings while doing it:
+
+- **The MARC path was itself inconsistent.** The authority decomposer stripped
+  its headings and the bibliographic one did not strip the 245, so `w.title` came
+  out "Testikirja" from one path and "Testikirja :" from the other — three test
+  assertions had that asymmetry written down as expected behaviour. The strip now
+  happens once, where 245 is read.
+- **The target path passes through no loader at all.** `build_target_record_from_marc`
+  builds a `MatchRecord` and no entities, so `finalise` never sees it; a work
+  report printing the target title beside the matched corpus title showed
+  "Testikirja :" against "Testikirja" for one and the same string. Stripping at
+  the extraction point in `parse_marc_record_elem` keeps both sides comparable,
+  and `finalise` remains the guarantee for any format that leaves something
+  behind.
+
+`check_output` takes the `ctx` now: `normalises_isbd` means the loader *honours*
+`strip_isbd_punctuation`, not that it strips unconditionally.
+
+## Stage 5.4: uniform relator normalisation ✅ COMPLETE
+
+The profile resolves roles first — so a deployment can still override any of
+them — and whatever it does not resolve now goes to the shared relator registry
+instead of being returned as it stands.
+
+That last step was the whole gap, and it was Finnish-shaped: the profile's
+`role_label_mappings` cover the English labels, and BFFI — the Finnish BIBFRAME
+profile — writes Finnish relator *terms*. Measured across a dozen terms, every
+one of them disagreed:
+
+| label | BibFrame, before | MARC |
+|---|---|---|
+| kääntäjä | kääntäjä | trl |
+| kirjoittaja | kirjoittaja | aut |
+| säveltäjä | säveltäjä | cmp |
+| sanoittaja | sanoittaja | lyr |
+| sovittaja | sovittaja | arr |
+
+So one agent's `role_counts` merged across a Melinda source and a BFFI source
+read `{"trl": 2, "kääntäjä": 3}`: the same role counted twice under two names.
+
+Three further defects surfaced, each larger than the declared gap:
+
+1. **A blank-node role was never read.** `bf:role [ rdfs:label "kääntäjä" ]` is
+   the normal shape, and the decomposer passed `str(role_obj)` — rdflib's
+   parse-local label — to the normaliser. The stored role was that label: not a
+   role, and different on every parse. `role_label_predicates` is now a profile
+   field, declared in all three shipped profiles.
+2. **BibFrame agents had no `role_counts` at all**, though `enricher.py` reads
+   `next(iter(agent.role_counts))` for the export role.
+3. **MARC contributions had no real role.** `role = a.get("role") or "aut"` read
+   a key nothing ever set, so every contribution row came out
+   `aut`/`is_primary`/`work`: a translator was filed against the work as its
+   author, and the expression tier held *no contributions whatsoever* — which is
+   why the matcher's expression-level contributor lookup (matcher.py:361) never
+   found a name to compare.
+
+Plus one convention decision: a 1XX main entry with no `$e`/`$4` now counts as
+`aut`, matching what the BibFrame path records from the primary contribution and
+what the target path already assumes for a 245 `$c` name.
+
+`check_output` enforces the claim as "the shared normaliser has nothing left to
+change", which distinguishes "kääntäjä" from a genuinely unknown role, and
+rejects a role that looks like a blank-node label.
+
+## Stage 5.5: uniform subject folding ✅ COMPLETE
+
+`loaders/subjects.py` is the folding logic in one place: subjects in as
+already-extracted mappings (extraction is format-specific, folding is not),
+`FoldedSubject` out, carrying heading, vocabulary, concept id and the
+`vocab:concept` key the agent footprint counts. The MARC path was refactored onto
+it and proven output-identical on every fixture record first
+(`subject_parity.py`: PASS), then BibFrame was wired to the same call.
+
+What the gap actually was:
+
+- **The BibFrame decomposer read no `bf:subject` whatsoever.** The target path
+  read subjects; the ingest path did not. A BIBFRAME work reached the datastore
+  with no subjects, and its agents with an empty footprint. The extractor was
+  private to `rdflib_loader`; it is now `extract_bibframe_subjects` in
+  `decomposition.py` and both paths call it.
+- **`works.subjects_json` held bare heading strings, which neither consumer
+  could read.** `work_serialization.j2` renders
+  `subjects | map(attribute='pref_label')` and so rendered *nothing* — the work's
+  serialised text, which BM25 and the dense index score, carried no subject terms
+  at all — while `find_classification_evidence` looks for `code`/`scheme` per
+  entry and failed silently inside its own try/except. The stored shape is now
+  the folded dict, and both consumers work.
+- **A legacy vocabulary could not be recognised from a URI.** The URI pattern
+  table lists only the modern vocabularies, because a MARC record declares ysa,
+  allars, musa or kaunokki in `$2`. A BIBFRAME subject is a URI and nothing else,
+  so a legacy heading arrived with no vocabulary and was dropped from the
+  footprint. `vocabulary_hint_from_uri` reads the vocabulary out of the Finto URI
+  path, which lets `legacy_to_modern` do its job on either format.
+
+A 4XX variant title on a work authority still rides in `subjects_json` — there is
+no variant-title column and that list is what the serialisation renders — but it
+is tagged `kind: variant_title` so it cannot be mistaken for a subject.
+
+MARC and BIBFRAME now produce identical concept sets, identical agent footprints
+and identical subject terms in the serialised text for equivalent records.
+
+## Stage 5.6: `translators_signature` from BIBFRAME ✅ COMPLETE
+
+Declared impossible here because roles were not normalised, so no BibFrame agent
+ever carried "trl". They do now, so the key that funnel HH dispatches on and the
+clusterer scores with is derived from BIBFRAME by the same computation as MARC.
+
+## Where stage 5 ended
+
+Every declared *normalisation* gap is closed. What is left in `not_produced` is
+structural, and each entry says why:
+
+| loader | remaining | why |
+|---|---|---|
+| marc_bibliographic | — | none |
+| marc_authority | entity_keys, subject folding, relators | an authority record has no manifestation to key, carries its own headings rather than subject access points, and no relator codes |
+| bibframe | citation, analytic, sammelband | no host-item concept, constituent works modelled as related Works, bound-with is holdings-level |
+
+660 → **680 passing**, lint clean, and all three linking modes unchanged through
+every step: TARGET-001 at `tier1_exact_identifier`, TARGET-002 at
+`tier2_domain_key` (0.8067), one work cluster, one expression cluster, two
+manifestation clusters.

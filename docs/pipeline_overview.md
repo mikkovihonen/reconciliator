@@ -99,7 +99,22 @@ resumptionToken and a completed run harvests incrementally next time. With
 derived from a digest of its own fields — leader, controlfields, datafields with
 indicators and subfields — so re-ingesting the same input yields the same work,
 expression, manifestation and agent URIs. Agent URIs derive from the agent's
-name and dates rather than its ordinal position among the `7XX` fields.
+name and dates rather than its ordinal position among the `7XX` fields. The same
+holds for RDF: a BIBFRAME blank node is identified by a digest of its own
+predicate/object pairs, never by rdflib's parse-local label, which is regenerated
+on every parse. Watch for that when working in `loaders/bibframe/`:
+`str(BNode())` returns a *bare* label with no `_:` prefix — only `.n3()` adds
+one — so a `startswith("_:")` test never fires. Use `is_blank_node()`.
+
+**Subjects** are folded to a vocabulary and a concept id at ingest
+(`loaders/subjects.py`), because that is the only form in which two catalogues'
+headings can be compared: "lääkärit" under `$2 ysa` and the same heading under
+`$2 yso/fin` are one subject once both read `yso:p2591`. A folded subject is
+stored on the work as a dict — heading, `pref_label`, vocabulary, uri, `code`,
+`scheme` — and the per-record `vocab:concept` histogram is stamped on every agent
+the record names, as evidence that this person was named on a record about these
+subjects. A heading that resolves to no supported vocabulary is kept but carries
+no key: counting the raw string would make two spellings look like two subjects.
 
 **`record_origin`** on every row is the name of the source that produced it. The
 `sources` table records which of those names are authoritative. Together these
@@ -303,16 +318,43 @@ rather than a guessed dimension that would not match the stored vectors. Both th
 matcher and the clusterer guard on an empty index, so wiring them before
 `build-index` has run is safe.
 
-## 11a. A caveat on the loaders
+## 11a. The loader contract
 
-The three formats reach the datastore through three unrelated signatures, and
-they do **not** apply the same normalisation. The BibFrame path in particular
-takes no `record_origin`, does no subject-vocabulary folding, no ISBD
-normalisation and no legacy heading folding, and derives no deterministic ids —
-so re-ingesting one BibFrame file whose nodes are blank produces fresh URIs every
-run. See [plans/loader_interface.md](plans/loader_interface.md) for the measured
-divergences and the planned abstract loader that makes each one either uniform or
-explicitly declared.
+Every format reaches the datastore through `RecordLoader`
+(`loaders/base.py`), and the registry (`loaders/registry.py`) picks the loader
+for a harvested item. Three things matter about it.
+
+**One shape, one options object.** A loader returns a `DecomposedRecord` — always
+lists, including the WEMI tiers — and receives a `LoadContext` carrying
+everything any loader may need. A loader that cannot honour part of the context
+*declares* that rather than omitting the parameter.
+
+**Normalisation is the base class's job, not each decomposer's.**
+`RecordLoader.finalise` stamps `record_origin` on every tier and strips trailing
+ISBD punctuation from every stored name and title. A new format gets both without
+writing any code, and an existing one cannot forget them. Format-specific
+normalisation that needs the source record — MARC's subject folding, its relator
+mapping — happens in the decomposer and is *shared code*
+(`loaders/subjects.py`, `normalizers/relators.py`) so that two formats cannot
+reach different answers about the same heading or the same role.
+
+**Every absence is declared, with a reason.** `LoaderCapabilities` states what a
+loader produces — work types, content types, key types, identifier schemes — and
+one flag per normalisation concern; `not_produced` maps each missing output to
+why it is missing. A silently omitted output is indistinguishable from an
+impossible one, which is how the BibFrame path came to apply none of the MARC
+path's normalisation without anything saying so. `check_output` compares a
+produced record against its loader's declaration, and
+`tests/test_funnel_reachability.py` reads the declaration rather than parsing
+loader source — an inference that had twice returned the wrong answer.
+
+What remains declared-and-absent is structural: a MARC authority record has no
+manifestation to key and carries no relator codes; BIBFRAME has no host-item
+concept (MARC 773), models constituent works as related Works rather than 505/700
+`$t` subfields, and has no bound-with, which is holdings-level.
+
+See [plans/loader_interface.md](plans/loader_interface.md) for the measured
+divergences this closed, and for what each one turned out to be hiding.
 
 ## 12. Testing conventions
 
