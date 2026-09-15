@@ -1902,6 +1902,78 @@ Re-ingesting after a replace returns the store to byte-identical counts, which i
 what deterministic ids (13.1) buy: a replace is a refresh rather than a churn of
 identity.
 
+### 14.14 Follow-ups after the staged work ✅ COMPLETE
+
+Two items were left open when the stages finished, each wanting its own diff.
+
+#### The registry mismatch was failing closed in silence
+
+With one database, "which rows may be matched against" is answered entirely by
+`record_origin` plus the `sources` registry, and when the two disagree the
+allow-list filters out every candidate — matching returns nothing and nothing
+errors. This cost two rounds of debugging in stage 2.
+`WEMIRepository.check_source_registry()` reports it, and `reconcile` prints the
+findings before matching starts:
+
+```
+registered authoritative, no rows         ! cannot be matched against
+rows stamped with a different origin      ! both findings (the stage-2 bug)
+only a corpus registered                  ! no allow-list to apply
+```
+
+The first draft also reported unregistered origins as "invisible" when *nothing*
+was authoritative — which is wrong, because `_origin_clause` applies no filter at
+all when the allow-list would be empty, so those rows are visible. A test pins
+that it does not cry wolf there, and another ties the diagnostic to the
+behaviour: the mismatched row really is absent from an authoritative-only search
+and present without the filter.
+
+#### Funnel B was broken twice over, and dead besides
+
+The tracklist tier compared the record's tracks against
+`{w.title for w in find_works_by_type("music") if w.id != candidate.id}` — the
+titles of every *other* music work in the store. That set is near-identical for
+every candidate and measures nothing resembling tracklist agreement, and the
+unbounded query ran inside the candidate loop, making the tier quadratic in the
+size of the music collection.
+
+It now compares a candidate against its **own** constituent tracks, and finds
+candidates by shared track title through a new `analytic_title` key rather than
+scanning. (The paired `analytic` key cannot serve that lookup: two catalogues
+often disagree about a track's creator while agreeing on its title.) It reports
+the overlap it found as the confidence rather than a fixed 0.85.
+
+**And then the tier could not run at all.** Verifying the fix, a sound recording
+dispatched to `funnel_d_notated_music`. `derive_domain_keys` emits a `music_work`
+key for *every* music record, and funnel D's first `when` alternative was
+`{work_type: [music], has_key: [music_work]}` — so it claimed every sound
+recording and **`funnel_b_music_sound` was unreachable for any MARC record**. The
+original if-chain had the identical defect, which stage 3 transcribed faithfully.
+The discriminator is `content_type`, which the MARC leader determines
+(`audio_music` vs `notated_music`), so `FunnelWhen` gained a `content_type`
+predicate. The score-title alternative was also English-only; it now uses the
+clusterer's Finnish vocabulary (`partituuri`, `nuotti`, `stemma`).
+
+```
+case 1 same tracks, different album title and publisher number
+       funnel_b_music_sound  tier3_tracklist_jaccard  conf=1.00 -> urn:work:melinda:A1
+case 2 3 of 6 titles shared (0.5, under the 0.75 threshold)     -> unmatched
+case 3 tracks matching the other stored album                   -> urn:work:melinda:A2
+case 4 tracks in no stored album                                -> unmatched
+```
+
+#### The test that should have caught it
+
+`test_every_funnel_is_reachable_by_a_record_of_its_own` builds each probe from
+the spec's own `when`, so it proves a spec claims its own probe — not that
+records the loader actually produces reach it. That circularity is exactly what
+hid the dead funnel, and it passed throughout. `tests/test_funnels.py` now also
+dispatches **real loader output** through MARC leaders and fields: a sound
+recording, a notated-music record, a Finnish score title, a monograph and a
+component record. Those are the assertions that can catch this class of mistake.
+
+564 passing.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
