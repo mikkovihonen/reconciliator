@@ -361,9 +361,7 @@ Each is its own diff with its own verification, in this order:
 1. ✅ **Repository binding and the relationship pair.** *Done — see the log
    below.*
 2. ✅ **The profile mechanism.** *Done — see the log below.*
-3. **Profile-driven MARC extraction** into an ordered `Constituent`: indicator
-   filters, durations, ordinals, dedup. Still no entities; asserted against
-   fixtures and against a profile that selects nothing.
+3. ✅ **Profile-driven MARC extraction.** *Done — see the log below.*
 4. **Shape A emission** through `loaders/aggregates.py`, gated by
    `constituents_mode`. Verified: an album yields 1 + N works and N ordered M-E
    rows; two albums sharing a track converge on one constituent work row;
@@ -532,3 +530,66 @@ spelling of "nothing", aliases, a source's own YAML profile, a relative path
 against the config directory, both extractor forms, and the four validation
 refusals (a field with no title, with neither tag nor predicate, with both, and
 an unknown ordinal). 692 → **733 passing**, lint clean, pipeline unchanged.
+
+## Stage 3 ✅ COMPLETE
+
+`constituents/record.py` holds the extracted `Constituent` and `finalise`, which
+deduplicates, caps and numbers — the same whatever the record was written in, so
+no extractor gets its own opinion about it. `loaders/marcxml.py` holds
+`extract_marc_constituents(record_elem, profile)`, because format-specific
+reading stays with the format.
+
+`extract_marc_analytics` is now a two-line call on the new **`marc_legacy`**
+profile: every 505 and every 700/710 `$t`, unfiltered and undeduplicated, field
+order 700 → 710 → 505. That is a faithful description of an imprecise
+convention, and it means the `analytic` / `analytic_title` keys a source has
+always derived stay byte-identical. Proven against the old implementation
+inlined from git, on three constructed records and every fixture record:
+`legacy analytic parity: PASS`.
+
+What `marc_enhanced` reads from the same album, which the old reading could not:
+
+```
+#1 'Cantus arcticus'  creator='Rautavaara, Einojuhani'  dur='18:20'  tag=505
+#2 'Angel of light'   creator=None                      dur='31:05'  tag=505
+#3 'Isle of bliss'    creator=None                      dur=None     tag=505
+```
+
+Three constituents rather than four, in order, each with its own duration, and
+the composer in its authority-controlled form.
+
+### Three things the implementation decided
+
+**Subfield grouping, not `findall`.** An enhanced 505 repeats its subfields in
+groups — `$t` `$r` `$g`, again and again — so a track's duration is the `$g`
+that follows *its* `$t`. Reading each code across the datafield gave every track
+the first track's duration and the first track's composer. The first attempt
+then over-corrected: falling back to the datafield's first occurrence of a code
+reintroduced exactly that leak, so the fallback is now limited to the subfields
+*before the first title*, which is what a 700 needs (`$a` precedes `$t`) and
+nothing more.
+
+**Merging is per attribute, by profile order.** One constituent described twice
+is two descriptions of it, not two candidates: the note gives the duration and
+the added entry gives the composer. Each attribute comes from the
+higher-precedence entry that states one, precedence being the profile's field
+order — so it is the source's decision, not the function's. An earlier attempt
+ranked by "richness", which quietly preferred a transcribed name over a
+controlled one.
+
+**One stated exception: `creator_controlled`.** A 7XX `$a` is an
+authority-controlled name and a contents note's `$r` is transcribed from the
+item. "Rautavaara, Einojuhani" and "Rautavaara" are the same person and only the
+first will match an authority record, so a controlled creator wins whichever
+entry otherwise takes precedence. Declared per field entry, not inferred.
+
+### Verified
+
+24 tests in `tests/test_constituent_extraction.py`: ordered tracklists,
+per-group subfields, a creator ahead of its title, both indicator-filter
+outcomes (a basic 505 and a plain 700 yield nothing), blank indicators written
+as a space or omitted, dedup in all three modes, the controlled-name exception,
+stated ordinals, disc numbers, the cap logging the record id, a `component`
+from 773, an RDF entry ignored, and the legacy path byte-for-byte.
+
+733 → **757 passing**, lint clean, pipeline unchanged.

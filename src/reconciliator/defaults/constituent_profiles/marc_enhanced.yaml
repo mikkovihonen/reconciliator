@@ -21,8 +21,11 @@ fields:
     duration: "g"       # "(4:32)" on sound recordings
     ordinal: position
 
-  # 700 name-title analytic added entry. $a is the constituent's creator, not the
-  # container's, which is why contributes_to_container is false.
+  # 700 name-title analytic added entry. $a is the constituent's creator, not
+  # the container's, which is why contributes_to_container is false; and it is an
+  # authority-controlled form, so when a track appears here *and* in the contents
+  # note, this is the name to keep - "Rautavaara, Einojuhani" over the note's
+  # transcribed "Rautavaara".
   - tag: "700"
     indicators:
       ind2: "2"
@@ -31,6 +34,7 @@ fields:
     duration: "g"
     ordinal: position
     contributes_to_container: false
+    creator_controlled: true
 
   # 710 the same, for a corporate body.
   - tag: "710"
@@ -40,6 +44,7 @@ fields:
     creator: "a"
     ordinal: position
     contributes_to_container: false
+    creator_controlled: true
 
   # 773 host item: this record is itself a part, so it becomes a component
   # manifestation hanging off the container found through its citation key.

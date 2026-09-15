@@ -1,0 +1,33 @@
+# What `extract_marc_analytics` has always read: every 505 and every 700/710 $t,
+# with no indicator filter and no deduplication.
+#
+# Kept as a named profile rather than left as code, so that the blocking keys a
+# source has always derived stay byte-identical while `marc_enhanced` offers the
+# stricter reading. It is a faithful description of an imprecise convention: a
+# basic 505's single `$a` blob still yields nothing (there is no `$t` to read),
+# but a 700 whose `ind2` is not "2" is read as an analytic entry even though MARC
+# does not say it is one.
+#
+# Field order is 700, 710, 505 because that is the order the old function
+# appended in, and the derived key lists preserve it.
+name: marc_legacy
+shape: embodied
+dedup: none
+max_per_record: 1000
+
+fields:
+  - tag: "700"
+    title: "t"
+    creator: "a"
+    ordinal: none
+    contributes_to_container: true    # what the old reading effectively did
+
+  - tag: "710"
+    title: "t"
+    creator: "a"
+    ordinal: none
+    contributes_to_container: true
+
+  - tag: "505"
+    title: "t"
+    ordinal: none

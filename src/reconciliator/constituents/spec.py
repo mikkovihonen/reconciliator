@@ -87,6 +87,13 @@ class ConstituentField(BaseModel):
     #: means them as the volume's contributors can say true.
     contributes_to_container: bool = False
 
+    #: Whether `creator` here is an authority-controlled name. A 7XX `$a` is; a
+    #: contents note's `$r` is transcribed from the item. When one record
+    #: describes a constituent twice, the controlled form is the one to keep,
+    #: whichever entry otherwise takes precedence - "Rautavaara, Einojuhani"
+    #: rather than "Rautavaara".
+    creator_controlled: bool = False
+
     @model_validator(mode="after")
     def exactly_one_locator(self) -> ConstituentField:
         if bool(self.tag) == bool(self.predicate):

@@ -17,6 +17,9 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
+from reconciliator.constituents import ConstituentProfile, get_constituent_profile
+from reconciliator.constituents.record import Constituent
+from reconciliator.constituents.record import finalise as finalise_constituents
 
 # ISBD presentation punctuation and the stripper live with the loader contract:
 # the charset had a second declaration here, and two copies of a normalisation
@@ -2139,28 +2142,161 @@ def decode_analytic(value: str) -> tuple[str, Optional[str]]:
     return title, creator
 
 
+def _subfield_groups(
+    datafield: etree._Element, title_code: str
+) -> list[tuple[dict[str, str], dict[str, str]]]:
+    """Split a datafield into one group per title subfield, in document order.
+
+    An enhanced 505 repeats its subfields in groups - `$t` title `$r`
+    responsibility `$g` duration, again and again - so a constituent's attributes
+    are the ones that follow *its* `$t` and precede the next. Reading each code
+    with `findall` instead would give every track the first track's duration.
+
+    Each group is returned with the subfields that appear *before the first*
+    title as a fallback, because a 700 puts `$a` ahead of `$t`: the creator is
+    outside the group it belongs to. The fallback stops there deliberately. Using
+    the datafield's first occurrence of each code instead gave every track on an
+    album the first track's duration and the first track's composer, since a
+    group that states neither would inherit both.
+    """
+    ordered: list[tuple[str, str]] = []
+    for sub in datafield:
+        tag = etree.QName(sub).localname if isinstance(sub.tag, str) else ""
+        if tag != "subfield":
+            continue
+        code = sub.get("code") or ""
+        text = (sub.text or "").strip()
+        if code and text:
+            ordered.append((code, text))
+
+    preamble: dict[str, str] = {}
+    for code, text in ordered:
+        if code == title_code:
+            break
+        preamble.setdefault(code, text)
+
+    groups: list[tuple[dict[str, str], dict[str, str]]] = []
+    current: Optional[dict[str, str]] = None
+    for code, text in ordered:
+        if code == title_code:
+            current = {code: text}
+            groups.append((current, preamble))
+        elif current is not None:
+            current.setdefault(code, text)
+    return groups
+
+
+def extract_marc_constituents(
+    record_elem: etree._Element,
+    profile: ConstituentProfile,
+    *,
+    record_id: str = "<unknown>",
+) -> list[Constituent]:
+    """Read the constituents a profile says this source records.
+
+    The profile decides which tags to look at, which indicator values qualify,
+    which subfield carries what, and how the results are deduplicated and
+    numbered - because two sources in the same format do not agree about any of
+    that. See plans/aggregates.md.
+    """
+    found: list[Constituent] = []
+
+    for precedence, field in enumerate(profile.fields):
+        if not field.tag:
+            continue  # an RDF entry; not this format's business
+        for datafield in _get_datafields(record_elem, field.tag):
+            if not _indicators_match(datafield, field.indicators):
+                continue
+            for group, field_level in _subfield_groups(datafield, field.title or "t"):
+
+                def value(code: Optional[str]) -> Optional[str]:
+                    if not code:
+                        return None
+                    return group.get(code) or field_level.get(code)
+
+                title = value(field.title)
+                if not title:
+                    continue
+                found.append(
+                    Constituent(
+                        title=title,
+                        creator=value(field.creator),
+                        ordinal=_stated_ordinal(field.ordinal, group, field_level),
+                        disc=_as_int(value(field.disc)),
+                        duration=_clean_duration(value(field.duration)),
+                        pagination=value(field.pagination),
+                        role=value(field.role),
+                        shape=profile.shape_of(field),
+                        component_type=field.component_type,
+                        container_key=field.container_key,
+                        contributes_to_container=field.contributes_to_container,
+                        source_field=field.tag,
+                        precedence=precedence,
+                        creator_controlled=field.creator_controlled,
+                    )
+                )
+
+    return finalise_constituents(found, profile, record_id=record_id)
+
+
+def _indicators_match(datafield: etree._Element, required: dict[str, str]) -> bool:
+    """Whether a datafield's indicators satisfy the profile.
+
+    An entry with no indicators claims every instance of the tag, which is what
+    the old unfiltered reading did; `marc_enhanced` names them, which is how a
+    basic 505's single `$a` blob is declined rather than mistaken for a title.
+    """
+    for name, expected in required.items():
+        actual = datafield.get(name)
+        # MARC writes a blank indicator as a space, and exporters disagree about
+        # whether it is a space or absent.
+        if (actual or " ").strip() != (expected or " ").strip():
+            return False
+    return True
+
+
+def _stated_ordinal(
+    ordinal: str, group: dict[str, str], field_level: dict[str, str]
+) -> Optional[int]:
+    """A number the record states, for `ordinal: subfield:<code>`.
+
+    `position` and `none` are resolved after deduplication, in `finalise`.
+    """
+    if not ordinal.startswith("subfield:"):
+        return None
+    code = ordinal.split(":", 1)[1]
+    return _as_int(group.get(code) or field_level.get(code))
+
+
+def _as_int(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    digits = re.sub(r"[^0-9]", "", value)
+    return int(digits) if digits else None
+
+
+def _clean_duration(value: Optional[str]) -> Optional[str]:
+    """"(4:32)" is one duration written for a card catalogue; store "4:32"."""
+    if not value:
+        return None
+    cleaned = value.strip().strip("()[]").strip()
+    return cleaned or None
+
+
 def extract_marc_analytics(record_elem: etree._Element) -> list[tuple[str, Optional[str]]]:
     """Extract constituent works (title, creator) from 700 $t / 710 $t / 505 $t.
 
     Lives here rather than in the matcher so the record is parsed once, at
     ingest, instead of once per record per match attempt.
+
+    The reading it performs is now the `marc_legacy` profile - every 505 and
+    every 700/710 `$t`, unfiltered and undeduplicated - so the blocking keys a
+    source has always derived stay byte-identical while a source that wants the
+    stricter reading names `marc_enhanced` instead. One implementation, two
+    described conventions, rather than one convention hard-coded here.
     """
-    analytics: list[tuple[str, Optional[str]]] = []
-    for df in _get_datafields(record_elem, "700"):
-        title = _get_subfield(df, "t")
-        if title and title.strip():
-            creator = _get_subfield(df, "a")
-            analytics.append((title.strip(), creator.strip() if creator else None))
-    for df in _get_datafields(record_elem, "710"):
-        title = _get_subfield(df, "t")
-        if title and title.strip():
-            creator = _get_subfield(df, "a")
-            analytics.append((title.strip(), creator.strip() if creator else None))
-    for df in _get_datafields(record_elem, "505"):
-        for value in _get_subfields(df, "t"):
-            if value:
-                analytics.append((value, None))
-    return analytics
+    profile = get_constituent_profile("marc_legacy")
+    return [(c.title, c.creator) for c in extract_marc_constituents(record_elem, profile)]
 
 
 def derive_domain_keys(
