@@ -86,8 +86,8 @@ resumptionToken and a completed run harvests incrementally next time. With
 `workers > 1` and a resolvable date window the harvest is partitioned into
 `slice_days` slices fetched concurrently.
 
-**Decomposition** (`loaders/marcxml.py`, `loaders/bibframe/`) produces, per
-record:
+**Decomposition** (`loaders/marcxml.py`, `loaders/bibframe/`, with
+`loaders/bibra.py` adapting bibra JSON into MARCXML) produces, per record:
 
 - one `WorkEntity`, one `ExpressionEntity`, one `ManifestationEntity`
 - `AgentEntity` rows with `ContributionEntity` links carrying relator roles
@@ -302,6 +302,17 @@ The embedder supplies the dimension, so a command without one gets no indexes
 rather than a guessed dimension that would not match the stored vectors. Both the
 matcher and the clusterer guard on an empty index, so wiring them before
 `build-index` has run is safe.
+
+## 11a. A caveat on the loaders
+
+The three formats reach the datastore through three unrelated signatures, and
+they do **not** apply the same normalisation. The BibFrame path in particular
+takes no `record_origin`, does no subject-vocabulary folding, no ISBD
+normalisation and no legacy heading folding, and derives no deterministic ids —
+so re-ingesting one BibFrame file whose nodes are blank produces fresh URIs every
+run. See [plans/loader_interface.md](plans/loader_interface.md) for the measured
+divergences and the planned abstract loader that makes each one either uniform or
+explicitly declared.
 
 ## 12. Testing conventions
 
