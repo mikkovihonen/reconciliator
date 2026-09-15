@@ -225,3 +225,81 @@ It does not unify the *extraction* logic, because the formats genuinely differ �
 that was measured and declined in WEMI 14.9.1. It unifies the contract, the
 return shape, the normalisation applied afterwards, and the statement of what each
 format can and cannot yield.
+
+
+---
+
+# Implementation log
+
+## Stages 1-4 ✅ COMPLETE
+
+`loaders/base.py` — `DecomposedRecord`, `LoadContext`, `LoaderCapabilities`,
+`RecordLoader`, `FormatAdapter`. `loaders/registry.py` — the three loaders and
+the dispatch. Stage 1 was verified output-identical to the direct decomposers
+before any call site moved.
+
+Ingest now dispatches through `load_record()`; the isinstance/leader-test chain
+in `_WEMIBatchAccumulator.add()` is gone, and every loader receives the full
+`LoadContext` whether or not it honours all of it.
+
+`tests/test_funnel_reachability.py` reads `LoaderCapabilities` instead of parsing
+loader source — the inference that had twice returned the wrong answer.
+
+### `check_output` earned its keep immediately
+
+The first run reported that MARC emits `kanto` and `viaf` identifier schemes the
+declaration omitted — agent `$0`/`$1` authority URIs become identifiers whose
+scheme is whichever vocabulary `detect_vocabulary` recognises. The declaration now
+reads that set from the vocabulary patterns rather than listing it by hand.
+
+### The base class closed one gap on contact
+
+BibFrame works went from `record_origin='unknown'` to the source name, because
+`finalise` stamps every tier. Previously only `insert_wemi_batch(record_origin=)`
+overwriting it afterwards made this right, so any caller inserting without that
+argument stored the wrong origin — and origin plus the `sources` registry is what
+decides which rows may be matched against.
+
+## Stage 5.1: BibFrame identity ✅ COMPLETE
+
+Fixed, and the root cause was not what the plan assumed.
+
+`str(BNode())` returns a **bare** label — `"Nc5b5385e576141b8b9b3bbf7f40d717f"` —
+with no `_:` prefix; only `.n3()` adds one. So **all eleven**
+`startswith("_:")` guards in the decomposer were dead code that had never fired.
+They were written to stop a blank node becoming a URI, and that branch never
+executed, which is precisely how parse-local labels ended up as work, expression
+and manifestation URIs.
+
+- `is_blank_node()` tests the type instead, and the eleven guards now use it
+- `derive_bibframe_node_id()` digests the node's own predicate/object pairs, with
+  a blank-node object replaced by a digest of *its* pairs — one level of
+  recursion, which BIBFRAME titles require, since
+  `bf:title [ a bf:Title ; bf:mainTitle "X" ]` puts the title behind a blank node
+- a derived id mints a URN on the MARC scheme rather than leaving a bare label
+
+```
+work : urn:work:bf:sha1:c8a6dc3fc3a51c54
+expr : urn:exp:bf:sha1:c8a6dc3fc3a51c54#expr-1
+manif: urn:manif:bf:sha1:fd96b1bc2bd8e09c
+stable across 3 parses: True
+different content -> different id: True
+```
+
+`BibframeLoader` now declares `deterministic_ids=True`, and the contract test that
+asserted the gap failed on the flip — which is the mechanism working: a
+declaration that changes has to be re-stated deliberately.
+
+660 passing, lint clean, all three pipeline modes unchanged.
+
+## Stage 5 remaining
+
+In the plan's order, each its own diff:
+
+2. **BibFrame `record_origin`** — done incidentally by `finalise`
+3. **Uniform ISBD normalisation** — the toggle reaches only MARC
+4. **Uniform subject folding and relator normalisation** — the largest, and the
+   most likely to move matching results, so last and alone
+
+The `LoadContext` already carries all of it to the BibFrame loader; what remains
+is for the loader to honour it and for two `not_produced` entries to be deleted.
