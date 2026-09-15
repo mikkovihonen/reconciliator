@@ -315,7 +315,13 @@ def init_authority_db(conn: sqlite3.Connection) -> None:
                 source_work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
                 target_work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
                 relationship_type TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- An edge is a fact about two works, so asserting it twice is
+                -- the same fact. The insert was unconditional, so every
+                -- re-harvest of a record appended another copy of each of its
+                -- edges; harmless-looking at one edge per record, a leak at one
+                -- per constituent.
+                UNIQUE(source_work_id, target_work_id, relationship_type)
             );
         """)
         conn.execute(

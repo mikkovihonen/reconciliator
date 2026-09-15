@@ -228,10 +228,8 @@ not be able to write 500 works.
 
 Each is its own diff with its own verification, in this order:
 
-1. **Repository binding and the relationship pair.** The four blockers above,
-   plus `has_constituent` / `constituent_of`. No loader change. Verified with a
-   hand-built batch: twenty ordered associations survive as twenty rows, in
-   order, and a re-inserted batch adds no duplicate edges.
+1. ✅ **Repository binding and the relationship pair.** *Done — see the log
+   below.*
 2. **`Constituent` extraction from MARC 505/700/710**, ordered, with duration and
    505-vs-700 dedup. No entities emitted yet; asserted against fixtures.
 3. **Shape A emission** behind the config flag, through `loaders/aggregates.py`.
@@ -265,3 +263,65 @@ These gate stages 2 and 5 and need real records, not reasoning:
    agent footprints, since the subject histogram is stamped per record.
 6. **Do anthology constituents belong in the target-side `MatchRecord`** as
    keys, or only in the store?
+
+---
+
+# Implementation log
+
+## Stage 1 ✅ COMPLETE
+
+`ManifestationExpressionAssociation` gained `manifestation_uri` /
+`expression_uri`, `WorkRelationship` gained `source_work_uri` /
+`target_work_uri`, and `ManifestationEntity` gained `container_uri` — the three
+ways a row names another row in the same batch, before either has an id.
+`insert_wemi_batch` binds by those first and keeps the positional fallbacks,
+which are still load-bearing: the loaders emit an association with no URIs on it
+until stage 3.
+
+Manifestations now insert in two passes when the batch holds a component —
+containers first, so a `container_uri` resolves — and only then, so the common
+one-manifestation case pays nothing. The vector argument is sliced alongside the
+rows, because it is positional against the manifestation list and slicing one
+without the other would attach the wrong embedding.
+
+`work_relationships` gained `UNIQUE(source_work_id, target_work_id,
+relationship_type)` and the insert an `ON CONFLICT … DO UPDATE`, so re-harvesting
+a record no longer appends another copy of each of its edges.
+
+Unbindable rows are dropped with a warning rather than stored as a join of
+nothing (the junction) or failing the whole batch on a foreign key (an edge). A
+component whose container is absent is stored *unlinked* instead — it is still a
+real publication, and dropping it would lose the only record that the source
+described it.
+
+Verified on a hand-built album — 1 container + 20 constituents + 1 shape-B
+component:
+
+```
+expressions on the album manifestation : 21  (want 21)
+junction rows                          : 21
+  first three : [('ALBUM-1', None, 1, None), ('c:track01', 1, 1, '4:01'), ('c:track02', 2, 1, '5:02')]
+  last two    : [('c:track19', 19, 2), ('c:track20', 20, 2)]
+  ordered     : True discs=[1, 2]
+has_constituent edges from the album   : 20  (want 20)
+  distinct targets                     : 20
+component container_id                 : 1 (album id 1) is_component=True type=part
+after a second identical ingest        : junction=21 edges=20 works=21 manifs=2
+```
+
+`tests/test_aggregate_batch.py` holds twelve tests covering the same ground plus
+batch order independence, a missing container, an unbindable association, the
+no-URI single-expression path, and `delete_source` cascading the whole aggregate
+(`PRAGMA foreign_keys` is on, so the junction and the container hierarchy are
+real cascades). 680 → **692 passing**, lint clean, all three linking modes
+unchanged.
+
+### One caveat, by decision rather than oversight
+
+`CREATE TABLE IF NOT EXISTS` cannot add a constraint to a table that already
+exists, so a database created before this stage has no
+`UNIQUE(source_work_id, target_work_id, relationship_type)` and will go on
+duplicating edges. There is no migration code, on purpose — see
+`plans/wemi_data_structure.md` and the standing decision that nothing is in
+production. Delete `data/authority.db` (or `reconciliator reset`) and re-ingest;
+the local dev database in this checkout is one of the affected ones.

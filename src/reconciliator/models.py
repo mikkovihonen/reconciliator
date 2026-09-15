@@ -410,6 +410,12 @@ WorkRelationshipType = Literal[
     # Cross-source identity: two work rows describing the same intellectual
     # creation, typically one per contributing source. Symmetric.
     "same_work_as",
+    # Part/whole within one source: an album and its tracks, an anthology and its
+    # stories, a journal issue and its articles. Distinct from
+    # series_member_of/has_series_member, which is serial hierarchy, and from
+    # bound_with, which is item-level. See plans/aggregates.md.
+    "has_constituent",
+    "constituent_of",
 ]
 
 # The ingest source a row came from, e.g. "melinda". Whether that source is
@@ -545,6 +551,11 @@ class ManifestationEntity(BaseModel):
     id: Optional[int] = None
     work_id: Optional[int] = None
     container_id: Optional[int] = None
+    #: The container's `manifestation_uri`, for a component whose container is
+    #: inserted in the same batch and so has no id yet. `container_id` was
+    #: carried through the insert but never resolved from anything, which is why
+    #: the containment hierarchy has never had a single row in it.
+    container_uri: Optional[str] = None
     is_component: bool = False
     component_type: Optional[ComponentType] = None
     manifestation_uri: Optional[str] = None
@@ -572,10 +583,21 @@ class ManifestationEntity(BaseModel):
 
 
 class ManifestationExpressionAssociation(BaseModel):
-    """Junction mapping between Manifestations and Expressions."""
+    """Junction mapping between Manifestations and Expressions.
+
+    A loader emits these before any row has an id, so the ids are filled in by
+    `insert_wemi_batch`. It used to bind every association to the batch's *first*
+    manifestation and first expression, which is invisible while a record yields
+    one of each and silently destructive once it yields several: the table's
+    primary key is (manifestation_id, expression_id), so an album's twenty
+    ordered associations collapsed into one row. The URI fields let each
+    association name the two rows it actually joins.
+    """
 
     manifestation_id: int
     expression_id: int
+    manifestation_uri: Optional[str] = None
+    expression_uri: Optional[str] = None
     track_number: Optional[int] = None
     disc_number: int = 1
     duration: Optional[str] = None
@@ -653,11 +675,19 @@ class ContributionEntity(BaseModel):
 
 
 class WorkRelationship(BaseModel):
-    """Inter-work relationship or historical lineage graph edge."""
+    """Inter-work relationship or historical lineage graph edge.
+
+    `source_work_uri` / `target_work_uri` are how an edge names its endpoints
+    before either row has an id. Without them `insert_wemi_batch` binds every
+    edge's source to the batch's first work, which is correct only while a record
+    produces exactly one work.
+    """
 
     id: Optional[int] = None
     source_work_id: int
     target_work_id: int
+    source_work_uri: Optional[str] = None
+    target_work_uri: Optional[str] = None
     relationship_type: WorkRelationshipType
     created_at: Optional[str] = None
 

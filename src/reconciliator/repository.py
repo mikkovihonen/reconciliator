@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from pathlib import Path
@@ -44,6 +45,8 @@ from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 if TYPE_CHECKING:
     from reconciliator.config import RepositoryFTSConfig, VectorEngineConfig
     from reconciliator.embedder import SentenceEmbedder
+
+logger = logging.getLogger(__name__)
 
 
 def _hydrate_agent_profile(row_dict: dict[str, Any]) -> dict[str, Any]:
@@ -818,6 +821,8 @@ class WEMIRepository:
                     INSERT INTO work_relationships (
                         source_work_id, target_work_id, relationship_type
                     ) VALUES (?, ?, ?)
+                    ON CONFLICT(source_work_id, target_work_id, relationship_type)
+                    DO UPDATE SET relationship_type = excluded.relationship_type
                     RETURNING id;
                     """,
                     (
@@ -920,7 +925,12 @@ class WEMIRepository:
                 expr_key_to_id[exp.expression_uri] = eid
                 expr_key_to_id[(exp.source, exp.source_id)] = eid
 
-        # 4. Manifestations
+        # 4. Manifestations, containers before components
+        #
+        # A component names its container by URI, and the container may be in
+        # this very batch, so it has to be inserted first for the id to exist.
+        # Two passes rather than one, and only when the batch actually holds a
+        # component - the common case is unchanged and pays nothing.
         manif_key_to_id: dict[Any, int] = {}
         if manifestations:
             for m in manifestations:
@@ -930,20 +940,79 @@ class WEMIRepository:
                         cand_id = works[0].id
                     if cand_id:
                         m.work_id = cand_id
-            m_ids = self.insert_manifestations_batch(manifestations, vectors=manifestation_vectors)
-            for m, mid in zip(manifestations, m_ids):
-                m.id = mid
-                manif_key_to_id[m.manifestation_uri] = mid
-                manif_key_to_id[(m.source, m.source_id)] = mid
+
+            def _insert_manifestations(rows: list[ManifestationEntity], idx: list[int]) -> None:
+                if not rows:
+                    return
+                # Keep each row beside its own vector: the vectors argument is
+                # positional against the manifestation list, so slicing one
+                # without the other would index the wrong embedding.
+                vectors = (
+                    [manifestation_vectors[i] for i in idx]
+                    if manifestation_vectors is not None
+                    else None
+                )
+                ids = self.insert_manifestations_batch(rows, vectors=vectors)
+                for row, row_id in zip(rows, ids):
+                    row.id = row_id
+                    manif_key_to_id[row.manifestation_uri] = row_id
+                    manif_key_to_id[(row.source, row.source_id)] = row_id
+
+            component_idx = [i for i, m in enumerate(manifestations) if m.container_uri]
+            if not component_idx:
+                _insert_manifestations(manifestations, list(range(len(manifestations))))
+            else:
+                container_idx = [i for i, m in enumerate(manifestations) if not m.container_uri]
+                _insert_manifestations(
+                    [manifestations[i] for i in container_idx], container_idx
+                )
+                for i in component_idx:
+                    component = manifestations[i]
+                    resolved = manif_key_to_id.get(component.container_uri)
+                    if resolved:
+                        component.container_id = resolved
+                    else:
+                        logger.warning(
+                            "Component %s/%s names container %s, which is not in "
+                            "this batch or the store; inserting it unlinked.",
+                            component.source,
+                            component.source_id,
+                            component.container_uri,
+                        )
+                _insert_manifestations(
+                    [manifestations[i] for i in component_idx], component_idx
+                )
 
         # 5. Manifestation-Expression Associations
+        #
+        # By URI first. The positional fallbacks below are right for a record
+        # that yields one manifestation and one expression and wrong for anything
+        # else: they pointed every association at the first row of each, and the
+        # junction's primary key is (manifestation_id, expression_id), so an
+        # album's ordered tracklist became a single row.
         if manifestation_expressions:
+            bound_assocs: list[ManifestationExpressionAssociation] = []
             for assoc in manifestation_expressions:
+                if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and assoc.manifestation_uri:
+                    assoc.manifestation_id = manif_key_to_id.get(assoc.manifestation_uri) or 0
+                if (not assoc.expression_id or assoc.expression_id <= 0) and assoc.expression_uri:
+                    assoc.expression_id = expr_key_to_id.get(assoc.expression_uri) or 0
                 if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and manifestations:
-                    assoc.manifestation_id = manifestations[0].id
+                    assoc.manifestation_id = manifestations[0].id or 0
                 if (not assoc.expression_id or assoc.expression_id <= 0) and expressions:
-                    assoc.expression_id = expressions[0].id
-            self.insert_manifestation_expressions_batch(manifestation_expressions)
+                    assoc.expression_id = expressions[0].id or 0
+                # An unbindable association would be a row joining nothing.
+                if assoc.manifestation_id > 0 and assoc.expression_id > 0:
+                    bound_assocs.append(assoc)
+                else:
+                    logger.warning(
+                        "Dropping manifestation-expression association that binds "
+                        "to no row: manifestation=%s expression=%s",
+                        assoc.manifestation_uri,
+                        assoc.expression_uri,
+                    )
+            if bound_assocs:
+                self.insert_manifestation_expressions_batch(bound_assocs)
 
         # 6. Items
         if items:
@@ -992,11 +1061,33 @@ class WEMIRepository:
                 self.insert_identifiers_batch(bound_identifiers)
 
         # 8. Work Relationships
+        #
+        # Both endpoints by URI when the edge names them; a constituent edge
+        # points from the container work to a constituent work, and binding the
+        # source positionally would attribute every part to the first work in the
+        # batch.
         if relationships:
+            bound_rels: list[WorkRelationship] = []
             for rel in relationships:
+                if (not rel.source_work_id or rel.source_work_id <= 0) and rel.source_work_uri:
+                    rel.source_work_id = work_key_to_id.get(rel.source_work_uri) or 0
+                if (not rel.target_work_id or rel.target_work_id <= 0) and rel.target_work_uri:
+                    rel.target_work_id = work_key_to_id.get(rel.target_work_uri) or 0
                 if (not rel.source_work_id or rel.source_work_id <= 0) and works:
-                    rel.source_work_id = works[0].id
-            self.insert_work_relationships_batch(relationships)
+                    rel.source_work_id = works[0].id or 0
+                # A dangling edge violates the foreign key, so the insert would
+                # fail the whole batch rather than this one row.
+                if rel.source_work_id > 0 and rel.target_work_id > 0:
+                    bound_rels.append(rel)
+                else:
+                    logger.warning(
+                        "Dropping %s edge with an unbound endpoint: source=%s target=%s",
+                        rel.relationship_type,
+                        rel.source_work_uri or rel.source_work_id,
+                        rel.target_work_uri or rel.target_work_id,
+                    )
+            if bound_rels:
+                self.insert_work_relationships_batch(bound_rels)
 
         # 9. Mediums of Performance
         if mediums_of_performance:
