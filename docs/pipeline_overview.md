@@ -188,6 +188,28 @@ Every funnel runs the same three tiers (`funnels/engine.py`):
 | 2 | author key + title stem, filtered by the spec's `work_types` in order |
 | 3 | dense vector search over the work index, then SQLite FTS5 |
 
+Tiers 2 and 3 **rank** their candidates rather than taking the first. A blocking
+query returns everything sharing an author key and title stem, which for a
+prolific author under a common title is several genuinely different works, and
+the first row is whichever the index happened to return.
+
+`CandidateEvaluator` scores each candidate — fusing the dense score with a
+pluggable reranker (`bm25`, `cross_encoder`, `fuzzy`, `noop`) by the configured
+weights — and applies three vetoes: conflicting volume designation, no shared
+author surname, publication years further apart than `max_year_difference`.
+Volume designations are compared *normalised*, so "osa 2", "2. osa" and "Vol. II"
+are one designation.
+
+The two roles are kept apart. The vetoes reject at both tiers. The fused-score
+threshold applies only at tier 3, where the score is a real similarity: a tier-2
+candidate already agrees on author key *and* title stem exactly, so holding it to
+a fuzzy bar would reject correct matches. Because volume and year live on the
+manifestation and a work has several, each of a work's editions is evaluated and
+the best verdict stands — the record matches the work if it matches any edition.
+
+`rerank.enabled: false` bypasses the vetoes and the fusion, leaving the bare
+dense threshold.
+
 A spec may name a `handler` — a built-in name or a path to a Python file under
 `funnels/` — whose module defines any of `tier1`/`tier2`/`tier3`. Omitted tiers
 fall back to the generic template. Three exist: recorded sound (tracklist
@@ -361,6 +383,15 @@ than reintroduce a parallel one.
 **`get_agent_by_id`** wraps `get_agents_by_ids([id])` for a single id. Callers use
 the batch form, which is the right default for a pipeline that processes records
 in batches.
+
+### Resolved since this chapter was written
+
+The `rerank` package — `CandidateEvaluator`, the four scorers and twelve of
+thirteen `RerankConfig` fields — was also connected to nothing: the evaluator was
+constructed into `WorkMatcher.evaluator` and never read. It is now wired into
+tiers 2 and 3, which is how the volume-normalisation defect in
+`check_volume_match` came to light: raw string equality rejected every candidate
+whose volume was merely spelled differently.
 
 ### A note on how these accumulated
 

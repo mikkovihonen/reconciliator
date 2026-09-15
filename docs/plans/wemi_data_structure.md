@@ -2304,6 +2304,66 @@ Two engineering items were considered and deliberately not done:
   decomposers share 4 of 36/12 tags and merging them concatenates rather than
   deduplicates.
 
+### 14.22 Candidate reranking, wired ✅ COMPLETE
+
+The `rerank` package was connected to nothing. `CandidateEvaluator` was
+constructed into `WorkMatcher.evaluator` and never read; no scorer was ever
+built; `create_rerank_scorer` and all four engines were referenced only by
+`tests/test_rerank.py`. Of thirteen `RerankConfig` fields exactly one - `top_k` -
+was read outside the package, and that fed vector retrieval depth rather than
+reranking. `config.example.yaml` documented the other twelve as live knobs.
+
+So the matcher could not prefer a better candidate over a worse one: tier 2 took
+`candidates[0]` from the blocking query, tier 3 took the first candidate over a
+bare dense threshold, and the volume, surname and year discriminators never ran.
+
+This also explains 14.10.1's `rerank.top_k` finding. Retrieving 50 candidates is
+pointless when the first acceptable one wins, which is why nobody noticed the
+depth was hardcoded to 5: the stage `top_k` exists to feed was missing.
+
+**Now wired** into both tiers through `WorkMatcher._rank_candidates`, exposed to
+the funnel engine on `FunnelContext`.
+
+#### Three defects found by wiring it
+
+**The candidate view was incomplete.** `_hydrate_candidate_record(work)` leaves
+`volume_designation` and `publication_year` as None, because both live on the
+manifestation - and the evaluator reads a missing value on either side as "do not
+penalise". So two of the three vetoes silently never fired even once connected.
+Candidates are now hydrated with each of the work's manifestations (capped at
+`MAX_EDITIONS_COMPARED`) and the best verdict stands, which is also the correct
+semantics: a work has several editions and the record matches the work if it
+matches any one of them.
+
+**`check_volume_match` compared raw strings.** The fixture corpus has targets
+spelling volumes "osa 1"/"osa 2" against authority records spelling them
+"1. osa"/"2. osa" - the usual case across two catalogues - so the veto rejected
+*every* candidate. `normalize_volume` already existed for exactly this comparison,
+canonicalising Finnish, Swedish and English prefixes and Roman numerals. It is now
+used.
+
+**Two different questions were being answered by one flag.** The evaluator's
+`accepted` combines "survived the vetoes" with "cleared the fused threshold".
+Applied wholesale, tier 2 began rejecting matches it had always made: with the
+default 0.6/0.4 weights and a 0.85 threshold, an exact author-key-and-title-stem
+match must additionally produce a rerank score of **0.775**. In the pipeline
+harness that pushed a correct match down to FTS. The vetoes now reject at both
+tiers; the fused threshold applies only at tier 3, where the score is a real
+similarity.
+
+#### It found a real mis-match in the fixtures
+
+TARGET-002 is volume 2. It used to resolve to `(FI-MELINDA)000100201`, the
+volume-**1** record. It now resolves to `000100202`, at tier 2. That is the
+capability reranking was supposed to buy, and it was demonstrably wrong before.
+
+(Under clustering the record still exports `000100201`, because every member of a
+work cluster exports the cluster's canonical work URI. Both volumes are the same
+*work*; the volume distinction is manifestation-level. That precedence is
+documented and unchanged.)
+
+630 passing.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
