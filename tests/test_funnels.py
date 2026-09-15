@@ -73,6 +73,8 @@ def test_every_funnel_is_reachable_by_a_record_of_its_own():
         identifiers: dict = {}
         if when.work_type:
             kw["work_type"] = when.work_type[0]
+        if when.content_type:
+            kw["content_type"] = when.content_type[0]
         if when.is_component is not None:
             kw["is_component"] = when.is_component
         keys = {k: ["probe"] for k in when.has_key}
@@ -98,12 +100,23 @@ def test_the_default_funnel_claims_a_plain_text_record():
 # --- precedence ----------------------------------------------------------
 
 
-def test_notated_music_takes_precedence_over_recorded_sound():
-    """A music record with a music work key is a score, not a recording."""
-    assert _select(_record(work_type="music", keys={"music_work": ["x"]})).id == (
+def test_the_music_split_keys_on_content_type_not_on_the_music_work_key():
+    """Every music record carries a music_work key, score or recording alike.
+
+    Dispatch keyed on that key claimed both, so funnel_b_music_sound was
+    unreachable for any MARC record. content_type comes from the leader and is
+    the real discriminator.
+    """
+    assert _select(_record(work_type="music", content_type="notated_music")).id == (
         "funnel_d_notated_music"
     )
-    assert _select(_record(work_type="music")).id == "funnel_b_music_sound"
+    assert _select(_record(work_type="music", content_type="audio_music")).id == (
+        "funnel_b_music_sound"
+    )
+    # A music_work key on a sound recording must not divert it.
+    assert _select(
+        _record(work_type="music", content_type="audio_music", keys={"music_work": ["x"]})
+    ).id == "funnel_b_music_sound"
 
 
 def test_exhibition_takes_precedence_over_conference_for_events():
@@ -281,3 +294,88 @@ def test_overriding_a_builtin_ignores_before_and_keeps_its_position():
         [FunnelSpec(id="funnel_l_cartography", before="funnel_c_article", confidence=0.5)]
     )
     assert [s.id for s in merged] == original
+
+
+# --- dispatch on real loader output ---------------------------------------
+#
+# The reachability test above builds each probe from the spec's own `when`, which
+# proves a spec claims its own probe - not that records the loader actually
+# produces reach it. That circularity hid a dead funnel: every MARC music record
+# carries a `music_work` key, so keying funnel D on that key claimed sound
+# recordings too and funnel B was unreachable. These tests dispatch loader
+# output, which is the only thing that can catch that class of mistake.
+
+
+def _marc(leader: str, title: str, extra: str = "", control_007: str = "") -> object:
+    from lxml import etree
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    cf007 = f'<controlfield tag="007">{control_007}</controlfield>' if control_007 else ""
+    return etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>{leader}</leader>
+            <controlfield tag="001">X1</controlfield>
+            {cf007}
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Sibelius, Jean</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">{title}</subfield></datafield>
+            {extra}
+        </record>""".encode()
+    )
+
+
+def _funnel_for(marc_record) -> str:  # noqa: ANN001
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+    from reconciliator.matcher import extract_identifiers_from_target
+
+    record = build_target_record_from_marc(marc_record, source="melinda")
+    return _select(record, extract_identifiers_from_target(record)).id
+
+
+def test_a_real_sound_recording_reaches_the_recorded_sound_funnel():
+    """The regression this whole section exists for."""
+    assert (
+        _funnel_for(
+            _marc(
+                "00000cjm a2200000 i 4500",
+                "Finlandia",
+                extra='<datafield tag="028" ind1="0" ind2="2"><subfield code="a">ODE 1234-2</subfield></datafield>',
+                control_007="sd f||g|||||",
+            )
+        )
+        == "funnel_b_music_sound"
+    )
+
+
+def test_a_real_notated_music_record_reaches_the_notated_music_funnel():
+    assert (
+        _funnel_for(_marc("00000ccm a2200000 i 4500", "Karelia-sarja, op. 11"))
+        == "funnel_d_notated_music"
+    )
+
+
+def test_a_finnish_score_title_reaches_notated_music_even_from_a_recording_leader():
+    """The score vocabulary is the clusterer's, not English-only."""
+    assert (
+        _funnel_for(_marc("00000cjm a2200000 i 4500", "Karelia-sarja partituuri"))
+        == "funnel_d_notated_music"
+    )
+
+
+def test_a_real_monograph_reaches_the_fall_through_funnel():
+    assert (
+        _funnel_for(_marc("00000cam a2200000 i 4500", "Sinuhe egyptilainen"))
+        == "funnel_a_monograph"
+    )
+
+
+def test_a_real_component_record_reaches_the_article_funnel():
+    assert (
+        _funnel_for(
+            _marc(
+                "00000cam a2200000 i 4500",
+                "Tutkimus jostakin",
+                extra='<datafield tag="773" ind1="0" ind2=" "><subfield code="t">Host Journal</subfield><subfield code="q">45</subfield></datafield>',
+            )
+        )
+        == "funnel_c_article"
+    )

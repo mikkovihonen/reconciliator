@@ -2064,6 +2064,10 @@ def derive_domain_keys(
 
     for a_title, a_creator in extract_marc_analytics(record_elem):
         _add("analytic", encode_analytic(a_title, a_creator))
+        # The title alone as well, so records sharing a track can be found by an
+        # exact key lookup. The paired form cannot serve that: two catalogues
+        # often disagree about a track's creator while agreeing on its title.
+        _add("analytic_title", a_title)
 
     return keys
 

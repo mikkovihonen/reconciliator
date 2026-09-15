@@ -26,6 +26,11 @@ class FunnelWhen(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     work_type: list[str] = Field(default_factory=list)
+    # The expression's content type, which the MARC leader determines. This is
+    # what separates notated music from a sound recording: both are work_type
+    # "music", and every music record carries a `music_work` key, so keys cannot
+    # tell them apart.
+    content_type: list[str] = Field(default_factory=list)
     is_component: Optional[bool] = None
     has_key: list[str] = Field(default_factory=list)
     has_identifier: list[str] = Field(default_factory=list)
@@ -36,6 +41,8 @@ class FunnelWhen(BaseModel):
     def matches(self, record: Any, identifiers: dict[str, list[str]]) -> bool:
         """Test this predicate against a record and its extracted identifiers."""
         if self.work_type and record.work_type not in self.work_type:
+            return False
+        if self.content_type and record.content_type not in self.content_type:
             return False
         if self.is_component is not None and bool(record.is_component) != self.is_component:
             return False

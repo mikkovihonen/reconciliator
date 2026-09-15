@@ -30,9 +30,20 @@ BUILTIN_SPECS: list[FunnelSpec] = [
     # --- music: notated before recorded ------------------------------------
     FunnelSpec(
         id="funnel_d_notated_music",
+        # Keyed on content_type, not on the music_work key. The original chain
+        # tested `music_work_key or "score" in stem or ismn/plate_number`, and
+        # derive_domain_keys emits a music_work key for EVERY music record - so
+        # that first alternative claimed every sound recording too, and
+        # funnel_b_music_sound was unreachable in practice. content_type comes
+        # from the MARC leader and is what actually distinguishes the two.
         when=[
-            {"work_type": ["music"], "has_key": ["music_work"]},
-            {"work_type": ["music"], "title_matches": "score"},
+            {"work_type": ["music"], "content_type": ["notated_music"]},
+            # The same score vocabulary the clusterer uses. "score" alone is
+            # English-only, and this is a Finnish-language catalogue.
+            {
+                "work_type": ["music"],
+                "title_matches": "(?i)score|partituuri|nuotti|stemma",
+            },
             {"work_type": ["music"], "has_identifier": ["ismn"]},
             {"work_type": ["music"], "has_identifier": ["plate_number"]},
         ],

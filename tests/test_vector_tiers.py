@@ -338,3 +338,121 @@ def test_manifestation_vector_merge_keeps_distinct_editions_apart(tmp_path: Path
         ],
     }
     assert len(clusterer._merge_manifestation_groups_by_vector(groups)) == 2
+
+
+# --- funnel B's tracklist tier --------------------------------------------
+
+
+def test_tracklist_tier_matches_two_releases_of_one_album(tmp_path: Path):
+    """No shared publisher number, different album titles, same tracks.
+
+    The original implementation compared the record's tracks against the titles
+    of every *other* music work in the store - near-identical for every
+    candidate, and measuring nothing resembling tracklist agreement. It also
+    re-ran that unbounded query inside the candidate loop.
+    """
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    store = WEMIRepository(db_path=tmp_path / "authority.db", dimension=DIM)
+    store.register_source("melinda", is_authoritative=True)
+    tracks = ["Finlandia", "Valse triste", "Karelia-sarja", "Tuonelan joutsen"]
+
+    _ingest_album(store, "A1", "Sibelius Orchestral Works", "ODE-111", tracks)
+    _ingest_album(store, "A2", "Grieg Peer Gynt", "XYZ-9", ["Morning Mood", "Solveigs Song"])
+
+    matcher = WorkMatcher(wemi_repo=store, config=ReconcileConfig(target_file=Path("x")))
+    target = build_target_record_from_marc(
+        _album_marc("T1", "Sibelius: The Essential Collection", "DECCA-77", tracks),
+        source="corpus",
+    )
+    result = matcher.match_target(target)
+
+    assert result.funnel_used == "funnel_b_music_sound"
+    assert result.match_tier == "tier3_tracklist_jaccard"
+    assert result.work_uri == "urn:work:melinda:A1"
+    assert result.confidence_score == pytest.approx(1.0)
+    assert sorted(c.title for c in result.constituent_matches) == sorted(tracks)
+
+
+def test_tracklist_tier_respects_the_overlap_threshold(tmp_path: Path):
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    store = WEMIRepository(db_path=tmp_path / "authority.db", dimension=DIM)
+    store.register_source("melinda", is_authoritative=True)
+    _ingest_album(
+        store, "A1", "Sibelius", "ODE-111",
+        ["Finlandia", "Valse triste", "Karelia-sarja", "Tuonelan joutsen"],
+    )
+
+    matcher = WorkMatcher(wemi_repo=store, config=ReconcileConfig(target_file=Path("x")))
+    # 3 of 6 distinct titles shared -> 0.5, under the 0.75 threshold.
+    target = build_target_record_from_marc(
+        _album_marc(
+            "T2", "Partial", "P-1",
+            ["Finlandia", "Valse triste", "Karelia-sarja", "Something Else", "Another"],
+        ),
+        source="corpus",
+    )
+    assert matcher.match_target(target).match_tier == "unmatched"
+
+
+def test_tracklist_tier_picks_the_album_whose_tracks_actually_agree(tmp_path: Path):
+    """Against two stored albums it must choose by tracklist, not by chance."""
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    store = WEMIRepository(db_path=tmp_path / "authority.db", dimension=DIM)
+    store.register_source("melinda", is_authoritative=True)
+    grieg = ["Morning Mood", "Solveigs Song"]
+    _ingest_album(store, "A1", "Sibelius", "ODE-111", ["Finlandia", "Valse triste"])
+    _ingest_album(store, "A2", "Grieg Peer Gynt", "XYZ-9", grieg)
+
+    matcher = WorkMatcher(wemi_repo=store, config=ReconcileConfig(target_file=Path("x")))
+    target = build_target_record_from_marc(
+        _album_marc("T3", "Grieg reissue", "O-1", grieg), source="corpus"
+    )
+    assert matcher.match_target(target).work_uri == "urn:work:melinda:A2"
+
+
+def test_tracklist_tier_does_not_match_tracks_in_no_stored_album(tmp_path: Path):
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    store = WEMIRepository(db_path=tmp_path / "authority.db", dimension=DIM)
+    store.register_source("melinda", is_authoritative=True)
+    _ingest_album(store, "A1", "Sibelius", "ODE-111", ["Finlandia", "Valse triste"])
+
+    matcher = WorkMatcher(wemi_repo=store, config=ReconcileConfig(target_file=Path("x")))
+    target = build_target_record_from_marc(
+        _album_marc("T4", "Unknown", "U-1", ["Prelude in Q", "Fantasia on Nothing"]),
+        source="corpus",
+    )
+    assert matcher.match_target(target).match_tier == "unmatched"
+
+
+def _album_marc(control: str, title: str, pubnum: str, tracks: list[str]):  # noqa: ANN202
+    contents = "".join(f'<subfield code="t">{t}</subfield>' for t in tracks)
+    return etree.fromstring(
+        f"""<record xmlns="{MARC_NS}">
+            <leader>00000cjm a2200000 i 4500</leader>
+            <controlfield tag="001">{control}</controlfield>
+            <controlfield tag="007">sd f||g|||||</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Sibelius, Jean</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">{title}</subfield></datafield>
+            <datafield tag="028" ind1="0" ind2="2"><subfield code="a">{pubnum}</subfield></datafield>
+            <datafield tag="505" ind1="0" ind2="0">{contents}</datafield>
+        </record>""".encode()
+    )
+
+
+def _ingest_album(
+    store: WEMIRepository, control: str, title: str, pubnum: str, tracks: list[str]
+) -> None:
+    keys: list = []
+    w, e, m, _itms, agts, _rels, idents, _assoc, _mops, contribs = decompose_marc_wemi(
+        _album_marc(control, title, pubnum, tracks),
+        source="melinda", record_origin="melinda", key_sink=keys,
+    )
+    store.insert_wemi_batch(
+        works=[w], expressions=[e], manifestations=[m], agents=agts,
+        identifiers=idents, contributions=contribs, entity_keys=keys,
+        record_origin="melinda",
+    )

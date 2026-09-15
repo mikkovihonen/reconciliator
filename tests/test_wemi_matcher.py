@@ -421,6 +421,10 @@ def test_work_matcher_notated_music_and_mop(repo: WEMIRepository):
         record_id="score_target_01",
         format="marcxml",
         work_type="music",
+        # From the MARC leader. This, not the music_work key, is what separates a
+        # score from a sound recording: every music record carries a music_work
+        # key, so keying dispatch on it made funnel_b_music_sound unreachable.
+        content_type="notated_music",
         title="Karelia-sarja, op. 11 (Partituuri)",
         title_stem="karelia sarja op 11",
         author_key="sibelius",
