@@ -915,7 +915,6 @@ class OAIIngestConfig(BaseModel):
     request_delay: float = 0.1
     timeout: float = 60.0
     include_items: bool = False
-    target_database: Optional[Union[Path, Literal["authority", "corpus"]]] = None
     normalization: Optional[RecordNormalizationConfig] = None
 
     @model_validator(mode="after")

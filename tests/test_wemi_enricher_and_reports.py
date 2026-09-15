@@ -13,12 +13,6 @@ from lxml import etree
 from rdflib import RDF, Graph, IdentifiedNode, URIRef
 
 from reconciliator.config import AppConfig, EnrichmentTogglesConfig
-
-OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
-BF_INSTANCE_OF = URIRef("http://id.loc.gov/ontologies/bibframe/instanceOf")
-BF_EXPRESSION_OF = URIRef("http://id.loc.gov/ontologies/bibframe/expressionOf")
-BF_HAS_PART = URIRef("http://id.loc.gov/ontologies/bibframe/hasPart")
-
 from reconciliator.loaders.bibframe.enricher import (
     enrich_bibframe_graph,
     enrich_bibframe_jsonld,
@@ -37,6 +31,11 @@ from reconciliator.reports import (
     WorkReportRow,
 )
 from reconciliator.xml_enricher import MARCXMLEnricher
+
+OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
+BF_INSTANCE_OF = URIRef("http://id.loc.gov/ontologies/bibframe/instanceOf")
+BF_EXPRESSION_OF = URIRef("http://id.loc.gov/ontologies/bibframe/expressionOf")
+BF_HAS_PART = URIRef("http://id.loc.gov/ontologies/bibframe/hasPart")
 
 MARC_SAMPLE = """<record xmlns="http://www.loc.gov/MARC21/slim">
   <leader>01234cam a22003254i 4500</leader>

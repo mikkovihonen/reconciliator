@@ -20,9 +20,6 @@ from rdflib import Graph, URIRef
 from reconciliator.cli import reconcile_cmd, reset_cmd
 from reconciliator.clusterer import CorpusClusterer
 from reconciliator.config import AppConfig
-from tests.conftest import persist_match_records
-
-OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
 from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
     ExpressionEntity,
@@ -40,7 +37,9 @@ from reconciliator.reports import (
 )
 from reconciliator.repository import WEMIRepository
 from reconciliator.xml_enricher import MARCXMLEnricher
+from tests.conftest import persist_match_records
 
+OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
@@ -53,8 +52,6 @@ def test_e2e_melinda_marcxml_pipeline(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
 
     auth_db_path = tmp_path / "authority.db"
-    corpus_db_path = tmp_path / "reconcile_corpus.db"
-    vocab_db_path = tmp_path / "vocab.db"
 
     config_yaml = f"""
 storage:
@@ -229,8 +226,6 @@ def test_e2e_bffi_bibframe_pipeline(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
 
     auth_db_path = tmp_path / "authority.db"
-    corpus_db_path = tmp_path / "reconcile_corpus.db"
-    vocab_db_path = tmp_path / "vocab.db"
 
     config_yaml = f"""
 storage:

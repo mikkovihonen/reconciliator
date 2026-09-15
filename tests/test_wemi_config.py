@@ -70,10 +70,16 @@ def test_oai_and_wikidata_ingest_config_extensions():
         endpoint="https://example.org/oai",
         metadata_prefix="marc21",
         include_items=True,
-        target_database=Path("data/custom_corpus.db"),
+        authoritative=False,
+        ingest_mode="replace",
     )
     assert oai.include_items is True
-    assert oai.target_database == Path("data/custom_corpus.db")
+    # `target_database` is gone: it selected a staging database that no longer
+    # exists, and nothing had read it since the staging tables were dropped.
+    # `authoritative` and `ingest_mode` are the per-source switches now.
+    assert oai.authoritative is False
+    assert oai.ingest_mode == "replace"
+    assert not hasattr(oai, "target_database")
 
     wikidata = WikidataIngestConfig(
         dump_path=Path("dumps/latest.json.gz"),

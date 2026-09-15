@@ -153,7 +153,6 @@ telemetry:
 
 
 def test_bibframe_jsonld_native_reconciliation(tmp_path: Path) -> None:
-    db_path = tmp_path / "authority.db"
     index_path = tmp_path / "faiss.index"
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)

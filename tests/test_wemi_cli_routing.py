@@ -38,11 +38,17 @@ ingest_wikidata:
         assert repo_arg.db_path == tmp_path / "authority.db"
 
 
-def test_cli_ingest_oai_corpus_routing(tmp_path: Path) -> None:
-    """Verify that target_database='corpus' routes to unified WEMIRepository."""
+def test_every_source_routes_to_the_single_authority_database(tmp_path: Path) -> None:
+    """There is one database, and `authoritative` is the only per-source switch.
+
+    This replaces two tests that set `target_database` to "corpus" and
+    "authority" and then asserted the same db_path in both - which they would
+    have done with the field removed, because nothing had read it since the
+    staging tables went. The field is gone; what actually distinguishes a corpus
+    from an authority is `authoritative`, and both land in the same store.
+    """
     runner = CliRunner()
     cfg_file = tmp_path / "config.yaml"
-
     cfg_file.write_text(
         f"""
 storage:
@@ -53,56 +59,33 @@ embedding:
   device: "cpu"
 
 ingest_oai:
-  test_target:
+  an_authority:
     enabled: true
     source_type: "oai"
     oai_url: "https://example.org/oai"
-    target_database: "corpus"
-"""
-    )
-
-    with patch("reconciliator.cli.SentenceEmbedder"), patch("reconciliator.cli.ingest_oai_pipeline") as mock_pipeline:
-        mock_pipeline.return_value = 10
-        result = runner.invoke(
-            app, ["ingest-oai", "--config", str(cfg_file), "--source", "test_target"]
-        )
-        assert result.exit_code == 0
-        assert mock_pipeline.called
-        store_kwarg = mock_pipeline.call_args.kwargs.get("store")
-        assert isinstance(store_kwarg, WEMIRepository)
-        assert store_kwarg.db_path == tmp_path / "authority.db"
-
-
-def test_cli_ingest_oai_authority_routing(tmp_path: Path) -> None:
-    """Verify that target_database='authority' routes to WEMIRepository."""
-    runner = CliRunner()
-    cfg_file = tmp_path / "config.yaml"
-
-    cfg_file.write_text(
-        f"""
-storage:
-  data_dir: "{tmp_path}"
-
-embedding:
-  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
-  device: "cpu"
-
-ingest_oai:
-  test_auth:
+    authoritative: true
+  a_corpus:
     enabled: true
     source_type: "oai"
     oai_url: "https://example.org/oai"
-    target_database: "authority"
+    authoritative: false
 """
     )
 
-    with patch("reconciliator.cli.SentenceEmbedder"), patch("reconciliator.cli.ingest_oai_pipeline") as mock_pipeline:
-        mock_pipeline.return_value = 15
-        result = runner.invoke(
-            app, ["ingest-oai", "--config", str(cfg_file), "--source", "test_auth"]
-        )
-        assert result.exit_code == 0
-        assert mock_pipeline.called
-        store_kwarg = mock_pipeline.call_args.kwargs.get("store")
-        assert isinstance(store_kwarg, WEMIRepository)
-        assert store_kwarg.db_path == tmp_path / "authority.db"
+    for source, expected_authoritative in (("an_authority", True), ("a_corpus", False)):
+        with (
+            patch("reconciliator.cli.SentenceEmbedder"),
+            patch("reconciliator.cli.ingest_oai_pipeline") as mock_pipeline,
+        ):
+            mock_pipeline.return_value = 1
+            result = runner.invoke(
+                app, ["ingest-oai", "--config", str(cfg_file), "--source", source]
+            )
+            assert result.exit_code == 0, result.output
+            store = mock_pipeline.call_args.kwargs.get("store")
+            assert isinstance(store, WEMIRepository)
+            assert store.db_path == tmp_path / "authority.db"
+            passed_config = mock_pipeline.call_args.kwargs.get("config")
+            assert passed_config.authoritative is expected_authoritative
+
+
