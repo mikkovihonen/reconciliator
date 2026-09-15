@@ -2193,6 +2193,93 @@ Phrased for cataloguers, to be lifted as-is.
 
 600 passing.
 
+### 14.18 SLM genre terms, and two external AV datasets 🔬 RESEARCH
+
+Continuing 14.17. **MARC reachability is now 40 of 41 funnels.**
+
+#### Genre terms verified against Finto, not guessed
+
+The subject-analysis guidance names SLM (Suomalainen lajityyppi- ja muotosanasto)
+as the 655 vocabulary (`$2 slm/fin`). Every term below was confirmed to exist
+through the Finto REST API, with its URI, rather than inferred from a
+plausible-looking Finnish word:
+
+| work type | SLM terms | URI |
+|---|---|---|
+| `broadcast_program` | televisio-ohjelmat + narrower (televisionäytelmät, televisiosarjat, televisioelokuvat, televisio-oopperat) | s1209 |
+| | radio-ohjelmat + narrower (kuunnelmat, radiosarjat, radiosovitukset) | s1416 |
+| | shared narrower: dokumenttiohjelmat, lastenohjelmat, musiikkiohjelmat, luonto-ohjelmat | |
+| `legal` | the whole *juridiset teokset* branch: lait, asetukset, säädöskokoelmat, direktiivit, valtiosopimukset, oikeustapauskokoelmat, peruskirjat | s1507 |
+| `anthology` | antologiat (*"Useamman kuin yhden kirjailijan kaunokirjallisista teksteistä koostuva valikoima"*), kokoomateokset | s289, s963 |
+
+**Matching is exact, not substring.** "dokumenttiohjelmat" (broadcast
+programmes) and "dokumenttielokuvat" (documentary films) share a stem and are
+different materials; substring matching across SLM would conflate them. A test
+pins that the near-miss terms stay out.
+
+`geodata_service` had no SLM term at all - spatial data is a content type, not a
+genre - so funnel NN keys on RDA `crd` (cartographic dataset) instead, which is
+distinct from `cri`, an ordinary map. It also had to move **ahead of** funnel L
+in precedence, because a cartographic dataset is work_type "cartography" too and
+cartography would otherwise claim it first.
+
+#### The one remaining gap, and why it stays
+
+`funnel_jj_medieval_fragment`. SLM's *katkelmat* (s1210) is the only candidate
+term and it carries **no definition and no broader concept** in the vocabulary,
+so it may well mean a published excerpt rather than a manuscript fragment. Using
+it would be exactly the guess this work exists to avoid.
+
+#### A hole in the audit, found by the audit passing
+
+The reachability test passed after four funnels had just been made reachable -
+which is wrong in the safe direction but still wrong. Capability extraction read
+only literal `return "..."` statements, and the new rules classify through lookup
+tables (`SLM_WORK_TYPES.get(...)`), so the audit under-reported what the loader
+emits. It now reads the tables from the imported module, so adding an entry
+cannot be missed. Second time a static-analysis shortcut in this audit has
+misled: the first was a regex missing a multi-line `_add()`.
+
+#### Two external AV datasets, both relevant, neither usable as-is
+
+**KAVI, "Kotimaiset tv-sarjat KAVIn tietokannoissa"** (CC-BY 4.0). Ritva as
+MPEG-7 XML (sarja-id, pysyvä tunniste, sarjan nimi, vaihtoehtoinen nimi, kuvaus,
+from 1.1.2009) and Tenho as CSV. **Both distribution URLs 404.** They are Drupal
+`/sites/default/files/` paths and kavi.fi has migrated to WordPress; the
+avoindata.fi record still advertises the dead links, and KAVI has no open-data
+landing page at any obvious path. Worth reporting to KAVI - the dataset is
+catalogued but not downloadable.
+
+**Yle Elävä arkisto / Arkivet** (CC0, explicitly experimental - *"palvelu saattaa
+olla nurin tai päättyä varoituksetta"*). Live and downloadable:
+
+| file | content |
+|---|---|
+| `program.csv` | 23 831 entities: `PID`, `PARTOF`, `TYPE` (TVSeries/TVProgram), titles fi/sv, `EPISODE_NUMBER`, `FIRSTRUN`, `DURATION`, classification, keywords |
+| `media.csv` | 34 816 media items with contributors and actors |
+| `tvlahetysrekisteri1985-1999.zip` | 227 483 TV transmission records |
+| `radionlahetysrekisteri1997-2005.zip` | 3 018 032 radio transmission records |
+
+`program.csv` is a WEMI hierarchy already: `TYPE=TVSeries` is the container,
+`TYPE=TVProgram` the episode, `PARTOF` the link between them, `PID` a persistent
+identifier, `FIRSTRUN` the first transmission. That is precisely the authority
+data funnel GG has never had - the Elonet-Teka memo confirms no such work-level
+linking exists in Finnish library data yet
+(*"ei näitä tietoja kuitenkaan ole linkitetty RDA:n vaatimalla tavalla"*), which
+is the whole point of the Teos MARC 21 project.
+
+Caveats to weigh before ingesting: the series structure is *"automaattisesti
+päätelty ja sisältää virheitä"* by Yle's own admission, the files were last
+updated in 2018, and the service disclaims its own continuity.
+
+**This needs a decision, not a default.** Ingesting it means a third loader
+(CSV/MPEG-7 alongside MARCXML and BibFrame) and a new source type - a real
+feature, not a refactor. The architecture takes it cleanly: it would register as
+a source with `authoritative: true`, `PID` becoming the work `source_id`, and
+`PARTOF` a `series_member_of` relationship.
+
+618 passing.
+
 ### 14.13 Intended behaviour changes
 
 Four stages change results, and each deserves its own before/after diff on a real
