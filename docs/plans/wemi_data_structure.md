@@ -1321,8 +1321,8 @@ Each lands green. Stages 1 and 2 carry the risk.
 |---|---|---|
 | 1 ✅ | `entity_keys` table; emit keys and analytics at decomposition | ~0 |
 | 2 ✅ | `MatchRecord` replaces `TargetRecord` across matcher, clusterer and enricher; identifiers read from the table (fixes the tier-1 defect); drop `target_*` tables and their repository methods | -250 |
-| 3 | Generic `run_funnel(spec, subject)`; delete the 42 methods; ship the current 42 as built-in specs | **-1400** |
-| 4 | `handler:` resolution; port the 6 custom funnels to handler modules | +150 |
+| 3 ✅ | Generic `run_funnel(spec, record)`; delete the 42 methods; ship the current 42 as built-in specs | **-1400** |
+| 4 ✅ | `handler:` resolution; port the custom funnels to handler modules (folded into stage 3) | +150 |
 | 5 | Dead code (`compute_bounding_box_iou`; expression-tier search APIs — see 14.10); reconcile docstrings against behaviour | -50 |
 | 6 | Merge `decompose_marc_authority` into `decompose_marc_wemi`; ISBD punctuation stripping becomes configurable (see 14.9) | -300 |
 | 7 | Build, wire and use the W/M vector indexes; honour `rerank.top_k` (see 14.10) | +200 |
@@ -1497,6 +1497,94 @@ to authoritative origins, since the reconciled corpus now contributes rows of it
 own. `test_target_schema_normalization_and_cascades` was replaced by tests
 pinning that `entity_keys` has **no** cascade — it is polymorphic, so it carries
 no foreign key, and `ingest_mode: replace` (14.12) must delete keys explicitly.
+
+### 14.6.3 Stage 3 as built ✅ COMPLETE
+
+`matcher.py` went from **2686 to 1063 lines**. The 42 funnel methods (1564 lines)
+and the 160-line dispatch chain are replaced by a 429-line declarative table, a
+169-line engine, a 132-line spec model and three handler modules totalling 130
+lines. Stage 4 folded in, since handler resolution was needed to land the three
+funnels that have real logic.
+
+`src/reconciliator/funnels/`:
+
+| file | role |
+|---|---|
+| `spec.py` | `FunnelSpec` and `FunnelWhen`, the seven dispatch predicates |
+| `builtin.py` | the 42 specs, in precedence order |
+| `engine.py` | `run_funnel`, `default_tier2`, `FunnelContext` |
+| `recorded_sound.py`, `notated_music.py`, `audiobook.py` | the funnels with real logic |
+
+Dispatch is an ordered list, first match wins, one spec marked `default`. `when`
+is in disjunctive normal form — a list of alternatives, each a conjunction —
+because two of the original conditions were genuine disjunctions. Handlers
+resolve at construction, so a bad name or path is a startup error naming the
+funnel rather than a funnel that silently degrades to the template.
+
+#### What declaring them exposed
+
+**Six dispatch branches were unreachable.** The chain tested for work types
+`article`, `chapter`, `statute`, `anthology_collection`, `conference_proceedings`
+and `government_publication`, none of which appear in the `WorkType` literal, so
+no record could ever carry them. Funnel C is still reachable through
+`is_component` and the host citation key, which is how articles actually arrive.
+They are omitted rather than transcribed.
+
+**Thirteen funnels mint a relationship rather than reading one.** My first
+extraction only looked for `get_work_relationships` and so found five; the other
+thirteen construct a `WorkRelationship` from the match itself — funnel MM
+matching a critical edition to its base work *is* the claim
+`critical_edition_of`. Two tests caught this. The spec distinguishes
+`relationships: true` (read stored) from `asserts_relationship: <type>` (mint one).
+
+**Nine funnels try work types in order**, not one: funnel AA looks for a
+`software` work and then an `ai_model` one. `work_types` is a list, tried until
+one yields candidates. I had flattened these to a single value and the suite
+caught it.
+
+**One funnel's tier 3 is suspect and was preserved anyway.** Funnel B's
+tracklist-overlap tier collects "constituent titles" as the titles of *every
+other music work* rather than the candidate's own constituents, so the Jaccard
+comparison does not measure what its docstring claims. Ported verbatim with a
+note, because this stage is meant to be output-identical; fixing it is a
+behavioural change and belongs in its own diff.
+
+#### A usability flaw found by testing the documented example
+
+New funnels were appended just before the fall-through, which made them
+unreachable whenever they overlapped a built-in — and special-casing records an
+existing funnel handles is the main reason to add one. The example config I had
+written would not have worked: `funnel_local_theses` sat after
+`funnel_k_thesis`, which claims every thesis. Specs now take `before: <funnel_id>`
+to place themselves ahead of a named funnel, verified end to end:
+
+```
+oulu thesis  -> funnel_local_theses
+other thesis -> funnel_k_thesis
+```
+
+#### Config
+
+`reconcile.funnels` overrides or extends. An entry whose `id` matches a built-in
+replaces it **in place**, keeping its precedence (so an override cannot silently
+reorder dispatch); a new id goes where `before` says, or ahead of the
+fall-through. `config.example.yaml` carries three worked examples: retuning a
+built-in, adding a funnel with a regex predicate and explicit precedence, and
+pointing at a handler by name or by path.
+
+#### Tests
+
+516 passing (+26). `tests/test_funnels.py` pins one default, unique ids, that
+every declared handler resolves, and that **every funnel is reachable by a record
+of its own** — which is the guard against an over-broad earlier spec shadowing a
+later one, the failure mode an if-chain makes invisible. Plus the precedence pairs
+that used to be implied by statement order (notated music over recorded sound,
+exhibition over conference), the seven predicate kinds, handler resolution by
+name and by path including basename collisions, and the override/`before` rules.
+
+The existing `funnel_used == "funnel_x_..."` assertions carried the collapse
+exactly as intended: deleting 1564 lines produced three failures, two of them
+tests calling a deleted method directly.
 
 ### 14.7 Decisions taken
 
