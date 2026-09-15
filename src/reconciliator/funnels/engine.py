@@ -39,6 +39,7 @@ class FunnelContext:
     align_expression: Any
     try_identifiers: Any
     vector_or_fts: Any
+    rank_candidates: Any
     result_cls: Any
     constituent_cls: Any
 
@@ -111,7 +112,25 @@ def default_tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
     if not candidates:
         return None
 
-    work = candidates[0]
+    # Rank rather than take candidates[0]. The blocking query returns everything
+    # sharing an author key and title stem, which for a prolific author under a
+    # common title is several genuinely different works; the first row is
+    # whichever the index happened to return. Ranking applies the volume,
+    # surname and year discriminators and the configured score fusion.
+    # require_threshold=False: these candidates already matched the author key
+    # and title stem exactly, so the score orders them and only the volume,
+    # surname and year vetoes reject them.
+    ranked = ctx.rank_candidates(
+        record, [(c, spec.confidence) for c in candidates], require_threshold=False
+    )
+    accepted = [(work, verdict) for work, verdict in ranked if verdict.accepted]
+    if not accepted:
+        # Every candidate was rejected by a discriminator. Falling through to
+        # tier 3 is right: a rejected tier-2 candidate is not evidence of
+        # absence, and the dense tier searches on different evidence.
+        return None
+
+    work, verdict = accepted[0]
     expression = None
     if spec.align_expression:
         expressions = ctx.repo.get_expressions_for_work(work.id)
@@ -130,7 +149,9 @@ def default_tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
         expression_uri=expression.expression_uri if expression else None,
         match_tier=spec.match_tier,
         funnel_used=spec.id,
-        confidence_score=spec.confidence,
+        # The fused score the evaluator produced, not the spec's flat figure: a
+        # tier that compares candidates should report which one it found.
+        confidence_score=float(verdict.match_score),
         relationships=_relationships(work, ctx),
         constituent_matches=_constituents(record, ctx),
     )

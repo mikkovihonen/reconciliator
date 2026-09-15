@@ -32,12 +32,24 @@ class CandidateEvaluator:
         """
         Check volume/part designation compatibility.
         Rejects conflicting designations (e.g. 'osa 1' vs 'osa 2').
+
+        Compares *normalised* designations. Raw string equality made this check
+        reject every candidate whose volume was merely spelled differently -
+        "osa 2" against "2. osa", or against "Vol. II" - which is the usual case
+        across two catalogues. `normalize_volume` canonicalises Finnish, Swedish
+        and English prefixes and Roman numerals to one form, and exists for
+        exactly this comparison.
         """
         if not self.config.require_volume_match:
             return True
         if not target_volume or not candidate_volume:
             return True
-        return target_volume.strip().lower() == candidate_volume.strip().lower()
+
+        from reconciliator.normalizers.record import normalize_volume
+
+        target_norm = normalize_volume(target_volume) or target_volume.strip().lower()
+        candidate_norm = normalize_volume(candidate_volume) or candidate_volume.strip().lower()
+        return target_norm == candidate_norm
 
     def check_surname_match(
         self, target_record: BibliographicRecord, candidate_record: BibliographicRecord

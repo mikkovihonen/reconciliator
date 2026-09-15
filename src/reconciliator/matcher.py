@@ -42,6 +42,7 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
+from reconciliator.normalizers.blocking import compute_author_key
 from reconciliator.repository import WEMIRepository
 from reconciliator.rerank import CandidateEvaluator
 from reconciliator.vocabularies import (
@@ -249,6 +250,12 @@ def _merge_funnel_specs(overrides: Optional[list[FunnelSpec]]) -> list[FunnelSpe
     if default_spec is not None:
         merged.append(default_spec)
     return merged
+
+
+# How many of a work's manifestations are compared before giving up. A work with
+# hundreds of editions would otherwise turn one candidate into hundreds of
+# evaluations; the discriminators only need to find one compatible edition.
+MAX_EDITIONS_COMPARED = 25
 
 
 class WorkMatcher:
@@ -491,24 +498,37 @@ class WorkMatcher:
                 if hasattr(self.config, "threshold") and self.config.threshold is not None
                 else 0.70
             )
-            for cand_work, score in results:
-                if work_type and cand_work.work_type != work_type:
+            # Rank the retrieved candidates instead of accepting the first one
+            # over a bare dense threshold. This is what `rerank.top_k` exists to
+            # feed: retrieving 50 candidates is pointless if the first
+            # acceptable one wins, which is why nobody noticed the depth was
+            # hardcoded to 5.
+            typed = [
+                (cand_work, score)
+                for cand_work, score in results
+                if not work_type or cand_work.work_type == work_type
+            ]
+            for cand_work, verdict in self._rank_candidates(
+                target, typed, acceptance_threshold=thresh
+            ):
+                if not verdict.accepted:
                     continue
-                if score >= thresh:
-                    exps = self.repo.get_expressions_for_work(cand_work.id)
-                    exp = self._align_expression(
-                        exps, target.language, translator_signature=target.get_first_key("translators_signature")
-                    )
-                    return WEMIMatchResult(
-                        target_record_id=target.record_id,
-                        matched_work=cand_work,
-                        matched_expression=exp,
-                        work_uri=cand_work.work_uri,
-                        expression_uri=exp.expression_uri if exp else None,
-                        match_tier="tier2_vector_fallback",
-                        funnel_used=funnel_name,
-                        confidence_score=float(score),
-                    )
+                exps = self.repo.get_expressions_for_work(cand_work.id)
+                exp = self._align_expression(
+                    exps,
+                    target.language,
+                    translator_signature=target.get_first_key("translators_signature"),
+                )
+                return WEMIMatchResult(
+                    target_record_id=target.record_id,
+                    matched_work=cand_work,
+                    matched_expression=exp,
+                    work_uri=cand_work.work_uri,
+                    expression_uri=exp.expression_uri if exp else None,
+                    match_tier="tier2_vector_fallback",
+                    funnel_used=funnel_name,
+                    confidence_score=float(verdict.match_score),
+                )
 
         # 2. FTS5 Lexical Search (Tier 3 Fallback)
         # Architectural distinction:
@@ -642,6 +662,7 @@ class WorkMatcher:
             align_expression=self._align_expression,
             try_identifiers=self._try_fast_path_identifiers,
             vector_or_fts=self._vector_or_fts_fallback,
+            rank_candidates=self._rank_candidates,
             result_cls=WEMIMatchResult,
             constituent_cls=ConstituentWorkMatch,
         )
@@ -727,6 +748,141 @@ class WorkMatcher:
             _add(format_wikidata_uri(agent.wikidata_qid), "1")
 
         return u0, u1
+
+    def _target_view(self, record: MatchRecord) -> BibliographicRecord:
+        """A BibliographicRecord view of a MatchRecord, for candidate evaluation.
+
+        `CandidateEvaluator` compares two BibliographicRecords. The funnels carry
+        a MatchRecord, whose author identity is the normalised `author_key`
+        rather than a list of agents - so the key is presented as a single
+        pseudo-agent surname, and candidate surnames are normalised the same way
+        in `_rank_candidates` before the comparison. Without that both sides
+        would be compared with different normalisation and "O'Brien" would never
+        match "obrien".
+        """
+        return BibliographicRecord(
+            source_id=record.record_id,
+            source=record.format or "target",
+            title=record.title or "",
+            uniform_title=record.uniform_title,
+            publication_year=record.year,
+            volume_designation=record.volume_designation,
+            language=record.language,
+            agents=[Agent(name=record.author_key or "", surname=record.author_key)]
+            if record.author_key
+            else [],
+        )
+
+    def _hard_checks_pass(self, verdict: ReconciliationMatch) -> bool:
+        """Whether a candidate survives the vetoes, ignoring the fuzzy threshold.
+
+        The evaluator's `accepted` flag answers two questions at once: did the
+        candidate survive the volume, surname and year discriminators, and did
+        its fused score clear the acceptance threshold. Those belong to
+        different tiers. A tier-2 candidate already matched the author key and
+        the title stem *exactly*, so demanding its BM25 title similarity also
+        clear a fuzzy bar rejects correct matches - with the default weights and
+        a 0.85 threshold it demands a rerank score of 0.775 from an exact-key
+        match. The score orders tier-2 candidates; only the vetoes reject them.
+        """
+        rerank_cfg = getattr(self.config, "rerank", None)
+        max_year = getattr(rerank_cfg, "max_year_difference", None)
+        year_ok = (
+            verdict.year_diff is None
+            or max_year is None
+            or abs(verdict.year_diff) <= max_year
+        )
+        return bool(verdict.volume_match and verdict.surname_match and year_ok)
+
+    def _rank_candidates(
+        self,
+        record: MatchRecord,
+        candidates: list[tuple[WorkEntity, float]],
+        acceptance_threshold: Optional[float] = None,
+        require_threshold: bool = True,
+    ) -> list[tuple[WorkEntity, ReconciliationMatch]]:
+        """Score candidates against the record and return them best-first.
+
+        This is the reranking stage the configuration has always described and
+        nothing performed. Previously a tier took `candidates[0]`, or the first
+        candidate above a bare dense threshold, so the matcher could not prefer a
+        better candidate over a worse one and the volume, surname and year
+        discriminators never ran.
+
+        Returns every candidate with its verdict, ordered by fused score, so a
+        caller can take the best *accepted* one and report what it rejected.
+        With no evaluator configured the ordering is the input order and every
+        candidate is accepted, which is the previous behaviour.
+        """
+        threshold = (
+            acceptance_threshold
+            if acceptance_threshold is not None
+            else getattr(self.config, "threshold", None) or 0.85
+        )
+        if self.evaluator is None:
+            return [
+                (
+                    work,
+                    ReconciliationMatch(
+                        candidate_record_id=work.source_id,
+                        source=work.source,
+                        match_tier="tier2_domain_key",
+                        match_score=score,
+                        dense_score=score,
+                        accepted=True,
+                    ),
+                )
+                for work, score in candidates
+            ]
+
+        target = self._target_view(record)
+        scored: list[tuple[WorkEntity, ReconciliationMatch]] = []
+        for work, dense_score in candidates:
+            # The volume, year and publisher the discriminators compare live on
+            # the *manifestation*, not the work, so a work has to be hydrated
+            # with one to be judged on them. A work with several manifestations
+            # is several editions: the record is compatible with the work if it
+            # is compatible with any one of them, so each is evaluated and the
+            # best verdict stands. Hydrating with the work alone left volume and
+            # year as None on the candidate side, which both checks read as
+            # "do not penalise" - so they silently never fired.
+            manifestations = self.repo.get_manifestations_for_work(work.id) if work.id else []
+            best: Optional[ReconciliationMatch] = None
+            for manifestation in (manifestations or [None])[:MAX_EDITIONS_COMPARED]:
+                candidate = self._hydrate_candidate_record(work, None, manifestation)
+                if candidate is None:
+                    continue
+                # Normalise candidate surnames the way author_key is normalised,
+                # so the evaluator's surname check compares like with like.
+                candidate = candidate.model_copy(
+                    update={
+                        "agents": [
+                            agent.model_copy(
+                                update={"surname": compute_author_key(agent.name, agent.surname)}
+                            )
+                            for agent in candidate.agents
+                        ]
+                    }
+                )
+                verdict = self.evaluator.evaluate_candidate(
+                    target, candidate, dense_score, acceptance_threshold=threshold
+                )
+                if not require_threshold and not verdict.accepted:
+                    # Re-admit a candidate the fuzzy threshold rejected but the
+                    # vetoes did not. See _hard_checks_pass.
+                    verdict = verdict.model_copy(
+                        update={"accepted": self._hard_checks_pass(verdict)}
+                    )
+                if best is None or (verdict.accepted, verdict.match_score) > (
+                    best.accepted,
+                    best.match_score,
+                ):
+                    best = verdict
+            if best is not None:
+                scored.append((work, best))
+
+        scored.sort(key=lambda pair: (pair[1].accepted, pair[1].match_score), reverse=True)
+        return scored
 
     def _hydrate_candidate_record(
         self,
