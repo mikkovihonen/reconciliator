@@ -100,32 +100,24 @@ def _extracted_identifier_schemes() -> set[str]:
 
 @pytest.fixture(scope="module")
 def capabilities() -> dict[str, set[str]]:
-    """What the MARC loader can actually emit.
+    """What the MARC loader can emit, read from its own declaration.
 
-    Literal `return "..."` statements are only half of it: classification also
-    happens through lookup tables, so their *values* are capabilities too. An
-    earlier version of this fixture read only the literals and so under-reported
-    the loader - it passed while four funnels it claimed were unreachable had
-    just been made reachable through `SLM_WORK_TYPES`. The tables are read from
-    the imported module rather than parsed, so adding an entry cannot be missed.
+    This used to infer the answer by parsing the loader's source, and got it
+    wrong twice: a regex missed a multi-line `_add()` call, and literal-only
+    extraction missed classification through lookup tables - the second time
+    passing while four funnels it claimed were unreachable had just become
+    reachable. `LoaderCapabilities` states it instead, and
+    `RecordLoader.check_output` (exercised in tests/test_loader_contract.py)
+    keeps the statement honest against what the loader actually produces.
     """
-    from reconciliator.loaders.marcxml import (
-        CONTENT_TYPE_WORK_TYPES,
-        RDA_CONTENT_TYPES,
-        SLM_WORK_TYPES,
-    )
+    from reconciliator.loaders.registry import MarcBibliographicLoader
 
+    declared = MarcBibliographicLoader.capabilities
     caps = {
-        "work_types": (
-            _returned_literals("determine_work_type")
-            | set(SLM_WORK_TYPES.values())
-            | set(CONTENT_TYPE_WORK_TYPES.values())
-        ),
-        "content_types": (
-            _returned_literals("determine_content_type") | set(RDA_CONTENT_TYPES.values())
-        ),
-        "keys": _added_key_types(),
-        "identifiers": _extracted_identifier_schemes(),
+        "work_types": set(declared.work_types),
+        "content_types": set(declared.content_types),
+        "keys": set(declared.key_types),
+        "identifiers": set(declared.identifier_schemes),
     }
     # Guard the audit itself: an extraction returning nothing would make every
     # funnel look unreachable and the assertions below meaningless.
