@@ -133,11 +133,14 @@ def test_decompose_monograph_wemi():
     assert work.original_language == "fin"
     assert "Sinuhe egyptiläinen" in work.serialized_text
 
-    assert expr.title == "Sinuhe egyptiläinen :"
+    # The " :" that introduces 245 $b is ISBD presentation punctuation. The work
+    # title lost it and these two kept it, because the strip ran at some title
+    # sites and not others; it now runs once where 245 is read.
+    assert expr.title == "Sinuhe egyptiläinen"
     assert expr.language == "fin"
     assert expr.content_type == "text"
 
-    assert manif.title == "Sinuhe egyptiläinen :"
+    assert manif.title == "Sinuhe egyptiläinen"
     assert manif.publisher == "WSOY,"
     assert manif.publication_year == 1945
     assert manif.carrier_type == "volume"
@@ -186,7 +189,7 @@ def test_decompose_music_wemi():
     ) = decompose_marc_wemi(rec, source="fennica")
 
     assert work.work_type == "music"
-    assert work.title == "Finlandia,"
+    assert work.title == "Finlandia"
     assert len(mops) == 1
     assert mops[0].label == "orkesteri"
 

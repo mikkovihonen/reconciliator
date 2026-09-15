@@ -212,13 +212,18 @@ def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
     # Verify WEMI entities created in authority.db
     w = repo.get_work_by_source("melinda_src", "FI-MEL-101")
     assert w is not None
-    assert w.title == "Testikirja :"
+    # 245 reads "Testikirja :" because a $b follows; the " :" is ISBD
+    # presentation punctuation and the loader strips it. It used to survive
+    # here: the toggle reached the authority decomposer's headings and not the
+    # bibliographic 245, so one source's title carried the colon and another's
+    # did not. `RecordLoader.finalise` now applies it to every loader's output.
+    assert w.title == "Testikirja"
     assert w.work_type == "text"
     assert w.original_language == "fin"
 
     m = repo.get_manifestation_by_source("melinda_src", "FI-MEL-101")
     assert m is not None
-    assert m.title == "Testikirja :"
+    assert m.title == "Testikirja"
 
     # Verify checkpoint (unified harvest_state)
     w_ckpt = repo.get_harvest_state("melinda_src")

@@ -17,6 +17,13 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
+
+# ISBD presentation punctuation and the stripper live with the loader contract:
+# the charset had a second declaration here, and two copies of a normalisation
+# rule are a rule that will eventually disagree with itself. The decomposers
+# still strip as they parse, because the cleaned title feeds key derivation
+# before `finalise` ever sees the record.
+from reconciliator.loaders.base import DEFAULT_ISBD_PUNCTUATION, strip_isbd
 from reconciliator.models import (
     AgentEntity,
     CarrierType,
@@ -124,26 +131,6 @@ def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
             parts.append(f"L|{(child.text or '').strip()}")
     digest = hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
     return f"{prefix}:{digest}"
-
-
-# ISBD presentation punctuation. Default matches the authority decomposer's
-# historical behaviour; `strip_isbd_punctuation: false` retains the literal
-# subfield instead. See RecordNormalizationConfig.
-DEFAULT_ISBD_PUNCTUATION = " ./,;:"
-
-
-def strip_isbd(value: Optional[str], enabled: bool = True, chars: str = DEFAULT_ISBD_PUNCTUATION) -> Optional[str]:
-    """Strip trailing ISBD punctuation from a heading string.
-
-    Single definition, because the authority path stripped it and the
-    bibliographic path did not, so the same agent was stored as "Waltari, Mika"
-    from one and "Waltari, Mika," from the other. Blocking keys already discarded
-    punctuation, so this governs the name that is stored and exported rather than
-    how records match.
-    """
-    if value is None:
-        return None
-    return value.rstrip(chars) if enabled else value
 
 
 def _get_subfields(elem: etree._Element, code: str) -> list[str]:
@@ -296,11 +283,25 @@ def parse_marc_record_elem(
     statement_of_resp: Optional[str] = None
     vol_designations: list[str] = []
 
+    def _isbd(value: Optional[str]) -> Optional[str]:
+        """Strip trailing ISBD punctuation, keeping a value that is only that.
+
+        Titles are stripped here, at the single extraction point, because both
+        the WEMI decomposers and the target-side MatchRecord read this dict. Only
+        agent names were stripped before, so a 245 $a reading "Testikirja :" -
+        the colon introduces $b - reached the datastore with the colon, while the
+        same title from an authority heading did not. `RecordLoader.finalise`
+        catches what any format leaves behind; this keeps the target path, which
+        builds no entities and so never passes through a loader, in step.
+        """
+        stripped = strip_isbd(value, strip_isbd_punctuation, isbd_punctuation)
+        return stripped or value
+
     f245 = _get_datafields(record_elem, "245")
     if f245:
         f = f245[0]
-        title_proper = _get_subfield(f, "a") or ""
-        subtitle = _get_subfield(f, "b")
+        title_proper = _isbd(_get_subfield(f, "a")) or ""
+        subtitle = _isbd(_get_subfield(f, "b"))
         statement_of_resp = _get_subfield(f, "c")
         parts = _get_subfields(f, "n") + _get_subfields(f, "p")
         vol_designations.extend(parts)
@@ -308,11 +309,11 @@ def parse_marc_record_elem(
     uniform_title = None
     f130 = _get_datafields(record_elem, "130")
     if f130:
-        uniform_title = _get_subfield(f130[0], "a")
+        uniform_title = _isbd(_get_subfield(f130[0], "a"))
     if not uniform_title:
         f240 = _get_datafields(record_elem, "240")
         if f240:
-            uniform_title = _get_subfield(f240[0], "a")
+            uniform_title = _isbd(_get_subfield(f240[0], "a"))
 
     variant_titles: list[str] = []
     for f in _get_datafields(record_elem, "246"):
@@ -322,9 +323,9 @@ def parse_marc_record_elem(
             combined = vt_a.strip()
             if vt_b:
                 combined = f"{combined} {vt_b.strip()}"
-            variant_titles.append(combined)
+            variant_titles.append(_isbd(combined) or combined)
     for f in _get_datafields(record_elem, "740"):
-        vt = _get_subfield(f, "a")
+        vt = _isbd(_get_subfield(f, "a"))
         if vt:
             variant_titles.append(vt)
 
@@ -370,15 +371,15 @@ def parse_marc_record_elem(
     original_title: Optional[str] = None
     f765 = _get_datafields(record_elem, "765")
     if f765:
-        original_title = _get_subfield(f765[0], "t")
+        original_title = _isbd(_get_subfield(f765[0], "t"))
     if not original_title:
         f242 = _get_datafields(record_elem, "242")
         if f242:
-            original_title = _get_subfield(f242[0], "a")
+            original_title = _isbd(_get_subfield(f242[0], "a"))
     if not original_title and orig_language and orig_language != language:
         f240 = _get_datafields(record_elem, "240")
         if f240:
-            original_title = _get_subfield(f240[0], "a")
+            original_title = _isbd(_get_subfield(f240[0], "a"))
 
     # Edition & Extent
     edition_str: Optional[str] = None
@@ -399,7 +400,7 @@ def parse_marc_record_elem(
         if series_fields:
             sf = series_fields[0]
             if not series_title:
-                series_title = _get_subfield(sf, "a")
+                series_title = _isbd(_get_subfield(sf, "a"))
             if not series_numbering:
                 series_numbering = _get_subfield(sf, "v")
 

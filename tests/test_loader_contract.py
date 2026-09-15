@@ -199,7 +199,6 @@ def test_check_output_catches_an_unstable_id_under_a_determinism_claim():
 def test_bibframe_declares_the_normalisation_it_still_does_not_apply():
     caps = BibframeLoader.capabilities
     for flag, key in (
-        ("normalises_isbd", "isbd_normalisation"),
         ("folds_subject_vocabularies", "subject_vocabulary_folding"),
         ("normalises_relators", "relator_normalisation"),
     ):
@@ -213,6 +212,87 @@ def test_bibframe_now_claims_deterministic_ids():
     caps = BibframeLoader.capabilities
     assert caps.deterministic_ids is True
     assert "deterministic_ids" not in caps.not_produced
+
+
+def test_every_loader_now_normalises_isbd(ctx: LoadContext):
+    """Closed in stage 5 by moving the strip into `RecordLoader.finalise`, so it
+    is a property of the interface rather than of each decomposer."""
+    for loader in LOADERS:
+        assert loader.capabilities.normalises_isbd is True, loader.capabilities.name
+        assert "isbd_normalisation" not in loader.capabilities.not_produced
+
+
+def test_isbd_punctuation_is_stripped_on_the_bibframe_path(ctx: LoadContext):
+    """The toggle existed before stage 5 but reached only the MARC decomposers,
+    so one catalogue's "Waltari, Mika" and another's "Waltari, Mika," were two
+    agents in every report that groups by name."""
+    record = load_record(_isbd_graph(), ctx)
+    assert record.works[0].title == "Sinuhe egyptilainen"
+    assert record.manifestations[0].title == "Sinuhe egyptilainen"
+    assert record.manifestations[0].publisher == "WSOY"
+    assert record.manifestations[0].publication_place == "Helsinki"
+    assert [a.name for a in record.agents] == ["Waltari, Mika"]
+
+
+def test_isbd_stripping_obeys_the_toggle():
+    off = LoadContext(source="melinda", strip_isbd_punctuation=False)
+    record = load_record(_isbd_graph(), off)
+    assert record.works[0].title == "Sinuhe egyptilainen /"
+    # And the declaration means "honours the toggle", not "always strips", so
+    # surviving punctuation is not a contract violation here.
+    assert BibframeLoader().check_output(record, off) == []
+
+
+def test_the_marc_and_target_paths_agree_on_a_title(ctx: LoadContext):
+    """The target file builds a MatchRecord and no entities, so it passes through
+    no loader. Stripping the 245 where it is read - rather than only in
+    `finalise` - keeps the two sides comparable: a work report that prints the
+    target title beside the matched corpus title showed "Testikirja :" against
+    "Testikirja" for what was one and the same string in both catalogues."""
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    elem = _marc(
+        '<datafield tag="245" ind1="1" ind2="0">'
+        '<subfield code="a">Testikirja :</subfield>'
+        '<subfield code="b">alaotsikko</subfield></datafield>'
+    )
+    # The fixture's own 245 comes first; replace it so only the ISBD one is read.
+    for f in elem.findall(f"{MARC_NS}datafield[@tag='245']")[:1]:
+        elem.remove(f)
+
+    target = build_target_record_from_marc(elem, source="target")
+    corpus = load_record(elem, ctx)
+    assert target.title == "Testikirja"
+    assert corpus.works[0].title == target.title
+    assert corpus.manifestations[0].title == target.title
+
+
+def test_isbd_stripping_never_empties_a_required_title(ctx: LoadContext):
+    """`title` is a required str on three tiers: a heading that is punctuation
+    all the way down is kept as it stands, because an empty title destroys the
+    only evidence that the source record was odd."""
+    record = load_record(_isbd_graph(title="..."), ctx)
+    assert record.works[0].title == "..."
+
+
+ISBD_TTL = """
+@prefix bf: <http://id.loc.gov/ontologies/bibframe/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<http://example.org/w1> a bf:Work ;
+    bf:title [ a bf:Title ; bf:mainTitle "%(t)s" ] ;
+    bf:contribution [ a bf:Contribution ;
+        bf:agent [ a bf:Person ; rdfs:label "Waltari, Mika," ] ] ;
+    bf:hasInstance <http://example.org/i1> .
+<http://example.org/i1> a bf:Instance ; bf:instanceOf <http://example.org/w1> ;
+    bf:title [ a bf:Title ; bf:mainTitle "%(t)s" ] ;
+    bf:provisionActivity [ a bf:Publication ;
+        bf:agent [ rdfs:label "WSOY," ] ;
+        bf:place [ rdfs:label "Helsinki :" ] ] .
+"""
+
+
+def _isbd_graph(title: str = "Sinuhe egyptilainen /") -> Graph:
+    return Graph().parse(data=ISBD_TTL % {"t": title}, format="turtle")
 
 
 # --- BibFrame identity ----------------------------------------------------

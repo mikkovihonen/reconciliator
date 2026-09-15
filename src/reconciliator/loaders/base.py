@@ -38,6 +38,50 @@ from reconciliator.models import (
 
 DEFAULT_ISBD_PUNCTUATION = " ./,;:"
 
+#: The fields whose stored value is a human-readable name, title or imprint
+#: statement. These are the ones that carry ISBD presentation punctuation - a
+#: trailing " /", "," or "." that belongs to the catalogue card rather than to
+#: the data - whenever the record came from MARC, or from anything converted out
+#: of MARC, which most BIBFRAME in circulation is.
+#:
+#: Deliberately excludes `*_normalized` (the normalisers already discard
+#: punctuation) and the enumeration fields `volume_designation` and
+#: `series_numbering`, which feed `check_volume_match` through
+#: `normalize_volume`; those are left alone so this pass cannot move a matching
+#: result.
+ISBD_TEXT_FIELDS: dict[str, tuple[str, ...]] = {
+    "works": ("title", "original_title"),
+    "expressions": ("title",),
+    "manifestations": (
+        "title", "subtitle", "publisher", "publication_place",
+        "edition_statement", "series_title", "host_title",
+    ),
+    "agents": ("name", "surname", "fuller_name"),
+}
+
+#: Same, for fields holding a list of such strings.
+ISBD_LIST_FIELDS: dict[str, tuple[str, ...]] = {
+    "agents": ("variant_names",),
+}
+
+
+def strip_isbd(
+    value: Optional[str],
+    enabled: bool = True,
+    chars: str = DEFAULT_ISBD_PUNCTUATION,
+) -> Optional[str]:
+    """Strip trailing ISBD punctuation from a heading string.
+
+    Single definition, because the authority path stripped it and the
+    bibliographic path did not, so the same agent was stored as "Waltari, Mika"
+    from one and "Waltari, Mika," from the other. Blocking keys already discarded
+    punctuation, so this governs the name that is stored and exported rather than
+    how records match.
+    """
+    if value is None:
+        return None
+    return value.rstrip(chars) if enabled else value
+
 
 @dataclass
 class DecomposedRecord:
@@ -169,6 +213,14 @@ class RecordLoader(ABC):
         afterwards, so a caller that inserted without that argument stored the
         wrong origin - and `record_origin` plus the `sources` registry is what
         decides which rows may be matched against.
+
+        Strips trailing ISBD punctuation from every stored name and title. The
+        toggle existed before this, but reached only the MARC decomposers, so
+        `strip_isbd_punctuation=True` cleaned a Melinda heading and left the
+        identical heading from a BIBFRAME export as "Waltari, Mika," - two rows
+        for one agent in any report that groups by name. Doing it here rather
+        than in each decomposer makes it a property of the interface: a loader
+        cannot forget it, and a new format gets it without writing any code.
         """
         origin = ctx.origin
         for entities in (
@@ -180,13 +232,59 @@ class RecordLoader(ABC):
         ):
             for entity in entities:
                 entity.record_origin = origin  # type: ignore[assignment]
+
+        if ctx.strip_isbd_punctuation:
+            self._strip_isbd_fields(record, ctx.isbd_punctuation)
         return record
 
-    def check_output(self, record: DecomposedRecord) -> list[str]:
+    @staticmethod
+    def _strip_isbd_fields(record: DecomposedRecord, chars: str) -> None:
+        """Strip trailing ISBD punctuation in place across the stored text fields.
+
+        Idempotent, so the MARC decomposers going on stripping as they parse
+        (where the cleaned title feeds key derivation) costs nothing here.
+
+        A value that is punctuation all the way down is left as it was: `title`
+        is a required `str` on three of the tiers, and replacing a bad title with
+        an empty one loses the only evidence that the source record was odd.
+        """
+        for tier, fields in ISBD_TEXT_FIELDS.items():
+            for entity in getattr(record, tier):
+                for name in fields:
+                    value = getattr(entity, name, None)
+                    if not isinstance(value, str):
+                        continue
+                    stripped = value.rstrip(chars)
+                    if stripped and stripped != value:
+                        setattr(entity, name, stripped)
+
+        for tier, fields in ISBD_LIST_FIELDS.items():
+            for entity in getattr(record, tier):
+                for name in fields:
+                    values = getattr(entity, name, None)
+                    if not isinstance(values, list):
+                        continue
+                    setattr(
+                        entity,
+                        name,
+                        [
+                            (v.rstrip(chars) or v) if isinstance(v, str) else v
+                            for v in values
+                        ],
+                    )
+
+    def check_output(
+        self, record: DecomposedRecord, ctx: Optional[LoadContext] = None
+    ) -> list[str]:
         """Compare what was produced against what this loader claims.
 
         Used by tests, not in the ingest path: a declaration nothing verifies
         drifts from the code the moment either changes.
+
+        Pass the `ctx` the record was loaded with to check only the claims that
+        context asked for. `normalises_isbd` means the loader honours
+        `strip_isbd_punctuation`, not that it strips unconditionally, so with the
+        toggle off the punctuation is supposed to survive.
         """
         caps = self.capabilities
         findings: list[str] = []
@@ -225,6 +323,23 @@ class RecordLoader(ABC):
                 findings.append(
                     f"{caps.name} claims deterministic_ids but produced "
                     f"parse-local identifiers: {unstable[:3]}"
+                )
+
+        if caps.normalises_isbd and (ctx is None or ctx.strip_isbd_punctuation):
+            chars = ctx.isbd_punctuation if ctx else DEFAULT_ISBD_PUNCTUATION
+            dirty = [
+                f"{tier}.{name}={value!r}"
+                for tier, fields in ISBD_TEXT_FIELDS.items()
+                for entity in getattr(record, tier)
+                for name in fields
+                if isinstance(value := getattr(entity, name, None), str)
+                and value != value.rstrip(chars)
+                and value.rstrip(chars)
+            ]
+            if dirty:
+                findings.append(
+                    f"{caps.name} claims normalises_isbd but stored headings "
+                    f"still carrying ISBD punctuation: {dirty[:3]}"
                 )
 
         if caps.stamps_record_origin:

@@ -297,15 +297,14 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         # triples, so the same input yields the same URIs on every ingest.
         deterministic_ids=True,
         stamps_record_origin=True,
-        normalises_isbd=False,
+        # The decomposer still takes no strip_isbd_punctuation; `finalise` applies
+        # it to the record afterwards, which is the whole reason the normalisation
+        # moved into the base class. BIBFRAME converted out of MARC - most of what
+        # circulates - carries the punctuation in its literals.
+        normalises_isbd=True,
         folds_subject_vocabularies=False,
         normalises_relators=False,
         not_produced={
-            "isbd_normalisation": (
-                "takes no strip_isbd_punctuation: RDF literals are not expected "
-                "to carry ISBD presentation punctuation, though exports converted "
-                "from MARC often do"
-            ),
             "subject_vocabulary_folding": (
                 "takes no vocab_store, so legacy subject headings are not folded "
                 "to their modern ontology as they are on the MARC path"
