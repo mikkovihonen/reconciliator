@@ -969,6 +969,14 @@ def reconcile_cmd(
     # without them the matcher's dense tier cannot fire at all.
     wemi_repo = _wemi_repo(cfg, embedder=embedder)
 
+    # Matching is about to run, and it depends on `record_origin` agreeing with
+    # the `sources` registry. When they disagree the failure is silent and total:
+    # the allow-list filters out every candidate, so nothing matches and nothing
+    # errors. Report it here rather than leaving it to be debugged from empty
+    # output.
+    for finding in wemi_repo.check_source_registry():
+        console.print(f"[yellow]Warning: {finding}[/yellow]")
+
     # Tier 3 standalone agent fallback needs the dedicated agent index; it is
     # optional, so only load it when build-agent-index has produced one.
     agent_indexer = None

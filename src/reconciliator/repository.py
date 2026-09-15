@@ -1966,6 +1966,63 @@ class WEMIRepository:
         batch = self.get_agents_by_ids([agent_id])
         return batch.get(agent_id)
 
+    def check_source_registry(self) -> list[str]:
+        """Report mismatches between the `sources` registry and the stored rows.
+
+        With one database, "which rows may be matched against" is answered
+        entirely by `record_origin` plus this registry. Both halves have to
+        agree, and when they do not the failure is silent and total: an empty
+        allow-list filters every candidate out, so matching returns nothing
+        rather than erroring. Two ways to get there:
+
+        - a source registered authoritative whose rows carry a different origin
+          (or which has no rows at all), so it contributes nothing to match
+          against;
+        - rows whose `record_origin` is in no registry entry, which are
+          therefore invisible to any authoritative-only search.
+
+        Returns human-readable findings, empty when the two agree.
+        """
+        findings: list[str] = []
+        registered = self.get_sources()
+        with self.get_connection() as conn:
+            origins = {
+                str(r[0])
+                for r in conn.execute(
+                    """
+                    SELECT DISTINCT record_origin FROM works
+                    UNION SELECT DISTINCT record_origin FROM manifestations
+                    UNION SELECT DISTINCT record_origin FROM agents;
+                    """
+                )
+                if r[0]
+            }
+
+        for name, is_authoritative in sorted(registered.items()):
+            if is_authoritative and name not in origins:
+                findings.append(
+                    f"source '{name}' is registered authoritative but no rows carry that "
+                    f"record_origin, so it cannot be matched against"
+                )
+
+        # An unregistered origin is only hidden when *some* source is registered
+        # authoritative: `_origin_clause` applies no filter at all when the
+        # allow-list would be empty, so with nothing authoritative every row
+        # stays visible. Reporting invisibility then would be crying wolf.
+        if any(registered.values()):
+            for origin in sorted(o for o in origins if o not in registered and o != "unknown"):
+                findings.append(
+                    f"rows carry record_origin '{origin}', which is in no sources entry, so "
+                    f"they are invisible to authoritative-only matching"
+                )
+        elif origins:
+            findings.append(
+                "no source is registered authoritative, so authoritative-only matching has no "
+                "allow-list to apply and searches every source, corpora included"
+            )
+
+        return findings
+
     def delete_source(self, source_name: str) -> dict[str, int]:
         """Remove every row a source contributed, leaving other sources untouched.
 
