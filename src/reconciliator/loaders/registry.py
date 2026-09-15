@@ -7,6 +7,7 @@ satisfy one contract and declare what they produce.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar
 
 from reconciliator.loaders.base import (
@@ -16,6 +17,8 @@ from reconciliator.loaders.base import (
     LoaderCapabilities,
     RecordLoader,
 )
+
+logger = logging.getLogger(__name__)
 
 # --- MARC bibliographic ---------------------------------------------------
 
@@ -208,7 +211,10 @@ def _add_constituents(
     if profile is None or not ctx.writes_constituent_entities:
         return
 
-    from reconciliator.loaders.aggregates import build_embodied_constituents
+    from reconciliator.loaders.aggregates import (
+        build_embodied_constituents,
+        reassign_constituent_contributions,
+    )
     from reconciliator.loaders.marcxml import (
         extract_marc_constituents,
         marc_main_entry_name,
@@ -220,6 +226,7 @@ def _add_constituents(
     if not constituents:
         return
 
+    main_entry = marc_main_entry_name(item)
     rows = build_embodied_constituents(
         constituents,
         container_work=work,
@@ -229,13 +236,30 @@ def _add_constituents(
         language=expression.language or "und",
         work_type=work.work_type,
         content_type=expression.content_type,
-        container_creator=marc_main_entry_name(item),
+        container_creator=main_entry,
         serialization_engine=ctx.serialization_engine,
     )
     record.works.extend(rows.works)
     record.expressions.extend(rows.expressions)
     record.associations.extend(rows.associations)
     record.relationships.extend(rows.relationships)
+
+    # Only once the constituent works exist: in `keys_only` there is nowhere for
+    # the contribution to go, and dropping it would lose the agent link.
+    moved = reassign_constituent_contributions(
+        agents=record.agents,
+        contributions=record.contributions,
+        constituents=constituents,
+        rows=rows,
+        container_work_uri=work.work_uri,
+        protected_name=main_entry,
+    )
+    if moved:
+        logger.debug(
+            "Moved %d contribution(s) from %s to their own constituent works.",
+            moved,
+            work.work_uri,
+        )
 
 
 # --- capability declarations ----------------------------------------------

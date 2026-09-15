@@ -375,3 +375,131 @@ def test_a_component_shaped_constituent_is_not_emitted_yet():
     record = load_record(article, _ctx("entities"))
     assert len(record.works) == 1
     assert record.relationships == []
+
+
+# --- stage 5: whose contribution is it -----------------------------------
+
+ANTHOLOGY = etree.fromstring(
+    """<record xmlns="http://www.loc.gov/MARC21/slim">
+      <leader>00000cam a2200000 i 4500</leader>
+      <controlfield tag="001">ANTH-1</controlfield>
+      <controlfield tag="008">200101s2020    fi |||||||||||||||fin d</controlfield>
+      <datafield tag="245" ind1="0" ind2="0">
+        <subfield code="a">Suomalaisia novelleja</subfield></datafield>
+      <datafield tag="700" ind1="1" ind2="2"><subfield code="a">Waltari, Mika</subfield>
+        <subfield code="t">Kuun maisema</subfield></datafield>
+      <datafield tag="700" ind1="1" ind2="2"><subfield code="a">Canth, Minna</subfield>
+        <subfield code="t">Agnes</subfield></datafield>
+      <datafield tag="700" ind1="1" ind2=" "><subfield code="a">Virtanen, Liisa</subfield>
+        <subfield code="e">toimittaja</subfield></datafield>
+    </record>""".encode()
+)
+
+#: A composer who is both the album's main entry and named beside one of its
+#: own pieces.
+OWN_WORKS = etree.fromstring(
+    """<record xmlns="http://www.loc.gov/MARC21/slim">
+      <leader>00000cjm a2200000 i 4500</leader>
+      <controlfield tag="001">ALB-9</controlfield>
+      <controlfield tag="007">sd fsngnnmmned</controlfield>
+      <controlfield tag="008">200101s2020    fi |||||||||||||||fin d</controlfield>
+      <datafield tag="100" ind1="1" ind2=" ">
+        <subfield code="a">Rautavaara, Einojuhani</subfield>
+        <subfield code="e">säveltäjä</subfield></datafield>
+      <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Teoksia</subfield></datafield>
+      <datafield tag="336" ind1=" " ind2=" "><subfield code="b">prm</subfield></datafield>
+      <datafield tag="700" ind1="1" ind2="2">
+        <subfield code="a">Rautavaara, Einojuhani</subfield>
+        <subfield code="t">Cantus arcticus</subfield></datafield>
+      <datafield tag="700" ind1="1" ind2="2"><subfield code="a">Sibelius, Jean</subfield>
+        <subfield code="t">Finlandia</subfield></datafield>
+    </record>""".encode()
+)
+
+
+def _contributions(record: DecomposedRecord) -> set[tuple[str, str, bool]]:
+    """(agent name, work title or URI, is_primary) for every work contribution."""
+    title_by_uri = {w.work_uri: w.title for w in record.works}
+    name_by_uri = {a.agent_uri: a.name for a in record.agents}
+    return {
+        (
+            name_by_uri.get(c.agent_uri or "", "?"),
+            title_by_uri.get(c.entity_uri or "", c.entity_uri or "?"),
+            bool(c.is_primary),
+        )
+        for c in record.contributions
+        if c.entity_type == "work"
+    }
+
+
+def test_an_anthologys_story_authors_were_stored_as_its_own_authors():
+    """The defect, in `keys_only`: Waltari and Canth as primary authors of
+    "Suomalaisia novelleja", which neither of them wrote."""
+    assert _contributions(load_record(ANTHOLOGY, _ctx("keys_only"))) == {
+        ("Waltari, Mika", "Suomalaisia novelleja", True),
+        ("Canth, Minna", "Suomalaisia novelleja", True),
+    }
+
+
+def test_each_story_author_now_contributes_to_their_own_story():
+    assert _contributions(load_record(ANTHOLOGY, _ctx("entities"))) == {
+        ("Waltari, Mika", "Kuun maisema", True),
+        ("Canth, Minna", "Agnes", True),
+    }
+
+
+def test_an_editor_stays_with_the_volume():
+    """A 700 without `$t` is a plain added entry: the editor edited the volume,
+    and nothing about this fix touches them."""
+    record = load_record(ANTHOLOGY, _ctx("entities"))
+    editor = next(c for c in record.contributions if c.role == "edt")
+    assert editor.entity_type == "expression"
+
+
+def test_the_agent_rows_are_kept():
+    """Waltari is a real agent and carries the `$0`/`$1` authority links. What
+    was wrong is the tier the contribution named, not the agent."""
+    for mode in ("keys_only", "entities"):
+        record = load_record(ANTHOLOGY, _ctx(mode))
+        assert [a.name for a in record.agents] == [
+            "Waltari, Mika",
+            "Canth, Minna",
+            "Virtanen, Liisa",
+        ]
+
+
+def test_the_main_entry_keeps_its_contribution_and_the_constituent_gains_one():
+    """A composer's album listing his own pieces: he contributed both, so this is
+    a second contribution rather than a move."""
+    got = _contributions(load_record(OWN_WORKS, _ctx("entities")))
+    assert ("Rautavaara, Einojuhani", "Teoksia", True) in got
+    assert ("Rautavaara, Einojuhani", "Cantus arcticus", True) in got
+    assert ("Sibelius, Jean", "Finlandia", True) in got
+    # And Sibelius stops being an author of the album he has one piece on.
+    assert ("Sibelius, Jean", "Teoksia", True) not in got
+
+
+def test_nothing_moves_in_keys_only_mode():
+    """There is nowhere for the contribution to go, and dropping it would lose
+    the agent link."""
+    assert _contributions(load_record(OWN_WORKS, _ctx("keys_only"))) == {
+        ("Rautavaara, Einojuhani", "Teoksia", True),
+        ("Sibelius, Jean", "Teoksia", True),
+    }
+
+
+def test_the_blocking_keys_do_not_move():
+    """Deliberately out of scope. `author_key` comes from the parsed agent list,
+    not from contributions, and the target path shares that derivation without
+    carrying a constituent profile - so changing it would make the two sides
+    disagree. See the plan's open questions."""
+    keys = {
+        mode: sorted(
+            (k.key_type, k.key_value)
+            for k in load_record(ANTHOLOGY, _ctx(mode)).entity_keys
+            if k.key_type in ("author", "work", "title_stem")
+        )
+        for mode in ("keys_only", "entities")
+    }
+    assert keys["keys_only"] == keys["entities"]
+    assert ("author", "waltari") in keys["entities"]

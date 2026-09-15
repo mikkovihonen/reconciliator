@@ -17,6 +17,8 @@ from typing import Optional
 
 from reconciliator.constituents.record import Constituent
 from reconciliator.models import (
+    AgentEntity,
+    ContributionEntity,
     ExpressionContentType,
     ExpressionEntity,
     ManifestationEntity,
@@ -199,6 +201,112 @@ def build_embodied_constituents(
     if rows.works:
         _serialize(rows, serialization_engine)
     return rows
+
+
+def reassign_constituent_contributions(
+    *,
+    agents: list[AgentEntity],
+    contributions: list[ContributionEntity],
+    constituents: list[Constituent],
+    rows: ConstituentRows,
+    container_work_uri: str,
+    protected_name: Optional[str] = None,
+) -> int:
+    """Move a constituent's creator off the container work and onto its own.
+
+    A 7XX carrying `$t` is a name-title analytic entry: the agent wrote the
+    constituent, not the volume. Both were filed against the container, so an
+    anthology's story authors were stored as *its* primary authors —
+
+        contribution entity_type=work role=aut primary=True agent=Waltari, Mika
+        contribution entity_type=work role=aut primary=True agent=Canth, Minna
+
+    — for "Suomalaisia novelleja", which neither of them wrote.
+
+    The agent rows stay: Waltari is a real agent and carries the `$0`/`$1`
+    authority links. What was wrong is the tier the contribution named. Returns
+    the number of contributions moved, for logging.
+
+    Whether a field's agent contributes to the container is the profile's call
+    (`contributes_to_container`), because a catalogue that lists an anthology's
+    authors in 7XX `$t` and *means* them as the volume's contributors exists too.
+    The record's main entry is never moved: a composer can be both the album's
+    1XX and the creator named beside one of its tracks.
+    """
+    work_uri_by_creator = _creator_index(constituents, rows)
+    if not work_uri_by_creator:
+        return 0
+
+    name_by_agent_uri = {a.agent_uri: a.name for a in agents if a.agent_uri}
+    protected = _fold(protected_name) if protected_name else None
+    moved = 0
+    added: list[ContributionEntity] = []
+
+    for contribution in contributions:
+        if contribution.entity_type != "work":
+            continue
+        if contribution.entity_uri and contribution.entity_uri != container_work_uri:
+            continue
+        name = name_by_agent_uri.get(contribution.agent_uri or "")
+        if not name:
+            continue
+        folded = _fold(name)
+        target = work_uri_by_creator.get(folded)
+        if not target:
+            continue
+
+        if protected and folded == protected:
+            # The record's main entry, named again beside one of its own
+            # constituents: a composer's album listing his own pieces. He
+            # contributed both, so this is a second contribution rather than a
+            # move - the container keeps its main entry and the constituent gets
+            # its creator.
+            added.append(
+                ContributionEntity(
+                    entity_type="work",
+                    entity_id=0,
+                    agent_id=0,
+                    entity_uri=target,
+                    agent_uri=contribution.agent_uri,
+                    role=contribution.role,
+                    is_primary=True,
+                )
+            )
+            continue
+
+        contribution.entity_uri = target
+        # Primary of the constituent, which is what it actually is: a story's
+        # author is its main entry even when the volume has one of its own.
+        contribution.is_primary = True
+        moved += 1
+
+    contributions.extend(added)
+    return moved + len(added)
+
+
+def _creator_index(
+    constituents: list[Constituent], rows: ConstituentRows
+) -> dict[str, str]:
+    """Folded creator name to constituent work URI, for creators the profile says
+    do not contribute to the container.
+
+    Keyed by name because that is what a contribution has to match on; a creator
+    named beside two constituents in one record maps to the first, since one
+    contribution row cannot name two works.
+    """
+    index: dict[str, str] = {}
+    by_title = {_fold(w.title): w.work_uri for w in rows.works}
+    for constituent in constituents:
+        if constituent.contributes_to_container or not constituent.creator:
+            continue
+        work_uri = by_title.get(_fold(constituent.title))
+        if work_uri:
+            index.setdefault(_fold(constituent.creator), work_uri)
+    return index
+
+
+def _fold(value: str) -> str:
+    return " ".join(value.strip().casefold().replace(",", " ").split())
 
 
 def _serialize(rows: ConstituentRows, engine: Optional[object]) -> None:

@@ -363,9 +363,7 @@ Each is its own diff with its own verification, in this order:
 2. ✅ **The profile mechanism.** *Done — see the log below.*
 3. ✅ **Profile-driven MARC extraction.** *Done — see the log below.*
 4. ✅ **Shape A emission.** *Done — see the log below.*
-5. **The contributor fix** — a 7XX with `$t` stops contributing to the container
-   where the profile says `contributes_to_container: false` — with a measured
-   before/after on matching, alone in its diff.
+5. ✅ **The contributor fix.** *Done — see the log below.*
 6. **Shape B**: `container_id` resolution for records that are themselves parts,
    through the profile's `container_key`, plus `component_type`.
 7. **BIBFRAME `bf:hasPart`** as a predicate-carrying profile, including the
@@ -403,6 +401,11 @@ stages 2-4 and a wrong answer is a config edit rather than a rewrite.
    `manifestations.work_id` is nullable, so both are expressible; an article's
    manifestation pointing at the article's work is the FRBR-correct answer and
    the one that makes `get_manifestations_for_work` useless for the container.
+8. **Should an aggregate's `author_key` come from its first analytic entry?**
+   Today an anthology's key is its first story author's surname, so two
+   catalogues listing the same stories in a different order derive different
+   keys and never block together. Changing it needs the target path to carry a
+   constituent profile, because both sides share one derivation — see stage 5.
 
 ---
 
@@ -663,3 +666,70 @@ declarations, and a 773 skipped rather than half-written.
 
 757 → **776 passing**, lint clean, legacy analytic parity still PASS, pipeline
 unchanged.
+
+## Stage 5 ✅ COMPLETE
+
+A 7XX carrying `$t` is a name-title analytic entry: the agent wrote the
+constituent, not the volume. Both were filed against the container, so an
+anthology's story authors were stored as its own primary authors. Measured on the
+same record, before and after:
+
+```
+mode=keys_only                                    mode=entities
+  Waltari  -> 'Suomalaisia novelleja' primary       Waltari  -> 'Kuun maisema' primary
+  Canth    -> 'Suomalaisia novelleja' primary       Canth    -> 'Agnes'        primary
+  Virtanen -> expression, role=edt                  Virtanen -> expression, role=edt
+blocking keys identical in both modes
+```
+
+The editor — a 700 with no `$t` — is untouched, which is the point of making it a
+profile decision rather than a rule about 7XX.
+
+### The agent rows stay
+
+Waltari is a real agent and carries the `$0`/`$1` authority links. What was wrong
+is the *tier the contribution named*, so the fix moves contributions and deletes
+nothing.
+
+### A composer's own album is a copy, not a move
+
+`marc_enhanced` names the 1XX as protected, and the first implementation simply
+skipped it — which left a composer's own piece with no creator at all on an album
+listing his own works. The main-entry case now *adds* a contribution to the
+constituent and leaves the container's intact, because he contributed both:
+
+```
+Rautavaara -> 'Teoksia'          primary   (container, kept)
+Rautavaara -> 'Cantus arcticus'  primary   (constituent, added)
+Sibelius   -> 'Finlandia'        primary   (moved off 'Teoksia')
+```
+
+### What this stage deliberately does *not* change
+
+I said earlier that this fix would change aggregate works' author keys and move
+matching results. It does not, and the reason matters: `author_key` comes from
+`parsed["agents"][0]`, not from contributions, and `build_target_record_from_marc`
+shares that derivation. The target path carries no constituent profile, so
+changing the key on the ingest side alone would make the two sides disagree about
+the same record and break tier-2 domain-key matching for exactly the records this
+plan is about.
+
+So the blocking keys are byte-identical in every mode — asserted — and "should an
+aggregate's author key come from its first analytic entry at all?" is now open
+question 8. It needs the target path to carry a profile, which is its own change.
+
+### Verified
+
+7 more tests (26 in `tests/test_aggregate_emission.py`): the defect in
+`keys_only`, the fix in `entities`, the editor untouched, agent rows kept, the
+main-entry copy, nothing moving in `keys_only`, and the blocking keys pinned.
+776 → **783 passing**, lint clean, pipeline unchanged.
+
+### One finding, filed rather than fixed
+
+The relator registry does not fold diacritics: a source writing `säveltäjä`
+resolves to `cmp`, and one writing the ASCII-folded `saveltaja` stores the raw
+term. The project has `fold_label` and a `preserved_diacritics` setting, so the
+machinery exists. Out of this stage's scope — it belongs with relator
+normalisation, not with aggregates — but it is a live gap for any source that
+ASCII-folds its Finnish.
