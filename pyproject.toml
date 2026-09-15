@@ -36,6 +36,10 @@ dev = [
     "zensical>=0.0.60",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [project.scripts]
 reconciliator = "reconciliator:main"
 
