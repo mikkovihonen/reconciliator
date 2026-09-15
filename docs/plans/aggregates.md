@@ -58,9 +58,11 @@ extent within the container, so it gets its own Work, Expression *and*
 Manifestation, the last carrying `container_id`, `is_component=True`,
 `component_type` and its own `pagination`.
 
-The source field decides the shape:
+Which shape a constituent takes is **per-source configuration**, not a property
+of the format — see the next section. For orientation, this is how the sources in
+hand express containment today:
 
-| source | shape | today |
+| source field | usual shape | today |
 |---|---|---|
 | MARC 505 `$t` (enhanced contents) | A | `analytic_title` key only |
 | MARC 700/710 `$t` (analytic added entry) | A | `analytic` key, **plus a spurious contributor — see below** |
@@ -71,6 +73,112 @@ The source field decides the shape:
 Shape B for 773 is the half-built path: the component knows its host through the
 `citation` key, and `container_id` is never resolved, so the container does not
 know its parts and the hierarchy cannot be walked in either direction from SQL.
+
+## Extraction is per-source configuration
+
+Two sources in the same format do not agree about constituents. Melinda writes
+enhanced 505s; a sound-recording database keeps tracks in its own conventions
+with durations; KAVI's EN 15907 has episodes of a series; Yle ships JSON; a BFFI
+export uses `bf:hasPart`. Plenty of sources have no aggregates at all, and for
+those, guessing is worse than doing nothing. So the fields to read, the shape
+they produce and the ordering they carry are **configuration owned by the
+source**, and the code is one profile-driven extractor rather than a chain of
+per-source special cases.
+
+This is the mechanism `schema_profile` and `normalization` already establish on
+`OAIIngestConfig`: a global default, a bundled profile by name, and a per-source
+override.
+
+```yaml
+ingest_oai:
+  melinda:
+    format: marcxml
+    constituents: marc_enhanced        # bundled name, or a path to a YAML profile
+    constituents_mode: entities        # off | keys_only | entities
+  fono:
+    format: marcxml
+    constituents: profiles/fono.yaml   # this source's own conventions
+  kavi:
+    format: en15907
+    constituents: off                  # first-class: silence must not mean "guess"
+```
+
+Bundled profiles live in `src/reconciliator/defaults/constituent_profiles/*.yaml`,
+beside `defaults/bibframe_profiles/`, and resolve through
+`get_constituent_profile(name_or_path)` with the same three steps as
+`get_profile`: an existing file path wins, then an alias map, then a bundled
+name, then an error that lists what is available.
+
+A profile is declarative:
+
+```yaml
+name: marc_enhanced
+shape: embodied                    # default shape for entries below
+dedup: normalized_title            # none | normalized_title | title_and_creator
+max_per_record: 100
+
+fields:                            # in precedence order; richer entries win dedup
+  - tag: "505"
+    indicators: {ind1: "0", ind2: "0"}    # enhanced contents only
+    title: "t"
+    creator: "r"
+    duration: "g"
+    ordinal: position                     # position | subfield:<code> | none
+  - tag: "700"
+    indicators: {ind2: "2"}               # analytic added entry
+    title: "t"
+    creator: "a"
+    duration: "g"
+    contributes_to_container: false       # the agent is the constituent's, not the album's
+  - tag: "710"
+    indicators: {ind2: "2"}
+    title: "t"
+    creator: "a"
+  - tag: "773"                            # this record is itself a part
+    shape: component
+    component_type: article
+    container_key: citation               # resolve the container through this key
+
+extractor: null                    # built-in name or path to .py, for the rest
+```
+
+For RDF sources the same profile shape carries predicates instead of tags
+(`predicate: "bf:hasPart"`), so one mechanism covers MARC, BIBFRAME and anything
+added later; the BIBFRAME *schema* profile keeps owning namespace and class
+questions.
+
+**The escape hatch is the funnel rule, verbatim.** `extractor` is either a
+built-in name or a path to a Python file:
+
+```yaml
+extractor: fono_tracks                            # built-in, by name
+extractor: src/reconciliator/constituents/fono.py # path, config-relative
+extractor: /opt/site/constituents/kavi.py         # path, absolute
+```
+
+A value ending in `.py` or containing a path separator is a path; anything else
+is a built-in name. Extractors resolve when configuration loads, so a bad path or
+an unknown name is a startup error naming the offending *source* rather than a
+source that silently ingests no constituents. This is `funnels.resolve_handler`
+with a different registry, and it should share the resolution code rather than
+copy it — the two differ only in the error message and the built-in table.
+
+Three properties worth stating, because they are what makes this configuration
+rather than a switch statement:
+
+- **A profile describes one source's convention, not a format.** Two MARC sources
+  can and will disagree; that is the point.
+- **Shape is per field entry**, defaulting to the profile. One source can yield
+  embodied constituents from its 505s *and* component manifestations from its
+  773-bearing records.
+- **`off` is first-class**, and is the default for any source that names no
+  profile, so adding this feature changes nothing for a source nobody has
+  described yet.
+
+The loader's `LoaderCapabilities` should declare which profile it ran under and
+whether constituents were produced, so `check_output` can verify that a profile
+promising ordinals actually yielded ordered rows — the same declared-and-checked
+contract the loader interface settled on.
 
 ## Identity
 
@@ -155,20 +263,25 @@ sense rather than one global predicate map.
 
 ## Extraction and assembly
 
-Follow the shape the loader contract settled on: **format-specific extraction,
-shared assembly.**
+The shape the loader contract settled on: **configuration decides what to read,
+shared code decides what it becomes.**
 
-- Extend `extract_marc_analytics` into an ordered `Constituent` record:
-  `title`, `creator`, `ordinal`, `disc`, `duration`, `pagination`, `source_tag`,
-  `role`. It currently returns `(title, creator)` and discards 505 `$g`
-  (duration), 505 `$r` (responsibility) and 700 `$g`.
-- **Dedup 505 against 700.** The album above emitted `analytic` for
+- One profile-driven extractor per format family produces an ordered
+  `Constituent`: `title`, `creator`, `ordinal`, `disc`, `duration`,
+  `pagination`, `shape`, `component_type`, `source_field`,
+  `contributes_to_container`. `extract_marc_analytics` becomes its MARC
+  implementation; it currently returns `(title, creator)` and discards 505 `$g`
+  (duration), 505 `$r` (responsibility) and 700 `$g`, and it reads *any* 505
+  rather than the indicators a profile names.
+- **Dedup is a profile setting.** The album above emitted `analytic` for
   "Cantus arcticus" twice — once from the 700 `$t` with a creator, once from the
-  505 `$t` without one. Match on normalised title, keep the richer entry.
+  505 `$t` without one. `dedup: normalized_title` keeps the richer entry; a
+  source that legitimately repeats a title can say `none`.
 - New `loaders/aggregates.py`, beside `loaders/subjects.py`: a `Constituent` list
   in, and `(works, expressions, associations, relationships, entity_keys)` out,
-  for both shapes. Both loaders call it, so the two formats cannot disagree about
-  what a constituent becomes.
+  for both shapes. Every loader and every custom extractor funnels through it, so
+  no source can invent its own idea of what a constituent becomes — which is the
+  same division that stopped the three formats normalising differently.
 - Keep emitting `analytic` and `analytic_title` keys. The tracklist tier's key
   lookup is cheap and works; the entity rows are additive, not a replacement.
 
@@ -189,6 +302,12 @@ exist as entities, that agent belongs to the constituent work, not the container
 This is the largest behaviour change in the plan: it removes contributors from
 aggregate works and changes their author keys, which moves matching results. It
 needs its own diff and a before/after on the fixtures.
+
+It is also the one place where a source could reasonably disagree, which is why
+`contributes_to_container` is a per-field profile setting rather than a rule. A
+catalogue that lists an anthology's authors in 700 `$t` *and* means them as the
+volume's contributors can say so; Melinda practice, as far as the fixtures show,
+does not.
 
 **`_constituents` mode `"resolve"` hardcodes `work_type="text"`**
 (`funnels/engine.py`), so album tracks could never resolve even if their works
@@ -213,16 +332,29 @@ lookup per title.
 
 ## Config
 
+Two levels, matching `normalization`: a global default and a per-source override.
+
 ```yaml
 ingest:
-  constituents: entities      # off | keys_only | entities
-  max_constituents_per_record: 100
+  # The default for any source that names none. `off` means a source nobody has
+  # described yet behaves exactly as it does today.
+  constituents: marc_enhanced
+  constituents_mode: entities        # off | keys_only | entities
+
+ingest_oai:
+  melinda:
+    constituents: marc_enhanced
+    constituents_mode: entities
+  fono:
+    constituents: profiles/fono.yaml
+  kavi:
+    constituents: off
 ```
 
-`keys_only` is today's behaviour, kept so the change can be bisected. Default
-`entities`, because there is nothing in production to migrate; the cap exists
-because a real 505 can list a 500-track box set, and one malformed record should
-not be able to write 500 works.
+`keys_only` is today's behaviour, kept so the change can be bisected per source.
+`max_per_record` lives in the profile rather than here, because the reason for a
+cap is a source's own practice: a real 505 can list a 500-track box set, and one
+malformed record should not be able to write 500 works.
 
 ## Stages
 
@@ -230,39 +362,61 @@ Each is its own diff with its own verification, in this order:
 
 1. ✅ **Repository binding and the relationship pair.** *Done — see the log
    below.*
-2. **`Constituent` extraction from MARC 505/700/710**, ordered, with duration and
-   505-vs-700 dedup. No entities emitted yet; asserted against fixtures.
-3. **Shape A emission** behind the config flag, through `loaders/aggregates.py`.
-   Verified: an album yields 1 + N works and N ordered M-E rows; two albums
-   sharing a track converge on one constituent work row; `delete_source` still
-   removes everything.
-4. **The contributor fix** — a 7XX with `$t` stops contributing to the container —
-   with a measured before/after on matching, alone in its diff.
-5. **Shape B**: `container_id` resolution for 773-bearing records, 774 if Melinda
-   uses it, `component_type` derived from the container's work type.
-6. **BIBFRAME `bf:hasPart`** via new profile fields, including the series
-   mis-mapping fix.
-7. **Rewire the consumers**: funnel G and recorded sound read stored rows;
+2. **The profile mechanism.** `ConstituentProfile` and `ConstituentField`
+   models, `get_constituent_profile(name_or_path)`, extractor resolution shared
+   with `funnels.resolve_handler`, the two config fields on `OAIIngestConfig` and
+   the global default, and `config.example.yaml` documenting all of it. Bundled
+   profiles: `marc_enhanced`, `marc_none`, `bibframe_haspart`. No extraction yet
+   — verified by loading every bundled profile, resolving a built-in and a path
+   extractor, and asserting that a bad name fails at startup naming the source.
+3. **Profile-driven MARC extraction** into an ordered `Constituent`: indicator
+   filters, durations, ordinals, dedup. Still no entities; asserted against
+   fixtures and against a profile that selects nothing.
+4. **Shape A emission** through `loaders/aggregates.py`, gated by
+   `constituents_mode`. Verified: an album yields 1 + N works and N ordered M-E
+   rows; two albums sharing a track converge on one constituent work row;
+   `delete_source` still removes everything; `mode: keys_only` reproduces today's
+   output exactly.
+5. **The contributor fix** — a 7XX with `$t` stops contributing to the container
+   where the profile says `contributes_to_container: false` — with a measured
+   before/after on matching, alone in its diff.
+6. **Shape B**: `container_id` resolution for records that are themselves parts,
+   through the profile's `container_key`, plus `component_type`.
+7. **BIBFRAME `bf:hasPart`** as a predicate-carrying profile, including the
+   series mis-mapping fix in the three schema profiles.
+8. **Rewire the consumers**: funnel G and recorded sound read stored rows;
    capability declarations, funnel reachability, `pipeline_check`.
-8. **Decide indexing and clustering treatment**, with a measurement rather than a
+9. **Decide indexing and clustering treatment**, with a measurement rather than a
    guess.
 
-## Open questions — cataloguing, not code
+## Open questions
 
-These gate stages 2 and 5 and need real records, not reasoning:
+Making extraction configuration demotes most of these: they now decide *what a
+profile says* for one source, not what the code does, so none of them blocks
+stages 2-4 and a wrong answer is a config edit rather than a rewrite.
+
+**Per source, answerable from records** — each one fills in a profile:
 
 1. **Melinda's 505 practice.** Enhanced (`ind2=0`, one `$t` per constituent) or
-   basic (a single `$a` blob with " -- " separators)? The basic form cannot be
-   split reliably, and a wrong split writes wrong works.
-2. **Is 774 used at all** in Melinda or Fono? If not, stage 5 is 773-only.
+   basic (a single `$a` blob with " -- " separators)? If both occur, the profile
+   filters on indicators and the basic form yields nothing rather than a bad
+   split — which is why the indicator filter is in the profile and not optional.
+2. **Is 774 used at all** in Melinda or Fono? If not, no profile names it.
 3. **Durations**: does Fono or Yle give track durations, and in which subfield?
-4. **Does a 700 `$t` always carry `ind2=2`** in Finnish practice, or is `ind2`
-   blank also used for analytics? The contributor fix in stage 4 depends on being
-   able to tell an analytic entry from a plain added entry.
+4. **Does a 700 `$t` always carry `ind2=2`** in Finnish practice? This sets the
+   indicator filter and `contributes_to_container` for stage 5.
+
+**Genuinely open design questions**, which configuration does not answer:
+
 5. **Should a constituent work inherit the container's subjects?** It changes
-   agent footprints, since the subject histogram is stamped per record.
+   agent footprints, since the subject histogram is stamped per record. Arguably
+   a profile setting too, but the default matters more than the switch.
 6. **Do anthology constituents belong in the target-side `MatchRecord`** as
    keys, or only in the store?
+7. **Does a component manifestation belong to the container's work, or its own?**
+   `manifestations.work_id` is nullable, so both are expressible; an article's
+   manifestation pointing at the article's work is the FRBR-correct answer and
+   the one that makes `get_manifestations_for_work` useless for the container.
 
 ---
 
