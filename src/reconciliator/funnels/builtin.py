@@ -388,7 +388,10 @@ BUILTIN_SPECS: list[FunnelSpec] = [
     ),
     FunnelSpec(
         id="funnel_pp_heritage_3d",
-        when={"work_type": ["heritage_model"]},
+        # Also on the key, which the loader emits from 347 digital file formats.
+        # `determine_work_type` never returns "heritage_model", so the work_type
+        # alternative alone made this funnel unreachable from MARC.
+        when=[{"work_type": ["heritage_model"]}, {"has_key": ["heritage_model"]}],
         identifier_schemes=["asset_hash", "model_uri"],
         asserts_relationship="digital_twin_of",
         work_types=['heritage_model'],

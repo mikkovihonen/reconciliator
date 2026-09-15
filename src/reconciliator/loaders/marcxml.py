@@ -839,6 +839,12 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
         if "rahat" in gh or "mitalit" in gh:
             return "numismatic"
 
+    # A 111 meeting main entry is a conference. Without this no MARC record ever
+    # became work_type "conference" or "event", so funnel J was unreachable
+    # despite 111 already being parsed as a corporate agent.
+    if _get_datafields(record_elem, "111"):
+        return "conference"
+
     # Music
     if l06 in ("c", "d", "j"):
         return "music"
@@ -2056,6 +2062,23 @@ def derive_domain_keys(
             start_page = q
             break
     _add("citation", compute_host_citation_key(first_issn, pub_year, start_page, author_surname))
+
+    # Translators, from the same relator test the serialization engine already
+    # uses. The key type was declared on MatchRecord and consumed by the
+    # clusterer's pairwise scoring and funnel HH's dispatch, but nothing ever
+    # emitted it - so both read an always-empty value.
+    translator_names = [
+        a.get("name")
+        for a in agents
+        if "trl" in (a.get("role_counts") or {}) or a.get("role") == "trl"
+    ]
+    if translator_names:
+        _add(
+            "translators_signature",
+            " ".join(
+                sorted(compute_author_key(n, None) for n in translator_names if n)
+            ).strip(),
+        )
 
     _add("patent", (idents.get("patent_number") or [None])[0])
     _add("fingerprint", (idents.get("fingerprint") or [None])[0])
