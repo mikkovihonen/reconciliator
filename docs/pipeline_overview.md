@@ -482,6 +482,33 @@ tiers 2 and 3, which is how the volume-normalisation defect in
 `check_volume_match` came to light: raw string equality rejected every candidate
 whose volume was merely spelled differently.
 
+Completing the loader contract closed six more of the same family, each a piece
+of code that *looked* connected:
+
+- **`ContributionEntity.role` on the MARC path** was read from a dict key nothing
+  ever set, so every contribution row came out `aut`/primary/work. The expression
+  tier therefore held no contributions at all, and the matcher's
+  expression-level contributor lookup had no name to compare.
+- **`AgentEntity.role_counts` for BibFrame** was read by the enricher and never
+  written by the decomposer.
+- **A BIBFRAME role's label** was never read, so the role stored was rdflib's
+  blank-node label: a different value on every parse.
+- **`works.subjects_json`** held bare heading strings while both of its consumers
+  expected dicts — `work_serialization.j2` renders `pref_label`, so no subject
+  term reached the text BM25 and the dense index score, and
+  `find_classification_evidence` looks for `code`/`scheme` and failed silently
+  inside its own try/except.
+- **`bf:subject`** was read on the target path and not on the ingest path, so a
+  BIBFRAME work was stored with no subjects whatsoever.
+- **Eleven `startswith("_:")` guards** in the BibFrame decomposer, plus one in
+  the agent path and one on the target path, could never fire, because
+  `str(BNode())` has no prefix.
+
+The unifying symptom: a field that is written but not read, or read but not
+written, is invisible until something compares the two formats' output. That is
+what `LoaderCapabilities` plus `check_output` are for, and why the reachability
+test now reads the declaration instead of inferring from source.
+
 ### A note on how these accumulated
 
 None of the ten were wrong when written; they are the shape of an API built
