@@ -901,6 +901,29 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     if date1 and int(date1) < 1800:
         return "early_print"
 
+    # Web archive and digital surrogate, from 857 "elektronisen arkiston sijainti
+    # ja käyttö" - the field that exists for material "saatavissa verkkoarkistossa
+    # tai digitaalisessa arkistossa", as distinct from 856's ordinary electronic
+    # location. Its second indicator says what the archived copy IS:
+    #
+    #   # or 0  the described resource itself, held in the archive -> web harvest
+    #   1 or 4  an electronic version of a physical resource       -> surrogate
+    #
+    # 533 "jäljennehuomautus" says the same as indicator 1 in note form.
+    #
+    # Checked after the leader and genre tests on purpose: a digitised map is
+    # still a map, so surrogate-ness only classifies a record that would
+    # otherwise be generic text. That this is a work type at all is arguable -
+    # being a surrogate is a property of the manifestation, not of the work - and
+    # is one of the questions to put to the National Library.
+    for f in _get_datafields(record_elem, "857"):
+        relationship = (f.get("ind2") or " ").strip()
+        if relationship in ("1", "4"):
+            return "preservation_surrogate"
+        return "web_harvest"
+    if _get_datafields(record_elem, "533"):
+        return "preservation_surrogate"
+
     # RDA content type as a work-type signal, before the serial/default fall
     # through. Leader/06 wins where it is specific, but an RDA record is required
     # to carry 336 and many electronic resources carry a generic leader with a
@@ -2142,6 +2165,23 @@ def derive_domain_keys(
                 sorted(compute_author_key(n, None) for n in translator_names if n)
             ).strip(),
         )
+
+    # Bound-with, from 501 "Huomautus julkaisemisesta jonkin kanssa". The RDA
+    # guidance records this as a local field carrying $5 with the holding
+    # library's ISIL code, so it appears in institutional records rather than in
+    # shared Melinda ones - the key is read here because Melinda is not the only
+    # source a corpus comes from. A holdings-level fallback is still needed for
+    # sammelbands described only at item level.
+    for f in _get_datafields(record_elem, "501"):
+        note = _get_subfield(f, "a")
+        if note:
+            _add("sammelband", note)
+        # 014 links the bound-with relationship to the other record.
+        for linked in _get_subfields(f, "5"):
+            _add("sammelband_holder", linked)
+    for f in _get_datafields(record_elem, "014"):
+        for val in _get_subfields(f, "a"):
+            _add("sammelband", val)
 
     _add("patent", (idents.get("patent_number") or [None])[0])
     _add("fingerprint", (idents.get("fingerprint") or [None])[0])

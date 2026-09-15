@@ -37,11 +37,8 @@ LOADER = pathlib.Path(__file__).resolve().parents[1] / "src/reconciliator/loader
 # guess - see docs/plans/wemi_data_structure.md 14.17 for the ones researched so
 # far and the open questions to put to the National Library.
 KNOWN_UNREACHABLE_FROM_MARC = {
-    "funnel_dd_sammelband",            # no 'sammelband' key: bound-with is not parsed
-    "funnel_ee_web_archive",           # no 'web_harvest' work type
     "funnel_g_anthology",              # no 'anthology' work type
     "funnel_gg_broadcast",             # no 'broadcast_program' type, no 'broadcast' key
-    "funnel_ii_preservation_surrogate",  # no 'preservation_surrogate' type (533 unparsed)
     "funnel_jj_medieval_fragment",     # no 'codex_fragment' work type
     "funnel_nn_geodata",               # no 'geodata_service' work type
     "funnel_t_legal",                  # no 'legal' work type, no 'statute' key
@@ -423,3 +420,118 @@ def test_the_accessibility_field_marks_a_braille_book_as_tactile():
         </record>""".encode()
     )
     assert build_target_record_from_marc(record, source="m").work_type == "tactile"
+
+
+# --- rules derived from the Finnish RDA application guidelines -------------
+#
+# Sources:
+#   857  https://marc21.kansalliskirjasto.fi/bib/841-88X.htm
+#        "ELEKTRONISEN ARKISTON SIJAINTI JA KÄYTTÖ ... aineisto tai sen osa on
+#         saatavissa verkkoarkistossa tai digitaalisessa arkistossa"
+#   501/533  .../RDA-sovellusohje/50X-535 Huomautuskentät/
+#   341/532  .../Lisäohjeita/Saavutettavuus/
+
+
+def _marc_with(extra: str, leader: str = "00000cam a2200000 i 4500"):  # noqa: ANN202
+    from lxml import etree
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    return etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>{leader}</leader>
+            <controlfield tag="001">X1</controlfield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Teos</subfield></datafield>
+            {extra}
+        </record>""".encode()
+    )
+
+
+def _work_type_of(extra: str, leader: str = "00000cam a2200000 i 4500") -> str:
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    return build_target_record_from_marc(_marc_with(extra, leader), source="m").work_type
+
+
+def test_857_marks_a_resource_held_in_a_web_archive():
+    """Second indicator 0 or blank: the linked copy is the described resource."""
+    for ind2 in ("0", " "):
+        extra = (
+            f'<datafield tag="857" ind1="4" ind2="{ind2}">'
+            '<subfield code="u">https://verkkoarkisto.kansalliskirjasto.fi/va/1</subfield>'
+            "</datafield>"
+        )
+        assert _work_type_of(extra) == "web_harvest"
+
+
+def test_857_second_indicator_1_marks_a_digital_surrogate():
+    """"Aineiston versio": the record describes a physical item and the archived
+    copy is its electronic version - a surrogate, not a born-digital resource."""
+    extra = (
+        '<datafield tag="857" ind1="4" ind2="1">'
+        '<subfield code="u">https://digi.kansalliskirjasto.fi/x</subfield></datafield>'
+    )
+    assert _work_type_of(extra) == "preservation_surrogate"
+
+
+def test_533_reproduction_note_marks_a_surrogate():
+    extra = (
+        '<datafield tag="533" ind1=" " ind2=" ">'
+        "<subfield code=\"a\">Digitoitu näköispainos</subfield></datafield>"
+    )
+    assert _work_type_of(extra) == "preservation_surrogate"
+
+
+def test_an_ordinary_856_online_resource_is_not_a_web_archive():
+    """856 is "elektronisen aineiston sijainti" - every e-book has one.
+
+    Keying the web-archive funnel on an online resource would route the entire
+    electronic collection to it. Only 857 means an archive.
+    """
+    extra = (
+        '<datafield tag="856" ind1="4" ind2="0">'
+        '<subfield code="u">https://example.org/ebook</subfield></datafield>'
+    )
+    assert _work_type_of(extra) == "text"
+
+
+def test_a_digitised_map_stays_a_map():
+    """Surrogate-ness is checked after the leader, so it cannot mask the material.
+
+    Whether "preservation_surrogate" should be a work type at all is an open
+    question - being a surrogate is a property of the manifestation.
+    """
+    extra = '<datafield tag="533" ind1=" " ind2=" "><subfield code="a">Digitoitu</subfield></datafield>'
+    assert _work_type_of(extra, leader="00000cem a2200000 i 4500") == "cartography"
+
+
+def test_501_bound_with_becomes_a_sammelband_key():
+    """501 is a local field carrying $5 with the holding library's ISIL code.
+
+    Read anyway because Melinda is not the only source a corpus comes from; a
+    holdings-level fallback is still needed for sammelbands described only at
+    item level.
+    """
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    extra = (
+        '<datafield tag="501" ind1=" " ind2=" ">'
+        "<subfield code=\"a\">Yhteissidos: Toinen teos</subfield>"
+        '<subfield code="5">FI-Hul</subfield></datafield>'
+    )
+    record = build_target_record_from_marc(_marc_with(extra), source="m")
+    assert record.get_keys("sammelband") == ["Yhteissidos: Toinen teos"]
+    assert record.get_keys("sammelband_holder") == ["FI-Hul"]
+
+
+def test_a_braille_score_is_tactile_not_music():
+    """Project decision: tactile wins over the material it carries.
+
+    `336 $b tcm` is literally "tactile notated music", so the record asserts
+    both. The tactile check runs before the leader, so a braille score - whose
+    Leader/06 may well be "c" - classifies as tactile.
+    """
+    extra = (
+        '<datafield tag="336" ind1=" " ind2=" "><subfield code="b">tcm</subfield>'
+        '<subfield code="2">rdacontent</subfield></datafield>'
+    )
+    assert _work_type_of(extra, leader="00000ccm a2200000 i 4500") == "tactile"
