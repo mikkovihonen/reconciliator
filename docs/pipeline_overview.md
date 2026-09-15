@@ -381,6 +381,22 @@ Ten public methods had no caller anywhere. Each was examined for a place in the
 architecture as it now stands; the verdicts differ, and are recorded here because
 the methods themselves have been removed.
 
+### Aggregates: albums and anthologies
+
+An album or anthology is stored as one work, one expression, one manifestation
+and a bag of constituent *title strings* in `entity_keys`
+(`analytic`, `analytic_title`). The schema has the whole containment model
+already — `manifestations.container_id`, `is_component`, `component_type`, and
+`manifestation_expressions.track_number` / `disc_number` / `duration` — and no
+loader writes any of it, so a tracklist is unordered and the container never
+knows its parts. Planned in
+[plans/aggregates.md](plans/aggregates.md), which also records the three defects
+the investigation turned up: a 700 `$t` name-title entry becomes a *contributor
+of the container* (an anthology's story authors come out as its primary
+authors), `bf:hasPart` is mapped to series membership in all three BIBFRAME
+profiles, and `insert_wemi_batch` binds every M-E association to the first
+expression, so ordered rows would collapse into one.
+
 ### Genuinely useful, and worth building deliberately
 
 **`search_manifestations_fts` — a no-embedder fallback for clustering.**
