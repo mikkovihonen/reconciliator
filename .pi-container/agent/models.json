@@ -52,8 +52,7 @@
           }
         },
         "flags": [
-          "--no-mmap",
-          "--mlock",
+          "--load-mode", "none",
           "--kv-offload",
           "--threads", 8,
           "--threads-batch", 8,
