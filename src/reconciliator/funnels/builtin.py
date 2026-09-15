@@ -162,6 +162,27 @@ BUILTIN_SPECS: list[FunnelSpec] = [
         align_expression=True,
     ),
     FunnelSpec(
+        id="funnel_nn_geodata",
+        # Must precede funnel_l_cartography: a cartographic dataset is also
+        # work_type "cartography", so cartography would otherwise claim it first.
+        # Safe to put earlier because this `when` requires the dataset content
+        # type, which an ordinary map does not carry.
+        # SLM has no genre term for spatial data, and the Finnish guidance
+        # documents no convention for a geodata service, so work_type alone made
+        # this unreachable. The RDA content type `crd` (cartographic dataset) is
+        # the real signal: a cartographic *dataset* is spatial data, as distinct
+        # from `cri`, a cartographic image, which is an ordinary map.
+        when=[
+            {"work_type": ["geodata_service"]},
+            {"content_type": ["cartographic_dataset"]},
+        ],
+        identifier_schemes=["epsg", "service_endpoint"],
+        asserts_relationship="spatial_layer_of",
+        work_types=['geodata_service'],
+        fallback_work_type="geodata_service",
+        match_tier="tier2_spatial_polygon",
+    ),
+    FunnelSpec(
         id="funnel_l_cartography",
         when={"work_type": ["cartography"]},
         identifier_schemes=["sheet_number", "isbn"],
@@ -369,15 +390,6 @@ BUILTIN_SPECS: list[FunnelSpec] = [
         fallback_work_type="critical_edition",
         match_tier="tier2_critical_scholarship",
         confidence=0.92,
-    ),
-    FunnelSpec(
-        id="funnel_nn_geodata",
-        when={"work_type": ["geodata_service"]},
-        identifier_schemes=["epsg", "service_endpoint"],
-        asserts_relationship="spatial_layer_of",
-        work_types=['geodata_service'],
-        fallback_work_type="geodata_service",
-        match_tier="tier2_spatial_polygon",
     ),
     FunnelSpec(
         id="funnel_oo_numismatic",

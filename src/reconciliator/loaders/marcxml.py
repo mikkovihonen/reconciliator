@@ -791,6 +791,52 @@ def iter_marc_record_elements(
 # ---------------------------------------------------------------------------
 
 
+# SLM (Suomalainen lajityyppi- ja muotosanasto) genre/form terms -> WorkType.
+#
+# Recorded in 655 with `$2 slm/fin` per the Sisällönkuvailuopas. Every term below
+# was confirmed to exist in SLM through the Finto API, with its URI noted, rather
+# than invented from a plausible-looking Finnish word - the failure mode this
+# table exists to avoid.
+#
+# Broadcast: SLM has no single "broadcast programme" concept, so the two parent
+# terms and their narrower concepts are listed. The four terms shared between
+# television and radio (dokumenttiohjelmat, lastenohjelmat, musiikkiohjelmat,
+# luonto-ohjelmat) are included because in SLM they sit only under those two
+# parents, so a record carrying one is a broadcast programme either way.
+#
+# Legal: the whole "juridiset teokset" (s1507) branch.
+SLM_WORK_TYPES: dict[str, str] = {
+    # televisio-ohjelmat s1209 and its narrower concepts
+    "televisio-ohjelmat": "broadcast_program",
+    "televisionäytelmät": "broadcast_program",
+    "televisiosarjat": "broadcast_program",
+    "televisioelokuvat": "broadcast_program",
+    "televisio-oopperat": "broadcast_program",
+    # radio-ohjelmat s1416 and its narrower concepts
+    "radio-ohjelmat": "broadcast_program",
+    "radiosarjat": "broadcast_program",
+    "radiosovitukset": "broadcast_program",
+    "kuunnelmat": "broadcast_program",
+    # shared narrower concepts of the two above
+    "dokumenttiohjelmat": "broadcast_program",
+    "lastenohjelmat": "broadcast_program",
+    "musiikkiohjelmat": "broadcast_program",
+    "luonto-ohjelmat": "broadcast_program",
+    # juridiset teokset s1507 and its narrower concepts
+    "juridiset teokset": "legal",
+    "lait": "legal",
+    "asetukset": "legal",
+    "säädöskokoelmat": "legal",
+    "direktiivit": "legal",
+    "valtiosopimukset": "legal",
+    "oikeustapauskokoelmat": "legal",
+    "peruskirjat (juridiset teokset)": "legal",
+    # antologiat s289, whose broader concept is kokoomateokset s963
+    "antologiat": "anthology",
+    "kokoomateokset": "anthology",
+}
+
+
 def determine_work_type(record_elem: etree._Element) -> WorkType:
     """Determine WEMI WorkType from Leader/06-07, 007, 008, 336, 502, and 655."""
     leader_elem = record_elem.find("marc:leader", MARC_NS)
@@ -811,6 +857,18 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     genre_headings = [
         (_get_subfield(f, "a") or "").lower() for f in _get_datafields(record_elem, genre_field)
     ]
+    # Terms taken from SLM (Suomalainen lajityyppi- ja muotosanasto), which the
+    # subject-analysis guidance names as the 655 vocabulary (`$2 slm/fin`), and
+    # verified against Finto rather than guessed. Exact-match first, because
+    # substring matching across this vocabulary collides - "dokumenttiohjelmat"
+    # (broadcast programmes) and "dokumenttielokuvat" (documentary films) share a
+    # stem but are different materials.
+    for gh in genre_headings:
+        term = gh.strip()
+        resolved = SLM_WORK_TYPES.get(term)
+        if resolved:
+            return resolved  # type: ignore[return-value]
+
     for gh in genre_headings:
         if "sarjakuv" in gh or "manga" in gh:
             return "comic"

@@ -37,11 +37,12 @@ LOADER = pathlib.Path(__file__).resolve().parents[1] / "src/reconciliator/loader
 # guess - see docs/plans/wemi_data_structure.md 14.17 for the ones researched so
 # far and the open questions to put to the National Library.
 KNOWN_UNREACHABLE_FROM_MARC = {
-    "funnel_g_anthology",              # no 'anthology' work type
-    "funnel_gg_broadcast",             # no 'broadcast_program' type, no 'broadcast' key
-    "funnel_jj_medieval_fragment",     # no 'codex_fragment' work type
-    "funnel_nn_geodata",               # no 'geodata_service' work type
-    "funnel_t_legal",                  # no 'legal' work type, no 'statute' key
+    # SLM's "katkelmat" (s1210) is the only candidate term, and it carries no
+    # definition and no broader concept in the vocabulary, so it may well mean a
+    # published excerpt rather than a manuscript fragment. Using it would be the
+    # kind of guess this table exists to prevent; it is a question for the
+    # National Library instead. See 14.18 in docs/plans/wemi_data_structure.md.
+    "funnel_jj_medieval_fragment",
 }
 
 
@@ -99,9 +100,30 @@ def _extracted_identifier_schemes() -> set[str]:
 
 @pytest.fixture(scope="module")
 def capabilities() -> dict[str, set[str]]:
+    """What the MARC loader can actually emit.
+
+    Literal `return "..."` statements are only half of it: classification also
+    happens through lookup tables, so their *values* are capabilities too. An
+    earlier version of this fixture read only the literals and so under-reported
+    the loader - it passed while four funnels it claimed were unreachable had
+    just been made reachable through `SLM_WORK_TYPES`. The tables are read from
+    the imported module rather than parsed, so adding an entry cannot be missed.
+    """
+    from reconciliator.loaders.marcxml import (
+        CONTENT_TYPE_WORK_TYPES,
+        RDA_CONTENT_TYPES,
+        SLM_WORK_TYPES,
+    )
+
     caps = {
-        "work_types": _returned_literals("determine_work_type"),
-        "content_types": _returned_literals("determine_content_type"),
+        "work_types": (
+            _returned_literals("determine_work_type")
+            | set(SLM_WORK_TYPES.values())
+            | set(CONTENT_TYPE_WORK_TYPES.values())
+        ),
+        "content_types": (
+            _returned_literals("determine_content_type") | set(RDA_CONTENT_TYPES.values())
+        ),
         "keys": _added_key_types(),
         "identifiers": _extracted_identifier_schemes(),
     }
@@ -535,3 +557,99 @@ def test_a_braille_score_is_tactile_not_music():
         '<subfield code="2">rdacontent</subfield></datafield>'
     )
     assert _work_type_of(extra, leader="00000ccm a2200000 i 4500") == "tactile"
+
+
+# --- SLM genre/form terms (655 $2 slm/fin) --------------------------------
+#
+# Every term confirmed to exist in SLM through the Finto API, with its URI, not
+# inferred from a plausible-looking Finnish word.
+#
+#   televisio-ohjelmat  s1209   radio-ohjelmat  s1416
+#   juridiset teokset   s1507   antologiat      s289 (broader: kokoomateokset s963)
+#
+# Source: https://finto.fi/slm/  |  https://api.finto.fi/rest/v1/slm/
+
+
+def _work_type_for_genre(term: str) -> str:
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+
+    extra = (
+        '<datafield tag="655" ind1=" " ind2="7">'
+        f"<subfield code=\"a\">{term}</subfield>"
+        '<subfield code="2">slm/fin</subfield></datafield>'
+    )
+    return build_target_record_from_marc(_marc_with(extra), source="m").work_type
+
+
+@pytest.mark.parametrize(
+    "term",
+    [
+        "televisio-ohjelmat",
+        "televisiosarjat",
+        "televisionäytelmät",
+        "radio-ohjelmat",
+        "radiosarjat",
+        "kuunnelmat",
+        "dokumenttiohjelmat",
+    ],
+)
+def test_slm_broadcast_terms_classify_as_broadcast(term: str):
+    assert _work_type_for_genre(term) == "broadcast_program"
+
+
+@pytest.mark.parametrize(
+    "term", ["lait", "asetukset", "säädöskokoelmat", "direktiivit", "valtiosopimukset"]
+)
+def test_slm_juridical_terms_classify_as_legal(term: str):
+    """The whole "juridiset teokset" (s1507) branch."""
+    assert _work_type_for_genre(term) == "legal"
+
+
+@pytest.mark.parametrize("term", ["antologiat", "kokoomateokset"])
+def test_slm_anthology_terms_classify_as_anthology(term: str):
+    assert _work_type_for_genre(term) == "anthology"
+
+
+@pytest.mark.parametrize(
+    ("term", "not_broadcast"),
+    [("dokumenttielokuvat", "documentary films, not programmes"),
+     ("elämäkerrat", "biographies"),
+     ("romaanit", "novels")],
+)
+def test_similar_slm_terms_are_not_swept_into_broadcast(term: str, not_broadcast: str):
+    """Why the table is exact-match rather than substring.
+
+    "dokumenttiohjelmat" and "dokumenttielokuvat" share a stem and are different
+    materials; substring matching across SLM would conflate them.
+    """
+    assert _work_type_for_genre(term) != "broadcast_program", not_broadcast
+
+
+def test_a_cartographic_dataset_is_spatial_data_not_a_map():
+    """`crd` is the only real signal for spatial data: SLM has no term for it.
+
+    The geodata spec must also sit ahead of cartography, since a cartographic
+    dataset is work_type "cartography" too and would otherwise be claimed first.
+    """
+    from reconciliator.loaders.marcxml import build_target_record_from_marc
+    from reconciliator.matcher import extract_identifiers_from_target
+
+    def funnel_for(code: str) -> str:
+        extra = (
+            '<datafield tag="336" ind1=" " ind2=" ">'
+            f"<subfield code=\"b\">{code}</subfield>"
+            '<subfield code="2">rdacontent</subfield></datafield>'
+        )
+        record = build_target_record_from_marc(_marc_with(extra), source="m")
+        identifiers = extract_identifiers_from_target(record)
+        fallback = None
+        for spec in BUILTIN_SPECS:
+            if spec.default:
+                fallback = spec
+                continue
+            if spec.claims(record, identifiers):
+                return spec.id
+        return fallback.id
+
+    assert funnel_for("crd") == "funnel_nn_geodata"
+    assert funnel_for("cri") == "funnel_l_cartography"
