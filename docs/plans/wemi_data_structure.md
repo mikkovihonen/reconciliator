@@ -1097,7 +1097,7 @@ pairs — no per-store booleans.
 `pipeline_check.py` output is byte-identical across all three linking modes
 before and after, so the merge changed storage without changing results.
 
-## Phase 14 — Removing TargetRecord and Making Funnels Configurable 📋 PLANNED
+## Phase 14 — Removing TargetRecord and Making Funnels Configurable ✅ COMPLETE
 
 ### 14.1 What the measurement showed
 
@@ -2082,7 +2082,7 @@ failing closed.
 
 583 passing.
 
-### 14.17 Classification rules derived from the Finnish RDA guidelines ✅ IN PROGRESS
+### 14.17 Classification rules derived from the Finnish RDA guidelines ✅ COMPLETE
 
 The eight remaining MARC reachability gaps needed citable cataloguing rules, not
 guesses. Researched against the National Library's own documentation; **five gaps
@@ -2193,7 +2193,7 @@ Phrased for cataloguers, to be lifted as-is.
 
 600 passing.
 
-### 14.18 SLM genre terms verified against Finto 🔬 RESEARCH
+### 14.18 SLM genre terms verified against Finto ✅ COMPLETE
 
 Continuing 14.17. **MARC reachability is now 40 of 41 funnels.**
 
@@ -2244,6 +2244,65 @@ misled: the first was a regex missing a multi-line `_add()`.
 
 KAVI and Yle moving-image sources, the Finna OAI-PMH route and the EN 15907
 mapping are a workstream of their own: see **[kavi.md](kavi.md)**.
+
+### 14.20 Closing sweep ✅ COMPLETE
+
+A last pass for things the refactor left behind, rather than new work.
+
+**Dead configuration.** `OAIIngestConfig.target_database` selected a staging
+database that no longer exists; nothing in `src/` had read it since stage 2
+dropped the staging tables. Two tests asserted it "routes to unified
+WEMIRepository" while setting it to `"corpus"` and `"authority"` and then
+checking the same `db_path` in both - they would have passed with the field
+deleted, which is what made them worthless. Replaced by one test that asserts
+what actually distinguishes a corpus from an authority now: both land in the
+single store, and `authoritative` carries the difference.
+
+**Lint to zero**, from 72 at the start of the session. All of the remainder was
+residue of this phase's own changes: `corpus_db_path` and `vocab_db_path` locals
+pointing at the database Phase 13 merged away, an unused `db_path`, and a
+`URIRef` constant wedged between two import blocks so every later import counted
+as out of place.
+
+**Eleven more keys with readers and no writer.** `translators_signature` (14.18)
+was not alone. These are read by the clusterer's blocking, the matcher's
+identifier derivation, the XML enricher, or a funnel's `has_key` predicate, and
+no loader emits any of them:
+
+> `board_game`, `broadcast`, `ephemera_corp`, `exhibition_event`,
+> `fragment_codex`, `numismatic_issue`, `oral_history`, `podcast`, `statute`,
+> `swhid`, `web_seed`
+
+They are *listed*, not deleted and not guessed at. Deleting would remove
+capability that becomes live the moment each rule lands; guessing at eleven MARC
+rules is the failure mode 14.17-14.18 exist to avoid. `KEYS_READ_BUT_NEVER_WRITTEN`
+in `tests/test_funnel_reachability.py` pins the set and fails in both directions,
+and a second test asserts that no funnel is reachable *only* through an unwritten
+key.
+
+**619 passing, lint clean.**
+
+### 14.21 What is genuinely left
+
+Everything below is blocked on a cataloguing decision, not on engineering.
+
+| item | blocked on |
+|---|---|
+| `funnel_jj_medieval_fragment` reachability | whether SLM *katkelmat* (s1210) means a manuscript fragment or a published excerpt - no definition, no broader concept |
+| the eleven keys above | one MARC rule each, from the RDA application guidelines |
+| the six questions in 14.17 | the National Library |
+| moving-image work identity | [kavi.md](kavi.md) - a separate workstream, and nationally blocked on the Teos MARC 21 project |
+
+Two engineering items were considered and deliberately not done:
+
+- **Agent deduplication** (14.11.1). Dropping `source_id` from the derived agent
+  URI would collapse one person across records into one row, which the `agents`
+  table is shaped for - but it also merges two different people who share a name
+  and carry no dates, and MARC 7XX frequently has no `$d`. One line to change
+  when wanted; a test pins the current scoping so the choice stays visible.
+- **The decomposer merge** (14.9.1), declined on measurement: the two MARC
+  decomposers share 4 of 36/12 tags and merging them concatenates rather than
+  deduplicates.
 
 ### 14.13 Intended behaviour changes
 
