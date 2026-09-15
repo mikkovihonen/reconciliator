@@ -480,3 +480,122 @@ def test_configured_isbd_character_set_reaches_both_paths():
     auth_agent = decompose_marc_authority(auth, source="kanto", isbd_punctuation=" ")[4][0]
     assert bib_agent.name == "Waltari, Mika,"
     assert auth_agent.name == "Waltari, Mika,"
+
+
+# --- deterministic agent identity ----------------------------------------
+
+
+def _marc_with_contributors(control: str, contributors: list[tuple[str, str]]) -> object:
+    from lxml import etree
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    sevens = "".join(
+        f'<datafield tag="700" ind1="1" ind2=" "><subfield code="a">{name}</subfield>'
+        f'<subfield code="d">{dates}</subfield></datafield>'
+        for name, dates in contributors
+    )
+    return etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">{control}</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Kivi, Aleksis</subfield><subfield code="d">1834-1872</subfield></datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Seitseman veljesta</subfield></datafield>
+            {sevens}
+        </record>""".encode()
+    )
+
+
+def test_agent_uri_does_not_depend_on_field_order():
+    """The defect: the URI embedded the agent's ordinal among the 7XX fields.
+
+    Reordering 700 fields - which carries no bibliographic meaning - silently
+    changed agent identity. Same class as the uuid4 record ids Phase 13.1 fixed.
+    """
+    from reconciliator.loaders.marcxml import decompose_marc_wemi
+
+    pair = [("Ahlqvist, August", "1826-1889"), ("Bergbom, Kaarlo", "1843-1906")]
+    forward = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
+    reverse = decompose_marc_wemi(
+        _marc_with_contributors("R1", list(reversed(pair))), source="melinda"
+    )[4]
+
+    assert {a.name: a.agent_uri for a in forward} == {a.name: a.agent_uri for a in reverse}
+
+
+def test_agent_uri_is_stable_across_identical_ingests():
+    from reconciliator.loaders.marcxml import decompose_marc_wemi
+
+    pair = [("Ahlqvist, August", "1826-1889")]
+    first = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
+    second = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
+    assert [a.agent_uri for a in first] == [a.agent_uri for a in second]
+
+
+def test_agent_id_separates_people_who_share_a_name_but_not_dates():
+    from reconciliator.loaders.marcxml import derive_agent_id
+
+    assert derive_agent_id("Virtanen, Matti", "1920-1990") != derive_agent_id(
+        "Virtanen, Matti", "1955-"
+    )
+
+
+def test_agent_ids_remain_scoped_to_their_record():
+    """Determinism without deduplication: this stage changes only the former.
+
+    Dropping source_id would collapse one person across records into a single
+    agent row, but would also merge two different people sharing a name and
+    carrying no dates - and MARC 7XX often has no $d.
+    """
+    from reconciliator.loaders.marcxml import decompose_marc_wemi
+
+    pair = [("Ahlqvist, August", "1826-1889")]
+    a = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
+    b = decompose_marc_wemi(_marc_with_contributors("R2", pair), source="melinda")[4]
+    by_name_a = {x.name: x.agent_uri for x in a}
+    by_name_b = {x.name: x.agent_uri for x in b}
+    assert by_name_a["Ahlqvist, August"] != by_name_b["Ahlqvist, August"]
+    assert ":R1:" in by_name_a["Ahlqvist, August"]
+    assert ":R2:" in by_name_b["Ahlqvist, August"]
+
+
+def test_an_authority_uri_beats_any_derived_id():
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import decompose_marc_wemi
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    rec = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <controlfield tag="001">R9</controlfield>
+            <datafield tag="100" ind1="1" ind2=" ">
+                <subfield code="a">Kivi, Aleksis</subfield>
+                <subfield code="0">https://urn.fi/URN:NBN:fi:au:pn:000123</subfield>
+            </datafield>
+            <datafield tag="245" ind1="1" ind2="0"><subfield code="a">T</subfield></datafield>
+        </record>""".encode()
+    )
+    agent = decompose_marc_wemi(rec, source="melinda")[4][0]
+    assert agent.agent_uri == "https://urn.fi/URN:NBN:fi:au:pn:000123"
+
+
+def test_all_decomposition_paths_mint_the_same_uri_shape():
+    """Three paths once minted three different schemes: ':{idx+1}', ':1', and none."""
+    import re
+
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import decompose_marc_authority, decompose_marc_wemi
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    bib = _marc_with_contributors("B1", [("Ahlqvist, August", "1826-1889")])
+    auth = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>00000nz  a2200000n  4500</leader>
+            <controlfield tag="001">A1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Kivi, Aleksis</subfield><subfield code="d">1834-1872</subfield></datafield>
+        </record>""".encode()
+    )
+    shape = re.compile(r"^urn:agent:[^:]+:[^:]+:[0-9a-f]{16}$")
+    for agent in decompose_marc_wemi(bib, source="melinda")[4]:
+        assert shape.match(agent.agent_uri), agent.agent_uri
+    for agent in decompose_marc_authority(auth, source="kanto")[4]:
+        assert shape.match(agent.agent_uri), agent.agent_uri

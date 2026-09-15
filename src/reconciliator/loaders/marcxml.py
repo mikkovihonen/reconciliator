@@ -57,6 +57,39 @@ logger = logging.getLogger(__name__)
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}
 
 
+def derive_agent_id(
+    name: Optional[str],
+    dates: Optional[str] = None,
+    fuller_name: Optional[str] = None,
+) -> str:
+    """Derive a stable agent id from the agent's own content.
+
+    The three decomposition paths used to mint three different fallback URIs, and
+    the bibliographic one embedded the agent's ordinal position among the
+    record's 7XX fields - so reordering those fields silently changed agent
+    identity. This is the same defect Phase 13.1 removed from records via
+    `derive_content_id`, and the same fix: identity from content, not position.
+
+    Deliberately scoped to one record: callers combine this digest with the
+    record's own source_id. Dropping source_id would additionally collapse one
+    person appearing in several records into a single agent row - which the
+    `agents` table would accept, since it upserts on `agent_uri` - but it would
+    also merge two *different* people who share a name and carry no dates, and
+    MARC 7XX fields frequently carry no $d. Agent deduplication is a separate
+    decision from agent determinism, and this stage only fixes determinism.
+
+    Only used as a fallback: an agent carrying a $0 or $1 authority URI keeps it,
+    since a real authority identifier beats any derived one.
+    """
+    parts = [
+        (name or "").strip().lower(),
+        (dates or "").strip().lower(),
+        (fuller_name or "").strip().lower(),
+    ]
+    digest = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    return digest
+
+
 def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
     """Derive a stable identifier from a record's own content.
 
@@ -1155,7 +1188,9 @@ def decompose_marc_authority(
                 agent_dates = _get_subfield(agent_field, "d")
                 b_yr, d_yr = parse_marc_dates(agent_dates)
                 sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
-                agent_uri = sub0 or f"urn:agent:{source}:{source_id}:1"
+                agent_uri = sub0 or (
+                    f"urn:agent:{source}:{source_id}:{derive_agent_id(agent_name_clean, agent_dates)}"
+                )
                 agent = AgentEntity(
                     agent_uri=agent_uri,
                     source=source,
@@ -1382,7 +1417,9 @@ def decompose_marc_authority(
 
         if not agent_uri:
             sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
-            agent_uri = sub0 or f"urn:agent:{source}:{source_id}"
+            agent_uri = sub0 or (
+                f"urn:agent:{source}:{source_id}:{derive_agent_id(agent_name_clean, agent_dates)}"
+            )
 
         for ident in identifiers:
             if ident.entity_type == "agent" and not ident.entity_uri:
@@ -1789,7 +1826,15 @@ def decompose_marc_wemi(
             continue
         u0 = a.get("uri_subfield_0") or []
         u1 = a.get("uri_subfield_1") or []
-        a_uri = u0[0] if u0 else (u1[0] if u1 else f"urn:agent:{source}:{source_id}:{idx + 1}")
+        a_uri = (
+            u0[0]
+            if u0
+            else (
+                u1[0]
+                if u1
+                else f"urn:agent:{source}:{source_id}:{derive_agent_id(a_name, a.get('dates'), a.get('fuller_name'))}"
+            )
+        )
         norm_name = a_name.strip().lower()
         agents_list.append(
             AgentEntity(
