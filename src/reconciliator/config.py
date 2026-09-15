@@ -896,6 +896,12 @@ class OAIIngestConfig(BaseModel):
     # A corpus being reconciled is ingested the same way as any other source,
     # with this set false, rather than through a separate staging path.
     authoritative: bool = True
+    # What a re-ingest does to rows this source wrote before.
+    #   accumulate  add to them - the historical behaviour
+    #   replace     remove this source's rows first, leaving other sources alone
+    # Deterministic ids (Phase 13.1) are what make `replace` a refresh rather
+    # than a churn of identity: the same input yields the same URIs.
+    ingest_mode: Literal["accumulate", "replace"] = "accumulate"
     id_source: Literal["marc_001", "oai_identifier", "auto"] = "marc_001"
     control_number_prefix: Optional[str] = None
     control_number_padding_digits: Optional[int] = None

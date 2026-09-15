@@ -493,6 +493,31 @@ def ingest_oai_pipeline(
                     prior.last_harvest_until,
                 )
 
+    # ------------------------------------------------------------------
+    # Replace mode
+    # ------------------------------------------------------------------
+    # Clear once, here, before the first batch - and only when this run is not
+    # continuing an earlier one. A resumed harvest that cleared would delete
+    # exactly what its own completed slices had just written, and an incremental
+    # harvest would throw away everything outside the new date window.
+    is_continuation = bool(initial_token or done_slices) or effective_config is not config
+    if config.ingest_mode == "replace" and not is_continuation:
+        removed = store.delete_source(source_name)
+        total_removed = sum(removed.values())
+        if total_removed:
+            logger.info(
+                "Source '%s': ingest_mode=replace removed %d existing rows (%s)",
+                source_name,
+                total_removed,
+                ", ".join(f"{k}={v}" for k, v in sorted(removed.items()) if v),
+            )
+    elif config.ingest_mode == "replace" and is_continuation:
+        logger.info(
+            "Source '%s': ingest_mode=replace skipped - this run continues an earlier "
+            "harvest, and clearing would delete what it already wrote",
+            source_name,
+        )
+
     from_date, until_date = _resolve_harvest_window(source_name, effective_config)
 
     if from_date and until_date and effective_config.workers > 1:

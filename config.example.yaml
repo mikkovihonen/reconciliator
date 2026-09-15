@@ -825,6 +825,20 @@ ingest_oai:
     # record_origin on every row is the source name, and the `sources` table
     # records which names are authoritative.
     authoritative: true
+
+    # What a re-ingest does to rows this source wrote before:
+    #   accumulate  add to them (default, and the historical behaviour)
+    #   replace     remove this source's rows first, leaving other sources alone
+    #
+    # `replace` clears once, before the first batch, and only when the run is not
+    # continuing an earlier one - a resumed or incremental harvest would otherwise
+    # delete exactly what its own completed slices had just written. Use
+    # `ingest-oai --restart` to force a full re-harvest with a clear.
+    #
+    # Deterministic ids are what make `replace` a refresh rather than a churn of
+    # identity: the same input yields the same work, expression, manifestation
+    # and agent URIs, so re-ingesting returns the store to the same state.
+    ingest_mode: "accumulate"
     id_source: "marc_001"
     control_number_prefix: "(FI-MELINDA)"
     control_number_padding_digits: 9

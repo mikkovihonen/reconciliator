@@ -1966,6 +1966,98 @@ class WEMIRepository:
         batch = self.get_agents_by_ids([agent_id])
         return batch.get(agent_id)
 
+    def delete_source(self, source_name: str) -> dict[str, int]:
+        """Remove every row a source contributed, leaving other sources untouched.
+
+        Backs `ingest_mode: replace`. Five tables carry `record_origin` - works,
+        expressions, manifestations, items, agents - and everything else hangs off
+        them by id. The polymorphic tables (`identifiers`, `entity_keys`,
+        `contributions`) carry no foreign key, because `entity_type`/`entity_id`
+        can name any tier and SQLite cannot express that as one constraint, so
+        their rows have to be deleted explicitly or they outlive their owners.
+
+        Returns per-table counts so a caller can report what it removed rather
+        than claiming a clean slate it did not verify.
+        """
+        removed: dict[str, int] = {}
+        with self.get_connection() as conn:
+
+            def ids_for(table: str) -> list[int]:
+                return [
+                    int(r[0])
+                    for r in conn.execute(
+                        f"SELECT id FROM {table} WHERE record_origin = ?;", (source_name,)
+                    )
+                ]
+
+            work_ids = ids_for("works")
+            expression_ids = ids_for("expressions")
+            manifestation_ids = ids_for("manifestations")
+            item_ids = ids_for("items")
+            agent_ids = ids_for("agents")
+
+            def delete_in(table: str, column: str, values: list[int]) -> int:
+                if not values:
+                    return 0
+                total = 0
+                # Chunked to stay under SQLITE_MAX_VARIABLE_NUMBER on large sources.
+                for start in range(0, len(values), 500):
+                    chunk = values[start : start + 500]
+                    placeholders = ",".join("?" for _ in chunk)
+                    cur = conn.execute(
+                        f"DELETE FROM {table} WHERE {column} IN ({placeholders});", chunk
+                    )
+                    total += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                return total
+
+            # Polymorphic children first, keyed by (entity_type, entity_id).
+            for table in ("identifiers", "entity_keys", "contributions"):
+                count = 0
+                for entity_type, entity_ids in (
+                    ("work", work_ids),
+                    ("expression", expression_ids),
+                    ("manifestation", manifestation_ids),
+                    ("item", item_ids),
+                    ("agent", agent_ids),
+                ):
+                    if not entity_ids:
+                        continue
+                    for start in range(0, len(entity_ids), 500):
+                        chunk = entity_ids[start : start + 500]
+                        placeholders = ",".join("?" for _ in chunk)
+                        cur = conn.execute(
+                            f"""
+                            DELETE FROM {table}
+                            WHERE entity_type = ? AND entity_id IN ({placeholders});
+                            """,
+                            [entity_type, *chunk],
+                        )
+                        count += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                removed[table] = count
+
+            # Contributions also reference agents by agent_id, not entity_id.
+            removed["contributions"] += delete_in("contributions", "agent_id", agent_ids)
+
+            removed["work_vectors"] = delete_in("work_vectors", "work_id", work_ids)
+            removed["manifestation_vectors"] = delete_in(
+                "manifestation_vectors", "manifestation_id", manifestation_ids
+            )
+            removed["manifestation_expressions"] = delete_in(
+                "manifestation_expressions", "manifestation_id", manifestation_ids
+            )
+            removed["work_relationships"] = delete_in(
+                "work_relationships", "source_work_id", work_ids
+            ) + delete_in("work_relationships", "target_work_id", work_ids)
+
+            # Then the entities themselves, children before parents.
+            for table in ("items", "manifestations", "expressions", "works", "agents"):
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE record_origin = ?;", (source_name,)
+                )
+                removed[table] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+        return removed
+
     def build_wemi_indexes(
         self,
         embedder: SentenceEmbedder,

@@ -1326,8 +1326,8 @@ Each lands green. Stages 1 and 2 carry the risk.
 | 5 ✅ | Dead code (`compute_bounding_box_iou`; the whole expression vector tier); reconcile docstrings against behaviour | -50 |
 | 6 ◐ | ISBD punctuation stripping configurable and consistent; the decomposer merge is **declined** (see 14.9.1) | +80 |
 | 7 ✅ | Build, wire and use the W/M vector indexes; honour `rerank.top_k` (see 14.10) | +200 |
-| 8 | Deterministic `agent_uri` (see 14.11) | ~0 |
-| 9 | `accumulate` / `replace` ingest mode per source (see 14.12) | +120 |
+| 8 ✅ | Deterministic `agent_uri` (see 14.11) | ~0 |
+| 9 ✅ | `accumulate` / `replace` ingest mode per source (see 14.12) | +120 |
 
 `matcher.py` should land near 600-700 lines, plus `funnels.py` (~250) and ~120
 lines of configuration models.
@@ -1832,6 +1832,75 @@ replace is a true refresh rather than a churn of identity.
 
 Interacts with resume: `replace` has to clear on the first batch of a run, not on
 every batch, or a resumed harvest deletes what the earlier slices just wrote.
+
+### 14.11.1 Stage 8 as built ✅ COMPLETE
+
+`derive_agent_id(name, dates, fuller_name)` replaces the position-derived
+fallback at all three minting sites, which previously used three different
+schemes: `:{idx + 1}` in `decompose_marc_wemi`, a hardcoded `:1` and no suffix at
+all in `decompose_marc_authority`. An agent carrying a `$0` or `$1` keeps it — a
+real authority identifier beats any derived one.
+
+```
+1. Reordering 700 fields
+   original  {'Ahlqvist': '67d9b74848', 'Bergbom': 'de57ef7cfd', 'Kivi': '6930ebc5d3'}
+   reversed  {'Ahlqvist': '67d9b74848', 'Bergbom': 'de57ef7cfd', 'Kivi': '6930ebc5d3'}
+   identical across orderings: True
+```
+
+#### Deliberately not also deduplicating agents
+
+The first version dropped `source_id` from the URI, which additionally collapsed
+one person appearing in several records into a single agent row — 3 rows for 6
+agent mentions. The `agents` table would accept that, since it upserts on
+`agent_uri`, and it is arguably what the table is shaped for.
+
+It was reverted, because the same collapse merges two *different* people who
+share a name and carry no dates:
+
+```
+derive_agent_id('Virtanen, Matti') == derive_agent_id('Virtanen, Matti')
+```
+
+MARC 7XX fields frequently carry no `$d`, so that is not a hypothetical. Agent
+deduplication is a separate decision from agent determinism, with a homonym
+trade-off of its own; this stage fixes determinism only, and ids stay scoped to
+their record. Dedup is available as a one-line change if wanted, and a test pins
+the current scoping so the choice is visible rather than incidental.
+
+### 14.12.1 Stage 9 as built ✅ COMPLETE
+
+`ingest_mode: accumulate | replace` per source, defaulting to `accumulate` — the
+historical behaviour.
+
+`WEMIRepository.delete_source(name)` removes every row one source contributed and
+returns per-table counts, so a caller reports what it removed rather than
+claiming a clean slate it did not verify. Five tables carry `record_origin`;
+everything else hangs off them by id, and the three polymorphic tables
+(`identifiers`, `entity_keys`, `contributions`) carry no foreign key — their
+`entity_type`/`entity_id` can name any tier, which SQLite cannot express as one
+constraint — so their rows are deleted explicitly or they outlive their owners.
+
+```
+before        {'works': 3, 'agents': 6, 'identifiers': 3, 'entity_keys': 15, ...}
+delete_source {'works': 2, 'agents': 4, 'identifiers': 2, 'entity_keys': 10, ...}
+after         {'works': 1, 'agents': 2, 'identifiers': 1, 'entity_keys': 5, ...}
+
+surviving origins    : ['fennica']
+orphaned identifiers : 0
+orphaned entity_keys : 0
+```
+
+**Clearing happens once, before the first batch, and only when the run is not
+continuing an earlier one.** A resumed harvest that cleared would delete exactly
+what its own completed slices had just written, and an incremental harvest would
+throw away everything outside the new date window. The guard checks for a
+resumption token, completed slices, or a rewritten `from_date`, and logs that it
+skipped rather than clearing silently.
+
+Re-ingesting after a replace returns the store to byte-identical counts, which is
+what deterministic ids (13.1) buy: a replace is a refresh rather than a churn of
+identity.
 
 ### 14.13 Intended behaviour changes
 
