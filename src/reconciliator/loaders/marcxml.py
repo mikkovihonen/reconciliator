@@ -374,6 +374,16 @@ def parse_marc_record_elem(
             language = _get_subfield(f, "a")
         orig_language = _get_subfield(f, "h")
 
+    # 377 - Associated Language: RDA fallback for records with neither a
+    # readable 008 language code nor a 041. In bibliographic records, 377 $a
+    # carries the language of the content (same semantics as 008/35-37).
+    if not language:
+        for f in _get_datafields(record_elem, "377"):
+            lang_377 = _get_subfield(f, "a")
+            if lang_377 and len(lang_377.strip()) == 3:
+                language = lang_377.strip()
+                break
+
     original_title: Optional[str] = None
     f765 = _get_datafields(record_elem, "765")
     if f765:
@@ -1684,6 +1694,15 @@ def decompose_marc_wemi(
     # template could not render and the classification-evidence reader could not
     # read.
     flat_subjects = list(parsed.get("subjects_folded") or [])
+
+    # Variant titles from 246 (Varying Form of Title) and 740 (Uncontrolled
+    # Related/Analytical Title) are already extracted by parse_marc_record_elem
+    # but were discarded here. Folding them into subjects_json makes alternative
+    # and parallel titles searchable via BM25 and the dense work index —
+    # the same mechanism MarcAuthorityLoader used for 4XX tracing entries.
+    for vt in parsed.get("variant_titles") or []:
+        if vt:
+            flat_subjects.append({"heading": vt, "pref_label": vt, "kind": "variant_title"})
 
     # Primary classification
     ykl_class = None
