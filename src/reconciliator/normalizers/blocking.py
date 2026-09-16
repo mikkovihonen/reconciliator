@@ -28,9 +28,14 @@ def compute_author_key(name: Optional[str], surname: Optional[str] = None) -> st
         return ""
     sur = surname or extract_surname(name or "")
     if not sur:
-        norm = normalize_agent_name(name or "")
-        parts = norm.split()
-        sur = parts[0] if parts else ""
+        canonical_name, norm_sur = normalize_agent_name(name or "")
+        if norm_sur:
+            sur = norm_sur
+        elif canonical_name:
+            parts = canonical_name.split()
+            sur = parts[0] if parts else ""
+        else:
+            sur = ""
     # Clean non-alphanumeric
     cleaned = re.sub(r"[^\w]", "", sur.lower(), flags=re.UNICODE)
     return cleaned

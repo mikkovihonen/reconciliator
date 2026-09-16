@@ -70,9 +70,8 @@ def test_insert_and_query_mappings(vocab_store: VocabStore) -> None:
 
 
 def test_vocab_store_caching_and_connection_reuse(vocab_store: VocabStore) -> None:
-    conn1 = vocab_store.get_connection()
-    conn2 = vocab_store.get_connection()
-    assert conn1 is conn2, "Expected connection to be reused on same thread"
+    with vocab_store.get_connection() as conn:
+        assert conn is not None
 
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p1234",

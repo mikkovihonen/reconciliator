@@ -1,9 +1,9 @@
-"""Dedicated progress telemetry tracking and CLI status query engine operating on progress.db."""
+"""SQLAlchemy 2.0 Core progress telemetry tracking and CLI status query engine operating on progress.db."""
 
 from __future__ import annotations
 
 import json
-import sqlite3
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -16,34 +16,64 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from sqlalchemy import (
+    Column,
+    Engine,
+    Float,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    and_,
+    delete,
+    select,
+    text,
+    update,
+)
+from sqlalchemy import (
+    Table as SQLTable,
+)
+from sqlalchemy import (
+    Text as SQLText,
+)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from reconciliator.db import get_db_connection
+from reconciliator.db import get_engine
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
 
+logger = logging.getLogger(__name__)
 
-def init_progress_db(conn: sqlite3.Connection) -> None:
+# ===================================================================
+# Progress Schema & Table Definition
+# ===================================================================
+
+progress_metadata = MetaData()
+
+task_progress_table = SQLTable(
+    "task_progress",
+    progress_metadata,
+    Column("task_id", String, primary_key=True),
+    Column("task_type", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("current_stage", String, nullable=False),
+    Column("items_processed", Integer, default=0, server_default="0"),
+    Column("items_total", Integer, nullable=True),
+    Column("bytes_processed", Integer, default=0, server_default="0"),
+    Column("bytes_total", Integer, nullable=True),
+    Column("rate_per_sec", Float, default=0.0, server_default="0.0"),
+    Column("percentage", Float, default=0.0, server_default="0.0"),
+    Column("start_time", String, nullable=False),
+    Column("last_heartbeat", String, nullable=False),
+    Column("error_message", String, nullable=True),
+    Column("metadata_json", SQLText, nullable=True),
+    Index("idx_progress_type", "task_type"),
+    Index("idx_progress_status", "status"),
+)
+
+
+def init_progress_db(engine: Engine) -> None:
     """Initialize task_progress table in progress.db."""
-    with conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS task_progress (
-                task_id TEXT PRIMARY KEY,
-                task_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                current_stage TEXT NOT NULL,
-                items_processed INTEGER DEFAULT 0,
-                items_total INTEGER,
-                bytes_processed INTEGER DEFAULT 0,
-                bytes_total INTEGER,
-                rate_per_sec REAL DEFAULT 0.0,
-                percentage REAL DEFAULT 0.0,
-                start_time TEXT NOT NULL,
-                last_heartbeat TEXT NOT NULL,
-                error_message TEXT,
-                metadata_json TEXT
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_progress_type ON task_progress(task_type);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_progress_status ON task_progress(status);")
+    progress_metadata.create_all(engine)
 
 
 def _now_iso() -> str:
@@ -51,7 +81,7 @@ def _now_iso() -> str:
 
 
 class ProgressTracker:
-    """Manages real-time task lifecycle and metrics heartbeats in progress.db."""
+    """Manages real-time task lifecycle and metrics heartbeats in progress.db via SQLAlchemy 2.0 Core."""
 
     def __init__(
         self,
@@ -66,8 +96,8 @@ class ProgressTracker:
         self.heartbeat_interval = heartbeat_interval
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.get_connection() as conn:
-            init_progress_db(conn)
+        self.engine = get_engine(self.db_path)
+        init_progress_db(self.engine)
 
         self._start_time_sec = time.time()
         self._last_heartbeat_sec = 0.0
@@ -81,8 +111,9 @@ class ProgressTracker:
         self._error_message: Optional[str] = None
         self._lock = threading.Lock()
 
-    def get_connection(self) -> sqlite3.Connection:
-        return get_db_connection(self.db_path)
+    def close(self) -> None:
+        """Dispose SQLAlchemy engine and release connection pool."""
+        self.engine.dispose()
 
     def start_task(
         self,
@@ -102,40 +133,36 @@ class ProgressTracker:
                 self._metadata.update(metadata)
 
             now = _now_iso()
-            with self.get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO task_progress (
-                        task_id, task_type, status, current_stage,
-                        items_processed, items_total, bytes_processed, bytes_total,
-                        rate_per_sec, percentage, start_time, last_heartbeat,
-                        error_message, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(task_id) DO UPDATE SET
-                        status = excluded.status,
-                        current_stage = excluded.current_stage,
-                        items_total = excluded.items_total,
-                        bytes_total = excluded.bytes_total,
-                        last_heartbeat = excluded.last_heartbeat,
-                        metadata_json = excluded.metadata_json;
-                    """,
-                    (
-                        self.task_id,
-                        self.task_type,
-                        self._status,
-                        self._current_stage,
-                        self._items_processed,
-                        self._items_total,
-                        self._bytes_processed,
-                        self._bytes_total,
-                        0.0,
-                        0.0,
-                        now,
-                        now,
-                        None,
-                        json.dumps(self._metadata, ensure_ascii=False),
-                    ),
+            meta_json = json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
+            with self.engine.begin() as conn:
+                stmt = sqlite_insert(task_progress_table).values(
+                    task_id=self.task_id,
+                    task_type=self.task_type,
+                    status=self._status,
+                    current_stage=self._current_stage,
+                    items_processed=self._items_processed,
+                    items_total=self._items_total,
+                    bytes_processed=self._bytes_processed,
+                    bytes_total=self._bytes_total,
+                    rate_per_sec=0.0,
+                    percentage=0.0,
+                    start_time=now,
+                    last_heartbeat=now,
+                    error_message=None,
+                    metadata_json=meta_json,
                 )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["task_id"],
+                    set_={
+                        "status": stmt.excluded.status,
+                        "current_stage": stmt.excluded.current_stage,
+                        "items_total": stmt.excluded.items_total,
+                        "bytes_total": stmt.excluded.bytes_total,
+                        "last_heartbeat": stmt.excluded.last_heartbeat,
+                        "metadata_json": stmt.excluded.metadata_json,
+                    },
+                )
+                conn.execute(stmt)
             self._last_heartbeat_sec = time.time()
 
     def update_progress(
@@ -183,34 +210,24 @@ class ProgressTracker:
             percentage = min(100.0, (self._bytes_processed / self._bytes_total) * 100.0)
 
         now_iso = _now_iso()
-        with self.get_connection() as conn:
-            conn.execute(
-                """
-                UPDATE task_progress SET
-                    status = ?,
-                    current_stage = ?,
-                    items_processed = ?,
-                    bytes_processed = ?,
-                    rate_per_sec = ?,
-                    percentage = ?,
-                    last_heartbeat = ?,
-                    error_message = ?,
-                    metadata_json = ?
-                WHERE task_id = ?;
-                """,
-                (
-                    self._status,
-                    self._current_stage,
-                    self._items_processed,
-                    self._bytes_processed,
-                    round(rate, 2),
-                    round(percentage, 1),
-                    now_iso,
-                    self._error_message,
-                    json.dumps(self._metadata, ensure_ascii=False),
-                    self.task_id,
-                ),
+        meta_json = json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
+        with self.engine.begin() as conn:
+            stmt = (
+                update(task_progress_table)
+                .where(task_progress_table.c.task_id == self.task_id)
+                .values(
+                    status=self._status,
+                    current_stage=self._current_stage,
+                    items_processed=self._items_processed,
+                    bytes_processed=self._bytes_processed,
+                    rate_per_sec=round(rate, 2),
+                    percentage=round(percentage, 1),
+                    last_heartbeat=now_iso,
+                    error_message=self._error_message,
+                    metadata_json=meta_json,
+                )
             )
+            conn.execute(stmt)
         self._last_heartbeat_sec = now_sec
 
     def complete_task(self, metadata: Optional[dict[str, Any]] = None) -> None:
@@ -240,26 +257,31 @@ def get_task_progress(db_path: Path | str, task_id: str) -> Optional[TaskProgres
     path = Path(db_path)
     if not path.exists():
         return None
-    with get_db_connection(path) as conn:
-        row = conn.execute("SELECT * FROM task_progress WHERE task_id = ?;", (task_id,)).fetchone()
-        if not row:
-            return None
-        return TaskProgress(
-            task_id=row["task_id"],
-            task_type=row["task_type"],
-            status=row["status"],
-            current_stage=row["current_stage"],
-            items_processed=row["items_processed"],
-            items_total=row["items_total"],
-            bytes_processed=row["bytes_processed"],
-            bytes_total=row["bytes_total"],
-            rate_per_sec=row["rate_per_sec"],
-            percentage=row["percentage"],
-            start_time=row["start_time"],
-            last_heartbeat=row["last_heartbeat"],
-            error_message=row["error_message"],
-            metadata_json=row["metadata_json"],
-        )
+    engine = get_engine(path)
+    try:
+        with engine.connect() as conn:
+            stmt = select(task_progress_table).where(task_progress_table.c.task_id == task_id)
+            row = conn.execute(stmt).mappings().first()
+            if not row:
+                return None
+            return TaskProgress(
+                task_id=row["task_id"],
+                task_type=row["task_type"],
+                status=row["status"],
+                current_stage=row["current_stage"],
+                items_processed=row["items_processed"],
+                items_total=row["items_total"],
+                bytes_processed=row["bytes_processed"],
+                bytes_total=row["bytes_total"],
+                rate_per_sec=row["rate_per_sec"],
+                percentage=row["percentage"],
+                start_time=row["start_time"],
+                last_heartbeat=row["last_heartbeat"],
+                error_message=row["error_message"],
+                metadata_json=row["metadata_json"],
+            )
+    finally:
+        engine.dispose()
 
 
 def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
@@ -267,30 +289,32 @@ def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
     path = Path(db_path)
     if not path.exists():
         return []
-    with get_db_connection(path) as conn:
-        rows = conn.execute(
-            "SELECT * FROM task_progress ORDER BY last_heartbeat DESC LIMIT ?;",
-            (limit,),
-        ).fetchall()
-        return [
-            TaskProgress(
-                task_id=r["task_id"],
-                task_type=r["task_type"],
-                status=r["status"],
-                current_stage=r["current_stage"],
-                items_processed=r["items_processed"],
-                items_total=r["items_total"],
-                bytes_processed=r["bytes_processed"],
-                bytes_total=r["bytes_total"],
-                rate_per_sec=r["rate_per_sec"],
-                percentage=r["percentage"],
-                start_time=r["start_time"],
-                last_heartbeat=r["last_heartbeat"],
-                error_message=r["error_message"],
-                metadata_json=r["metadata_json"],
-            )
-            for r in rows
-        ]
+    engine = get_engine(path)
+    try:
+        with engine.connect() as conn:
+            stmt = select(task_progress_table).order_by(task_progress_table.c.last_heartbeat.desc()).limit(limit)
+            rows = conn.execute(stmt).mappings().all()
+            return [
+                TaskProgress(
+                    task_id=r["task_id"],
+                    task_type=r["task_type"],
+                    status=r["status"],
+                    current_stage=r["current_stage"],
+                    items_processed=r["items_processed"],
+                    items_total=r["items_total"],
+                    bytes_processed=r["bytes_processed"],
+                    bytes_total=r["bytes_total"],
+                    rate_per_sec=r["rate_per_sec"],
+                    percentage=r["percentage"],
+                    start_time=r["start_time"],
+                    last_heartbeat=r["last_heartbeat"],
+                    error_message=r["error_message"],
+                    metadata_json=r["metadata_json"],
+                )
+                for r in rows
+            ]
+    finally:
+        engine.dispose()
 
 
 def parse_duration_seconds(duration_str: str) -> float:
@@ -323,71 +347,58 @@ def prune_tasks(
     keep_last: Optional[int] = None,
     include_running: bool = False,
 ) -> int:
-    """Prune task telemetry records from progress.db.
-
-    Args:
-        db_path: Path to progress.db.
-        task_id: If specified, delete only this task ID.
-        status: If specified, filter by status ('completed', 'failed', 'running', or 'terminated' for both completed and failed).
-        older_than_seconds: If specified, delete tasks whose last_heartbeat is older than this many seconds.
-        keep_last: If specified, preserve the most recent N tasks.
-        include_running: If False, never delete tasks with status='running'.
-
-    Returns:
-        Number of deleted task records.
-    """
+    """Prune task telemetry records from progress.db."""
     path = Path(db_path)
     if not path.exists():
         return 0
 
-    with get_db_connection(path) as conn:
-        conditions: list[str] = []
-        params: list[Any] = []
+    engine = get_engine(path)
+    try:
+        with engine.begin() as conn:
+            conditions = []
 
-        if not include_running:
-            conditions.append("status != 'running'")
+            if not include_running:
+                conditions.append(task_progress_table.c.status != "running")
 
-        if task_id:
-            conditions.append("task_id = ?")
-            params.append(task_id)
+            if task_id:
+                conditions.append(task_progress_table.c.task_id == task_id)
 
-        if status:
-            if status == "terminated":
-                conditions.append("status IN ('completed', 'failed')")
-            else:
-                conditions.append("status = ?")
-                params.append(status)
+            if status:
+                if status == "terminated":
+                    conditions.append(task_progress_table.c.status.in_(["completed", "failed"]))
+                else:
+                    conditions.append(task_progress_table.c.status == status)
 
-        if older_than_seconds is not None:
-            cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
-            cutoff_iso = cutoff.isoformat()
-            conditions.append("last_heartbeat < ?")
-            params.append(cutoff_iso)
+            if older_than_seconds is not None:
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+                cutoff_iso = cutoff.isoformat()
+                conditions.append(task_progress_table.c.last_heartbeat < cutoff_iso)
 
-        if keep_last is not None and keep_last > 0:
-            cursor = conn.execute(
-                "SELECT task_id FROM task_progress ORDER BY last_heartbeat DESC LIMIT ?;",
-                (keep_last,),
-            )
-            keep_ids = [row["task_id"] for row in cursor.fetchall()]
-            if keep_ids:
-                placeholders = ",".join("?" for _ in keep_ids)
-                conditions.append(f"task_id NOT IN ({placeholders})")
-                params.extend(keep_ids)
+            if keep_last is not None and keep_last > 0:
+                keep_stmt = (
+                    select(task_progress_table.c.task_id)
+                    .order_by(task_progress_table.c.last_heartbeat.desc())
+                    .limit(keep_last)
+                )
+                keep_ids = [r[0] for r in conn.execute(keep_stmt).fetchall()]
+                if keep_ids:
+                    conditions.append(~task_progress_table.c.task_id.in_(keep_ids))
 
-        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-        query = f"DELETE FROM task_progress{where_clause};"
-        cursor = conn.execute(query, params)
-        deleted_count = cursor.rowcount
-        conn.commit()
+            stmt = delete(task_progress_table)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            result = conn.execute(stmt)
+            deleted_count = result.rowcount
 
-        if deleted_count > 0:
-            try:
-                conn.execute("VACUUM;")
-            except Exception:
-                pass
+            if deleted_count > 0:
+                try:
+                    conn.execute(text("VACUUM;"))
+                except Exception:
+                    pass
 
-        return max(deleted_count, 0)
+            return max(deleted_count, 0)
+    finally:
+        engine.dispose()
 
 
 def format_task_table(tasks: list[TaskProgress]) -> Table:
@@ -571,7 +582,6 @@ def render_telemetry_tui(
                 except Exception:
                     pass
 
-    # Filter out system daemon task from user pipeline execution table
     pipeline_tasks = [t for t in tasks if t.task_id != "system_vector_daemon"]
 
     running_count = sum(1 for t in pipeline_tasks if t.status == "running")

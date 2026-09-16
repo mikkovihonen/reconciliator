@@ -1,26 +1,123 @@
-"""Dedicated SQLite store for controlled vocabularies, ontologies, and migration mappings."""
+"""SQLAlchemy 2.0 Core store for controlled vocabularies, ontologies, and migration mappings."""
 
 from __future__ import annotations
 
 import functools
 import json
-import sqlite3
-import threading
+import logging
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from sqlalchemy import (
+    Column,
+    Engine,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    and_,
+    delete,
+    func,
+    insert,
+    select,
+    text,
+)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from reconciliator.config import VocabNormalizationConfig
-from reconciliator.db import get_db_connection
+from reconciliator.db import get_engine
 from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.vocabularies import concept_id_to_uri, normalize_concept_id
 
+logger = logging.getLogger(__name__)
+
+# ===================================================================
+# Vocab Schema & Table Definitions
+# ===================================================================
+
+vocab_metadata = MetaData()
+
+concepts_table = Table(
+    "concepts",
+    vocab_metadata,
+    Column("uri", String, primary_key=True),
+    Column("vocabulary", String, nullable=False),
+    Column("is_deprecated", Integer, default=0, server_default="0"),
+    Column("target_field", String, nullable=True),
+    Index("idx_concepts_vocab", "vocabulary"),
+)
+
+concept_labels_table = Table(
+    "concept_labels",
+    vocab_metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("concept_uri", String, ForeignKey("concepts.uri", ondelete="CASCADE"), nullable=False),
+    Column("lang", String, nullable=False),
+    Column("label_type", String, nullable=False),
+    Column("label", String, nullable=False),
+    Index("idx_concept_labels_concept_uri", "concept_uri"),
+)
+
+concept_mappings_table = Table(
+    "concept_mappings",
+    vocab_metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("legacy_uri", String, nullable=True),
+    Column("legacy_vocab", String, nullable=False),
+    Column("target_uri", String, nullable=False),
+    Column("target_vocab", String, nullable=False),
+    Column("mapping_type", String, nullable=False),
+    Column("target_field", String, nullable=False),
+    Index("idx_mappings_legacy_uri", "legacy_uri"),
+    Index("idx_mappings_target_uri", "target_uri"),
+    Index("idx_mappings_vocab", "legacy_vocab"),
+)
+
+concept_mapping_labels_table = Table(
+    "concept_mapping_labels",
+    vocab_metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("mapping_id", Integer, ForeignKey("concept_mappings.id", ondelete="CASCADE"), nullable=False),
+    Column("lang", String, nullable=False),
+    Column("label", String, nullable=False),
+    Index("idx_concept_mapping_labels_mapping_id", "mapping_id"),
+)
+
+relator_terms_table = Table(
+    "relator_terms",
+    vocab_metadata,
+    Column("folded_term", String, primary_key=True),
+    Column("raw_term", String, nullable=False),
+    Column("lang", String, nullable=False),
+    Column("code", String, nullable=True),
+    Column("uri", String, nullable=True),
+    Index("idx_relators_lang", "lang"),
+)
+
+concept_aliases_table = Table(
+    "concept_aliases",
+    vocab_metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("folded_label", String, nullable=False),
+    Column("raw_label", String, nullable=False),
+    Column("lang", String, nullable=False),
+    Column("concept_uri", String, nullable=False),
+    Column("wikidata_qid", String, nullable=True),
+    Column("vocabulary", String, nullable=False),
+    Column("target_field", String, nullable=False),
+    Column("is_preferred", Integer, nullable=False),
+    Column("source", String, nullable=False),
+    Index("idx_concept_aliases_lookup", "folded_label", "target_field"),
+    Index("idx_concept_aliases_uri", "concept_uri"),
+    Index("idx_concept_aliases_qid", "wikidata_qid"),
+)
+
 
 def is_language_allowed(lang: str, allowed: Optional[Sequence[str] | str]) -> bool:
-    """Check whether a language tag is allowed by an ingestion language filter.
-
-    Supports None, '*', 'all', ['*'], ['all'] for wildcard / ingest-all behavior.
-    """
+    """Check whether a language tag is allowed by an ingestion language filter."""
     if allowed is None:
         return True
     norm_lang = lang.strip().lower()
@@ -35,230 +132,141 @@ def is_language_allowed(lang: str, allowed: Optional[Sequence[str] | str]) -> bo
     return norm_lang in norm_set
 
 
-def _migrate_flat_vocab_db_if_needed(conn: sqlite3.Connection) -> None:
-    """Migrate legacy flat tables (pref_label_fi, legacy_label_fi, etc.) to normalized 1-to-many schema."""
-    cursor = conn.execute("PRAGMA table_info(concepts);")
-    cols = {row["name"] for row in cursor.fetchall()}
-    if cols and "pref_label_fi" in cols:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_labels_temp (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                concept_uri TEXT NOT NULL,
-                lang TEXT NOT NULL,
-                label_type TEXT NOT NULL,
-                label TEXT NOT NULL
-            );
-        """)
-        for col_name, lang in (("pref_label_fi", "fi"), ("pref_label_sv", "sv"), ("pref_label_en", "en")):
-            if col_name in cols:
-                conn.execute(f"""
-                    INSERT INTO concept_labels_temp (concept_uri, lang, label_type, label)
-                    SELECT uri, '{lang}', 'pref', trim({col_name})
-                    FROM concepts
-                    WHERE {col_name} IS NOT NULL AND trim({col_name}) != '';
-                """)
-        for col_name, lang in (("alt_labels_fi", "fi"), ("alt_labels_sv", "sv")):
-            if col_name in cols:
-                rows = conn.execute(
-                    f"SELECT uri, {col_name} FROM concepts WHERE {col_name} IS NOT NULL AND {col_name} != '';"
-                ).fetchall()
-                for r in rows:
-                    c_uri = r["uri"]
-                    raw_json = r[col_name]
-                    try:
-                        alts = json.loads(raw_json)
-                        for alt in alts:
-                            if alt and str(alt).strip():
-                                conn.execute(
-                                    "INSERT INTO concept_labels_temp (concept_uri, lang, label_type, label) VALUES (?, ?, 'alt', ?);",
-                                    (c_uri, lang, str(alt).strip()),
-                                )
-                    except Exception:
-                        pass
+def _migrate_flat_vocab_db_if_needed(engine: Engine) -> None:
+    """Migrate legacy flat tables (pref_label_fi, legacy_label_fi, etc.) to normalized schema."""
+    with engine.begin() as conn:
+        cursor = conn.execute(text("PRAGMA table_info(concepts);"))
+        cols = {row[1] for row in cursor.fetchall()}
+        if cols and "pref_label_fi" in cols:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS concept_labels_temp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    concept_uri TEXT NOT NULL,
+                    lang TEXT NOT NULL,
+                    label_type TEXT NOT NULL,
+                    label TEXT NOT NULL
+                );
+            """))
+            for col_name, lang in (("pref_label_fi", "fi"), ("pref_label_sv", "sv"), ("pref_label_en", "en")):
+                if col_name in cols:
+                    conn.execute(text(f"""
+                        INSERT INTO concept_labels_temp (concept_uri, lang, label_type, label)
+                        SELECT uri, '{lang}', 'pref', trim({col_name})
+                        FROM concepts
+                        WHERE {col_name} IS NOT NULL AND trim({col_name}) != '';
+                    """))
+            for col_name, lang in (("alt_labels_fi", "fi"), ("alt_labels_sv", "sv")):
+                if col_name in cols:
+                    rows = conn.execute(
+                        text(f"SELECT uri, {col_name} FROM concepts WHERE {col_name} IS NOT NULL AND {col_name} != '';")
+                    ).fetchall()
+                    for r in rows:
+                        c_uri = r[0]
+                        raw_json = r[1]
+                        try:
+                            alts = json.loads(raw_json)
+                            for alt in alts:
+                                if alt and str(alt).strip():
+                                    conn.execute(
+                                        text("INSERT INTO concept_labels_temp (concept_uri, lang, label_type, label) VALUES (:uri, :lang, 'alt', :label);"),
+                                        {"uri": c_uri, "lang": lang, "label": str(alt).strip()},
+                                    )
+                        except Exception:
+                            pass
 
-        conn.execute("""
-            CREATE TABLE concepts_new (
-                uri TEXT PRIMARY KEY,
-                vocabulary TEXT NOT NULL,
-                is_deprecated INTEGER DEFAULT 0,
-                target_field TEXT
-            );
-        """)
-        conn.execute("""
-            INSERT INTO concepts_new (uri, vocabulary, is_deprecated, target_field)
-            SELECT uri, vocabulary, coalesce(is_deprecated, 0), target_field
-            FROM concepts;
-        """)
-        conn.execute("DROP TABLE concepts;")
-        conn.execute("ALTER TABLE concepts_new RENAME TO concepts;")
+            conn.execute(text("""
+                CREATE TABLE concepts_new (
+                    uri TEXT PRIMARY KEY,
+                    vocabulary TEXT NOT NULL,
+                    is_deprecated INTEGER DEFAULT 0,
+                    target_field TEXT
+                );
+            """))
+            conn.execute(text("""
+                INSERT INTO concepts_new (uri, vocabulary, is_deprecated, target_field)
+                SELECT uri, vocabulary, coalesce(is_deprecated, 0), target_field
+                FROM concepts;
+            """))
+            conn.execute(text("DROP TABLE concepts;"))
+            conn.execute(text("ALTER TABLE concepts_new RENAME TO concepts;"))
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_labels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                concept_uri TEXT NOT NULL REFERENCES concepts(uri) ON DELETE CASCADE,
-                lang TEXT NOT NULL,
-                label_type TEXT NOT NULL,
-                label TEXT NOT NULL
-            );
-        """)
-        conn.execute("INSERT INTO concept_labels SELECT * FROM concept_labels_temp;")
-        conn.execute("DROP TABLE concept_labels_temp;")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS concept_labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    concept_uri TEXT NOT NULL REFERENCES concepts(uri) ON DELETE CASCADE,
+                    lang TEXT NOT NULL,
+                    label_type TEXT NOT NULL,
+                    label TEXT NOT NULL
+                );
+            """))
+            conn.execute(text("INSERT INTO concept_labels SELECT * FROM concept_labels_temp;"))
+            conn.execute(text("DROP TABLE concept_labels_temp;"))
 
-    cursor_m = conn.execute("PRAGMA table_info(concept_mappings);")
-    cols_m = {row["name"] for row in cursor_m.fetchall()}
-    if cols_m and "legacy_label_fi" in cols_m:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_mapping_labels_temp (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mapping_id INTEGER NOT NULL,
-                lang TEXT NOT NULL,
-                label TEXT NOT NULL
-            );
-        """)
-        for col_name, lang in (("legacy_label_fi", "fi"), ("legacy_label_sv", "sv")):
-            if col_name in cols_m:
-                conn.execute(f"""
-                    INSERT INTO concept_mapping_labels_temp (mapping_id, lang, label)
-                    SELECT id, '{lang}', trim({col_name})
-                    FROM concept_mappings
-                    WHERE {col_name} IS NOT NULL AND trim({col_name}) != '';
-                """)
-        conn.execute("""
-            CREATE TABLE concept_mappings_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                legacy_uri TEXT,
-                legacy_vocab TEXT NOT NULL,
-                target_uri TEXT NOT NULL,
-                target_vocab TEXT NOT NULL,
-                mapping_type TEXT NOT NULL,
-                target_field TEXT NOT NULL
-            );
-        """)
-        conn.execute("""
-            INSERT INTO concept_mappings_new (id, legacy_uri, legacy_vocab, target_uri, target_vocab, mapping_type, target_field)
-            SELECT id, legacy_uri, legacy_vocab, target_uri, target_vocab, mapping_type, target_field
-            FROM concept_mappings;
-        """)
-        conn.execute("DROP TABLE concept_mappings;")
-        conn.execute("ALTER TABLE concept_mappings_new RENAME TO concept_mappings;")
+        cursor_m = conn.execute(text("PRAGMA table_info(concept_mappings);"))
+        cols_m = {row[1] for row in cursor_m.fetchall()}
+        if cols_m and "legacy_label_fi" in cols_m:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS concept_mapping_labels_temp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mapping_id INTEGER NOT NULL,
+                    lang TEXT NOT NULL,
+                    label TEXT NOT NULL
+                );
+            """))
+            for col_name, lang in (("legacy_label_fi", "fi"), ("legacy_label_sv", "sv")):
+                if col_name in cols_m:
+                    conn.execute(text(f"""
+                        INSERT INTO concept_mapping_labels_temp (mapping_id, lang, label)
+                        SELECT id, '{lang}', trim({col_name})
+                        FROM concept_mappings
+                        WHERE {col_name} IS NOT NULL AND trim({col_name}) != '';
+                    """))
+            conn.execute(text("""
+                CREATE TABLE concept_mappings_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    legacy_uri TEXT,
+                    legacy_vocab TEXT NOT NULL,
+                    target_uri TEXT NOT NULL,
+                    target_vocab TEXT NOT NULL,
+                    mapping_type TEXT NOT NULL,
+                    target_field TEXT NOT NULL
+                );
+            """))
+            conn.execute(text("""
+                INSERT INTO concept_mappings_new (id, legacy_uri, legacy_vocab, target_uri, target_vocab, mapping_type, target_field)
+                SELECT id, legacy_uri, legacy_vocab, target_uri, target_vocab, mapping_type, target_field
+                FROM concept_mappings;
+            """))
+            conn.execute(text("DROP TABLE concept_mappings;"))
+            conn.execute(text("ALTER TABLE concept_mappings_new RENAME TO concept_mappings;"))
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_mapping_labels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mapping_id INTEGER NOT NULL REFERENCES concept_mappings(id) ON DELETE CASCADE,
-                lang TEXT NOT NULL,
-                label TEXT NOT NULL
-            );
-        """)
-        conn.execute("INSERT INTO concept_mapping_labels SELECT * FROM concept_mapping_labels_temp;")
-        conn.execute("DROP TABLE concept_mapping_labels_temp;")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS concept_mapping_labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mapping_id INTEGER NOT NULL REFERENCES concept_mappings(id) ON DELETE CASCADE,
+                    lang TEXT NOT NULL,
+                    label TEXT NOT NULL
+                );
+            """))
+            conn.execute(text("INSERT INTO concept_mapping_labels SELECT * FROM concept_mapping_labels_temp;"))
+            conn.execute(text("DROP TABLE concept_mapping_labels_temp;"))
 
 
-def init_vocab_db(conn: sqlite3.Connection) -> None:
+def init_vocab_db(engine: Engine) -> None:
     """Initialize concepts, concept_labels, concept_mappings, concept_mapping_labels, relator_terms, and concept_aliases tables in vocab.db."""
-    with conn:
-        _migrate_flat_vocab_db_if_needed(conn)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concepts (
-                uri TEXT PRIMARY KEY,
-                vocabulary TEXT NOT NULL,
-                is_deprecated INTEGER DEFAULT 0,
-                target_field TEXT
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_concepts_vocab ON concepts(vocabulary);")
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_labels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                concept_uri TEXT NOT NULL REFERENCES concepts(uri) ON DELETE CASCADE,
-                lang TEXT NOT NULL,
-                label_type TEXT NOT NULL,
-                label TEXT NOT NULL
-            );
-        """)
-        conn.execute(
+    _migrate_flat_vocab_db_if_needed(engine)
+    vocab_metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_concept_labels_lookup ON concept_labels(lang, label_type, lower(label));"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_concept_labels_concept_uri ON concept_labels(concept_uri);"
-        )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_mappings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                legacy_uri TEXT,
-                legacy_vocab TEXT NOT NULL,
-                target_uri TEXT NOT NULL,
-                target_vocab TEXT NOT NULL,
-                mapping_type TEXT NOT NULL,
-                target_field TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_legacy_uri ON concept_mappings(legacy_uri);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_target_uri ON concept_mappings(target_uri);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mappings_vocab ON concept_mappings(legacy_vocab);"
-        )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_mapping_labels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mapping_id INTEGER NOT NULL REFERENCES concept_mappings(id) ON DELETE CASCADE,
-                lang TEXT NOT NULL,
-                label TEXT NOT NULL
-            );
-        """)
-        conn.execute(
+        ))
+        conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_concept_mapping_labels_lookup ON concept_mapping_labels(lang, lower(label));"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_concept_mapping_labels_mapping_id ON concept_mapping_labels(mapping_id);"
-        )
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS relator_terms (
-                folded_term TEXT PRIMARY KEY,
-                raw_term TEXT NOT NULL,
-                lang TEXT NOT NULL,
-                code TEXT,
-                uri TEXT
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_relators_lang ON relator_terms(lang);")
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS concept_aliases (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                folded_label TEXT NOT NULL,
-                raw_label TEXT NOT NULL,
-                lang TEXT NOT NULL,
-                concept_uri TEXT NOT NULL,
-                wikidata_qid TEXT,
-                vocabulary TEXT NOT NULL,
-                target_field TEXT NOT NULL,
-                is_preferred INTEGER NOT NULL,
-                source TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_concept_aliases_lookup ON concept_aliases(folded_label, target_field);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_concept_aliases_uri ON concept_aliases(concept_uri);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_concept_aliases_qid ON concept_aliases(wikidata_qid);"
-        )
+        ))
 
 
 class VocabStore:
-    """Repository handling queries and bulk ingestion into vocab.db."""
+    """Repository handling queries and bulk ingestion into vocab.db using SQLAlchemy 2.0 Core."""
 
     def __init__(
         self,
@@ -268,27 +276,17 @@ class VocabStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.config = config or VocabNormalizationConfig()
-        self._local = threading.local()
-        with self.get_connection() as conn:
-            init_vocab_db(conn)
+        self.engine = get_engine(self.db_path)
+        init_vocab_db(self.engine)
 
-    def get_connection(self) -> sqlite3.Connection:
-        """Get or create a thread-local SQLite connection with WAL pragmas."""
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = get_db_connection(self.db_path)
-            self._local.conn = conn
-        return conn
+    def get_connection(self) -> Any:
+        """Get a configured connection adapter backed by the SQLAlchemy Engine."""
+        from reconciliator.db import ConnectionAdapter
+        return ConnectionAdapter(self.engine.connect(), auto_close=True)
 
     def close(self) -> None:
-        """Close thread-local SQLite connection if open."""
-        conn = getattr(self._local, "conn", None)
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            self._local.conn = None
+        """Dispose SQLAlchemy engine and release connection pool."""
+        self.engine.dispose()
 
     def clear_caches(self) -> None:
         """Clear all in-memory LRU caches."""
@@ -305,81 +303,69 @@ class VocabStore:
         if not concepts:
             return
         concept_rows = [
-            (
-                c.uri,
-                c.vocabulary,
-                1 if c.is_deprecated else 0,
-                c.target_field,
-            )
+            {
+                "uri": c.uri,
+                "vocabulary": c.vocabulary,
+                "is_deprecated": 1 if c.is_deprecated else 0,
+                "target_field": c.target_field,
+            }
             for c in concepts
         ]
-        label_rows: list[tuple[str, str, str, str]] = []
+        label_rows: list[dict[str, str]] = []
         for c in concepts:
             for lang, lbl in c.pref_labels.items():
                 if lbl and lbl.strip():
                     if is_language_allowed(lang, self.config.ingest_pref_label_languages):
-                        label_rows.append((c.uri, lang, "pref", lbl.strip()))
+                        label_rows.append({"concept_uri": c.uri, "lang": lang, "label_type": "pref", "label": lbl.strip()})
             for lang, alts in c.alt_labels.items():
                 if is_language_allowed(lang, self.config.ingest_alt_label_languages):
                     for alt in alts:
                         if alt and str(alt).strip():
-                            label_rows.append((c.uri, lang, "alt", str(alt).strip()))
+                            label_rows.append({"concept_uri": c.uri, "lang": lang, "label_type": "alt", "label": str(alt).strip()})
 
-        with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT INTO concepts (uri, vocabulary, is_deprecated, target_field)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(uri) DO UPDATE SET
-                    vocabulary = excluded.vocabulary,
-                    is_deprecated = excluded.is_deprecated,
-                    target_field = excluded.target_field;
-                """,
-                concept_rows,
+        with self.engine.begin() as conn:
+            stmt = sqlite_insert(concepts_table).values(concept_rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["uri"],
+                set_={
+                    "vocabulary": stmt.excluded.vocabulary,
+                    "is_deprecated": stmt.excluded.is_deprecated,
+                    "target_field": stmt.excluded.target_field,
+                },
             )
-            uris = [(c.uri,) for c in concepts]
-            conn.executemany("DELETE FROM concept_labels WHERE concept_uri = ?;", uris)
+            conn.execute(stmt)
+
+            uris = [c.uri for c in concepts]
+            conn.execute(delete(concept_labels_table).where(concept_labels_table.c.concept_uri.in_(uris)))
             if label_rows:
-                conn.executemany(
-                    """
-                    INSERT INTO concept_labels (concept_uri, lang, label_type, label)
-                    VALUES (?, ?, ?, ?);
-                    """,
-                    label_rows,
-                )
+                conn.execute(insert(concept_labels_table), label_rows)
+
         self.clear_caches()
 
     def insert_mappings(self, mappings: list[ConceptMapping]) -> None:
         """Bulk insert legacy mappings into concept_mappings and concept_mapping_labels."""
         if not mappings:
             return
-        with self.get_connection() as conn:
+        with self.engine.begin() as conn:
             for m in mappings:
-                cur = conn.execute(
-                    """
-                    INSERT INTO concept_mappings (
-                        legacy_uri, legacy_vocab, target_uri, target_vocab, mapping_type, target_field
-                    ) VALUES (?, ?, ?, ?, ?, ?);
-                    """,
-                    (
-                        m.legacy_uri,
-                        m.legacy_vocab,
-                        m.target_uri,
-                        m.target_vocab,
-                        m.mapping_type,
-                        m.target_field,
-                    ),
+                res = conn.execute(
+                    insert(concept_mappings_table).values(
+                        legacy_uri=m.legacy_uri,
+                        legacy_vocab=m.legacy_vocab,
+                        target_uri=m.target_uri,
+                        target_vocab=m.target_vocab,
+                        mapping_type=m.mapping_type,
+                        target_field=m.target_field,
+                    )
                 )
-                m_id = cur.lastrowid
+                m_id = res.inserted_primary_key[0] if res.inserted_primary_key else None
                 label_rows = []
                 for lang, lbl in m.legacy_labels.items():
                     if lbl and lbl.strip():
-                        label_rows.append((m_id, lang, lbl.strip()))
-                if label_rows:
-                    conn.executemany(
-                        "INSERT INTO concept_mapping_labels (mapping_id, lang, label) VALUES (?, ?, ?);",
-                        label_rows,
-                    )
+                        label_rows.append({"mapping_id": m_id, "lang": lang, "label": lbl.strip()})
+                if label_rows and m_id is not None:
+                    conn.execute(insert(concept_mapping_labels_table), label_rows)
+
         self.clear_caches()
 
     @functools.lru_cache(maxsize=32768)
@@ -388,9 +374,10 @@ class VocabStore:
         if not uri:
             return None
         clean_uri = uri.strip()
-        with self.get_connection() as conn:
+        with self.engine.connect() as conn:
             # 1. Exact lookup
-            row = conn.execute("SELECT * FROM concepts WHERE uri = ?;", (clean_uri,)).fetchone()
+            stmt = select(concepts_table).where(concepts_table.c.uri == clean_uri)
+            row = conn.execute(stmt).mappings().first()
 
             # 2. Canonical expansion if exact match missed
             if not row:
@@ -399,7 +386,8 @@ class VocabStore:
                 if norm_id:
                     expanded_uri = concept_id_to_uri(norm_id, rules=rules)
                     if expanded_uri and expanded_uri != clean_uri:
-                        row = conn.execute("SELECT * FROM concepts WHERE uri = ?;", (expanded_uri,)).fetchone()
+                        stmt = select(concepts_table).where(concepts_table.c.uri == expanded_uri)
+                        row = conn.execute(stmt).mappings().first()
 
             # 3. Trailing slash / protocol variant fallback
             if not row:
@@ -409,17 +397,20 @@ class VocabStore:
                 elif clean_uri.startswith("http://"):
                     candidates.append("https://" + clean_uri[7:])
                 for cand in candidates:
-                    row = conn.execute("SELECT * FROM concepts WHERE uri = ?;", (cand,)).fetchone()
+                    stmt = select(concepts_table).where(concepts_table.c.uri == cand)
+                    row = conn.execute(stmt).mappings().first()
                     if row:
                         break
 
             if not row:
                 return None
             concept_uri = row["uri"]
-            labels_rows = conn.execute(
-                "SELECT lang, label_type, label FROM concept_labels WHERE concept_uri = ?;",
-                (concept_uri,),
-            ).fetchall()
+            labels_stmt = select(
+                concept_labels_table.c.lang,
+                concept_labels_table.c.label_type,
+                concept_labels_table.c.label,
+            ).where(concept_labels_table.c.concept_uri == concept_uri)
+            labels_rows = conn.execute(labels_stmt).mappings().all()
 
             pref_labels: dict[str, str] = {}
             alt_labels: dict[str, list[str]] = {}
@@ -448,31 +439,22 @@ class VocabStore:
         """Look up concept by preferred label."""
         clean_lbl = label.strip().lower()
         norm_l = self.config.language_code_map.get(lang.lower(), lang.lower())
-        with self.get_connection() as conn:
-            if vocabulary:
-                query = """
-                    SELECT c.uri
-                    FROM concept_labels cl
-                    JOIN concepts c ON cl.concept_uri = c.uri
-                    WHERE c.vocabulary = ? AND cl.lang = ? AND cl.label_type = 'pref' AND lower(cl.label) = ?
-                    ORDER BY c.is_deprecated ASC
-                    LIMIT 1;
-                """
-                row = conn.execute(query, (vocabulary, norm_l, clean_lbl)).fetchone()
-            else:
-                query = """
-                    SELECT c.uri
-                    FROM concept_labels cl
-                    JOIN concepts c ON cl.concept_uri = c.uri
-                    WHERE cl.lang = ? AND cl.label_type = 'pref' AND lower(cl.label) = ?
-                    ORDER BY c.is_deprecated ASC
-                    LIMIT 1;
-                """
-                row = conn.execute(query, (norm_l, clean_lbl)).fetchone()
+        with self.engine.connect() as conn:
+            stmt = select(concepts_table.c.uri).select_from(
+                concept_labels_table.join(concepts_table, concept_labels_table.c.concept_uri == concepts_table.c.uri)
+            ).where(
+                concept_labels_table.c.lang == norm_l,
+                concept_labels_table.c.label_type == "pref",
+                func.lower(concept_labels_table.c.label) == clean_lbl,
+            ).order_by(concepts_table.c.is_deprecated.asc()).limit(1)
 
+            if vocabulary:
+                stmt = stmt.where(concepts_table.c.vocabulary == vocabulary)
+
+            row = conn.execute(stmt).first()
             if not row:
                 return None
-            return self.find_concept_by_uri(row["uri"])
+            return self.find_concept_by_uri(row[0])
 
     @functools.lru_cache(maxsize=16384)
     def find_legacy_mapping_by_uri(self, uri: str) -> Optional[ConceptMapping]:
@@ -480,10 +462,9 @@ class VocabStore:
         if not uri:
             return None
         clean_uri = uri.strip()
-        with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM concept_mappings WHERE legacy_uri = ? LIMIT 1;", (clean_uri,)
-            ).fetchone()
+        with self.engine.connect() as conn:
+            stmt = select(concept_mappings_table).where(concept_mappings_table.c.legacy_uri == clean_uri).limit(1)
+            row = conn.execute(stmt).mappings().first()
 
             if not row:
                 rules = getattr(self.config, "concept_id_rules", None)
@@ -491,9 +472,8 @@ class VocabStore:
                 if norm_id:
                     expanded_uri = concept_id_to_uri(norm_id, rules=rules)
                     if expanded_uri and expanded_uri != clean_uri:
-                        row = conn.execute(
-                            "SELECT * FROM concept_mappings WHERE legacy_uri = ? LIMIT 1;", (expanded_uri,)
-                        ).fetchone()
+                        stmt = select(concept_mappings_table).where(concept_mappings_table.c.legacy_uri == expanded_uri).limit(1)
+                        row = conn.execute(stmt).mappings().first()
 
             if not row:
                 candidates = [clean_uri.rstrip("/")] if clean_uri.endswith("/") else [clean_uri + "/"]
@@ -502,19 +482,19 @@ class VocabStore:
                 elif clean_uri.startswith("http://"):
                     candidates.append("https://" + clean_uri[7:])
                 for cand in candidates:
-                    row = conn.execute(
-                        "SELECT * FROM concept_mappings WHERE legacy_uri = ? LIMIT 1;", (cand,)
-                    ).fetchone()
+                    stmt = select(concept_mappings_table).where(concept_mappings_table.c.legacy_uri == cand).limit(1)
+                    row = conn.execute(stmt).mappings().first()
                     if row:
                         break
 
             if not row:
                 return None
             mapping_id = row["id"]
-            lbl_rows = conn.execute(
-                "SELECT lang, label FROM concept_mapping_labels WHERE mapping_id = ?;",
-                (mapping_id,),
-            ).fetchall()
+            lbl_stmt = select(
+                concept_mapping_labels_table.c.lang,
+                concept_mapping_labels_table.c.label,
+            ).where(concept_mapping_labels_table.c.mapping_id == mapping_id)
+            lbl_rows = conn.execute(lbl_stmt).mappings().all()
             legacy_labels = {r["lang"]: r["label"] for r in lbl_rows}
             return ConceptMapping(
                 legacy_uri=row["legacy_uri"],
@@ -533,36 +513,34 @@ class VocabStore:
         """Look up migration mapping by legacy label."""
         clean_lbl = label.strip().lower()
         norm_l = self.config.language_code_map.get(lang.lower(), lang.lower())
-        with self.get_connection() as conn:
-            if legacy_vocab:
-                query = """
-                    SELECT m.id
-                    FROM concept_mapping_labels cml
-                    JOIN concept_mappings m ON cml.mapping_id = m.id
-                    WHERE m.legacy_vocab = ? AND cml.lang = ? AND lower(cml.label) = ?
-                    LIMIT 1;
-                """
-                row = conn.execute(query, (legacy_vocab, norm_l, clean_lbl)).fetchone()
-            else:
-                query = """
-                    SELECT m.id
-                    FROM concept_mapping_labels cml
-                    JOIN concept_mappings m ON cml.mapping_id = m.id
-                    WHERE cml.lang = ? AND lower(cml.label) = ?
-                    LIMIT 1;
-                """
-                row = conn.execute(query, (norm_l, clean_lbl)).fetchone()
+        with self.engine.connect() as conn:
+            stmt = select(concept_mappings_table.c.id).select_from(
+                concept_mapping_labels_table.join(
+                    concept_mappings_table,
+                    concept_mapping_labels_table.c.mapping_id == concept_mappings_table.c.id,
+                )
+            ).where(
+                concept_mapping_labels_table.c.lang == norm_l,
+                func.lower(concept_mapping_labels_table.c.label) == clean_lbl,
+            ).limit(1)
 
+            if legacy_vocab:
+                stmt = stmt.where(concept_mappings_table.c.legacy_vocab == legacy_vocab)
+
+            row = conn.execute(stmt).first()
             if not row:
                 return None
-            mapping_id = row["id"]
-            m_row = conn.execute("SELECT * FROM concept_mappings WHERE id = ?;", (mapping_id,)).fetchone()
+            mapping_id = row[0]
+            m_stmt = select(concept_mappings_table).where(concept_mappings_table.c.id == mapping_id)
+            m_row = conn.execute(m_stmt).mappings().first()
             if not m_row:
                 return None
-            lbl_rows = conn.execute(
-                "SELECT lang, label FROM concept_mapping_labels WHERE mapping_id = ?;",
-                (mapping_id,),
-            ).fetchall()
+
+            lbl_stmt = select(
+                concept_mapping_labels_table.c.lang,
+                concept_mapping_labels_table.c.label,
+            ).where(concept_mapping_labels_table.c.mapping_id == mapping_id)
+            lbl_rows = conn.execute(lbl_stmt).mappings().all()
             legacy_labels = {r["lang"]: r["label"] for r in lbl_rows}
             return ConceptMapping(
                 legacy_uri=m_row["legacy_uri"],
@@ -578,7 +556,7 @@ class VocabStore:
         """Bulk insert or replace relator terms in relator_terms."""
         if not terms:
             return
-        rows: list[tuple[str, str, str, Optional[str], Optional[str]]] = []
+        rows: list[dict[str, Any]] = []
         for t in terms:
             if isinstance(t, dict):
                 raw = str(t.get("raw_term", ""))
@@ -598,71 +576,68 @@ class VocabStore:
                 lang = "fi"
                 code = None
                 uri = None
-            rows.append((folded, raw, lang, code, uri))
-        with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT INTO relator_terms (folded_term, raw_term, lang, code, uri)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(folded_term) DO UPDATE SET
-                    raw_term = excluded.raw_term,
-                    lang = excluded.lang,
-                    code = excluded.code,
-                    uri = excluded.uri;
-                """,
-                rows,
+            rows.append({
+                "folded_term": folded,
+                "raw_term": raw,
+                "lang": lang,
+                "code": code,
+                "uri": uri,
+            })
+
+        with self.engine.begin() as conn:
+            stmt = sqlite_insert(relator_terms_table).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["folded_term"],
+                set_={
+                    "raw_term": stmt.excluded.raw_term,
+                    "lang": stmt.excluded.lang,
+                    "code": stmt.excluded.code,
+                    "uri": stmt.excluded.uri,
+                },
             )
+            conn.execute(stmt)
+
         self.clear_caches()
 
     @functools.lru_cache(maxsize=8192)
     def is_known_relator(self, folded_term: str) -> bool:
         """Check whether a folded role term exists in relator_terms."""
-        with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM relator_terms WHERE folded_term = ? LIMIT 1;",
-                (folded_term.strip().casefold(),),
-            ).fetchone()
+        with self.engine.connect() as conn:
+            stmt = select(1).where(relator_terms_table.c.folded_term == folded_term.strip().casefold()).limit(1)
+            row = conn.execute(stmt).first()
             return bool(row)
 
     @functools.lru_cache(maxsize=8192)
     def get_relator_code(self, folded_term: str) -> Optional[str]:
         """Look up standard MARC code for a folded role term in relator_terms."""
-        with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT code FROM relator_terms WHERE folded_term = ? AND code IS NOT NULL LIMIT 1;",
-                (folded_term.strip().casefold(),),
-            ).fetchone()
-            return row["code"] if row and row["code"] else None
-
+        with self.engine.connect() as conn:
+            stmt = select(relator_terms_table.c.code).where(
+                relator_terms_table.c.folded_term == folded_term.strip().casefold(),
+                relator_terms_table.c.code.isnot(None),
+            ).limit(1)
+            row = conn.execute(stmt).first()
+            return str(row[0]) if row and row[0] else None
 
     def insert_aliases(self, aliases: list[dict[str, Any]]) -> None:
         """Bulk insert alias records into concept_aliases."""
         if not aliases:
             return
         rows = [
-            (
-                a["folded_label"],
-                a["raw_label"],
-                a["lang"],
-                a["concept_uri"],
-                a.get("wikidata_qid"),
-                a["vocabulary"],
-                a.get("target_field") or self.config.default_vocab_target_field,
-                a.get("is_preferred", 1),
-                a.get("source", "vocab"),
-            )
+            {
+                "folded_label": a["folded_label"],
+                "raw_label": a["raw_label"],
+                "lang": a["lang"],
+                "concept_uri": a["concept_uri"],
+                "wikidata_qid": a.get("wikidata_qid"),
+                "vocabulary": a["vocabulary"],
+                "target_field": a.get("target_field") or self.config.default_vocab_target_field,
+                "is_preferred": a.get("is_preferred", 1),
+                "source": a.get("source", "vocab"),
+            }
             for a in aliases
         ]
-        with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT INTO concept_aliases (
-                    folded_label, raw_label, lang, concept_uri, wikidata_qid,
-                    vocabulary, target_field, is_preferred, source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+        with self.engine.begin() as conn:
+            conn.execute(insert(concept_aliases_table), rows)
         self.clear_caches()
 
     @functools.lru_cache(maxsize=65536)
@@ -672,10 +647,7 @@ class VocabStore:
         target_field: Optional[str] = None,
         vocabulary: Optional[str] = None,
     ) -> tuple[Optional[VocabConcept], Optional[str]]:
-        """Look up concept by normalized alias (accepts either pre-folded or raw label).
-
-        Returns (concept, wikidata_qid) or (None, None).
-        """
+        """Look up concept by normalized alias (accepts either pre-folded or raw label)."""
         clean = folded_label.strip()
         if not clean:
             return None, None
@@ -689,49 +661,42 @@ class VocabStore:
         if clean != clean_folded:
             search_tokens.append(clean)
 
-        with self.get_connection() as conn:
-            token_placeholders = ",".join("?" for _ in search_tokens)
-            params: list[Any] = list(search_tokens)
-            where_clauses = [f"folded_label IN ({token_placeholders})"]
+        with self.engine.connect() as conn:
+            conditions: list[Any] = [concept_aliases_table.c.folded_label.in_(search_tokens)]
             if target_field:
-                where_clauses.append("target_field = ?")
-                params.append(target_field)
+                conditions.append(concept_aliases_table.c.target_field == target_field)
             if vocabulary:
-                where_clauses.append("vocabulary = ?")
-                params.append(vocabulary)
+                conditions.append(concept_aliases_table.c.vocabulary == vocabulary)
 
-            query = f"""
-                SELECT concept_uri, wikidata_qid
-                FROM concept_aliases
-                WHERE {" AND ".join(where_clauses)}
-                ORDER BY is_preferred DESC, id ASC
-                LIMIT 1;
-            """
-            row = conn.execute(query, params).fetchone()
+            stmt = select(
+                concept_aliases_table.c.concept_uri,
+                concept_aliases_table.c.wikidata_qid,
+            ).where(and_(*conditions)).order_by(
+                concept_aliases_table.c.is_preferred.desc(),
+                concept_aliases_table.c.id.asc(),
+            ).limit(1)
+
+            row = conn.execute(stmt).first()
             if not row and target_field:
-                # Fallback: try without target_field filter
-                fallback_query = f"""
-                    SELECT concept_uri, wikidata_qid
-                    FROM concept_aliases
-                    WHERE folded_label IN ({token_placeholders})
-                    ORDER BY is_preferred DESC, id ASC
-                    LIMIT 1;
-                """
-                row = conn.execute(fallback_query, tuple(search_tokens)).fetchone()
+                fallback_stmt = select(
+                    concept_aliases_table.c.concept_uri,
+                    concept_aliases_table.c.wikidata_qid,
+                ).where(concept_aliases_table.c.folded_label.in_(search_tokens)).order_by(
+                    concept_aliases_table.c.is_preferred.desc(),
+                    concept_aliases_table.c.id.asc(),
+                ).limit(1)
+                row = conn.execute(fallback_stmt).first()
 
             if not row:
                 return None, None
 
-            concept_uri = row["concept_uri"]
-            wikidata_qid = row["wikidata_qid"]
+            concept_uri = str(row[0])
+            wikidata_qid = str(row[1]) if row[1] is not None else None
             concept = self.find_concept_by_uri(concept_uri)
             return concept, wikidata_qid
 
     def find_concepts_by_uris(self, uris: Sequence[str]) -> dict[str, VocabConcept]:
-        """Look up multiple concepts by URI or concept ID in batch.
-
-        Returns a dictionary mapping each queried input URI to its corresponding VocabConcept.
-        """
+        """Look up multiple concepts by URI or concept ID in batch."""
         results: dict[str, VocabConcept] = {}
         for u in uris:
             if not u:
@@ -752,20 +717,26 @@ class VocabStore:
             else set(self.config.legacy_to_modern.keys())
         )
 
-        with self.get_connection() as conn:
-            # Clear existing vocabulary-derived aliases
+        with self.engine.begin() as conn:
             conn.execute(
-                "DELETE FROM concept_aliases WHERE source IN ('vocab', 'concept_mapping');"
+                delete(concept_aliases_table).where(
+                    concept_aliases_table.c.source.in_(["vocab", "concept_mapping"])
+                )
             )
 
             # 1. From concepts and concept_labels
-            query = """
-                SELECT c.uri, c.vocabulary, c.target_field, cl.lang, cl.label_type, cl.label
-                FROM concepts c
-                JOIN concept_labels cl ON c.uri = cl.concept_uri
-                WHERE c.is_deprecated = 0;
-            """
-            rows = conn.execute(query).fetchall()
+            stmt = select(
+                concepts_table.c.uri,
+                concepts_table.c.vocabulary,
+                concepts_table.c.target_field,
+                concept_labels_table.c.lang,
+                concept_labels_table.c.label_type,
+                concept_labels_table.c.label,
+            ).select_from(
+                concepts_table.join(concept_labels_table, concepts_table.c.uri == concept_labels_table.c.concept_uri)
+            ).where(concepts_table.c.is_deprecated == 0)
+
+            rows = conn.execute(stmt).mappings().all()
             for r in rows:
                 c_vocab = r["vocabulary"]
                 if c_vocab in active_legacy_vocabs:
@@ -793,12 +764,19 @@ class VocabStore:
                         )
 
             # 2. From concept_mappings and concept_mapping_labels
-            query_m = """
-                SELECT m.target_uri, m.target_vocab, m.target_field, cml.lang, cml.label
-                FROM concept_mappings m
-                JOIN concept_mapping_labels cml ON m.id = cml.mapping_id;
-            """
-            mapping_rows = conn.execute(query_m).fetchall()
+            m_stmt = select(
+                concept_mappings_table.c.target_uri,
+                concept_mappings_table.c.target_vocab,
+                concept_mappings_table.c.target_field,
+                concept_mapping_labels_table.c.lang,
+                concept_mapping_labels_table.c.label,
+            ).select_from(
+                concept_mappings_table.join(
+                    concept_mapping_labels_table,
+                    concept_mappings_table.c.id == concept_mapping_labels_table.c.mapping_id,
+                )
+            )
+            mapping_rows = conn.execute(m_stmt).mappings().all()
             for m in mapping_rows:
                 t_uri = m["target_uri"]
                 t_vocab = m["target_vocab"]

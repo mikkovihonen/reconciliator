@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -13,7 +12,8 @@ import numpy as np
 from rapidfuzz import fuzz
 
 from reconciliator.db import (
-    get_db_connection,
+    ConnectionAdapter,
+    get_engine,
     init_authority_db,
 )
 from reconciliator.indexer import VectorIndex, create_vector_engine
@@ -81,39 +81,39 @@ def _hydrate_agent_profile(row_dict: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _row_to_agent(row: sqlite3.Row) -> AgentEntity:
+def _row_to_agent(row: Any) -> AgentEntity:
     return AgentEntity.model_validate(_hydrate_agent_profile(dict(row)))
 
 
-def _row_to_work(row: sqlite3.Row) -> WorkEntity:
+def _row_to_work(row: Any) -> WorkEntity:
     return WorkEntity.model_validate(dict(row))
 
 
-def _row_to_expression(row: sqlite3.Row) -> ExpressionEntity:
+def _row_to_expression(row: Any) -> ExpressionEntity:
     return ExpressionEntity.model_validate(dict(row))
 
 
-def _row_to_manifestation(row: sqlite3.Row) -> ManifestationEntity:
+def _row_to_manifestation(row: Any) -> ManifestationEntity:
     return ManifestationEntity.model_validate(dict(row))
 
 
-def _row_to_item(row: sqlite3.Row) -> ItemEntity:
+def _row_to_item(row: Any) -> ItemEntity:
     return ItemEntity.model_validate(dict(row))
 
 
-def _row_to_identifier(row: sqlite3.Row) -> IdentifierEntity:
+def _row_to_identifier(row: Any) -> IdentifierEntity:
     return IdentifierEntity.model_validate(dict(row))
 
 
-def _row_to_contribution(row: sqlite3.Row) -> ContributionEntity:
+def _row_to_contribution(row: Any) -> ContributionEntity:
     return ContributionEntity.model_validate(dict(row))
 
 
-def _row_to_work_relationship(row: sqlite3.Row) -> WorkRelationship:
+def _row_to_work_relationship(row: Any) -> WorkRelationship:
     return WorkRelationship.model_validate(dict(row))
 
 
-def _row_to_harvest_state(row: sqlite3.Row) -> HarvestState:
+def _row_to_harvest_state(row: Any) -> HarvestState:
     return HarvestState.model_validate(dict(row))
 
 
@@ -148,8 +148,8 @@ class WEMIRepository:
             self.fts_config = RepositoryFTSConfig()
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.get_connection() as conn:
-            init_authority_db(conn)
+        self.engine = get_engine(self.db_path)
+        init_authority_db(self.engine)
 
         # Work indexer
         if work_indexer is not None:
@@ -175,11 +175,11 @@ class WEMIRepository:
         else:
             self.manifestation_indexer = None
 
-    def get_connection(self) -> sqlite3.Connection:
+    def get_connection(self) -> ConnectionAdapter:
         """Obtain connection to authority.db with foreign keys enabled."""
-        return get_db_connection(self.db_path)
+        return ConnectionAdapter(self.engine.connect(), auto_close=True)
 
-    def get_corpus_connection(self) -> sqlite3.Connection:
+    def get_corpus_connection(self) -> ConnectionAdapter:
         """Corpus staging shares the authority database.
 
         Retained as a named entry point because the corpus tables are a distinct
@@ -188,6 +188,10 @@ class WEMIRepository:
         reset clear one database while the repository wrote to another.
         """
         return self.get_connection()
+
+    def close(self) -> None:
+        """Dispose SQLAlchemy engine and release connection pool."""
+        self.engine.dispose()
 
     # -----------------------------------------------------------------------
     # Batch Insertions
@@ -878,17 +882,17 @@ class WEMIRepository:
         """Coordinated batch insertion of WEMI domain entities with foreign key binding."""
         if record_origin:
             for w in works:
-                w.record_origin = record_origin  # type: ignore[assignment]
+                w.record_origin = record_origin
             for exp in expressions:
-                exp.record_origin = record_origin  # type: ignore[assignment]
+                exp.record_origin = record_origin
             for m in manifestations:
-                m.record_origin = record_origin  # type: ignore[assignment]
+                m.record_origin = record_origin
             if items:
                 for it in items:
-                    it.record_origin = record_origin  # type: ignore[assignment]
+                    it.record_origin = record_origin
             if agents:
                 for ag in agents:
-                    ag.record_origin = record_origin  # type: ignore[assignment]
+                    ag.record_origin = record_origin
 
         # 1. Agents
         agent_key_to_id: dict[Any, int] = {}

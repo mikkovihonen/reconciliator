@@ -352,39 +352,43 @@ class VectorDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
             if not progress_db.exists():
                 return
 
-            import sqlite3
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            from reconciliator.db import get_engine
+            from reconciliator.progress import task_progress_table
+
             now_iso = datetime.now(timezone.utc).isoformat()
             status_data = self.get_telemetry_dict()
-            with sqlite3.connect(str(progress_db), timeout=5.0) as conn:
-                conn.execute(
-                    """
-                    INSERT INTO task_progress (
-                        task_id, task_type, status, current_stage,
-                        items_processed, items_total, rate_per_sec,
-                        start_time, last_heartbeat, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(task_id) DO UPDATE SET
-                        status = excluded.status,
-                        current_stage = excluded.current_stage,
-                        items_processed = excluded.items_processed,
-                        items_total = excluded.items_total,
-                        rate_per_sec = excluded.rate_per_sec,
-                        last_heartbeat = excluded.last_heartbeat,
-                        metadata_json = excluded.metadata_json;
-                    """,
-                    (
-                        "system_vector_daemon",
-                        "system",
-                        "running",
-                        f"{len(self.pool.indices)} active index(es)",
-                        sum(m.engine.total_vectors for m in self.pool.indices.values()),
-                        None,
-                        sum(m.searches_total for m in self.pool.indices.values()) / max(1.0, now_iso and (time.monotonic() - self.start_time)),
-                        now_iso,
-                        now_iso,
-                        json_dumps(status_data),
-                    ),
-                )
+            engine = get_engine(progress_db)
+            try:
+                with engine.begin() as conn:
+                    stmt = sqlite_insert(task_progress_table).values(
+                        task_id="system_vector_daemon",
+                        task_type="system",
+                        status="running",
+                        current_stage=f"{len(self.pool.indices)} active index(es)",
+                        items_processed=sum(m.engine.total_vectors for m in self.pool.indices.values()),
+                        items_total=None,
+                        rate_per_sec=sum(m.searches_total for m in self.pool.indices.values()) / max(1.0, time.monotonic() - self.start_time),
+                        start_time=now_iso,
+                        last_heartbeat=now_iso,
+                        metadata_json=json_dumps(status_data),
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["task_id"],
+                        set_={
+                            "status": stmt.excluded.status,
+                            "current_stage": stmt.excluded.current_stage,
+                            "items_processed": stmt.excluded.items_processed,
+                            "items_total": stmt.excluded.items_total,
+                            "rate_per_sec": stmt.excluded.rate_per_sec,
+                            "last_heartbeat": stmt.excluded.last_heartbeat,
+                            "metadata_json": stmt.excluded.metadata_json,
+                        },
+                    )
+                    conn.execute(stmt)
+            finally:
+                engine.dispose()
         except Exception:
             pass
 

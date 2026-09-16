@@ -451,6 +451,13 @@ def test_isbd_stripping_does_not_move_any_blocking_key():
     assert compute_title_stem("Sinuhe egyptilainen.") == compute_title_stem(
         "Sinuhe egyptilainen"
     )
+    # Regression guard: names where extract_surname returns empty/None previously crashed
+    # with AttributeError ('tuple' object has no attribute 'split') when normalize_agent_name
+    # returned a tuple.
+    assert compute_author_key(", ") == ""
+    assert compute_author_key(",") == ""
+    assert compute_author_key("   ") == ""
+
 
 
 def test_configured_isbd_character_set_reaches_both_paths():

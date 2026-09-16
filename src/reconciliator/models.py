@@ -772,13 +772,7 @@ class MatchRecord(BaseModel):
     volume_designation: Optional[str] = None
     is_component: bool = False
     keys: dict[str, list[str]] = Field(default_factory=dict)
-    # Standard identifiers, extracted once at ingest. Carried on the record rather
-    # than re-derived from raw_payload at match time: the old payload parse was a
-    # second full parse per match attempt, and it silently returned nothing on the
-    # reconcile path, where the payload was JSON mislabelled as marcxml.
     identifiers: dict[str, list[str]] = Field(default_factory=dict)
-    # Expression and Work context above the manifestation, so the funnels can
-    # align at all three tiers without a repository round trip.
     content_type: Optional[str] = None
     work_uri: Optional[str] = None
     expression_uri: Optional[str] = None
@@ -852,31 +846,6 @@ class MatchRecord(BaseModel):
     @property
     def work_blocking_key(self) -> str:
         return self.get_first_key("work") or self.get_first_key("work_blocking") or ""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 class ManifestationCluster(BaseModel):
     """Carrier-level duplicate cluster in reconcile_corpus.db."""
