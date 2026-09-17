@@ -1,15 +1,14 @@
-"""Tests for PostgreSQL engine configuration, SQL dialect adapter, and schema definitions."""
+"""Tests for PostgreSQL engine configuration and schema definitions."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
-from sqlalchemy.dialects import postgresql
+from sqlalchemy import text
 
 from reconciliator.config import PostgresConfig
 from reconciliator.db import (
-    ConnectionAdapter,
     concepts_table,
     entity_subjects_table,
+    get_db_connection,
     get_engine,
     metadata,
 )
@@ -31,47 +30,12 @@ def test_postgres_config_defaults():
     assert pg.max_overflow == 20
 
 
-def test_sql_adapter_placeholder_adaptation():
-    conn = MagicMock()
-    conn.dialect = postgresql.dialect()
-    adapter = ConnectionAdapter(conn)
-
-    sql = "SELECT * FROM works WHERE id = ?;"
-    adapted = adapter._adapt_sql(sql)
-    assert adapted == "SELECT * FROM works WHERE id = %s;"
-
-
-def test_sql_adapter_postgres_placeholders():
-    conn = MagicMock()
-    conn.dialect = postgresql.dialect()
-    adapter = ConnectionAdapter(conn)
-
-    sql = "SELECT * FROM works WHERE id = ? AND source = ?;"
-    adapted = adapter._adapt_sql(sql)
-    assert adapted == "SELECT * FROM works WHERE id = %s AND source = %s;"
-
-
-def test_sql_adapter_postgres_insert_or_ignore():
-    conn = MagicMock()
-    conn.dialect = postgresql.dialect()
-    adapter = ConnectionAdapter(conn)
-
-    sql = "INSERT OR IGNORE INTO entity_keys (entity_type, entity_id) VALUES (?, ?);"
-    adapted = adapter._adapt_sql(sql)
-    assert "INSERT INTO entity_keys" in adapted
-    assert "ON CONFLICT DO NOTHING;" in adapted
-    assert "%s" in adapted
-
-
-def test_sql_adapter_postgres_insert_or_replace():
-    conn = MagicMock()
-    conn.dialect = postgresql.dialect()
-    adapter = ConnectionAdapter(conn)
-
-    sql = "INSERT OR REPLACE INTO work_vectors (vector_id, work_id) VALUES (?, ?);"
-    adapted = adapter._adapt_sql(sql)
-    assert "INSERT INTO work_vectors" in adapted
-    assert "ON CONFLICT (vector_id) DO UPDATE SET work_id = EXCLUDED.work_id;" in adapted
+def test_get_db_connection_context_manager(tmp_path: Path):
+    db_file = tmp_path / "test_conn.db"
+    with get_db_connection(db_file) as conn:
+        res = conn.execute(text("SELECT 1 AS val")).mappings().fetchone()
+        assert res is not None
+        assert res["val"] == 1
 
 
 def test_unified_schema_creation_and_constraints(tmp_path: Path):

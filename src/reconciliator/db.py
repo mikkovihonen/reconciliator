@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -581,226 +580,6 @@ PG_SEARCH_DDL_STATEMENTS = [
 
 
 # ===================================================================
-# 4. Result & Connection Adapters
-# ===================================================================
-
-
-class RowAdapter:
-    """Mapping & index-accessible row adapter for SQLAlchemy Row."""
-
-    __slots__ = ("_row",)
-
-    def __init__(self, row: Any) -> None:
-        self._row = row
-
-    @staticmethod
-    def _coerce_val(val: Any) -> Any:
-        import datetime
-
-        if isinstance(val, (datetime.date, datetime.datetime)):
-            return val.isoformat()
-        return val
-
-    def __getitem__(self, key: Any) -> Any:
-        if isinstance(key, (int, slice)):
-            val = self._row[key]
-        else:
-            val = self._row._mapping[key]
-        return self._coerce_val(val)
-
-    def get(self, key: Any, default: Any = None) -> Any:
-        val = self._row._mapping.get(key, default)
-        return self._coerce_val(val)
-
-    def keys(self) -> Any:
-        return self._row._mapping.keys()
-
-    def values(self) -> Any:
-        return [self._coerce_val(v) for v in self._row._mapping.values()]
-
-    def items(self) -> Any:
-        return [(k, self._coerce_val(v)) for k, v in self._row._mapping.items()]
-
-    def __iter__(self) -> Any:
-        return iter(self._row._mapping)
-
-    def __len__(self) -> int:
-        return len(self._row)
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self._coerce_val(getattr(self._row, name))
-        except AttributeError:
-            if hasattr(self._row, "_mapping") and name in self._row._mapping:
-                return self._coerce_val(self._row._mapping[name])
-            raise
-
-
-class ResultAdapter:
-    """Cursor/Result adapter for SQLAlchemy CursorResult."""
-
-    __slots__ = ("_result",)
-
-    def __init__(self, result: Any) -> None:
-        self._result = result
-
-    def fetchone(self) -> Optional[RowAdapter]:
-        row = self._result.fetchone()
-        return RowAdapter(row) if row is not None else None
-
-    def fetchmany(self, size: Optional[int] = None) -> list[RowAdapter]:
-        if size is None:
-            rows = self._result.fetchmany()
-        else:
-            rows = self._result.fetchmany(size)
-        return [RowAdapter(r) for r in rows]
-
-    def fetchall(self) -> list[RowAdapter]:
-        return [RowAdapter(r) for r in self._result.fetchall()]
-
-    def scalar(self) -> Any:
-        return self._result.scalar()
-
-    def scalar_one(self) -> Any:
-        return self._result.scalar_one()
-
-    def scalar_one_or_none(self) -> Any:
-        return self._result.scalar_one_or_none()
-
-    def scalars(self) -> Any:
-        return self._result.scalars()
-
-    def mappings(self) -> Any:
-        return self._result.mappings()
-
-    def __iter__(self) -> Any:
-        for r in self._result:
-            yield RowAdapter(r)
-
-    @property
-    def rowcount(self) -> int:
-        rc = self._result.rowcount
-        return int(rc) if rc is not None else -1
-
-    @property
-    def lastrowid(self) -> Any:
-        return getattr(self._result, "lastrowid", None)
-
-
-class ConnectionAdapter:
-    """Connection adapter supporting both raw SQL statements and SQLAlchemy Core statements."""
-
-    def __init__(self, conn: Any, auto_close: bool = False) -> None:
-        self._conn = conn
-        self._auto_close = auto_close
-        self._is_postgres = True
-
-    def _adapt_sql(self, statement: str) -> str:
-        if not self._is_postgres:
-            return statement
-        stmt = statement.replace("?", "%s")
-        if "INSERT OR IGNORE INTO" in stmt:
-            stmt = stmt.replace("INSERT OR IGNORE INTO", "INSERT INTO")
-            if "ON CONFLICT" not in stmt:
-                stmt = stmt.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING;"
-        elif "INSERT OR REPLACE INTO" in stmt:
-            m = re.search(
-                r"INSERT\s+OR\s+REPLACE\s+INTO\s+([a-zA-Z0-9_]+)\s*\(([^\)]+)\)",
-                stmt,
-                re.IGNORECASE,
-            )
-            if m:
-                tbl = m.group(1).lower()
-                cols_str = m.group(2)
-                cols_in_insert = [c.strip() for c in cols_str.split(",")]
-                stmt = re.sub(
-                    r"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", stmt, flags=re.IGNORECASE
-                )
-                if "ON CONFLICT" not in stmt:
-                    table_obj = metadata.tables.get(tbl)
-                    if table_obj is not None and table_obj.primary_key.columns:
-                        pk_cols = [c.name for c in table_obj.primary_key.columns]
-                    else:
-                        pk_cols = ["id"]
-
-                    conflict_target = ", ".join(pk_cols)
-                    update_cols = [c for c in cols_in_insert if c not in pk_cols]
-                    if update_cols:
-                        updates = ", ".join(f"{col} = EXCLUDED.{col}" for col in update_cols)
-                        stmt = (
-                            stmt.rstrip().rstrip(";")
-                            + f" ON CONFLICT ({conflict_target}) DO UPDATE SET {updates};"
-                        )
-                    else:
-                        stmt = (
-                            stmt.rstrip().rstrip(";")
-                            + f" ON CONFLICT ({conflict_target}) DO NOTHING;"
-                        )
-        if "GROUP_CONCAT" in stmt.upper():
-            stmt = re.sub(
-                r"GROUP_CONCAT\s*\(\s*([^,\)]+)\s*,\s*([^)]+)\s*\)",
-                r"STRING_AGG(\1, \2)",
-                stmt,
-                flags=re.IGNORECASE,
-            )
-            stmt = re.sub(
-                r"GROUP_CONCAT\s*\(\s*([^,\)]+)\s*\)",
-                r"STRING_AGG(\1, ',')",
-                stmt,
-                flags=re.IGNORECASE,
-            )
-        return stmt
-
-    def execute(self, statement: Any, parameters: Any = None) -> ResultAdapter:
-        if isinstance(statement, str):
-            statement = self._adapt_sql(statement)
-            if parameters is None:
-                res = self._conn.exec_driver_sql(statement)
-            else:
-                params = tuple(parameters) if isinstance(parameters, (list, set)) else parameters
-                res = self._conn.exec_driver_sql(statement, params)
-        elif parameters is not None:
-            res = self._conn.execute(statement, parameters)
-        else:
-            res = self._conn.execute(statement)
-        return ResultAdapter(res)
-
-    def executemany(self, statement: Any, parameters: Any) -> ResultAdapter:
-        if isinstance(statement, str):
-            statement = self._adapt_sql(statement)
-            res = self._conn.exec_driver_sql(statement, list(parameters))
-        else:
-            res = self._conn.execute(statement, parameters)
-        return ResultAdapter(res)
-
-    def commit(self) -> None:
-        if hasattr(self._conn, "commit"):
-            self._conn.commit()
-
-    def rollback(self) -> None:
-        if hasattr(self._conn, "rollback"):
-            self._conn.rollback()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> ConnectionAdapter:
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if hasattr(self._conn, "commit") and exc_type is None:
-            try:
-                self._conn.commit()
-            except Exception:
-                pass
-        if self._auto_close:
-            self._conn.close()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._conn, name)
-
-
-# ===================================================================
 # 5. Engine Lifecycle & Pragmas
 # ===================================================================
 
@@ -867,24 +646,20 @@ def get_engine(
     return engine
 
 
-def get_db_connection(db_path: Path | str | None = None) -> ConnectionAdapter:
-    """Create a configured connection adapter backed by SQLAlchemy Engine."""
+def get_db_connection(db_path: Path | str | None = None) -> Any:
+    """Create a configured transaction connection context manager backed by SQLAlchemy Engine."""
     engine = get_engine(db_path)
-    conn = engine.connect()
-    return ConnectionAdapter(conn, auto_close=True)
+    return engine.begin()
 
 
 def _resolve_bind(target: Any) -> tuple[Any, Any]:
     """Resolve target into a SQLAlchemy bindable and an executor function."""
     if isinstance(target, Engine):
         return target, lambda sql: target.connect().exec_driver_sql(sql)
-    if hasattr(target, "_conn"):
-        return target._conn, lambda sql: target._conn.exec_driver_sql(sql)
     if hasattr(target, "exec_driver_sql"):
         return target, lambda sql: target.exec_driver_sql(sql)
     if hasattr(target, "execute"):
-        engine = get_engine()
-        return engine, lambda sql: target.execute(sql)
+        return target, lambda sql: target.execute(sql)
     raise TypeError(f"Unsupported target type for database initialization: {type(target)}")
 
 
@@ -894,45 +669,56 @@ def create_schema_tables(conn: Any, tables: Sequence[Table]) -> None:
         with conn.begin() as c:
             create_schema_tables(c, tables)
         return
-    raw_conn = getattr(conn, "_conn", conn)
     existing = set(
-        raw_conn.exec_driver_sql(
+        conn.exec_driver_sql(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
         ).scalars()
     )
     for table in tables:
         if table.name not in existing:
-            table.create(raw_conn)
+            table.create(conn)
 
 
 def init_authority_db(target: Any) -> None:
     """Initialize relational tables, indexes, and PostgreSQL full-text/trigram indexes."""
     if isinstance(target, Engine):
         with target.begin() as conn:
-            create_schema_tables(conn, metadata.sorted_tables)
-            for stmt in PG_SEARCH_DDL_STATEMENTS:
-                try:
-                    with conn.begin_nested():
-                        conn.exec_driver_sql(stmt)
-                except Exception as e:
-                    logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
+            init_authority_db(conn)
         return
 
     bind, exec_sql = _resolve_bind(target)
+    in_tx = hasattr(bind, "in_transaction") and (
+        bind.in_transaction() if callable(bind.in_transaction) else bool(bind.in_transaction)
+    )
+
+    if in_tx:
+        create_schema_tables(bind, metadata.sorted_tables)
+        for stmt in PG_SEARCH_DDL_STATEMENTS:
+            try:
+                with bind.begin_nested():
+                    exec_sql(stmt)
+            except Exception as e:
+                logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
+        return
+
     if hasattr(bind, "begin"):
         with bind.begin():
             create_schema_tables(bind, metadata.sorted_tables)
+            for stmt in PG_SEARCH_DDL_STATEMENTS:
+                try:
+                    with bind.begin_nested():
+                        exec_sql(stmt)
+                except Exception as e:
+                    logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
     else:
         create_schema_tables(bind, metadata.sorted_tables)
-
-    for stmt in PG_SEARCH_DDL_STATEMENTS:
-        try:
-            exec_sql(stmt)
-        except Exception as e:
-            logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
-
-    if hasattr(bind, "commit"):
-        bind.commit()
+        for stmt in PG_SEARCH_DDL_STATEMENTS:
+            try:
+                exec_sql(stmt)
+            except Exception as e:
+                logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
+        if hasattr(bind, "commit"):
+            bind.commit()
 
 
 def init_corpus_db(target: Any) -> None:
@@ -946,17 +732,24 @@ def init_corpus_db(target: Any) -> None:
     ]
     if isinstance(target, Engine):
         with target.begin() as conn:
-            create_schema_tables(conn, tables)
+            init_corpus_db(conn)
         return
 
-    bind, _ = _resolve_bind(target)
+    bind, exec_sql = _resolve_bind(target)
+    in_tx = hasattr(bind, "in_transaction") and (
+        bind.in_transaction() if callable(bind.in_transaction) else bool(bind.in_transaction)
+    )
+    if in_tx:
+        create_schema_tables(bind, tables)
+        return
+
     if hasattr(bind, "begin"):
         with bind.begin():
             create_schema_tables(bind, tables)
     else:
         create_schema_tables(bind, tables)
-    if hasattr(bind, "commit"):
-        bind.commit()
+        if hasattr(bind, "commit"):
+            bind.commit()
 
 
 def set_metadata(target: Any, key: str, value: str) -> None:
@@ -977,7 +770,7 @@ def set_metadata(target: Any, key: str, value: str) -> None:
             set_={"value": stmt.excluded.value},
         )
         bind.execute(stmt)
-        if hasattr(bind, "commit"):
+        if hasattr(bind, "commit") and getattr(bind, "_trans_context_manager", None) is None:
             bind.commit()
 
 

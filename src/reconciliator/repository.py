@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -26,7 +27,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.curie import parse_curie, to_curie
 from reconciliator.db import (
-    ConnectionAdapter,
     agents_table,
     contributions_table,
     corpus_expression_clusters_table,
@@ -118,40 +118,53 @@ def _hydrate_agent_profile(row_dict: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _row_to_dict(row: Any) -> dict[str, Any]:
+    if hasattr(row, "_mapping"):
+        d = dict(row._mapping)
+    elif isinstance(row, dict):
+        d = dict(row)
+    else:
+        d = dict(row)
+    for k, v in d.items():
+        if isinstance(v, (datetime, date)):
+            d[k] = v.isoformat()
+    return d
+
+
 def _row_to_agent(row: Any) -> AgentEntity:
-    return AgentEntity.model_validate(_hydrate_agent_profile(dict(row)))
+    return AgentEntity.model_validate(_hydrate_agent_profile(_row_to_dict(row)))
 
 
 def _row_to_work(row: Any) -> WorkEntity:
-    return WorkEntity.model_validate(dict(row))
+    return WorkEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_expression(row: Any) -> ExpressionEntity:
-    return ExpressionEntity.model_validate(dict(row))
+    return ExpressionEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_manifestation(row: Any) -> ManifestationEntity:
-    return ManifestationEntity.model_validate(dict(row))
+    return ManifestationEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_item(row: Any) -> ItemEntity:
-    return ItemEntity.model_validate(dict(row))
+    return ItemEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_identifier(row: Any) -> IdentifierEntity:
-    return IdentifierEntity.model_validate(dict(row))
+    return IdentifierEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_contribution(row: Any) -> ContributionEntity:
-    return ContributionEntity.model_validate(dict(row))
+    return ContributionEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_work_relationship(row: Any) -> WorkRelationship:
-    return WorkRelationship.model_validate(dict(row))
+    return WorkRelationship.model_validate(_row_to_dict(row))
 
 
 def _row_to_harvest_state(row: Any) -> HarvestState:
-    return HarvestState.model_validate(dict(row))
+    return HarvestState.model_validate(_row_to_dict(row))
 
 
 class WEMIRepository:
@@ -216,11 +229,11 @@ class WEMIRepository:
         else:
             self.manifestation_indexer = None
 
-    def get_connection(self) -> ConnectionAdapter:
-        """Obtain connection to authority.db with foreign keys enabled."""
-        return ConnectionAdapter(self.engine.connect(), auto_close=True)
+    def get_connection(self) -> Any:
+        """Obtain connection with an active transaction."""
+        return self.engine.begin()
 
-    def get_corpus_connection(self) -> ConnectionAdapter:
+    def get_corpus_connection(self) -> Any:
         """Corpus staging shares the authority database.
 
         Retained as a named entry point because the corpus tables are a distinct
@@ -315,7 +328,7 @@ class WEMIRepository:
                     },
                 ).returning(agents_table.c.id)
                 res = conn.execute(stmt).fetchone()
-                agent_ids.append(res["id"] if res else 0)
+                agent_ids.append(res[0] if res else 0)
         return agent_ids
 
     def insert_works_batch(
@@ -363,7 +376,7 @@ class WEMIRepository:
                     },
                 ).returning(works_table.c.id)
                 res = conn.execute(stmt).fetchone()
-                work_ids.append(res["id"] if res else 0)
+                work_ids.append(res[0] if res else 0)
 
         if vectors is not None and self.work_indexer is not None and len(vectors) == len(works):
             vector_ids = self.work_indexer.add_vectors(vectors, ids=work_ids)
@@ -430,7 +443,7 @@ class WEMIRepository:
                     },
                 ).returning(expressions_table.c.id)
                 res = conn.execute(stmt).fetchone()
-                expression_ids.append(res["id"] if res else 0)
+                expression_ids.append(res[0] if res else 0)
 
         return expression_ids
 
@@ -503,7 +516,7 @@ class WEMIRepository:
                     },
                 ).returning(manifestations_table.c.id)
                 res = conn.execute(stmt).fetchone()
-                manif_ids.append(res["id"] if res else 0)
+                manif_ids.append(res[0] if res else 0)
 
         if (
             vectors is not None
@@ -604,7 +617,7 @@ class WEMIRepository:
                     .returning(items_table.c.id)
                 )
                 res = conn.execute(stmt).fetchone()
-                item_ids.append(res["id"] if res else 0)
+                item_ids.append(res[0] if res else 0)
         return item_ids
 
     def insert_identifiers_batch(self, identifiers: list[IdentifierEntity]) -> list[int]:
@@ -626,7 +639,7 @@ class WEMIRepository:
                     .returning(identifiers_table.c.id)
                 )
                 res = conn.execute(stmt).fetchone()
-                id_ids.append(res["id"] if res else 0)
+                id_ids.append(res[0] if res else 0)
         return id_ids
 
     def insert_entity_keys_batch(self, keys: list[EntityKey]) -> None:
@@ -665,7 +678,7 @@ class WEMIRepository:
             .order_by(entity_keys_table.c.id)
         )
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
         for row in rows:
             bag.setdefault(row["key_type"], []).append(row["key_value"])
         return bag
@@ -689,7 +702,7 @@ class WEMIRepository:
             .order_by(entity_keys_table.c.entity_id, entity_keys_table.c.id)
         )
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
         for row in rows:
             out.setdefault(row["entity_id"], {}).setdefault(row["key_type"], []).append(
                 row["key_value"]
@@ -733,7 +746,7 @@ class WEMIRepository:
         stmt = stmt.order_by(manifestations_table.c.id)
 
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
 
             key_bags = self.get_all_entity_keys("manifestation")
 
@@ -743,7 +756,7 @@ class WEMIRepository:
                 identifiers_table.c.source.label("scheme"),
                 identifiers_table.c.source_id.label("value"),
             ).where(identifiers_table.c.entity_type.in_(("manifestation", "work", "expression")))
-            ident_rows = conn.execute(ident_stmt).fetchall()
+            ident_rows = conn.execute(ident_stmt).mappings().fetchall()
 
         ident_by_entity: dict[tuple[str, int], dict[str, list[str]]] = {}
         for r in ident_rows:
@@ -819,8 +832,7 @@ class WEMIRepository:
             entity_keys_table.c.key_value == key_value,
         )
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
-        return [row["entity_id"] for row in rows]
+            return list(conn.execute(stmt).scalars().all())
 
     def insert_contributions_batch(self, contributions: list[ContributionEntity]) -> list[int]:
         """Insert ContributionEntity records in batch."""
@@ -842,7 +854,7 @@ class WEMIRepository:
                     .returning(contributions_table.c.id)
                 )
                 res = conn.execute(stmt).fetchone()
-                c_ids.append(res["id"] if res else 0)
+                c_ids.append(res[0] if res else 0)
         return c_ids
 
     def insert_work_relationships_batch(self, rels: list[WorkRelationship]) -> list[int]:
@@ -862,34 +874,37 @@ class WEMIRepository:
                     set_={"relationship_type": stmt.excluded.relationship_type},
                 ).returning(work_relationships_table.c.id)
                 res = conn.execute(stmt).fetchone()
-                r_ids.append(res["id"] if res else 0)
+                r_ids.append(res[0] if res else 0)
         return r_ids
 
     def insert_medium_of_performance_batch(self, mops: list[MediumOfPerformance]) -> None:
-        """Insert or replace MediumOfPerformance records in batch."""
+        """Insert MediumOfPerformance records in batch."""
         if not mops:
             return
+        rows = [
+            {
+                "work_id": mop.work_id,
+                "medium_uri": mop.medium_uri,
+                "label": mop.label,
+                "player_count": mop.player_count,
+                "is_soloist": bool(mop.is_soloist),
+            }
+            for mop in mops
+        ]
+        stmt = pg_insert(work_medium_of_performance_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["work_id", "medium_uri"],
+            set_={
+                "label": stmt.excluded.label,
+                "player_count": stmt.excluded.player_count,
+                "is_soloist": stmt.excluded.is_soloist,
+            },
+        )
         with self.get_connection() as conn:
-            for m in mops:
-                stmt = pg_insert(work_medium_of_performance_table).values(
-                    work_id=m.work_id,
-                    medium_uri=m.medium_uri,
-                    label=m.label,
-                    player_count=m.player_count,
-                    is_soloist=bool(m.is_soloist),
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["work_id", "medium_uri"],
-                    set_={
-                        "label": stmt.excluded.label,
-                        "player_count": stmt.excluded.player_count,
-                        "is_soloist": stmt.excluded.is_soloist,
-                    },
-                )
-                conn.execute(stmt)
+            conn.execute(stmt)
 
     def insert_entity_subjects_batch(self, subjects: list[EntitySubject]) -> list[int]:
-        """Insert EntitySubject records in batch."""
+        """Insert polymorphic EntitySubject records in batch."""
         if not subjects:
             return []
         s_ids: list[int] = []
@@ -912,7 +927,7 @@ class WEMIRepository:
                     .returning(entity_subjects_table.c.id)
                 )
                 row = conn.execute(stmt).fetchone()
-                s_ids.append(row["id"] if row else 0)
+                s_ids.append(row[0] if row else 0)
         return s_ids
 
     def insert_wemi_batch(
@@ -1278,7 +1293,7 @@ class WEMIRepository:
             .order_by(entity_subjects_table.c.is_primary.desc(), entity_subjects_table.c.id.asc())
         )
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [EntitySubject.model_validate(dict(r)) for r in rows]
 
     def get_subjects_for_agent(self, agent_id: int) -> list[EntitySubject]:
@@ -1300,7 +1315,7 @@ class WEMIRepository:
             stmt = stmt.where(entity_subjects_table.c.entity_type == entity_type)
         stmt = stmt.order_by(entity_subjects_table.c.id.asc())
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [dict(r) for r in rows]
 
     def get_agent(self, agent_id: int) -> Optional[AgentEntity]:
@@ -1346,9 +1361,9 @@ class WEMIRepository:
                 )
                 .limit(1)
             )
-            ident_row = conn.execute(stmt).fetchone()
-            if ident_row:
-                work.wikidata_qid = ident_row["source_id"]
+            qid = conn.execute(stmt).scalar()
+            if qid:
+                work.wikidata_qid = qid
         return work
 
     def get_work(self, work_id: int) -> Optional[WorkEntity]:
@@ -1588,7 +1603,7 @@ class WEMIRepository:
         """Map every known ingest source to whether it is authoritative."""
         stmt = select(sources_table.c.name, sources_table.c.is_authoritative)
         with self.get_connection() as conn:
-            return {r["name"]: bool(r["is_authoritative"]) for r in conn.execute(stmt)}
+            return {r["name"]: bool(r["is_authoritative"]) for r in conn.execute(stmt).mappings()}
 
     def authoritative_sources(self) -> list[str]:
         """Names of the sources whose records may be used as authority."""
@@ -1598,23 +1613,39 @@ class WEMIRepository:
             .order_by(sources_table.c.name)
         )
         with self.get_connection() as conn:
-            return [r["name"] for r in conn.execute(stmt)]
+            return list(conn.execute(stmt).scalars().all())
 
     def non_authoritative_sources(self) -> list[str]:
         """Source names registered as non-authoritative, i.e. corpora to cluster."""
         return sorted(name for name, auth in self.get_sources().items() if not auth)
 
-    def _origin_clause(
-        self, column: str = "record_origin", authoritative_only: bool = True
-    ) -> tuple[str, list[Any]]:
-        """SQL fragment restricting rows to authoritative sources."""
-        if not authoritative_only:
-            return "", []
-        names = self.authoritative_sources()
-        if not names:
-            return "", []
-        placeholders = ",".join("?" for _ in names)
-        return f" AND {column} IN ({placeholders})", list(names)
+    def apply_work_consolidations(self, group_map: dict[str, list[str]]) -> int:
+        """Apply work-level cluster groupings directly to the authority works table."""
+        if not group_map:
+            return 0
+        updates = 0
+        with self.get_connection() as conn:
+            for canon_source_id, member_ids in group_map.items():
+                w_canon = self.get_work_by_source_id(canon_source_id)
+                if not w_canon or not w_canon.id:
+                    continue
+                canon_pk = w_canon.id
+
+                pks_to_update = []
+                for mid in member_ids:
+                    w = self.get_work_by_source_id(mid)
+                    if w and w.id:
+                        pks_to_update.append(w.id)
+
+                if pks_to_update:
+                    stmt = (
+                        update(works_table)
+                        .where(works_table.c.id.in_(pks_to_update))
+                        .values(canonical_work_id=canon_pk)
+                    )
+                    conn.execute(stmt)
+                    updates += len(pks_to_update)
+        return updates
 
     def set_canonical_works(self, mapping: dict[int, int]) -> None:
         """Record the elected canonical work for each consolidated work id."""
@@ -1622,15 +1653,18 @@ class WEMIRepository:
             return
         with self.get_connection() as conn:
             for work_id, canonical in mapping.items():
-                stmt = (
+                conn.execute(
                     update(works_table)
                     .where(works_table.c.id == work_id)
                     .values(canonical_work_id=canonical)
                 )
-                conn.execute(stmt)
 
     def clear_canonical_works(self) -> None:
         """Undo consolidation, leaving every work its own canonical."""
+        self.reset_work_consolidations()
+
+    def reset_work_consolidations(self) -> None:
+        """Clear canonical_work_id pointers and same_work_as relationships."""
         with self.get_connection() as conn:
             conn.execute(update(works_table).values(canonical_work_id=None))
             conn.execute(
@@ -1646,7 +1680,7 @@ class WEMIRepository:
             works_table.c.canonical_work_id != works_table.c.id,
         )
         with self.get_connection() as conn:
-            return {r["id"]: r["canonical_work_id"] for r in conn.execute(stmt)}
+            return {r[0]: r[1] for r in conn.execute(stmt)}
 
     def get_identifiers_for_entity(
         self, entity_type: EntityType, entity_id: int
@@ -1699,7 +1733,7 @@ class WEMIRepository:
             ),
         )
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             candidates = [(r["entity_type"], r["entity_id"]) for r in rows]
             if not authoritative_only:
                 return candidates
@@ -1725,7 +1759,7 @@ class WEMIRepository:
                 tbl = table_map.get(etype)
                 if tbl is not None:
                     check_stmt = select(tbl.c.record_origin).where(tbl.c.id == eid)
-                    row = conn.execute(check_stmt).fetchone()
+                    row = conn.execute(check_stmt).mappings().fetchone()
                     if row and row["record_origin"] in allowed:
                         filtered.append((etype, eid))
             return filtered
@@ -1736,7 +1770,7 @@ class WEMIRepository:
             work_medium_of_performance_table.c.work_id == work_id
         )
         with self.get_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [
                 MediumOfPerformance(
                     work_id=r["work_id"],
@@ -1820,8 +1854,7 @@ class WEMIRepository:
             manifestations_table.c.source == source
         )
         with self.get_connection() as conn:
-            cursor = conn.execute(stmt)
-            return {row["source_id"] for row in cursor if row["source_id"]}
+            return {row for row in conn.execute(stmt).scalars() if row}
 
     # -----------------------------------------------------------------------
     # Database-Level SQLite FTS5 Lexical Search (Engine-Level BM25 Ranking)
@@ -1848,54 +1881,10 @@ class WEMIRepository:
         limit: Optional[int] = None,
         ranking_function: Optional[str] = None,
         weights: Optional[list[float]] = None,
-        prefix_search: Optional[bool] = None,
-    ) -> tuple[str, str, int]:
-        """Format MATCH query string, ORDER BY clause, and limit based on config or explicit parameters."""
-        eff_limit = (
-            limit
-            if limit is not None
-            else (self.fts_config.default_limit if self.fts_config else 20)
-        )
-        eff_rank = ranking_function or (
-            self.fts_config.ranking_function if self.fts_config else "bm25"
-        )
-        eff_weights = (
-            weights
-            if weights is not None
-            else (self.fts_config.column_weights if self.fts_config else None)
-        )
-        eff_prefix = (
-            prefix_search
-            if prefix_search is not None
-            else (self.fts_config.prefix_search if self.fts_config else False)
-        )
-        clean_query = query.strip()
-        if eff_prefix and clean_query:
-            tokens = clean_query.split()
-            processed_tokens: list[str] = []
-            for t in tokens:
-                token_clean = t.rstrip("*")
-                if not token_clean:
-                    continue
-                if (
-                    token_clean.upper() in {"OR", "AND", "NOT"}
-                    or token_clean.startswith('"')
-                    or token_clean.endswith('"')
-                ):
-                    processed_tokens.append(token_clean)
-                else:
-                    processed_tokens.append(f"{token_clean}*")
-            clean_query = " ".join(processed_tokens)
-
-        if eff_weights:
-            weights_str = ", ".join(str(float(w)) for w in eff_weights)
-            order_clause = f"bm25({table_name}, {weights_str})"
-        elif eff_rank and eff_rank.lower() != "bm25":
-            order_clause = eff_rank
-        else:
-            order_clause = "f.rank"
-
-        return clean_query, order_clause, eff_limit
+        prefix: bool = True,
+    ) -> tuple[str, list[Any]]:
+        """Construct FTS query string and ordering clause using PostgreSQL full-text search."""
+        return "", []
 
     def search_works_fts(
         self,
@@ -1907,34 +1896,38 @@ class WEMIRepository:
         authoritative_only: bool = False,
     ) -> list[tuple[WorkEntity, float]]:
         """Search works via PostgreSQL full-text search. Returns list of (WorkEntity, rank)."""
-        if not query or not query.strip():
+        clean_query = query.strip()
+        if not clean_query:
             return []
+
         eff_limit = (
             limit
             if limit is not None
             else (self.fts_config.default_limit if self.fts_config else 20)
         )
-        clean_query = query.strip()
-        origin_clause, origin_params = self._origin_clause("w.record_origin", authoritative_only)
-
         eff_prefix = (
             prefix_search
             if prefix_search is not None
             else (self.fts_config.prefix_search if self.fts_config else True)
         )
 
-        ts_vector = func.to_tsvector(
-            "simple", func.unaccent(func.coalesce(works_table.c.serialized_text, ""))
-        )
-        ts_query = func.websearch_to_tsquery("simple", func.unaccent(clean_query))
+        parts = re.split(r"\s+OR\s+", clean_query, flags=re.IGNORECASE)
+        or_clauses = []
+        for part in parts:
+            words = re.findall(r"\w+", part)
+            if not words:
+                continue
+            clause = " & ".join(f"{w}:*" if eff_prefix else w for w in words)
+            or_clauses.append(f"({clause})" if len(words) > 1 else clause)
+        ts_query_str = " | ".join(or_clauses)
+        if not ts_query_str:
+            return []
+
+        ts_query = func.to_tsquery("simple", ts_query_str)
+        ts_vector = func.to_tsvector("simple", func.coalesce(works_table.c.serialized_text, ""))
         rank_col = func.ts_rank_cd(ts_vector, ts_query).label("rank")
 
         match_cond = ts_vector.op("@@")(ts_query)
-        if eff_prefix:
-            match_cond = or_(
-                match_cond,
-                works_table.c.title_normalized.op("%")(clean_query),
-            )
 
         stmt = select(works_table, rank_col).where(match_cond)
         if authoritative_only:
@@ -1945,11 +1938,13 @@ class WEMIRepository:
         stmt = stmt.order_by(rank_col.desc()).limit(eff_limit)
 
         with self.get_connection() as conn:
-            cursor = conn.execute(stmt)
+            cursor = conn.execute(stmt).mappings()
             return [
                 (_row_to_work(row), float(row["rank"]) if row["rank"] is not None else 0.0)
                 for row in cursor
             ]
+
+    search_works_lexical = search_works_fts
 
     # -----------------------------------------------------------------------
     # Dense Vector Search
@@ -1987,9 +1982,8 @@ class WEMIRepository:
             stmt = select(work_vectors_table.c.vector_id, work_vectors_table.c.work_id).where(
                 work_vectors_table.c.vector_id.in_(vector_indices)
             )
-            rows = conn.execute(stmt).fetchall()
-            for r in rows:
-                vector_to_work_id[r["vector_id"]] = r["work_id"]
+            for r in conn.execute(stmt):
+                vector_to_work_id[r[0]] = r[1]
 
         results: list[tuple[WorkEntity, float]] = []
         seen_work_ids: set[int] = set()
@@ -2038,9 +2032,8 @@ class WEMIRepository:
                 manifestation_vectors_table.c.vector_id,
                 manifestation_vectors_table.c.manifestation_id,
             ).where(manifestation_vectors_table.c.vector_id.in_(vector_indices))
-            rows = conn.execute(stmt).fetchall()
-            for r in rows:
-                vector_to_manif_id[r["vector_id"]] = r["manifestation_id"]
+            for r in conn.execute(stmt):
+                vector_to_manif_id[r[0]] = r[1]
 
         results: list[tuple[ManifestationEntity, float]] = []
         seen_manif_ids: set[int] = set()
@@ -2072,11 +2065,9 @@ class WEMIRepository:
                 stmt = select(tbl.c.record_origin, func.count().label("cnt")).group_by(
                     tbl.c.record_origin
                 )
-                rows = conn.execute(stmt).fetchall()
-                for r in rows:
-                    orig = r["record_origin"]
+                for orig, cnt in conn.execute(stmt):
                     if orig in counts[tier]:
-                        counts[tier][orig] = r["cnt"]
+                        counts[tier][orig] = cnt
         return counts
 
     # -----------------------------------------------------------------------
@@ -2199,7 +2190,7 @@ class WEMIRepository:
                         agents_table.c.source_id.in_(qids_with_idents),
                     )
                 ).fetchall()
-                qid_to_agent_id = {r["source_id"]: r["id"] for r in agent_records}
+                qid_to_agent_id = {r[1]: r[0] for r in agent_records}
 
                 ident_rows = []
                 for a in authors:
@@ -2242,7 +2233,7 @@ class WEMIRepository:
                         identifiers_table.c.entity_id.in_(agent_id_list),
                     )
                     for r in conn.execute(chk_stmt):
-                        existing_idents.add((r["entity_id"], r["source"], r["source_id"]))
+                        existing_idents.add((r[0], r[1], r[2]))
 
                     to_insert = [
                         row
@@ -2275,7 +2266,7 @@ class WEMIRepository:
                 agents_table.c.source == "wikidata",
                 agents_table.c.source_id.in_(qids),
             )
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
 
             results: dict[str, dict[str, Any]] = {}
             agent_id_map: dict[str, int] = {}
@@ -2311,9 +2302,9 @@ class WEMIRepository:
                 id_rows = conn.execute(id_stmt).fetchall()
                 rev_map = {aid: qid for qid, aid in agent_id_map.items()}
                 for r in id_rows:
-                    qid = rev_map.get(r["entity_id"])
+                    qid = rev_map.get(r[0])
                     if qid and qid in results:
-                        results[qid]["identifiers"][r["source"]] = r["source_id"]
+                        results[qid]["identifiers"][r[1]] = r[2]
 
             return results
 
@@ -2344,7 +2335,7 @@ class WEMIRepository:
                     agents_table.c.affiliation,
                     agents_table.c.metadata_json,
                 ).where(agents_table.c.id.in_(agent_ids))
-                rows = conn.execute(stmt).fetchall()
+                rows = conn.execute(stmt).mappings().fetchall()
                 for r in rows:
                     results[r["id"]] = _hydrate_agent_profile(dict(r))
             except Exception:
@@ -2575,26 +2566,23 @@ class WEMIRepository:
             )
 
             with self.get_connection() as conn:
-                cur = conn.execute(stmt)
-                while True:
-                    rows = cur.fetchmany(batch_size)
-                    if not rows:
-                        break
-                    ids = [int(r["id"]) for r in rows]
-                    texts = [str(r["serialized_text"]) for r in rows]
+                rows = conn.execute(stmt).fetchall()
+                for i in range(0, len(rows), batch_size):
+                    batch = rows[i : i + batch_size]
+                    ids = [int(r[0]) for r in batch]
+                    texts = [str(r[1]) for r in batch]
                     vectors = embedder.embed_texts(texts, batch_size=len(texts))
                     vector_ids = indexer.add_vectors(vectors, ids=ids)
-                    with self.get_connection() as write_conn:
-                        values_to_insert = [
-                            {"vector_id": v_id, id_col_name: ent_id}
-                            for v_id, ent_id in zip(vector_ids, ids)
-                        ]
-                        map_stmt = pg_insert(map_table_obj).values(values_to_insert)
-                        map_stmt = map_stmt.on_conflict_do_update(
-                            index_elements=[map_table_obj.c.vector_id],
-                            set_={id_col_name: getattr(map_stmt.excluded, id_col_name)},
-                        )
-                        write_conn.execute(map_stmt)
+                    values_to_insert = [
+                        {"vector_id": v_id, id_col_name: ent_id}
+                        for v_id, ent_id in zip(vector_ids, ids)
+                    ]
+                    map_stmt = pg_insert(map_table_obj).values(values_to_insert)
+                    map_stmt = map_stmt.on_conflict_do_update(
+                        index_elements=[map_table_obj.c.vector_id],
+                        set_={id_col_name: getattr(map_stmt.excluded, id_col_name)},
+                    )
+                    conn.execute(map_stmt)
                     counts[kind] += len(ids)
             indexer.save()
 
@@ -2629,16 +2617,14 @@ class WEMIRepository:
         ).order_by(agents_table.c.id)
 
         with self.get_connection() as conn:
-            cur = conn.execute(stmt)
+            rows = conn.execute(stmt).mappings().fetchall()
 
             total_indexed = 0
-            while True:
-                rows = cur.fetchmany(batch_size)
-                if not rows:
-                    break
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i : i + batch_size]
                 ids: list[int] = []
                 texts: list[str] = []
-                for r in rows:
+                for r in batch:
                     agent_dict = dict(r)
                     text = wemi_engine.render_agent(agent_dict)
                     ids.append(agent_dict["id"])
@@ -2698,11 +2684,9 @@ class WEMIRepository:
                 ).where(contributions_table.c.agent_id == cid)
                 contribs = conn.execute(stmt).fetchall()
 
-                work_ids = [c["entity_id"] for c in contribs if c["entity_type"] == "work"]
-                manif_ids = [
-                    c["entity_id"] for c in contribs if c["entity_type"] == "manifestation"
-                ]
-                expr_ids = [c["entity_id"] for c in contribs if c["entity_type"] == "expression"]
+                work_ids = [c[1] for c in contribs if c[0] == "work"]
+                manif_ids = [c[1] for c in contribs if c[0] == "manifestation"]
+                expr_ids = [c[1] for c in contribs if c[0] == "expression"]
 
                 # Contributions land on whichever tier the relator implies, so the
                 # tiers have to be walked in both directions before evidence is
@@ -2713,24 +2697,24 @@ class WEMIRepository:
                         manifestations_table.c.work_id.in_(work_ids)
                     )
                     for row in conn.execute(manif_stmt):
-                        if row["id"] not in manif_ids:
-                            manif_ids.append(row["id"])
+                        if row[0] not in manif_ids:
+                            manif_ids.append(row[0])
                 if manif_ids:
                     manif_work_stmt = select(distinct(manifestations_table.c.work_id)).where(
                         manifestations_table.c.id.in_(manif_ids),
                         manifestations_table.c.work_id.is_not(None),
                     )
                     for row in conn.execute(manif_work_stmt):
-                        if row["work_id"] not in work_ids:
-                            work_ids.append(row["work_id"])
+                        if row[0] not in work_ids:
+                            work_ids.append(row[0])
                 if expr_ids:
                     expr_work_stmt = select(distinct(expressions_table.c.work_id)).where(
                         expressions_table.c.id.in_(expr_ids),
                         expressions_table.c.work_id.is_not(None),
                     )
                     for row in conn.execute(expr_work_stmt):
-                        if row["work_id"] not in work_ids:
-                            work_ids.append(row["work_id"])
+                        if row[0] not in work_ids:
+                            work_ids.append(row[0])
 
                 if norm_target_coauthors and (work_ids or manif_ids or expr_ids):
                     # Co-contributors are collected across every tier the candidate
@@ -2759,7 +2743,7 @@ class WEMIRepository:
                             )
                             .where(or_(*conds), contributions_table.c.agent_id != cid)
                         )
-                        co_agents = conn.execute(co_stmt).fetchall()
+                        co_agents = conn.execute(co_stmt).mappings().fetchall()
                         for co in co_agents:
                             c_norm = fold_label(co["name_normalized"] or co["name"])
                             for t_norm in norm_target_coauthors:
@@ -2778,17 +2762,17 @@ class WEMIRepository:
                         manifestations_table.c.publisher.is_not(None),
                         manifestations_table.c.publisher != "",
                     )
-                    pubs = conn.execute(pub_stmt).fetchall()
+                    pubs = conn.execute(pub_stmt).scalars().all()
                     for pb in pubs:
-                        p_norm = fold_label(pb["publisher"])
+                        p_norm = fold_label(pb)
                         if p_norm and (
                             p_norm in norm_target_pub
                             or norm_target_pub in p_norm
                             or fuzz.token_set_ratio(norm_target_pub, p_norm) >= 80.0
                         ):
                             evidence[cid]["has_publisher_match"] = True
-                            if pb["publisher"] not in evidence[cid]["matched_publishers"]:
-                                evidence[cid]["matched_publishers"].append(pb["publisher"])
+                            if pb not in evidence[cid]["matched_publishers"]:
+                                evidence[cid]["matched_publishers"].append(pb)
 
                 if work_ids and norm_target_classes:
                     class_stmt = select(distinct(works_table.c.ykl_class)).where(
@@ -2796,9 +2780,9 @@ class WEMIRepository:
                         works_table.c.ykl_class.is_not(None),
                         works_table.c.ykl_class != "",
                     )
-                    classes = conn.execute(class_stmt).fetchall()
+                    classes = conn.execute(class_stmt).scalars().all()
                     for cl in classes:
-                        code = str(cl["ykl_class"]).strip().lower()
+                        code = str(cl).strip().lower()
                         for tc in norm_target_classes:
                             t_scheme, _, t_code = tc.partition(":")
                             if t_scheme in ("ykl", ""):
@@ -2813,10 +2797,10 @@ class WEMIRepository:
                         works_table.c.id.in_(work_ids),
                         works_table.c.subjects_json.is_not(None),
                     )
-                    subjects = conn.execute(subj_stmt).fetchall()
+                    subjects = conn.execute(subj_stmt).scalars().all()
                     for sj in subjects:
                         try:
-                            subj_data = json.loads(sj["subjects_json"])
+                            subj_data = json.loads(sj)
                             if isinstance(subj_data, list):
                                 for subj in subj_data:
                                     code = str(subj.get("code", "")).strip().lower()
@@ -3069,7 +3053,7 @@ class WEMIRepository:
         """Fetch all work clusters."""
         stmt = select(corpus_work_clusters_table).order_by(corpus_work_clusters_table.c.cluster_id)
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [WorkCluster.model_validate(dict(r)) for r in rows]
 
     def get_expression_clusters_for_work(self, work_cluster_id: str) -> list[ExpressionCluster]:
@@ -3080,7 +3064,7 @@ class WEMIRepository:
             .order_by(corpus_expression_clusters_table.c.cluster_id)
         )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             clusters = []
             for r in rows:
                 d = dict(r)
@@ -3103,7 +3087,7 @@ class WEMIRepository:
             corpus_expression_clusters_table.c.cluster_id
         )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             clusters = []
             for r in rows:
                 d = dict(r)
@@ -3126,21 +3110,21 @@ class WEMIRepository:
             corpus_manifestation_clusters_table.c.cluster_id
         )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [ManifestationCluster.model_validate(dict(r)) for r in rows]
 
     def get_corpus_linkage(self, record_id: str) -> Optional[CorpusLinkage]:
         """Fetch linkage record for a staged target record."""
         stmt = select(corpus_linkages_table).where(corpus_linkages_table.c.record_id == record_id)
         with self.get_corpus_connection() as conn:
-            row = conn.execute(stmt).fetchone()
+            row = conn.execute(stmt).mappings().fetchone()
             return CorpusLinkage.model_validate(dict(row)) if row else None
 
     def get_all_corpus_linkages(self) -> list[CorpusLinkage]:
         """Fetch all corpus linkage records."""
         stmt = select(corpus_linkages_table).order_by(corpus_linkages_table.c.record_id)
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [CorpusLinkage.model_validate(dict(r)) for r in rows]
 
     def get_sammelband_bindings(self, binding_id: str) -> list[SammelbandBinding]:
@@ -3151,5 +3135,5 @@ class WEMIRepository:
             .order_by(sammelband_bindings_table.c.sequence_in_binding)
         )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(stmt).mappings().fetchall()
             return [SammelbandBinding.model_validate(dict(r)) for r in rows]

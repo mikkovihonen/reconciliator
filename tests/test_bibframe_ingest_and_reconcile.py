@@ -107,7 +107,7 @@ telemetry:
 
         store = WEMIRepository(db_path, index_path)
         with store.get_connection() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM works;").fetchone()[0]
+            count = conn.exec_driver_sql("SELECT COUNT(*) FROM works;").scalar()
         assert count == 1
 
         # BFFI records are keyed by their own URIs, under the configured source name.

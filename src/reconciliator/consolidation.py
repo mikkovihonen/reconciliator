@@ -142,7 +142,7 @@ class WorkConsolidator:
             stmt_works = stmt_works.where(works_table.c.record_origin.in_(auth_sources))
 
         with self.repo.get_connection() as conn:
-            for row in conn.execute(stmt_works):
+            for row in conn.execute(stmt_works).mappings():
                 work_curie = to_curie(row["source"] or "", row["source_id"] or "")
                 sig = WorkSignature(
                     work_id=row["id"],
@@ -169,7 +169,7 @@ class WorkConsolidator:
                 .join(agents_table, contributions_table.c.agent_id == agents_table.c.id)
                 .where(contributions_table.c.entity_type == "work")
             )
-            for row in conn.execute(stmt_creators):
+            for row in conn.execute(stmt_creators).mappings():
                 sig = signatures.get(row["work_id"])
                 if sig is None:
                     continue
@@ -192,7 +192,7 @@ class WorkConsolidator:
                     identifiers_table.c.entity_type == "work",
                     func.lower(identifiers_table.c.source).in_(sources_list),
                 )
-                for row in conn.execute(stmt_work_idents):
+                for row in conn.execute(stmt_work_idents).mappings():
                     sig = signatures.get(row["work_id"])
                     if sig is not None:
                         self._add_identifier(sig, row["source"], row["source_id"])
@@ -218,7 +218,7 @@ class WorkConsolidator:
                         func.lower(identifiers_table.c.source).in_(sources_list),
                     )
                 )
-                for row in conn.execute(stmt_manif_idents):
+                for row in conn.execute(stmt_manif_idents).mappings():
                     sig = signatures.get(row["work_id"])
                     if sig is not None:
                         self._add_identifier(sig, row["source"], row["source_id"])
@@ -417,4 +417,6 @@ class WorkConsolidator:
             work_relationships_table.c.target_work_id,
         ).where(work_relationships_table.c.relationship_type == SAME_WORK)
         with self.repo.get_connection() as conn:
-            return {(r["source_work_id"], r["target_work_id"]) for r in conn.execute(stmt)}
+            return {
+                (r["source_work_id"], r["target_work_id"]) for r in conn.execute(stmt).mappings()
+            }

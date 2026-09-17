@@ -16,7 +16,9 @@ from lxml import etree
 
 from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.config import load_config
+from reconciliator.db import work_relationships_table, works_table
 from reconciliator.repository import WEMIRepository
+from sqlalchemy import func, select
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC = "{http://www.loc.gov/MARC21/slim}"
@@ -282,14 +284,18 @@ def test_sources_keep_separate_identities_until_consolidation_runs(linked: dict)
         # stored as WEMI rows in the same database, so an unscoped count includes
         # its works too.
         authoritative = repo.authoritative_sources()
-        placeholders = ", ".join("?" for _ in authoritative)
-        works = conn.execute(
-            f"SELECT source, source_id FROM works WHERE record_origin IN ({placeholders}) ORDER BY id",
-            authoritative,
-        ).fetchall()
+        works = list(
+            conn.execute(
+                select(works_table.c.source, works_table.c.source_id)
+                .where(works_table.c.record_origin.in_(authoritative))
+                .order_by(works_table.c.id)
+            ).mappings()
+        )
         same_work_edges = conn.execute(
-            "SELECT COUNT(*) c FROM work_relationships WHERE relationship_type = 'same_work_as';"
-        ).fetchone()["c"]
+            select(func.count())
+            .select_from(work_relationships_table)
+            .where(work_relationships_table.c.relationship_type == "same_work_as")
+        ).scalar()
 
     assert len(works) == 2, "fixture holds the same work in two sources"
     assert {w["source"] for w in works} == {"source_a", "source_b"}

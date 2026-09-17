@@ -21,11 +21,11 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
     def write_worker(worker_id: int) -> int:
         with get_db_connection(db_path) as conn:
             for i in range(20):
-                conn.execute(
+                conn.exec_driver_sql(
                     """
                     INSERT INTO works (
                         source, source_id, title, title_normalized, work_type
-                    ) VALUES ('melinda', ?, ?, ?, 'text');
+                    ) VALUES ('melinda', %s, %s, %s, 'text');
                     """,
                     (
                         f"REC_{worker_id}_{i}",
@@ -37,9 +37,7 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
 
     def read_worker() -> int:
         with get_db_connection(db_path) as conn:
-            cursor = conn.execute("SELECT COUNT(*) as cnt FROM works;")
-            row = cursor.fetchone()
-            return int(row["cnt"])
+            return int(conn.exec_driver_sql("SELECT COUNT(*) FROM works;").scalar())
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         write_futures = [executor.submit(write_worker, wid) for wid in range(4)]
@@ -52,7 +50,7 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
 
     # Verify total rows committed
     with get_db_connection(db_path) as conn:
-        total = conn.execute("SELECT COUNT(*) as cnt FROM works;").fetchone()["cnt"]
+        total = conn.exec_driver_sql("SELECT COUNT(*) FROM works;").scalar()
         assert total == 4 * 20
 
 

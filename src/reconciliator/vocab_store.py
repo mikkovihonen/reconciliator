@@ -85,10 +85,8 @@ class VocabStore:
         init_vocab_db(self.engine)
 
     def get_connection(self) -> Any:
-        """Get a configured connection adapter backed by the SQLAlchemy Engine."""
-        from reconciliator.db import ConnectionAdapter
-
-        return ConnectionAdapter(self.engine.connect(), auto_close=True)
+        """Get a configured connection context manager backed by the SQLAlchemy Engine."""
+        return self.engine.begin()
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine and release connection pool."""

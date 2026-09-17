@@ -5,10 +5,12 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+from sqlalchemy import select
 from typer.testing import CliRunner
 
 from reconciliator.cli import app
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
+from reconciliator.db import agents_table, manifestations_table, works_table
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.repository import WEMIRepository
@@ -142,7 +144,15 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
 
     # Verify both records exist with their respective source names
     with store.get_connection() as conn:
-        rows = conn.execute("SELECT source, source_id, title FROM works ORDER BY id;").fetchall()
+        rows = (
+            conn.execute(
+                select(works_table.c.source, works_table.c.source_id, works_table.c.title).order_by(
+                    works_table.c.id
+                )
+            )
+            .mappings()
+            .fetchall()
+        )
         assert len(rows) == 2
         assert rows[0]["source"] == "catalog_a"
         assert rows[0]["title"] == "Source A Book Title"
@@ -151,10 +161,11 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
 
         # Each source contributes a full WEMI split, not just a Work row.
         # Vectors are not written at ingest time; build-index does that.
-        manif_sources = [
-            r["source"]
-            for r in conn.execute("SELECT source FROM manifestations ORDER BY id;").fetchall()
-        ]
+        manif_sources = list(
+            conn.execute(
+                select(manifestations_table.c.source).order_by(manifestations_table.c.id)
+            ).scalars()
+        )
         assert manif_sources == ["catalog_a", "catalog_b"]
 
         # ISBD punctuation is stripped on both ingest paths now. It used to be
@@ -163,7 +174,7 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
         # author keys derive from these strings, so the paths disagreed about
         # identity. `record_normalization.strip_isbd_punctuation: false` retains
         # the literal subfield.
-        agent_names = sorted(r["name"] for r in conn.execute("SELECT name FROM agents;").fetchall())
+        agent_names = sorted(conn.execute(select(agents_table.c.name)).scalars())
         assert agent_names == ["Author Alpha", "Author Beta"]
 
 

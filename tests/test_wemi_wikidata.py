@@ -1,13 +1,11 @@
 """Unit tests for two-pass Wikidata WEMI decomposition and streaming ingestion."""
 
 import gzip
-import sqlite3
 from pathlib import Path
 
 import orjson
 
 from reconciliator.config import WikidataIngestConfig
-from reconciliator.db import init_authority_db
 from reconciliator.ingestion.wikidata import (
     _prescan_authors,
     decompose_wikidata_entity,
@@ -34,9 +32,6 @@ def test_wikidata_author_prescan(tmp_path: Path):
         f.write(line + b"\n")
 
     auth_db = tmp_path / "auth.db"
-    with sqlite3.connect(auth_db) as conn:
-        init_authority_db(conn)
-
     w_repo = WEMIRepository(db_path=auth_db)
     persisted_count = _prescan_authors(dump_path, w_repo, tracker=None)
     assert persisted_count == 1
@@ -71,8 +66,6 @@ def test_wikidata_author_prescan(tmp_path: Path):
 def test_decompose_wikidata_creative_work(tmp_path: Path):
     """Verify decomposition of a primary creative work entity."""
     auth_db = tmp_path / "auth.db"
-    with sqlite3.connect(auth_db) as conn:
-        init_authority_db(conn)
     w_repo = WEMIRepository(db_path=auth_db)
 
     # Seed author in repository
@@ -159,8 +152,6 @@ def test_decompose_wikidata_creative_work(tmp_path: Path):
 def test_decompose_wikidata_edition_with_parent_work(tmp_path: Path):
     """Verify decomposition of an edition entity with P629 pointing to parent work."""
     auth_db = tmp_path / "auth.db"
-    with sqlite3.connect(auth_db) as conn:
-        init_authority_db(conn)
     w_repo = WEMIRepository(db_path=auth_db)
 
     edition_entity = {
@@ -217,8 +208,6 @@ def test_ingest_wikidata_wemi_pipeline_e2e(tmp_path: Path):
         f.write(orjson.dumps(work_entity) + b"\n")
 
     auth_db = tmp_path / "authority.db"
-    with sqlite3.connect(auth_db) as conn:
-        init_authority_db(conn)
     w_repo = WEMIRepository(db_path=auth_db)
 
     config = WikidataIngestConfig(

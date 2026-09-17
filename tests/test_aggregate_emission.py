@@ -15,8 +15,16 @@ from pathlib import Path
 
 import pytest
 from lxml import etree
+from sqlalchemy import delete, func, nulls_first, select
 
 from reconciliator.constituents import resolve_for_source
+from reconciliator.db import (
+    expressions_table,
+    manifestation_expressions_table,
+    manifestations_table,
+    work_relationships_table,
+    works_table,
+)
 from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.loaders.base import DecomposedRecord, LoadContext
 from reconciliator.loaders.registry import (
@@ -118,20 +126,28 @@ def _ingest(repo: WEMIRepository, record: DecomposedRecord) -> None:
 
 def _junction(repo: WEMIRepository, manifestation_id: int) -> list[dict]:
     with repo.get_connection() as conn:
-        return [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT e.title, e.source_id, me.track_number, me.disc_number,
-                       me.duration, me.is_primary
-                FROM manifestation_expressions me
-                JOIN expressions e ON e.id = me.expression_id
-                WHERE me.manifestation_id = ?
-                ORDER BY me.disc_number, me.track_number NULLS FIRST;
-                """,
-                (manifestation_id,),
+        stmt = (
+            select(
+                expressions_table.c.title,
+                expressions_table.c.source_id,
+                manifestation_expressions_table.c.track_number,
+                manifestation_expressions_table.c.disc_number,
+                manifestation_expressions_table.c.duration,
+                manifestation_expressions_table.c.is_primary,
             )
-        ]
+            .select_from(
+                manifestation_expressions_table.join(
+                    expressions_table,
+                    expressions_table.c.id == manifestation_expressions_table.c.expression_id,
+                )
+            )
+            .where(manifestation_expressions_table.c.manifestation_id == manifestation_id)
+            .order_by(
+                nulls_first(manifestation_expressions_table.c.disc_number),
+                nulls_first(manifestation_expressions_table.c.track_number),
+            )
+        )
+        return [dict(row) for row in conn.execute(stmt).mappings().fetchall()]
 
 
 # --- the mode gate --------------------------------------------------------
@@ -229,7 +245,12 @@ def test_a_constituent_finds_its_container_without_a_second_edge(repo: WEMIRepos
 
 def _all_works(repo: WEMIRepository) -> list[dict]:
     with repo.get_connection() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM works ORDER BY id;")]
+        return [
+            dict(r)
+            for r in conn.execute(select(works_table).order_by(works_table.c.id))
+            .mappings()
+            .fetchall()
+        ]
 
 
 # --- identity -------------------------------------------------------------
@@ -251,10 +272,13 @@ def test_two_releases_of_one_track_converge_on_one_work(repo: WEMIRepository):
 
     with repo.get_connection() as conn:
         containers = conn.execute(
-            "SELECT COUNT(*) c FROM work_relationships "
-            "WHERE target_work_id = ? AND relationship_type = 'has_constituent';",
-            (cantus[0]["id"],),
-        ).fetchone()["c"]
+            select(func.count())
+            .select_from(work_relationships_table)
+            .where(
+                work_relationships_table.c.target_work_id == cantus[0]["id"],
+                work_relationships_table.c.relationship_type == "has_constituent",
+            )
+        ).scalar()
     assert containers == 2
 
 
@@ -323,7 +347,7 @@ def test_identity_survives_a_reingest(repo: WEMIRepository):
         _ingest(repo, load_record(ALBUM_A, _ctx("entities")))
     with repo.get_connection() as conn:
         counts = {
-            table: conn.execute(f"SELECT COUNT(*) c FROM {table};").fetchone()["c"]
+            table: conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table};").scalar()
             for table in ("works", "manifestation_expressions", "work_relationships")
         }
     assert counts == {"works": 3, "manifestation_expressions": 3, "work_relationships": 2}
@@ -579,13 +603,13 @@ def test_the_container_can_be_asked_for_its_parts(repo: WEMIRepository):
 
     issue = repo.get_manifestation_by_source(SRC, HOST_ID)
     with repo.get_connection() as conn:
-        parts = [
-            row["source_id"]
-            for row in conn.execute(
-                "SELECT source_id FROM manifestations WHERE container_id = ? ORDER BY source_id;",
-                (issue.id,),
-            )
-        ]
+        parts = list(
+            conn.execute(
+                select(manifestations_table.c.source_id)
+                .where(manifestations_table.c.container_id == issue.id)
+                .order_by(manifestations_table.c.source_id)
+            ).scalars()
+        )
     assert parts == ["(FI-MELINDA)000900222", "(FI-MELINDA)000900333"]
 
 
@@ -612,8 +636,8 @@ def test_deleting_the_host_cascades_to_its_parts(repo: WEMIRepository):
     _ingest(repo, load_record(_article("000900222", "Suomen murteista"), _ctx("entities")))
     issue = repo.get_manifestation_by_source(SRC, HOST_ID)
     with repo.get_connection() as conn:
-        conn.execute("DELETE FROM manifestations WHERE id = ?;", (issue.id,))
-        remaining = conn.execute("SELECT COUNT(*) c FROM manifestations;").fetchone()["c"]
+        conn.execute(delete(manifestations_table).where(manifestations_table.c.id == issue.id))
+        remaining = conn.exec_driver_sql("SELECT COUNT(*) FROM manifestations;").scalar()
     assert remaining == 0
 
 

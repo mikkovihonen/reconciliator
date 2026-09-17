@@ -298,7 +298,7 @@ def test_vocab_store_rebuild_aliases_dynamic_legacy(tmp_path: Path) -> None:
     assert count == 1
 
     with store.get_connection() as conn:
-        rows = conn.execute("SELECT * FROM concept_aliases;").fetchall()
+        rows = conn.exec_driver_sql("SELECT * FROM concept_aliases;").mappings().fetchall()
         assert len(rows) == 1
         assert rows[0]["vocabulary"] == "dyn_modern"
         assert rows[0]["concept_id"] in ("1", "http://example.org/dyn_modern/1")

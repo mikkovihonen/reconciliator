@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from lxml import etree
+from sqlalchemy import func, select
 
 from reconciliator.cli import (
     consolidate_works_cmd,
@@ -23,6 +24,7 @@ from reconciliator.cli import (
 )
 from reconciliator.config import VectorEngineConfig, WorkConsolidationConfig, load_config
 from reconciliator.consolidation import WorkConsolidator
+from reconciliator.db import works_table
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
@@ -144,12 +146,9 @@ def _add_work(
         contributions=contributions,
         record_origin="authority",
     )
-    with repo.get_connection() as conn:
-        return int(
-            conn.execute(
-                "SELECT id FROM works WHERE source = ? AND source_id = ?;", (source, source_id)
-            ).fetchone()["id"]
-        )
+    work = repo.get_work_by_source(source, source_id)
+    assert work is not None and work.id is not None
+    return work.id
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +194,7 @@ def test_consolidates_on_metadata_without_any_identifier(tmp_path: Path) -> None
     b = _add_work(repo, "source_b", "B1", "Sinuhe egyptiläinen")
 
     with repo.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) c FROM identifiers").fetchone()["c"] == 0
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM identifiers").scalar() == 0
 
     result = WorkConsolidator(repo).consolidate()
     assert result.groups == [[a, b]]
@@ -286,13 +285,17 @@ def test_edges_explain_the_grouping_and_nothing_is_deleted(tmp_path: Path) -> No
 
     WorkConsolidator(repo).consolidate()
     with repo.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) c FROM works").fetchone()["c"] == 2, (
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM works").scalar() == 2, (
             "consolidation must not delete work rows"
         )
-        edges = conn.execute(
-            "SELECT source_work_id, target_work_id FROM work_relationships "
-            "WHERE relationship_type = 'same_work_as' ORDER BY source_work_id;"
-        ).fetchall()
+        edges = (
+            conn.exec_driver_sql(
+                "SELECT source_work_id, target_work_id FROM work_relationships "
+                "WHERE relationship_type = 'same_work_as' ORDER BY source_work_id;"
+            )
+            .mappings()
+            .fetchall()
+        )
     assert [(e["source_work_id"], e["target_work_id"]) for e in edges] == [(a, b), (b, a)], (
         "same_work_as is symmetric"
     )
@@ -332,9 +335,9 @@ def test_clear_undoes_consolidation(tmp_path: Path) -> None:
     assert repo.get_work_equivalence_map() == {}
     with repo.get_connection() as conn:
         assert (
-            conn.execute(
-                "SELECT COUNT(*) c FROM work_relationships WHERE relationship_type='same_work_as';"
-            ).fetchone()["c"]
+            conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM work_relationships WHERE relationship_type='same_work_as';"
+            ).scalar()
             == 0
         )
 
@@ -484,11 +487,12 @@ def test_cli_consolidation_gives_both_sources_one_identity(consolidated_run: dic
         # Scoped to authority rows: the reconciled corpus is stored as WEMI in
         # the same database now and contributes works of its own.
         auth = repo.authoritative_sources()
-        ph = ", ".join("?" for _ in auth)
         assert (
             conn.execute(
-                f"SELECT COUNT(*) c FROM works WHERE record_origin IN ({ph})", auth
-            ).fetchone()["c"]
+                select(func.count())
+                .select_from(works_table)
+                .where(works_table.c.record_origin.in_(auth))
+            ).scalar()
             == 2
         )
 

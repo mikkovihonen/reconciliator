@@ -22,9 +22,8 @@ from reconciliator.repository import WEMIRepository
 def test_work_type_hub_sqlite_constraint(tmp_path):
     """Verify that 'hub' is an accepted work_type under SQLite CHECK constraints."""
     db_path = tmp_path / "test_hub.db"
-    conn = get_db_connection(db_path)
-    init_authority_db(conn)
-    conn.close()
+    with get_db_connection(db_path) as conn:
+        init_authority_db(conn)
 
     repo = WEMIRepository(db_path=db_path)
 
@@ -47,9 +46,8 @@ def test_work_type_hub_sqlite_constraint(tmp_path):
 def test_expression_medium_of_performance_persistence(tmp_path):
     """Verify that medium_of_performance can be stored and retrieved on ExpressionEntity."""
     db_path = tmp_path / "test_mop.db"
-    conn = get_db_connection(db_path)
-    init_authority_db(conn)
-    conn.close()
+    with get_db_connection(db_path) as conn:
+        init_authority_db(conn)
 
     repo = WEMIRepository(db_path=db_path)
 

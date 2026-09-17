@@ -312,10 +312,10 @@ def test_prune_tasks_older_than_and_keep_last(progress_db: Path) -> None:
 
         init_progress_db(conn)
         for tid, hb in [("t1", t1_time), ("t2", t2_time), ("t3", t3_time), ("t4", t4_time)]:
-            conn.execute(
+            conn.exec_driver_sql(
                 """
                 INSERT INTO task_progress (task_id, task_type, status, current_stage, start_time, last_heartbeat)
-                VALUES (?, 'reconciliation', 'completed', 'done', ?, ?);
+                VALUES (%s, 'reconciliation', 'completed', 'done', %s, %s);
                 """,
                 (tid, hb, hb),
             )
@@ -334,10 +334,10 @@ def test_prune_tasks_older_than_and_keep_last(progress_db: Path) -> None:
     t6_time = now.isoformat()
     with get_db_connection(progress_db) as conn:
         for tid, hb in [("t5", t5_time), ("t6", t6_time)]:
-            conn.execute(
+            conn.exec_driver_sql(
                 """
                 INSERT INTO task_progress (task_id, task_type, status, current_stage, start_time, last_heartbeat)
-                VALUES (?, 'reconciliation', 'completed', 'done', ?, ?);
+                VALUES (%s, 'reconciliation', 'completed', 'done', %s, %s);
                 """,
                 (tid, hb, hb),
             )

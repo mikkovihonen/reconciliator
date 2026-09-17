@@ -190,9 +190,8 @@ def test_an_exact_stem_uses_the_index(store: WEMIRepository):
     with store.get_connection() as conn:
         plan = [
             str(row[0])
-            for row in conn.execute(
-                "EXPLAIN SELECT w.* FROM works w WHERE w.title_normalized = ?;",
-                ("x",),
+            for row in conn.exec_driver_sql(
+                "EXPLAIN SELECT w.* FROM works w WHERE w.title_normalized = 'x';"
             )
         ]
     plan_text = "\n".join(plan)

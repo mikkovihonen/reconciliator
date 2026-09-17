@@ -69,7 +69,7 @@ def _ingest(store: WEMIRepository, source: str, control: str, title: str) -> Non
 
 def _counts(store: WEMIRepository) -> dict[str, int]:
     with store.get_connection() as conn:
-        return {t: conn.execute(f"SELECT COUNT(*) FROM {t};").fetchone()[0] for t in COUNTED}
+        return {t: conn.exec_driver_sql(f"SELECT COUNT(*) FROM {t};").scalar() for t in COUNTED}
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ def test_delete_source_removes_only_that_source(store: WEMIRepository):
     store.delete_source("melinda")
 
     with store.get_connection() as conn:
-        origins = [r[0] for r in conn.execute("SELECT DISTINCT record_origin FROM works;")]
+        origins = list(conn.exec_driver_sql("SELECT DISTINCT record_origin FROM works;").scalars())
     assert origins == ["fennica"]
     assert _counts(store)["works"] == 1
 
@@ -105,24 +105,24 @@ def test_delete_source_leaves_no_orphaned_polymorphic_rows(store: WEMIRepository
     store.delete_source("melinda")
 
     with store.get_connection() as conn:
-        orphan_identifiers = conn.execute(
+        orphan_identifiers = conn.exec_driver_sql(
             """
             SELECT COUNT(*) FROM identifiers
             WHERE (entity_type = 'work' AND entity_id NOT IN (SELECT id FROM works))
                OR (entity_type = 'manifestation' AND entity_id NOT IN (SELECT id FROM manifestations))
                OR (entity_type = 'agent' AND entity_id NOT IN (SELECT id FROM agents));
             """
-        ).fetchone()[0]
-        orphan_keys = conn.execute(
+        ).scalar()
+        orphan_keys = conn.exec_driver_sql(
             """
             SELECT COUNT(*) FROM entity_keys
             WHERE entity_type = 'manifestation'
               AND entity_id NOT IN (SELECT id FROM manifestations);
             """
-        ).fetchone()[0]
-        orphan_contribs = conn.execute(
+        ).scalar()
+        orphan_contribs = conn.exec_driver_sql(
             "SELECT COUNT(*) FROM contributions WHERE agent_id NOT IN (SELECT id FROM agents);"
-        ).fetchone()[0]
+        ).scalar()
     assert (orphan_identifiers, orphan_keys, orphan_contribs) == (0, 0, 0)
 
 

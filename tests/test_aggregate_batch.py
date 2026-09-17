@@ -27,7 +27,9 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
+from reconciliator.db import expressions_table, manifestation_expressions_table
 from reconciliator.repository import WEMIRepository
+from sqlalchemy import select
 
 SRC = "fono"
 TRACKS = 20
@@ -166,20 +168,27 @@ def _ingest(repo: WEMIRepository) -> None:
 
 def _junction_rows(repo: WEMIRepository, manifestation_id: int) -> list[dict]:
     with repo.get_connection() as conn:
-        return [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT e.source_id, me.track_number, me.disc_number,
-                       me.duration, me.is_primary
-                FROM manifestation_expressions me
-                JOIN expressions e ON e.id = me.expression_id
-                WHERE me.manifestation_id = ?
-                ORDER BY me.disc_number, me.track_number;
-                """,
-                (manifestation_id,),
+        stmt = (
+            select(
+                expressions_table.c.source_id,
+                manifestation_expressions_table.c.track_number,
+                manifestation_expressions_table.c.disc_number,
+                manifestation_expressions_table.c.duration,
+                manifestation_expressions_table.c.is_primary,
             )
-        ]
+            .select_from(
+                manifestation_expressions_table.join(
+                    expressions_table,
+                    expressions_table.c.id == manifestation_expressions_table.c.expression_id,
+                )
+            )
+            .where(manifestation_expressions_table.c.manifestation_id == manifestation_id)
+            .order_by(
+                manifestation_expressions_table.c.disc_number,
+                manifestation_expressions_table.c.track_number,
+            )
+        )
+        return [dict(row) for row in conn.execute(stmt).mappings().fetchall()]
 
 
 # --- the junction ---------------------------------------------------------
@@ -274,9 +283,9 @@ def test_an_unbindable_association_is_dropped(repo: WEMIRepository):
     repo.insert_wemi_batch(record_origin=SRC, **batch)
     album = repo.get_manifestation_by_source(SRC, "ALBUM-1")
     with repo.get_connection() as conn:
-        orphans = conn.execute(
-            "SELECT COUNT(*) c FROM manifestation_expressions WHERE expression_id <= 0;"
-        ).fetchone()["c"]
+        orphans = conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM manifestation_expressions WHERE expression_id <= 0;"
+        ).scalar()
     assert orphans == 0
     assert len(_junction_rows(repo, album.id)) == TRACKS + 1
 
@@ -357,7 +366,7 @@ def test_re_ingesting_a_record_adds_no_duplicates(repo: WEMIRepository):
     _ingest(repo)
     with repo.get_connection() as conn:
         counts = {
-            table: conn.execute(f"SELECT COUNT(*) c FROM {table};").fetchone()["c"]
+            table: conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table};").scalar()
             for table in (
                 "works",
                 "expressions",
@@ -388,5 +397,5 @@ def test_deleting_the_source_removes_the_whole_aggregate(repo: WEMIRepository):
             "manifestation_expressions",
             "work_relationships",
         ):
-            remaining = conn.execute(f"SELECT COUNT(*) c FROM {table};").fetchone()["c"]
+            remaining = conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table};").scalar()
             assert remaining == 0, f"{table} still holds {remaining} rows"

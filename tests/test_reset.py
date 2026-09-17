@@ -22,7 +22,7 @@ def test_reset_all_storage(tmp_path: Path) -> None:
     # Initialize and populate a test row
     with get_db_connection(storage.authority_db) as conn:
         init_authority_db(conn)
-        conn.execute("INSERT INTO db_metadata (key, value) VALUES ('test', '123');")
+        conn.exec_driver_sql("INSERT INTO db_metadata (key, value) VALUES ('test', '123');")
 
     storage.work_index.write_bytes(b"dummy index content")
 
@@ -32,11 +32,11 @@ def test_reset_all_storage(tmp_path: Path) -> None:
     assert not storage.work_index.exists()
 
     with get_db_connection(storage.database_url) as conn:
-        row = conn.execute("SELECT * FROM db_metadata WHERE key = 'test';").fetchone()
+        row = conn.exec_driver_sql("SELECT * FROM db_metadata WHERE key = 'test';").fetchone()
         assert row is None
         tables = {
             r[0]
-            for r in conn.execute(
+            for r in conn.exec_driver_sql(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
             ).fetchall()
         }
@@ -103,7 +103,7 @@ storage:
     with get_db_connection(conf.storage.database_url) as conn:
         tables = {
             r[0]
-            for r in conn.execute(
+            for r in conn.exec_driver_sql(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
             ).fetchall()
         }
@@ -134,7 +134,7 @@ def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
     with repo.get_connection() as conn:
         tables = {
             r[0]
-            for r in conn.execute(
+            for r in conn.exec_driver_sql(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
             ).fetchall()
         }

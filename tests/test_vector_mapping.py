@@ -132,9 +132,9 @@ def test_wemi_repository_idempotent_ingest(tmp_path: Path, backend: str) -> None
     # Total vectors must remain 1, not 2!
     assert store.work_indexer.total_vectors == 1
 
-    # Verify vector mappings in sqlite
+    # Verify vector mappings
     with store.get_connection() as conn:
-        rows = conn.execute("SELECT work_id FROM work_vectors;").fetchall()
+        rows = conn.exec_driver_sql("SELECT work_id FROM work_vectors;").fetchall()
         assert len(rows) == 1
 
     # Search with new vector

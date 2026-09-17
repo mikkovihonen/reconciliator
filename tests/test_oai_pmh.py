@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy import select
+
+from reconciliator.db import works_table
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
@@ -345,7 +348,7 @@ def test_ingest_oai_pipeline_skip_existing(tmp_path: Path) -> None:
     assert total == 2
     # Only the previously unseen records reached storage.
     with store.get_connection() as conn:
-        stored = sorted(r["source_id"] for r in conn.execute("SELECT source_id FROM works;"))
+        stored = sorted(conn.execute(select(works_table.c.source_id)).scalars())
     assert stored == ["rec_2", "rec_4"]
 
 
@@ -414,7 +417,7 @@ def test_ingest_oai_pipeline_skip_existing_matches_canonical_ids(tmp_path: Path)
 
     assert total == 2
     with store.get_connection() as conn:
-        stored = sorted(r["source_id"] for r in conn.execute("SELECT source_id FROM works;"))
+        stored = sorted(conn.execute(select(works_table.c.source_id)).scalars())
     assert stored == ["(FI-MELINDA)999999", "888888"]
 
 

@@ -9,8 +9,10 @@ from unittest.mock import patch
 import pytest
 
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
+from reconciliator.db import works_table
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.repository import WEMIRepository
+from sqlalchemy import select
 from tests.test_oai_pmh import make_marc_record
 
 
@@ -93,7 +95,7 @@ class FakeEndpoint:
 
 def stored_ids(repo: WEMIRepository) -> list[str]:
     with repo.get_connection() as conn:
-        return sorted(r["source_id"] for r in conn.execute("SELECT source_id FROM works;"))
+        return sorted(conn.execute(select(works_table.c.source_id)).scalars())
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +213,7 @@ def test_checkpoint_never_outruns_written_records(tmp_path: Path) -> None:
 
     def spy(self: WEMIRepository, state: Any) -> None:
         with self.get_connection() as conn:
-            written = conn.execute("SELECT COUNT(*) AS c FROM works;").fetchone()["c"]
+            written = conn.exec_driver_sql("SELECT COUNT(*) FROM works;").scalar()
         observed.append((state.resumption_token, written))
         real_save(self, state)
 
