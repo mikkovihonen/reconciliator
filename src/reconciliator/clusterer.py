@@ -11,7 +11,7 @@ import re
 import time
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Optional
+from typing import Generic, Optional, TypeVar
 
 from rapidfuzz import fuzz
 
@@ -27,22 +27,25 @@ from reconciliator.models import (
     SammelbandBinding,
     WorkCluster,
 )
+from reconciliator.normalizers.identifiers import clean_alphanumeric
 from reconciliator.repository import WEMIRepository
 
+T = TypeVar("T")
 
-class UnionFind:
+
+class UnionFind(Generic[T]):
     """Disjoint Set Union (DSU) data structure with path compression and union by rank."""
 
-    def __init__(self, elements: Iterable[str]) -> None:
-        self.parent: dict[str, str] = {e: e for e in elements}
-        self.rank: dict[str, int] = {e: 0 for e in elements}
+    def __init__(self, elements: Iterable[T]) -> None:
+        self.parent: dict[T, T] = {e: e for e in elements}
+        self.rank: dict[T, int] = {e: 0 for e in elements}
 
-    def find(self, item: str) -> str:
+    def find(self, item: T) -> T:
         if self.parent[item] != item:
             self.parent[item] = self.find(self.parent[item])
         return self.parent[item]
 
-    def union(self, item1: str, item2: str) -> None:
+    def union(self, item1: T, item2: T) -> None:
         root1 = self.find(item1)
         root2 = self.find(item2)
         if root1 != root2:
@@ -54,13 +57,15 @@ class UnionFind:
                 self.parent[root2] = root1
                 self.rank[root1] += 1
 
-    def get_components(self) -> dict[str, list[str]]:
+    def get_components(self) -> dict[T, list[T]]:
         """Return connected components grouped by root representative."""
-        components: dict[str, list[str]] = defaultdict(list)
+        components: dict[T, list[T]] = defaultdict(list)
         for item in self.parent:
             root = self.find(item)
             components[root].append(item)
         return dict(components)
+
+    groups = get_components
 
 
 class CorpusClusterer:
@@ -174,8 +179,8 @@ class CorpusClusterer:
         )
         for scheme in common_schemes:
             if scheme in ids1 and scheme in ids2:
-                v1_set = {re.sub(r"[^0-9a-zA-Z]", "", x).lower() for x in ids1[scheme]}
-                v2_set = {re.sub(r"[^0-9a-zA-Z]", "", x).lower() for x in ids2[scheme]}
+                v1_set = {clean_alphanumeric(x) for x in ids1[scheme]}
+                v2_set = {clean_alphanumeric(x) for x in ids2[scheme]}
                 v1_set.discard("")
                 v2_set.discard("")
                 if v1_set & v2_set:

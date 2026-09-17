@@ -44,7 +44,7 @@ def test_wikidata_author_prescan(tmp_path: Path):
     assert author["identifiers"]["isni"] == "0000 0001 2147 888X"
 
     # Verify agents table
-    agent = w_repo.get_agent_by_uri("http://www.wikidata.org/entity/Q43210")
+    agent = w_repo.get_agent_by_curie("http://www.wikidata.org/entity/Q43210")
     assert agent is not None
     assert agent.name == "Mika Waltari"
     assert agent.source == "wikidata"

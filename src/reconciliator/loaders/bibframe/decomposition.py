@@ -60,6 +60,7 @@ from reconciliator.normalizers.blocking import (
     compute_music_work_key,
     compute_title_stem,
     compute_work_blocking_key,
+    to_manifestation_entity_keys,
 )
 from reconciliator.template import WEMISerializationEngine
 from reconciliator.vocabularies import detect_vocabulary
@@ -1542,17 +1543,10 @@ def bibframe_entity_keys(
     identifiers: list[IdentifierEntity],
 ) -> list[EntityKey]:
     """Shape `derive_bibframe_keys` output as EntityKey rows bound to the manifestation."""
-    return [
-        EntityKey(
-            entity_type="manifestation",
-            entity_id=0,
-            key_type=key_type,
-            key_value=value,
-            entity_uri=manifestation.manifestation_uri,
-        )
-        for key_type, values in derive_bibframe_keys(work, agents, identifiers).items()
-        for value in values
-    ]
+    return to_manifestation_entity_keys(
+        manifestation.manifestation_uri,
+        derive_bibframe_keys(work, agents, identifiers),
+    )
 
 
 def build_target_record_from_bibframe(

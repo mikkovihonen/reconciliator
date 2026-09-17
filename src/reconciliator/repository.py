@@ -598,53 +598,32 @@ class WEMIRepository:
         vectors = np.expand_dims(vector, axis=0) if vector is not None else None
         return self.insert_manifestations_batch([manifestation], vectors=vectors)[0]
 
+    def _insert_simple_batch(self, table: Any, entities: list[Any]) -> list[int]:
+        """Insert simple entity records in batch and return their assigned IDs."""
+        if not entities:
+            return []
+        col_names = {c.name for c in table.c} - {"id", "created_at"}
+        rows: list[dict[str, Any]] = []
+        for e in entities:
+            d = e.model_dump(mode="python") if hasattr(e, "model_dump") else dict(e)
+            row = {}
+            for k, v in d.items():
+                if k in col_names:
+                    row[k] = bool(v) if isinstance(v, bool) else v
+            rows.append(row)
+
+        with self.get_connection() as conn:
+            stmt = pg_insert(table).values(rows).returning(table.c.id)
+            res = conn.execute(stmt).fetchall()
+            return [r[0] for r in res]
+
     def insert_items_batch(self, items: list[ItemEntity]) -> list[int]:
         """Insert ItemEntity records in batch."""
-        if not items:
-            return []
-        item_ids: list[int] = []
-        with self.get_connection() as conn:
-            for item in items:
-                stmt = (
-                    pg_insert(items_table)
-                    .values(
-                        manifestation_id=item.manifestation_id,
-                        source=item.source,
-                        source_id=item.source_id,
-                        record_origin=item.record_origin,
-                        holding_organization=item.holding_organization,
-                        shelf_mark=item.shelf_mark,
-                        barcode=item.barcode,
-                        custodial_history=item.custodial_history,
-                        item_condition=item.item_condition,
-                    )
-                    .returning(items_table.c.id)
-                )
-                res = conn.execute(stmt).fetchone()
-                item_ids.append(res[0] if res else 0)
-        return item_ids
+        return self._insert_simple_batch(items_table, items)
 
     def insert_identifiers_batch(self, identifiers: list[IdentifierEntity]) -> list[int]:
         """Insert polymorphic IdentifierEntity records in batch."""
-        if not identifiers:
-            return []
-        id_ids: list[int] = []
-        with self.get_connection() as conn:
-            for ident in identifiers:
-                stmt = (
-                    pg_insert(identifiers_table)
-                    .values(
-                        entity_type=ident.entity_type,
-                        entity_id=ident.entity_id,
-                        source=ident.source,
-                        source_id=ident.source_id,
-                        source_id_normalized=ident.source_id_normalized,
-                    )
-                    .returning(identifiers_table.c.id)
-                )
-                res = conn.execute(stmt).fetchone()
-                id_ids.append(res[0] if res else 0)
-        return id_ids
+        return self._insert_simple_batch(identifiers_table, identifiers)
 
     def insert_entity_keys_batch(self, keys: list[EntityKey]) -> None:
         """Insert derived domain blocking keys in batch.
@@ -840,26 +819,7 @@ class WEMIRepository:
 
     def insert_contributions_batch(self, contributions: list[ContributionEntity]) -> list[int]:
         """Insert ContributionEntity records in batch."""
-        if not contributions:
-            return []
-        c_ids: list[int] = []
-        with self.get_connection() as conn:
-            for c in contributions:
-                stmt = (
-                    pg_insert(contributions_table)
-                    .values(
-                        entity_type=c.entity_type,
-                        entity_id=c.entity_id,
-                        agent_id=c.agent_id,
-                        role=c.role,
-                        is_primary=bool(c.is_primary),
-                        field_tag=c.field_tag,
-                    )
-                    .returning(contributions_table.c.id)
-                )
-                res = conn.execute(stmt).fetchone()
-                c_ids.append(res[0] if res else 0)
-        return c_ids
+        return self._insert_simple_batch(contributions_table, contributions)
 
     def insert_work_relationships_batch(self, rels: list[WorkRelationship]) -> list[int]:
         """Insert WorkRelationship records in batch."""
@@ -909,30 +869,7 @@ class WEMIRepository:
 
     def insert_entity_subjects_batch(self, subjects: list[EntitySubject]) -> list[int]:
         """Insert polymorphic EntitySubject records in batch."""
-        if not subjects:
-            return []
-        s_ids: list[int] = []
-        with self.get_connection() as conn:
-            for s in subjects:
-                stmt = (
-                    pg_insert(entity_subjects_table)
-                    .values(
-                        entity_type=s.entity_type,
-                        entity_id=s.entity_id,
-                        source=s.source,
-                        source_record_id=s.source_record_id,
-                        relation_type=s.relation_type,
-                        vocabulary=s.vocabulary,
-                        concept_id=s.concept_id,
-                        raw_label=s.raw_label,
-                        is_resolved=bool(s.is_resolved),
-                        is_primary=bool(s.is_primary),
-                    )
-                    .returning(entity_subjects_table.c.id)
-                )
-                row = conn.execute(stmt).fetchone()
-                s_ids.append(row[0] if row else 0)
-        return s_ids
+        return self._insert_simple_batch(entity_subjects_table, subjects)
 
     def insert_wemi_batch(
         self,
@@ -1322,12 +1259,35 @@ class WEMIRepository:
             rows = conn.execute(stmt).mappings().fetchall()
             return [dict(r) for r in rows]
 
-    def get_agent(self, agent_id: int) -> Optional[AgentEntity]:
-        """Fetch AgentEntity by ID."""
-        stmt = select(agents_table).where(agents_table.c.id == agent_id)
+    def _get_entity_by_id(
+        self, table: Any, row_converter: Callable[[Any], Any], entity_id: int
+    ) -> Any:
+        stmt = select(table).where(table.c.id == entity_id)
         with self.get_connection() as conn:
             row = conn.execute(stmt).fetchone()
-            return _row_to_agent(row) if row else None
+            return row_converter(row) if row else None
+
+    def _get_entity_by_source(
+        self,
+        table: Any,
+        row_converter: Callable[[Any], Any],
+        source: str,
+        source_id: str,
+        case_insensitive: bool = False,
+    ) -> Any:
+        source_cond = (
+            func.lower(table.c.source) == source.lower()
+            if case_insensitive
+            else table.c.source == source
+        )
+        stmt = select(table).where(source_cond, table.c.source_id == source_id)
+        with self.get_connection() as conn:
+            row = conn.execute(stmt).fetchone()
+            return row_converter(row) if row else None
+
+    def get_agent(self, agent_id: int) -> Optional[AgentEntity]:
+        """Fetch AgentEntity by ID."""
+        return self._get_entity_by_id(agents_table, _row_to_agent, agent_id)
 
     def get_agent_by_curie(self, curie_or_uri: str) -> Optional[AgentEntity]:
         """Fetch AgentEntity by CURIE or URI."""
@@ -1351,10 +1311,6 @@ class WEMIRepository:
                     )
                     row = conn.execute(fallback_stmt).fetchone()
             return _row_to_agent(row) if row else None
-
-    def get_agent_by_uri(self, agent_uri: str) -> Optional[AgentEntity]:
-        """Fetch AgentEntity by agent_uri or CURIE (backward-compatibility alias)."""
-        return self.get_agent_by_curie(agent_uri)
 
     def _enrich_work_identifiers(
         self, conn: Any, work: Optional[WorkEntity]
@@ -1388,10 +1344,6 @@ class WEMIRepository:
             return None
         return self.get_work_by_source(source, source_id)
 
-    def get_work_by_uri(self, work_uri: str) -> Optional[WorkEntity]:
-        """Fetch WorkEntity by work_uri or CURIE (backward-compatibility alias)."""
-        return self.get_work_by_curie(work_uri)
-
     def get_work_by_source(self, source: str, source_id: str) -> Optional[WorkEntity]:
         """Fetch WorkEntity by source and source_id."""
         stmt = select(works_table).where(
@@ -1404,46 +1356,28 @@ class WEMIRepository:
 
     def get_expression(self, expression_id: int) -> Optional[ExpressionEntity]:
         """Fetch ExpressionEntity by ID."""
-        stmt = select(expressions_table).where(expressions_table.c.id == expression_id)
-        with self.get_connection() as conn:
-            row = conn.execute(stmt).fetchone()
-            return _row_to_expression(row) if row else None
+        return self._get_entity_by_id(expressions_table, _row_to_expression, expression_id)
 
     def get_expression_by_curie(self, curie_or_uri: str) -> Optional[ExpressionEntity]:
         """Fetch ExpressionEntity by CURIE or URI."""
         source, source_id = parse_curie(curie_or_uri)
         if not source_id:
             return None
-        with self.get_connection() as conn:
-            stmt = select(expressions_table).where(
-                expressions_table.c.source == source.lower(),
-                expressions_table.c.source_id == source_id,
-            )
-            row = conn.execute(stmt).fetchone()
-            return _row_to_expression(row) if row else None
-
-    def get_expression_by_uri(self, expression_uri: str) -> Optional[ExpressionEntity]:
-        """Fetch ExpressionEntity by expression_uri or CURIE (backward-compatibility alias)."""
-        return self.get_expression_by_curie(expression_uri)
+        return self._get_entity_by_source(
+            expressions_table, _row_to_expression, source, source_id, case_insensitive=True
+        )
 
     def get_manifestation(self, manifestation_id: int) -> Optional[ManifestationEntity]:
         """Fetch ManifestationEntity by ID."""
-        stmt = select(manifestations_table).where(manifestations_table.c.id == manifestation_id)
-        with self.get_connection() as conn:
-            row = conn.execute(stmt).fetchone()
-            return _row_to_manifestation(row) if row else None
+        return self._get_entity_by_id(manifestations_table, _row_to_manifestation, manifestation_id)
 
     def get_manifestation_by_source(
         self, source: str, source_id: str
     ) -> Optional[ManifestationEntity]:
         """Fetch ManifestationEntity by source and source_id."""
-        stmt = select(manifestations_table).where(
-            manifestations_table.c.source == source,
-            manifestations_table.c.source_id == source_id,
+        return self._get_entity_by_source(
+            manifestations_table, _row_to_manifestation, source, source_id
         )
-        with self.get_connection() as conn:
-            row = conn.execute(stmt).fetchone()
-            return _row_to_manifestation(row) if row else None
 
     def get_expressions_for_work(
         self, work_id: int, record_origin: Optional[RecordOrigin | str] = None
@@ -1496,10 +1430,6 @@ class WEMIRepository:
         if not source_id:
             return None
         return self.get_manifestation_by_source(source, source_id)
-
-    def get_manifestation_by_uri(self, manifestation_uri: str) -> Optional[ManifestationEntity]:
-        """Fetch ManifestationEntity by URI or CURIE (backward-compatibility alias)."""
-        return self.get_manifestation_by_curie(manifestation_uri)
 
     def get_manifestations_for_work(
         self, work_id: int, record_origin: Optional[RecordOrigin | str] = None

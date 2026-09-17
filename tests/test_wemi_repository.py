@@ -454,12 +454,12 @@ def test_wemi_repository_agent_by_uri_concept_id_fallback(repo: WEMIRepository) 
     repo.insert_agents_batch([agent])
 
     # Direct URI match
-    found = repo.get_agent_by_uri("https://urn.fi/URN:NBN:fi:au:pn:000123456")
+    found = repo.get_agent_by_curie("https://urn.fi/URN:NBN:fi:au:pn:000123456")
     assert found is not None
     assert found.name == "Virtanen, Matti"
 
     # Concept ID fallback match
-    found_cid = repo.get_agent_by_uri("kanto:000123456")
+    found_cid = repo.get_agent_by_curie("kanto:000123456")
     assert found_cid is not None
     assert found_cid.id == found.id
 
@@ -477,7 +477,7 @@ def test_wemi_repository_wikidata_author_canonical_uri(repo: WEMIRepository) -> 
         ]
     )
     # Check lookup via URI and via concept id
-    agent = repo.get_agent_by_uri("http://www.wikidata.org/entity/Q42")
+    agent = repo.get_agent_by_curie("http://www.wikidata.org/entity/Q42")
     assert agent is not None
     assert agent.name == "Douglas Adams"
     assert agent.curie == "wikidata:Q42"
@@ -516,7 +516,7 @@ def test_wemi_repository_dynamic_author_identifiers_option3(repo: WEMIRepository
     }
 
     # 2. Verify agent entity was created
-    agent = repo.get_agent_by_uri("http://www.wikidata.org/entity/Q42")
+    agent = repo.get_agent_by_curie("http://www.wikidata.org/entity/Q42")
     assert agent is not None
 
     # 3. Verify relational lookups in WEMI's identifiers table

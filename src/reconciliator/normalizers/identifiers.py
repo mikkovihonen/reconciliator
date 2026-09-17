@@ -6,6 +6,41 @@ import re
 from typing import Iterable, Optional
 
 
+def clean_alphanumeric(value: str) -> str:
+    """Strip all characters except ASCII/Unicode digits and lowercase letters."""
+    return re.sub(r"[^0-9a-z]", "", str(value or "").strip().lower())
+
+
+def classify_identifier_scheme(val: str, hint: Optional[str] = None) -> tuple[str, str]:
+    """Classify a standard identifier into (scheme, canonical_value).
+
+    Recognizes ISBN, ISSN, DOI, URN, ISMN, etc.
+    """
+    if not val:
+        return ("", "")
+    v = str(val).strip()
+    v_clean = clean_alphanumeric(v)
+    v_lower = v.lower()
+
+    if hint:
+        h = hint.lower().strip()
+        if h in ("isbn", "issn", "doi", "urn", "ismn"):
+            return (h, v)
+
+    if v_clean.startswith(("978", "979")) or len(v_clean) in (10, 13):
+        return ("isbn", v)
+    if ("-" in v and len(v) == 9) or (len(v_clean) == 8 and (v_clean.isdigit() or v_clean[:-1].isdigit())):
+        return ("issn", v)
+    if v_lower.startswith("10.") or "doi.org/" in v_lower:
+        return ("doi", v)
+    if v_lower.startswith("urn:"):
+        return ("urn", v)
+    if v_lower.startswith(("m-", "m", "9790")):
+        return ("ismn", v)
+
+    return ("standard_number", v)
+
+
 def isbn_10_to_13(isbn10: str) -> Optional[str]:
     """Convert a valid 10-digit ISBN into a canonical 13-digit EAN string."""
     clean = re.sub(r"[^0-9X]", "", isbn10.upper())
@@ -206,6 +241,8 @@ def normalize_source_id(
 
 
 __all__ = [
+    "clean_alphanumeric",
+    "classify_identifier_scheme",
     "isbn_10_to_13",
     "validate_isbn_13",
     "normalize_isbn",

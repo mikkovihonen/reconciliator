@@ -210,50 +210,42 @@ def verify_orcid(
     return False, f"orcid_mismatch: target {target_orcid} vs candidate {candidate_orcid}"
 
 
+def _verify_distribution_match(
+    target_dist: dict[str, int],
+    candidate_dist: dict[str, int],
+    label: str,
+    threshold: float = 80.0,
+) -> tuple[bool, str]:
+    """Verify compatibility of two string distribution bags using substring and fuzzy token matching."""
+    if not target_dist or not candidate_dist:
+        return True, f"neutral_no_{label}"
+
+    for t_item in target_dist:
+        t_norm = t_item.strip().lower()
+        for c_item in candidate_dist:
+            c_norm = c_item.strip().lower()
+            if t_norm in c_norm or c_norm in t_norm:
+                return True, f"{label}_matched"
+            if fuzz.token_set_ratio(t_norm, c_norm) >= threshold:
+                return True, f"{label}_similar"
+
+    return False, f"{label}_mismatch"
+
+
 def verify_qualifiers(
     target_qualifiers: dict[str, int],
     candidate_qualifiers: dict[str, int],
 ) -> tuple[bool, str]:
-    """Verify compatibility of empirical agent qualifier distributions.
-
-    Returns (passed, reason).
-    """
-    if not target_qualifiers or not candidate_qualifiers:
-        return True, "neutral_no_qualifier"
-
-    for t_q in target_qualifiers:
-        t_norm = t_q.strip().lower()
-        for c_q in candidate_qualifiers:
-            c_norm = c_q.strip().lower()
-            if t_norm in c_norm or c_norm in t_norm:
-                return True, "qualifier_matched"
-            if fuzz.token_set_ratio(t_norm, c_norm) >= 80.0:
-                return True, "qualifier_similar"
-
-    return False, "qualifier_mismatch"
+    """Verify compatibility of empirical agent qualifier distributions."""
+    return _verify_distribution_match(target_qualifiers, candidate_qualifiers, "qualifier")
 
 
 def verify_affiliations(
     target_affiliations: dict[str, int],
     candidate_affiliations: dict[str, int],
 ) -> tuple[bool, str]:
-    """Verify compatibility of agent affiliation distributions (e.g. universities, institutes).
-
-    Returns (passed, reason).
-    """
-    if not target_affiliations or not candidate_affiliations:
-        return True, "neutral_no_affiliation"
-
-    for t_a in target_affiliations:
-        t_norm = t_a.strip().lower()
-        for c_a in candidate_affiliations:
-            c_norm = c_a.strip().lower()
-            if t_norm in c_norm or c_norm in t_norm:
-                return True, "affiliation_matched"
-            if fuzz.token_set_ratio(t_norm, c_norm) >= 80.0:
-                return True, "affiliation_similar"
-
-    return False, "affiliation_mismatch"
+    """Verify compatibility of agent affiliation distributions (e.g. universities, institutes)."""
+    return _verify_distribution_match(target_affiliations, candidate_affiliations, "affiliation")
 
 
 def verify_languages(

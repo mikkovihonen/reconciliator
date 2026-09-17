@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from reconciliator.config import AppConfig, ReconcileConfig, VocabIngestConfig
 from reconciliator.vocabularies import strip_vocabulary_subcode
@@ -151,6 +151,27 @@ def sanitize_tsv_cell(val: Any) -> str:
         return f"{val:.4f}"
     s = str(val)
     return s.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+
+
+def _write_tsv_file(file_path: Path, columns: list[str], rows: Iterable[Any]) -> None:
+    """Write an iterable of dataclass rows to a TSV file with strict sanitization."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with file_path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write("\t".join(columns) + "\n")
+        for r in rows:
+            vals = [sanitize_tsv_cell(getattr(r, col)) for col in columns]
+            f.write("\t".join(vals) + "\n")
+
+
+def _write_summary_tsv(
+    file_path: Path, columns: list[str], rows: Iterable[tuple[Any, ...]]
+) -> None:
+    """Write tabular summary rows to a TSV file."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with file_path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write("\t".join(columns) + "\n")
+        for row in rows:
+            f.write("\t".join(str(cell) for cell in row) + "\n")
 
 
 @dataclass
@@ -507,34 +528,7 @@ class ReportGenerator:
 
     def write_agent_detailed_report(self, file_path: Path) -> None:
         """Write agent_reconciliation_uris.tsv with exact 21 columns."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(AGENT_TSV_COLUMNS) + "\n")
-            for r in self.agent_rows:
-                vals = [
-                    sanitize_tsv_cell(r.target_record_id),
-                    sanitize_tsv_cell(r.target_title),
-                    sanitize_tsv_cell(r.target_year),
-                    sanitize_tsv_cell(r.target_isbn),
-                    sanitize_tsv_cell(r.field_tag),
-                    sanitize_tsv_cell(r.field_occurrence),
-                    sanitize_tsv_cell(r.subfield_code),
-                    sanitize_tsv_cell(r.target_heading),
-                    sanitize_tsv_cell(r.target_role),
-                    sanitize_tsv_cell(r.uri),
-                    sanitize_tsv_cell(r.vocabulary),
-                    sanitize_tsv_cell(r.authority_label),
-                    sanitize_tsv_cell(r.authority_record_id),
-                    sanitize_tsv_cell(r.authority_source),
-                    sanitize_tsv_cell(r.match_tier),
-                    sanitize_tsv_cell(r.match_score),
-                    sanitize_tsv_cell(r.dense_score),
-                    sanitize_tsv_cell(r.rerank_score),
-                    sanitize_tsv_cell(r.agent_name_score),
-                    sanitize_tsv_cell(r.action),
-                    sanitize_tsv_cell(r.is_novel),
-                ]
-                f.write("\t".join(vals) + "\n")
+        _write_tsv_file(file_path, AGENT_TSV_COLUMNS, self.agent_rows)
 
     def write_agent_summary_report(self, file_path: Path) -> None:
         """Write agent_reconciliation_summary.tsv in tidy 5-column schema."""
@@ -841,36 +835,11 @@ class ReportGenerator:
         rows.extend(source_metric_rows)
         rows.extend(quality_metric_rows)
 
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(SUMMARY_COLUMNS) + "\n")
-            for section, metric, value, pct, desc in rows:
-                f.write(f"{section}\t{metric}\t{value}\t{pct}\t{desc}\n")
+        _write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
 
     def write_subject_detailed_report(self, file_path: Path) -> None:
         """Write subject_reconciliation_uris.tsv with exact 16 columns."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(SUBJECT_TSV_COLUMNS) + "\n")
-            for r in self.subject_rows:
-                vals = [
-                    sanitize_tsv_cell(r.target_record_id),
-                    sanitize_tsv_cell(r.target_title),
-                    sanitize_tsv_cell(r.source_field_tag),
-                    sanitize_tsv_cell(r.field_occurrence),
-                    sanitize_tsv_cell(r.source_heading),
-                    sanitize_tsv_cell(r.source_vocab),
-                    sanitize_tsv_cell(r.source_uri),
-                    sanitize_tsv_cell(r.language),
-                    sanitize_tsv_cell(r.target_field_tag),
-                    sanitize_tsv_cell(r.target_vocab),
-                    sanitize_tsv_cell(r.target_uri),
-                    sanitize_tsv_cell(r.target_pref_label),
-                    sanitize_tsv_cell(r.mapping_type),
-                    sanitize_tsv_cell(r.action),
-                    sanitize_tsv_cell(r.is_novel),
-                    sanitize_tsv_cell(r.tag_changed),
-                ]
-                f.write("\t".join(vals) + "\n")
+        _write_tsv_file(file_path, SUBJECT_TSV_COLUMNS, self.subject_rows)
 
     def write_subject_summary_report(self, file_path: Path) -> None:
         """Write subject_reconciliation_summary.tsv in tidy 5-column schema."""
@@ -1179,57 +1148,15 @@ class ReportGenerator:
             *tag_migration_metric_rows,
         ]
 
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(SUMMARY_COLUMNS) + "\n")
-            for section, metric, value, pct, desc in rows:
-                f.write(f"{section}\t{metric}\t{value}\t{pct}\t{desc}\n")
+        _write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
 
     def write_work_report(self, file_path: Path) -> None:
         """Write work_reconciliation.tsv containing work-level links across 42 domains."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(WORK_TSV_COLUMNS) + "\n")
-            for r in self.work_rows:
-                vals = [
-                    sanitize_tsv_cell(r.target_record_id),
-                    sanitize_tsv_cell(r.work_type),
-                    sanitize_tsv_cell(r.target_title),
-                    sanitize_tsv_cell(r.target_author),
-                    sanitize_tsv_cell(r.target_year),
-                    sanitize_tsv_cell(r.work_blocking_key),
-                    sanitize_tsv_cell(r.matched_work_uri),
-                    sanitize_tsv_cell(r.wikidata_qid),
-                    sanitize_tsv_cell(r.match_tier),
-                    sanitize_tsv_cell(r.funnel_used),
-                    sanitize_tsv_cell(r.confidence_score),
-                    sanitize_tsv_cell(r.is_clustered),
-                    sanitize_tsv_cell(r.cluster_id),
-                    sanitize_tsv_cell(r.action),
-                    sanitize_tsv_cell(r.record_level_work_uri),
-                ]
-                f.write("\t".join(vals) + "\n")
+        _write_tsv_file(file_path, WORK_TSV_COLUMNS, self.work_rows)
 
     def write_expression_report(self, file_path: Path) -> None:
         """Write expression_reconciliation.tsv containing expression-level realization links."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(EXPRESSION_TSV_COLUMNS) + "\n")
-            for r in self.expression_rows:
-                vals = [
-                    sanitize_tsv_cell(r.target_record_id),
-                    sanitize_tsv_cell(r.work_uri),
-                    sanitize_tsv_cell(r.expression_uri),
-                    sanitize_tsv_cell(r.content_type),
-                    sanitize_tsv_cell(r.language),
-                    sanitize_tsv_cell(r.version_designation),
-                    sanitize_tsv_cell(r.translators),
-                    sanitize_tsv_cell(r.performers),
-                    sanitize_tsv_cell(r.match_tier),
-                    sanitize_tsv_cell(r.confidence_score),
-                    sanitize_tsv_cell(r.cluster_id),
-                    sanitize_tsv_cell(r.action),
-                ]
-                f.write("\t".join(vals) + "\n")
+        _write_tsv_file(file_path, EXPRESSION_TSV_COLUMNS, self.expression_rows)
 
     def write_wemi_summary_report(self, file_path: Path) -> None:
         """Write wemi_reconciliation_summary.tsv summarizing work & expression reconciliation."""
@@ -1304,7 +1231,4 @@ class ReportGenerator:
                 )
             )
 
-        with file_path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\t".join(WEMI_SUMMARY_COLUMNS) + "\n")
-            for section, metric, value, pct, desc in rows:
-                f.write(f"{section}\t{metric}\t{value}\t{pct}\t{desc}\n")
+        _write_summary_tsv(file_path, WEMI_SUMMARY_COLUMNS, rows)

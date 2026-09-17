@@ -778,7 +778,7 @@ stays in the spec for a source whose parts genuinely name their host by a key.
 
 Stage 1 resolved `container_uri` within a batch, which is the rare case: a
 journal issue is ingested long before the articles that cite it. `insert_wemi_batch`
-now falls back to `get_manifestation_by_uri`, so containment works across batches
+now falls back to `get_manifestation_by_curie`, so containment works across batches
 and across runs.
 
 ### One mapping corrected on the way

@@ -21,6 +21,7 @@ from typing import Any, Iterable, Optional
 from rapidfuzz import fuzz
 from sqlalchemy import and_, func, select
 
+from reconciliator.clusterer import UnionFind
 from reconciliator.config import WorkConsolidationConfig
 from reconciliator.curie import to_curie
 from reconciliator.db import (
@@ -32,6 +33,7 @@ from reconciliator.db import (
     works_table,
 )
 from reconciliator.models import WorkRelationship
+from reconciliator.normalizers.identifiers import clean_alphanumeric
 from reconciliator.repository import WEMIRepository
 
 logger = logging.getLogger(__name__)
@@ -40,10 +42,6 @@ SAME_WORK = "same_work_as"
 
 # Synthetic URIs minted per record carry no cross-source identity.
 _LOCAL_URI_PREFIXES = ("urn:work:", "urn:reconciliator:", "urn:agent:", "urn:exp:", "urn:manif:")
-
-
-def _normalize_identifier(value: str) -> str:
-    return re.sub(r"[^0-9a-z]", "", value.strip().lower())
 
 
 @dataclass
@@ -84,30 +82,6 @@ class ConsolidationResult:
     def consolidated_works(self) -> int:
         """Work rows that were folded into some other row's identity."""
         return sum(len(g) - 1 for g in self.groups)
-
-
-class _UnionFind:
-    def __init__(self, items: Iterable[int]) -> None:
-        self.parent = {i: i for i in items}
-
-    def find(self, item: int) -> int:
-        root = item
-        while self.parent[root] != root:
-            root = self.parent[root]
-        while self.parent[item] != root:
-            self.parent[item], item = root, self.parent[item]
-        return root
-
-    def union(self, a: int, b: int) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.parent[rb] = ra
-
-    def groups(self) -> dict[int, list[int]]:
-        out: dict[int, list[int]] = {}
-        for item in self.parent:
-            out.setdefault(self.find(item), []).append(item)
-        return out
 
 
 class WorkConsolidator:
@@ -227,7 +201,7 @@ class WorkConsolidator:
 
     @staticmethod
     def _add_identifier(sig: WorkSignature, scheme: Any, value: Any) -> None:
-        norm = _normalize_identifier(str(value or ""))
+        norm = clean_alphanumeric(str(value or ""))
         if not norm:
             return
         scheme_l = str(scheme or "").strip().lower()
@@ -365,7 +339,7 @@ class WorkConsolidator:
         if not pairs:
             return result
 
-        uf = _UnionFind(sigs.keys())
+        uf = UnionFind(sigs.keys())
         for a, b, evidence in pairs:
             uf.union(a, b)
             result.evidence[(a, b)] = evidence

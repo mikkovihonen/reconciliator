@@ -43,6 +43,7 @@ from reconciliator.models import (
     WorkRelationship,
 )
 from reconciliator.normalizers.blocking import compute_author_key
+from reconciliator.normalizers.identifiers import classify_identifier_scheme
 from reconciliator.repository import WEMIRepository
 from reconciliator.rerank import CandidateEvaluator
 from reconciliator.vocabularies import (
@@ -145,21 +146,10 @@ def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]
     # From target blocking / domain keys
     if target.get_first_key("standard"):
         sk = target.get_first_key("standard").strip()
-        sk_clean = re.sub(r"[^0-9a-zA-Z]", "", sk)
-        if sk_clean.startswith(("978", "979")) or len(sk_clean) in (10, 13):
-            _add("isbn", sk)
-        elif "-" in sk and len(sk) == 9:
-            _add("issn", sk)
-        elif sk.lower().startswith("10."):
-            _add("doi", sk)
-        elif sk.lower().startswith("urn:"):
-            _add("urn", sk)
-        elif sk.lower().startswith(("m", "9790")):
-            _add("ismn", sk)
-        else:
-            _add("standard_number", sk)
-            if target.work_type in ("music", "audio_nonmusic"):
-                _add("publisher_number", sk)
+        scheme, norm_val = classify_identifier_scheme(sk)
+        _add(scheme, norm_val)
+        if scheme == "standard_number" and target.work_type in ("music", "audio_nonmusic"):
+            _add("publisher_number", sk)
 
     if (
         target.get_first_key("series")
@@ -168,43 +158,24 @@ def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]
     ):
         _add("issn", target.get_first_key("series"))
 
-    if target.get_first_key("patent"):
-        _add("patent_number", target.get_first_key("patent"))
-        _add("patent", target.get_first_key("patent"))
-
-    if target.get_first_key("statute"):
-        _add("sdk", target.get_first_key("statute"))
-        _add("eli", target.get_first_key("statute"))
-
-    if target.get_first_key("swhid"):
-        _add("swhid", target.get_first_key("swhid"))
-
-    if target.get_first_key("fingerprint"):
-        _add("fingerprint", target.get_first_key("fingerprint"))
-
-    if target.get_first_key("podcast"):
-        _add("guid_rss", target.get_first_key("podcast"))
-
-    if target.get_first_key("board_game"):
-        _add("bgg", target.get_first_key("board_game"))
-        _add("ean", target.get_first_key("board_game"))
-
-    if target.get_first_key("fragment_codex"):
-        _add("fragmenta", target.get_first_key("fragment_codex"))
-
-    if target.get_first_key("numismatic_issue"):
-        _add("michel", target.get_first_key("numismatic_issue"))
-        _add("scott", target.get_first_key("numismatic_issue"))
-        _add("km", target.get_first_key("numismatic_issue"))
-
-    if target.get_first_key("geodata_spatial"):
-        _add("epsg", target.get_first_key("geodata_spatial"))
-
-    if target.get_first_key("web_seed"):
-        _add("memento_uri", target.get_first_key("web_seed"))
-
-    if target.get_first_key("sammelband"):
-        _add("barcode", target.get_first_key("sammelband"))
+    domain_key_schemes = (
+        ("patent", ("patent_number", "patent")),
+        ("statute", ("sdk", "eli")),
+        ("swhid", ("swhid",)),
+        ("fingerprint", ("fingerprint",)),
+        ("podcast", ("guid_rss",)),
+        ("board_game", ("bgg", "ean")),
+        ("fragment_codex", ("fragmenta",)),
+        ("numismatic_issue", ("michel", "scott", "km")),
+        ("geodata_spatial", ("epsg",)),
+        ("web_seed", ("memento_uri",)),
+        ("sammelband", ("barcode",)),
+    )
+    for dk, target_schemes in domain_key_schemes:
+        dk_val = target.get_first_key(dk)
+        if dk_val:
+            for ts in target_schemes:
+                _add(ts, dk_val)
 
     # Identifiers extracted at ingest and carried on the record. This replaces a
     # second full parse of raw_payload per match attempt which, on the reconcile

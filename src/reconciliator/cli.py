@@ -1043,6 +1043,98 @@ def _to_target_record(
     )
 
 
+def _make_agent_report_row(
+    target_record: Any,
+    agent: Any,
+    field_tag: str,
+    field_occurrence: int,
+    uri: str = "",
+    action: str = "unmatched",
+    is_novel: bool = False,
+    discovered_map: Optional[dict[str, Any]] = None,
+    accepted_candidates: Optional[list[Any]] = None,
+    match_tier: str = "TIER_0",
+    match_score: float = 0.0,
+    dense_score: Optional[float] = None,
+    rerank_score: Optional[float] = None,
+) -> AgentReportRow:
+    target_isbn = (
+        target_record.identifiers.isbn[0]
+        if getattr(target_record, "identifiers", None) and target_record.identifiers.isbn
+        else None
+    )
+    target_role = (
+        ", ".join(agent.role_counts.keys()) if getattr(agent, "role_counts", None) else None
+    )
+
+    if not uri:
+        return AgentReportRow(
+            target_record_id=target_record.source_id,
+            target_title=target_record.title,
+            target_year=target_record.publication_year,
+            target_isbn=target_isbn,
+            field_tag=field_tag,
+            field_occurrence=field_occurrence,
+            subfield_code="0",
+            target_heading=agent.name,
+            target_role=target_role,
+            uri="",
+            vocabulary="",
+            authority_label=None,
+            authority_record_id="",
+            authority_source="",
+            match_tier=match_tier,
+            match_score=match_score,
+            dense_score=dense_score,
+            rerank_score=rerank_score,
+            agent_name_score=None,
+            action=action,
+            is_novel=is_novel,
+            dates=agent.dates,
+            fuller_name=agent.fuller_name,
+            birth_year=agent.birth_year,
+            death_year=agent.death_year,
+        )
+
+    subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
+    disc_uri = discovered_map.get(uri) if discovered_map else None
+    cand_source_id = (
+        disc_uri.source_record_id
+        if disc_uri
+        else (accepted_candidates[0].source_id if accepted_candidates else "")
+    )
+    cand_source = (
+        disc_uri.source
+        if disc_uri
+        else (accepted_candidates[0].source if accepted_candidates else "")
+    )
+    agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
+
+    return AgentReportRow(
+        target_record_id=target_record.source_id,
+        target_title=target_record.title,
+        target_year=target_record.publication_year,
+        target_isbn=target_isbn,
+        field_tag=field_tag,
+        field_occurrence=field_occurrence,
+        subfield_code=subfield_code,
+        target_heading=agent.name,
+        target_role=target_role,
+        uri=uri,
+        vocabulary=detect_vocabulary(uri) or "OTHER",
+        authority_label=agent.name,
+        authority_record_id=cand_source_id,
+        authority_source=cand_source,
+        match_tier=match_tier,
+        match_score=match_score,
+        dense_score=dense_score,
+        rerank_score=rerank_score,
+        agent_name_score=agent_name_score,
+        action=action,
+        is_novel=is_novel,
+    )
+
+
 @app.command("reconcile")
 def reconcile_cmd(
     config: Path = typer.Option(
@@ -1304,96 +1396,40 @@ def reconcile_cmd(
                         if (r_cfg.enrich and is_novel)
                         else ("existing" if not is_novel else "proposed")
                     )
-                    subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
-                    disc_uri = discovered_map.get(uri)
-                    cand_source_id = (
-                        disc_uri.source_record_id
-                        if disc_uri
-                        else (
-                            res.accepted_candidates[0].source_id if res.accepted_candidates else ""
-                        )
-                    )
-                    cand_source = (
-                        disc_uri.source
-                        if disc_uri
-                        else (res.accepted_candidates[0].source if res.accepted_candidates else "")
-                    )
-                    agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
-
                     reporter.add_agent_row(
-                        AgentReportRow(
-                            target_record_id=target_record.source_id,
-                            target_title=target_record.title,
-                            target_year=target_record.publication_year,
-                            target_isbn=target_record.identifiers.isbn[0]
-                            if target_record.identifiers.isbn
-                            else None,
-                            field_tag=field_tag,
-                            field_occurrence=idx + 1,
-                            subfield_code=subfield_code,
-                            target_heading=agent.name,
-                            target_role=", ".join(agent.role_counts.keys())
-                            if agent.role_counts
-                            else None,
+                        _make_agent_report_row(
+                            target_record,
+                            agent,
+                            field_tag,
+                            idx + 1,
                             uri=uri,
-                            vocabulary=detect_vocabulary(uri) or "OTHER",
-                            authority_label=agent.name,
-                            authority_record_id=cand_source_id,
-                            authority_source=cand_source,
+                            action=action,
+                            is_novel=is_novel,
+                            discovered_map=discovered_map,
+                            accepted_candidates=res.accepted_candidates,
                             match_tier=match_tier,
                             match_score=match_score,
                             dense_score=dense_score,
                             rerank_score=rerank_score,
-                            agent_name_score=agent_name_score,
-                            action=action,
-                            is_novel=is_novel,
                         )
                     )
 
                 for uri in suppressed:
-                    subfield_code = "1" if "wikidata.org" in uri.lower() else "0"
-                    disc_uri = discovered_map.get(uri)
-                    cand_source_id = (
-                        disc_uri.source_record_id
-                        if disc_uri
-                        else (
-                            res.accepted_candidates[0].source_id if res.accepted_candidates else ""
-                        )
-                    )
-                    cand_source = (
-                        disc_uri.source
-                        if disc_uri
-                        else (res.accepted_candidates[0].source if res.accepted_candidates else "")
-                    )
-                    agent_name_score = disc_uri.alignment_score if disc_uri else 100.0
-
                     reporter.add_agent_row(
-                        AgentReportRow(
-                            target_record_id=target_record.source_id,
-                            target_title=target_record.title,
-                            target_year=target_record.publication_year,
-                            target_isbn=target_record.identifiers.isbn[0]
-                            if target_record.identifiers.isbn
-                            else None,
-                            field_tag=field_tag,
-                            field_occurrence=idx + 1,
-                            subfield_code=subfield_code,
-                            target_heading=agent.name,
-                            target_role=", ".join(agent.role_counts.keys())
-                            if agent.role_counts
-                            else None,
+                        _make_agent_report_row(
+                            target_record,
+                            agent,
+                            field_tag,
+                            idx + 1,
                             uri=uri,
-                            vocabulary=detect_vocabulary(uri) or "OTHER",
-                            authority_label=agent.name,
-                            authority_record_id=cand_source_id,
-                            authority_source=cand_source,
+                            action="suppressed_by_priority",
+                            is_novel=True,
+                            discovered_map=discovered_map,
+                            accepted_candidates=res.accepted_candidates,
                             match_tier=match_tier,
                             match_score=match_score,
                             dense_score=dense_score,
                             rerank_score=rerank_score,
-                            agent_name_score=agent_name_score,
-                            action="suppressed_by_priority",
-                            is_novel=True,
                         )
                     )
 
@@ -1403,36 +1439,17 @@ def reconcile_cmd(
                 # and no way to measure link coverage over a corpus.
                 if not selected and not suppressed:
                     reporter.add_agent_row(
-                        AgentReportRow(
-                            target_record_id=target_record.source_id,
-                            target_title=target_record.title,
-                            target_year=target_record.publication_year,
-                            target_isbn=target_record.identifiers.isbn[0]
-                            if target_record.identifiers.isbn
-                            else None,
-                            field_tag=field_tag,
-                            field_occurrence=idx + 1,
-                            subfield_code="0",
-                            target_heading=agent.name,
-                            target_role=", ".join(agent.role_counts.keys())
-                            if agent.role_counts
-                            else None,
-                            uri="",
-                            vocabulary="",
-                            authority_label=None,
-                            authority_record_id="",
-                            authority_source="",
+                        _make_agent_report_row(
+                            target_record,
+                            agent,
+                            field_tag,
+                            idx + 1,
+                            action="unmatched",
+                            is_novel=False,
                             match_tier=match_tier,
                             match_score=match_score,
                             dense_score=dense_score,
                             rerank_score=rerank_score,
-                            agent_name_score=None,
-                            action="unmatched",
-                            is_novel=False,
-                            dates=agent.dates,
-                            fuller_name=agent.fuller_name,
-                            birth_year=agent.birth_year,
-                            death_year=agent.death_year,
                         )
                     )
 

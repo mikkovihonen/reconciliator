@@ -54,6 +54,7 @@ from reconciliator.normalizers.blocking import (
     compute_series_key,
     compute_title_stem,
     compute_work_blocking_key,
+    to_manifestation_entity_keys,
 )
 from reconciliator.normalizers.relators import normalize_role
 from reconciliator.template import WEMISerializationEngine
@@ -2231,19 +2232,14 @@ def decompose_marc_wemi(
         _title_stem = compute_title_stem(
             parsed.get("uniform_title") or parsed.get("title"), lang=parsed.get("language")
         )
-        for key_type, values in derive_domain_keys(
-            record_elem, parsed, work_type, _author_key, _title_stem
-        ).items():
-            for value in values:
-                key_sink.append(
-                    EntityKey(
-                        entity_type="manifestation",
-                        entity_id=0,
-                        key_type=key_type,
-                        key_value=value,
-                        entity_uri=manifestation.manifestation_uri,
-                    )
-                )
+        key_sink.extend(
+            to_manifestation_entity_keys(
+                manifestation.manifestation_uri,
+                derive_domain_keys(
+                    record_elem, parsed, work_type, _author_key, _title_stem
+                ),
+            )
+        )
 
     # 600 personal name subjects -> Agent + Contribution (role="subject")
     for f in _get_datafields(record_elem, "600"):
