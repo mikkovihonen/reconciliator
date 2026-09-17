@@ -66,7 +66,7 @@ def _constituents(record: Any, ctx: FunnelContext, work: Any = None) -> list[Any
     for a container ingested before constituents existed or under
     `constituents_mode: keys_only`.
     """
-    from reconciliator.matcher import extract_target_analytics
+    from reconciliator.utils import extract_target_analytics
 
     mode = ctx.spec.constituents
     if mode == "none":

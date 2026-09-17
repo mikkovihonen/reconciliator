@@ -27,6 +27,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.db import get_engine, task_progress_table
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
+from reconciliator.utils.durations import parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -284,28 +285,6 @@ def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
             ]
     finally:
         engine.dispose()
-
-
-def parse_duration_seconds(duration_str: str) -> float:
-    """Parse human-readable duration strings like '7d', '24h', '30m', '60s' into seconds."""
-    s = duration_str.strip().lower()
-    if not s:
-        raise ValueError("Duration string cannot be empty")
-    if s.endswith(("days", "day", "d")):
-        val = s.rstrip("days").rstrip("d")
-        return float(val) * 86400.0
-    elif s.endswith(("hours", "hour", "hrs", "hr", "h")):
-        val = s.rstrip("hours").rstrip("hrs").rstrip("h")
-        return float(val) * 3600.0
-    elif s.endswith(("minutes", "minute", "mins", "min", "m")):
-        val = s.rstrip("minutes").rstrip("mins").rstrip("m")
-        return float(val) * 60.0
-    elif s.endswith(("seconds", "second", "secs", "sec", "s")):
-        val = s.rstrip("seconds").rstrip("secs").rstrip("s")
-        return float(val)
-    else:
-        # Default numeric strings without unit to days
-        return float(s) * 86400.0
 
 
 def prune_tasks(

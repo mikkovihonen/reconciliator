@@ -5,10 +5,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
-
-def clean_alphanumeric(value: str) -> str:
-    """Strip all characters except ASCII/Unicode digits and lowercase letters."""
-    return re.sub(r"[^0-9a-z]", "", str(value or "").strip().lower())
+from reconciliator.utils.strings import clean_alphanumeric
 
 
 def classify_identifier_scheme(val: str, hint: Optional[str] = None) -> tuple[str, str]:

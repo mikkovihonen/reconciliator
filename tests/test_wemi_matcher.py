@@ -7,11 +7,7 @@ import numpy as np
 import pytest
 
 from reconciliator.indexer import TorchVectorEngine
-from reconciliator.matcher import (
-    WorkMatcher,
-    compute_jaccard_overlap,
-    extract_identifiers_from_target,
-)
+from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
     AgentEntity,
     ExpressionEntity,
@@ -24,6 +20,7 @@ from reconciliator.models import (
     WorkRelationship,
 )
 from reconciliator.repository import WEMIRepository
+from reconciliator.utils import compute_jaccard_overlap, extract_identifiers_from_target
 
 
 @pytest.fixture
@@ -104,7 +101,7 @@ def test_identifiers_are_not_read_from_the_payload():
 
 def test_analytics_come_from_keys_not_the_payload():
     from reconciliator.loaders.marcxml import encode_analytic
-    from reconciliator.matcher import extract_target_analytics, extract_target_track_titles
+    from reconciliator.utils import extract_target_analytics, extract_target_track_titles
 
     target = MatchRecord(
         record_id="rec-1",

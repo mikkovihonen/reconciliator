@@ -134,6 +134,7 @@ def start_postgres_container(
             "-d",
             "--name",
             name,
+            "--shm-size=1g",
             "-p",
             f"{port}:5432",
             "-e",

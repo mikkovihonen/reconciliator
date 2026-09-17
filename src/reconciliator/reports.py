@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from reconciliator.config import AppConfig, ReconcileConfig, VocabIngestConfig
+from reconciliator.utils.tsv import sanitize_tsv_cell, write_summary_tsv, write_tsv_file
 from reconciliator.vocabularies import strip_vocabulary_subcode
 
 
@@ -139,39 +140,6 @@ def normalize_vocab_code(vocab: Optional[str]) -> str:
     if not clean.startswith("http"):
         clean = strip_vocabulary_subcode(clean)
     return clean.lower()
-
-
-def sanitize_tsv_cell(val: Any) -> str:
-    """Sanitize string for TSV cell, replacing tabs and newlines with spaces."""
-    if val is None:
-        return ""
-    if isinstance(val, bool):
-        return "true" if val else "false"
-    if isinstance(val, float):
-        return f"{val:.4f}"
-    s = str(val)
-    return s.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
-
-
-def _write_tsv_file(file_path: Path, columns: list[str], rows: Iterable[Any]) -> None:
-    """Write an iterable of dataclass rows to a TSV file with strict sanitization."""
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    with file_path.open("w", encoding="utf-8", newline="\n") as f:
-        f.write("\t".join(columns) + "\n")
-        for r in rows:
-            vals = [sanitize_tsv_cell(getattr(r, col)) for col in columns]
-            f.write("\t".join(vals) + "\n")
-
-
-def _write_summary_tsv(
-    file_path: Path, columns: list[str], rows: Iterable[tuple[Any, ...]]
-) -> None:
-    """Write tabular summary rows to a TSV file."""
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    with file_path.open("w", encoding="utf-8", newline="\n") as f:
-        f.write("\t".join(columns) + "\n")
-        for row in rows:
-            f.write("\t".join(str(cell) for cell in row) + "\n")
 
 
 @dataclass
@@ -528,7 +496,7 @@ class ReportGenerator:
 
     def write_agent_detailed_report(self, file_path: Path) -> None:
         """Write agent_reconciliation_uris.tsv with exact 21 columns."""
-        _write_tsv_file(file_path, AGENT_TSV_COLUMNS, self.agent_rows)
+        write_tsv_file(file_path, AGENT_TSV_COLUMNS, self.agent_rows)
 
     def write_agent_summary_report(self, file_path: Path) -> None:
         """Write agent_reconciliation_summary.tsv in tidy 5-column schema."""
@@ -835,11 +803,11 @@ class ReportGenerator:
         rows.extend(source_metric_rows)
         rows.extend(quality_metric_rows)
 
-        _write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
+        write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
 
     def write_subject_detailed_report(self, file_path: Path) -> None:
         """Write subject_reconciliation_uris.tsv with exact 16 columns."""
-        _write_tsv_file(file_path, SUBJECT_TSV_COLUMNS, self.subject_rows)
+        write_tsv_file(file_path, SUBJECT_TSV_COLUMNS, self.subject_rows)
 
     def write_subject_summary_report(self, file_path: Path) -> None:
         """Write subject_reconciliation_summary.tsv in tidy 5-column schema."""
@@ -1148,15 +1116,15 @@ class ReportGenerator:
             *tag_migration_metric_rows,
         ]
 
-        _write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
+        write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
 
     def write_work_report(self, file_path: Path) -> None:
         """Write work_reconciliation.tsv containing work-level links across 42 domains."""
-        _write_tsv_file(file_path, WORK_TSV_COLUMNS, self.work_rows)
+        write_tsv_file(file_path, WORK_TSV_COLUMNS, self.work_rows)
 
     def write_expression_report(self, file_path: Path) -> None:
         """Write expression_reconciliation.tsv containing expression-level realization links."""
-        _write_tsv_file(file_path, EXPRESSION_TSV_COLUMNS, self.expression_rows)
+        write_tsv_file(file_path, EXPRESSION_TSV_COLUMNS, self.expression_rows)
 
     def write_wemi_summary_report(self, file_path: Path) -> None:
         """Write wemi_reconciliation_summary.tsv summarizing work & expression reconciliation."""
@@ -1231,4 +1199,4 @@ class ReportGenerator:
                 )
             )
 
-        _write_summary_tsv(file_path, WEMI_SUMMARY_COLUMNS, rows)
+        write_summary_tsv(file_path, WEMI_SUMMARY_COLUMNS, rows)

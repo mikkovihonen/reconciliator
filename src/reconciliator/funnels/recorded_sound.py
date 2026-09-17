@@ -82,7 +82,7 @@ def _constituent_matches(work: Any, tracks: set[str], ctx: FunnelContext) -> lis
 
 
 def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
-    from reconciliator.matcher import compute_jaccard_overlap, extract_target_track_titles
+    from reconciliator.utils import compute_jaccard_overlap, extract_target_track_titles
 
     tracks = extract_target_track_titles(record)
     if tracks:

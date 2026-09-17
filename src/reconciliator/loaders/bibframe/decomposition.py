@@ -60,9 +60,9 @@ from reconciliator.normalizers.blocking import (
     compute_music_work_key,
     compute_title_stem,
     compute_work_blocking_key,
-    to_manifestation_entity_keys,
 )
 from reconciliator.template import WEMISerializationEngine
+from reconciliator.utils import to_manifestation_entity_keys
 from reconciliator.vocabularies import detect_vocabulary
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,6 @@ from typing import Any, Iterable, Optional
 from rapidfuzz import fuzz
 from sqlalchemy import and_, func, select
 
-from reconciliator.clusterer import UnionFind
 from reconciliator.config import WorkConsolidationConfig
 from reconciliator.curie import to_curie
 from reconciliator.db import (
@@ -33,8 +32,8 @@ from reconciliator.db import (
     works_table,
 )
 from reconciliator.models import WorkRelationship
-from reconciliator.normalizers.identifiers import clean_alphanumeric
 from reconciliator.repository import WEMIRepository
+from reconciliator.utils import UnionFind, clean_alphanumeric
 
 logger = logging.getLogger(__name__)
 

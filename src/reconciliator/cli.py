@@ -75,7 +75,6 @@ from reconciliator.progress import (
     format_task_table,
     get_task_progress,
     list_tasks,
-    parse_duration_seconds,
     prune_tasks,
     render_status_json,
     render_vector_daemon_panel,
@@ -89,6 +88,7 @@ from reconciliator.reports import (
     WorkReportRow,
 )
 from reconciliator.repository import WEMIRepository
+from reconciliator.utils import parse_duration_seconds
 from reconciliator.vocab_folding import VocabFolder
 from reconciliator.vocab_store import VocabStore
 from reconciliator.vocabularies import detect_vocabulary

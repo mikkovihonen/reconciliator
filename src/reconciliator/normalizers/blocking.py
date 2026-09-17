@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from reconciliator.normalizers.agent import extract_surname, normalize_agent_name
 from reconciliator.normalizers.record import clean_title
@@ -94,22 +94,3 @@ def compute_host_citation_key(
     clean_page = str(start_page or "").strip()
     clean_author = str(author_surname or "").strip().lower()
     return f"{clean_issn}::{clean_year}::{clean_page}::{clean_author}"
-
-
-def to_manifestation_entity_keys(
-    manifestation_uri: str, domain_keys: dict[str, list[str]]
-) -> list[Any]:
-    """Shape a domain keys dictionary into EntityKey rows bound to a manifestation."""
-    from reconciliator.models import EntityKey
-
-    return [
-        EntityKey(
-            entity_type="manifestation",
-            entity_id=0,
-            key_type=key_type,
-            key_value=value,
-            entity_uri=manifestation_uri,
-        )
-        for key_type, values in domain_keys.items()
-        for value in values
-    ]

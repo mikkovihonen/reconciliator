@@ -327,7 +327,7 @@ def _marc(leader: str, title: str, extra: str = "", control_007: str = "") -> ob
 
 def _funnel_for(marc_record) -> str:  # noqa: ANN001
     from reconciliator.loaders.marcxml import build_target_record_from_marc
-    from reconciliator.matcher import extract_identifiers_from_target
+    from reconciliator.utils import extract_identifiers_from_target
 
     record = build_target_record_from_marc(marc_record, source="melinda")
     return _select(record, extract_identifiers_from_target(record)).id

@@ -209,7 +209,7 @@ def _bibframe_record(cls: str, title: str = "Teos"):  # noqa: ANN202
 
 
 def _bibframe_funnel(cls: str) -> str:
-    from reconciliator.matcher import extract_identifiers_from_target
+    from reconciliator.utils import extract_identifiers_from_target
 
     record = _bibframe_record(cls)
     identifiers = extract_identifiers_from_target(record)
@@ -621,7 +621,7 @@ def test_a_cartographic_dataset_is_spatial_data_not_a_map():
     dataset is work_type "cartography" too and would otherwise be claimed first.
     """
     from reconciliator.loaders.marcxml import build_target_record_from_marc
-    from reconciliator.matcher import extract_identifiers_from_target
+    from reconciliator.utils import extract_identifiers_from_target
 
     def funnel_for(code: str) -> str:
         extra = (

@@ -46,6 +46,12 @@ from reconciliator.normalizers.blocking import compute_author_key
 from reconciliator.normalizers.identifiers import classify_identifier_scheme
 from reconciliator.repository import WEMIRepository
 from reconciliator.rerank import CandidateEvaluator
+from reconciliator.utils import (
+    compute_jaccard_overlap,
+    extract_identifiers_from_target,
+    extract_target_analytics,
+    extract_target_track_titles,
+)
 from reconciliator.vocabularies import (
     VocabularyManager,
     format_wikidata_uri,
@@ -113,95 +119,6 @@ class WEMIMatchResult:
             self.manifestation_curie = self.manifestation_uri
         elif not self.manifestation_uri and self.manifestation_curie:
             self.manifestation_uri = self.manifestation_curie
-
-
-def compute_jaccard_overlap(set1: set[str], set2: set[str]) -> float:
-    """Compute Jaccard similarity between two sets of string tokens/titles."""
-    if not set1 or not set2:
-        return 0.0
-    norm1 = {re.sub(r"[^0-9a-zA-Z]", "", s).lower() for s in set1 if s}
-    norm2 = {re.sub(r"[^0-9a-zA-Z]", "", s).lower() for s in set2 if s}
-    norm1.discard("")
-    norm2.discard("")
-    if not norm1 or not norm2:
-        return 0.0
-    intersection = len(norm1 & norm2)
-    union = len(norm1 | norm2)
-    return intersection / union if union > 0 else 0.0
-
-
-def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]:
-    """Extract standard identifiers from MatchRecord fields and raw payload."""
-    ids: dict[str, list[str]] = {}
-
-    def _add(scheme: str, val: Optional[str]) -> None:
-        if val and val.strip():
-            s = scheme.lower().strip()
-            v = val.strip()
-            if s not in ids:
-                ids[s] = []
-            if v not in ids[s]:
-                ids[s].append(v)
-
-    # From target blocking / domain keys
-    if target.get_first_key("standard"):
-        sk = target.get_first_key("standard").strip()
-        scheme, norm_val = classify_identifier_scheme(sk)
-        _add(scheme, norm_val)
-        if scheme == "standard_number" and target.work_type in ("music", "audio_nonmusic"):
-            _add("publisher_number", sk)
-
-    if (
-        target.get_first_key("series")
-        and "-" in target.get_first_key("series")
-        and len(target.get_first_key("series")) == 9
-    ):
-        _add("issn", target.get_first_key("series"))
-
-    domain_key_schemes = (
-        ("patent", ("patent_number", "patent")),
-        ("statute", ("sdk", "eli")),
-        ("swhid", ("swhid",)),
-        ("fingerprint", ("fingerprint",)),
-        ("podcast", ("guid_rss",)),
-        ("board_game", ("bgg", "ean")),
-        ("fragment_codex", ("fragmenta",)),
-        ("numismatic_issue", ("michel", "scott", "km")),
-        ("geodata_spatial", ("epsg",)),
-        ("web_seed", ("memento_uri",)),
-        ("sammelband", ("barcode",)),
-    )
-    for dk, target_schemes in domain_key_schemes:
-        dk_val = target.get_first_key(dk)
-        if dk_val:
-            for ts in target_schemes:
-                _add(ts, dk_val)
-
-    # Identifiers extracted at ingest and carried on the record. This replaces a
-    # second full parse of raw_payload per match attempt which, on the reconcile
-    # path, parsed JSON as XML, threw, was swallowed, and returned nothing - so
-    # tier 1 could never fire there.
-    for scheme, values in (target.identifiers or {}).items():
-        for value in values:
-            _add(scheme, value)
-
-    return ids
-
-
-def extract_target_track_titles(target: MatchRecord) -> set[str]:
-    """Constituent track titles, from the analytics extracted at ingest."""
-    return {title for title, _creator in extract_target_analytics(target)}
-
-
-def extract_target_analytics(target: MatchRecord) -> list[tuple[str, Optional[str]]]:
-    """Constituent works (title, creator), from the analytics extracted at ingest.
-
-    These come from MARC 700/710/505 `$t`, parsed once by the loader into
-    `entity_keys` rather than re-parsed from the payload on every match attempt.
-    """
-    from reconciliator.loaders.marcxml import decode_analytic
-
-    return [decode_analytic(v) for v in target.get_keys("analytic")]
 
 
 def _merge_funnel_specs(overrides: Optional[list[FunnelSpec]]) -> list[FunnelSpec]:
