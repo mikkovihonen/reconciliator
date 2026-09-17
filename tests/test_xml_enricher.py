@@ -145,6 +145,7 @@ def test_marc_predicate_profiles_configuration() -> None:
     enricher = MARCXMLEnricher()
 
     from reconciliator.models import ExpressionCluster, WorkCluster
+
     work = WorkCluster(
         cluster_id="w1",
         canonical_title="Test Work",
@@ -207,7 +208,13 @@ def test_scheme_definition_and_deduplication() -> None:
     """
     elem = etree.fromstring(xml_with_wayback.strip())
     enricher = MARCXMLEnricher()
-    tr = MatchRecord(record_id="rec2", title="Archived Site", format="marcxml", title_stem="archived site", web_seed_key="http://example.org/new-seed")
+    tr = MatchRecord(
+        record_id="rec2",
+        title="Archived Site",
+        format="marcxml",
+        title_stem="archived site",
+        web_seed_key="http://example.org/new-seed",
+    )
 
     enriched = enricher.enrich_record_tree(
         elem,
@@ -226,8 +233,16 @@ def test_multilingual_linking_labels() -> None:
     from reconciliator.models import MatchRecord, WorkCluster
 
     enricher = MARCXMLEnricher()
-    work = WorkCluster(cluster_id="w2", canonical_title="Swedish Book", canonical_work_uri="http://example.org/w2")
-    tr = MatchRecord(record_id="rec3", title="Swedish Book", format="marcxml", title_stem="swedish book", host_citation_key="HOST-001")
+    work = WorkCluster(
+        cluster_id="w2", canonical_title="Swedish Book", canonical_work_uri="http://example.org/w2"
+    )
+    tr = MatchRecord(
+        record_id="rec3",
+        title="Swedish Book",
+        format="marcxml",
+        title_stem="swedish book",
+        host_citation_key="HOST-001",
+    )
 
     # 1. Swedish record (via 041 $a)
     xml_swe = """
@@ -285,7 +300,13 @@ def test_series_uri_generation() -> None:
     from reconciliator.models import MatchRecord
 
     enricher = MARCXMLEnricher()
-    tr = MatchRecord(record_id="rec5", title="Series Item", format="marcxml", title_stem="series item", series_key="otavan-kirjasto-12")
+    tr = MatchRecord(
+        record_id="rec5",
+        title="Series Item",
+        format="marcxml",
+        title_stem="series item",
+        series_key="otavan-kirjasto-12",
+    )
 
     xml_str = """
     <record xmlns="http://www.loc.gov/MARC21/slim">
@@ -305,5 +326,3 @@ def test_series_uri_generation() -> None:
     f830 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='830']")
     assert f830 is not None
     assert _get_subfields(f830, "0") == ["urn:reconciliator:series:otavan-kirjasto-12"]
-
-

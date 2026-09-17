@@ -100,12 +100,12 @@ storage:
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
-  template_path: "{templates / 'default_serialization.j2'}"
+  template_path: "{templates / "default_serialization.j2"}"
   device: "cpu"
   batch_size: 16
 
 ingest_vocab:
-  input_path: "{FIXTURES / 'sample_finto.ttl'}"
+  input_path: "{FIXTURES / "sample_finto.ttl"}"
   vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
   legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 
@@ -113,7 +113,7 @@ ingest_oai:
   melinda:
     enabled: true
     source_type: "file"
-    input_path: "{FIXTURES / 'sample_melinda.xml'}"
+    input_path: "{FIXTURES / "sample_melinda.xml"}"
     workers: 1
     batch_size: 10
 
@@ -167,8 +167,7 @@ def _fields(path: Path) -> dict[str, dict[str, Any]]:
                 d.get("ind1"),
                 d.get("ind2"),
                 tuple(
-                    (s.get("code"), (s.text or "").strip())
-                    for s in d.findall(f"{MARC}subfield")
+                    (s.get("code"), (s.text or "").strip()) for s in d.findall(f"{MARC}subfield")
                 ),
             )
             for d in rec.findall(f"{MARC}datafield")
@@ -191,9 +190,7 @@ def test_export_preserves_every_input_field(tmp_path: Path) -> None:
     assert s["leader"] == d["leader"]
     assert s["controls"] == d["controls"], "controlfields must survive untouched"
 
-    out_subfield_values = {
-        (code, text) for _, _, _, subs in d["data"] for code, text in subs
-    }
+    out_subfield_values = {(code, text) for _, _, _, subs in d["data"] for code, text in subs}
     out_tags = [t for t, _, _, _ in d["data"]]
 
     # The invariant: every subfield value that arrived must still be somewhere in
@@ -224,12 +221,12 @@ def test_export_preserves_every_input_field(tmp_path: Path) -> None:
     assert ("999", " ", " ", (("a", "paikallinen arvo"), ("b", "toinen"))) in d["data"]
     assert ("880", "1", "0", (("6", "245-01/Cyrl"), ("a", "Синухе"))) in d["data"]
     assert ("041", "0", " ", (("a", "fin"), ("a", "swe"))) in d["data"]
-    assert ("a", "Erikoismerkit: & < > åäö — \"lainaus\".") in out_subfield_values
+    assert ("a", 'Erikoismerkit: & < > åäö — "lainaus".') in out_subfield_values
 
     # And enrichment actually happened.
     assert ("0", "http://www.yso.fi/onto/yso/p2591") in out_subfield_values
     assert ("0", "http://urn.fi/URN:NBN:fi:au:slm:s123") in out_subfield_values
-    assert ("0", "https://urn.fi/URN:NBN:fi:au:pn:000123456") in out_subfield_values
+    assert ("0", "kanto:000123456") in out_subfield_values
     assert "655" in out_tags, "kaunokki heading should fold from 650 to 655"
 
 

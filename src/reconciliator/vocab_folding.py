@@ -259,9 +259,7 @@ class VocabFolder:
                 concept.vocabulary, source_field, concept.target_field
             )
             tgt_v = self._enforce_valid_field_vocab(target_field, concept.vocabulary)
-            target_vocab = format_target_vocab(
-                tgt_v, source_vocab, lang=lang, config=self.config
-            )
+            target_vocab = format_target_vocab(tgt_v, source_vocab, lang=lang, config=self.config)
             return (
                 target_field,
                 target_vocab,
@@ -278,17 +276,13 @@ class VocabFolder:
         if mapping:
             concept = self.vocab_store.find_concept_by_uri(mapping.target_uri)
             pref_label = (
-                self._select_pref_label(concept, lang, clean_heading)
-                if concept
-                else clean_heading
+                self._select_pref_label(concept, lang, clean_heading) if concept else clean_heading
             )
             target_field = self._resolve_target_field(
                 mapping.target_vocab, source_field, mapping.target_field
             )
             tgt_v = self._enforce_valid_field_vocab(target_field, mapping.target_vocab)
-            target_vocab = format_target_vocab(
-                tgt_v, source_vocab, lang=lang, config=self.config
-            )
+            target_vocab = format_target_vocab(tgt_v, source_vocab, lang=lang, config=self.config)
             return (
                 target_field,
                 target_vocab,
@@ -304,7 +298,9 @@ class VocabFolder:
             if source_field in self.config.default_field_vocabularies:
                 candidate_vocabs = [self.config.default_field_vocabularies[source_field]]
             else:
-                candidate_vocabs = list(dict.fromkeys(self.config.default_field_vocabularies.values()))
+                candidate_vocabs = list(
+                    dict.fromkeys(self.config.default_field_vocabularies.values())
+                )
 
         mapped_target = self.config.legacy_to_modern.get(norm_vocab)
         if mapped_target and mapped_target in candidate_vocabs:
@@ -312,7 +308,9 @@ class VocabFolder:
             candidate_vocabs.insert(0, mapped_target)
 
         for v in candidate_vocabs:
-            concept = self.vocab_store.find_concept_by_label(clean_heading, vocabulary=v, lang=effective_lang)
+            concept = self.vocab_store.find_concept_by_label(
+                clean_heading, vocabulary=v, lang=effective_lang
+            )
             if concept:
                 pref_label = self._select_pref_label(concept, lang, clean_heading)
                 target_field = self._resolve_target_field(

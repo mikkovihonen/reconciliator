@@ -8,6 +8,7 @@ from typing import Any, Optional
 from rdflib import RDF, RDFS, Graph, IdentifiedNode, URIRef
 
 from reconciliator.config import EnrichmentTogglesConfig
+from reconciliator.curie import extract_wikidata_qid, format_wikidata_uri
 from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
 from reconciliator.matcher import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (
@@ -17,7 +18,6 @@ from reconciliator.models import (
     ManifestationCluster,
     WorkCluster,
 )
-from reconciliator.vocabularies import format_wikidata_uri
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +39,14 @@ def enrich_bibframe_graph(
 ) -> Graph:
     """Enrich an RDF graph in-place with resolved authority, vocabulary, and WEMI graph URIs.
 
-    Maintains all unmapped triples and namespaces without degradation.
+    Adds ``owl:sameAs`` linkages, MARC relator predicate upgrades, FAST/YSO vocabulary
+    mappings, and canonical WEMI graph clusters depending on which pipeline stages ran.
     """
     if not enrich:
         return g
 
-    toggles = enrichment_config or EnrichmentTogglesConfig()
     p = profile or get_profile()
+    toggles = enrichment_config or EnrichmentTogglesConfig()
     instance_node, expression_node, work_node = nodes
 
     owl_same_as = URIRef(p.expand_curie(p.same_as_predicate))
@@ -137,18 +138,24 @@ def enrich_bibframe_graph(
         expression_uri = wemi_res.expression_uri
         manifestation_uri = wemi_res.manifestation_uri
         if wemi_res.matched_work:
-            wikidata_qid = wemi_res.matched_work.wikidata_qid
+            if wemi_res.matched_work.source == "wikidata":
+                wikidata_qid = wemi_res.matched_work.source_id
+            elif getattr(wemi_res.matched_work, "wikidata_qid", None):
+                wikidata_qid = wemi_res.matched_work.wikidata_qid
+            elif wemi_res.matched_work.curie:
+                wikidata_qid = extract_wikidata_qid(wemi_res.matched_work.curie)
 
     if cor_link:
-        work_uri = cor_link.final_work_uri or work_uri
-        expression_uri = cor_link.final_expression_uri or expression_uri
+        work_uri = cor_link.final_work_curie or work_uri
+        expression_uri = cor_link.final_expression_curie or expression_uri
 
     if work_cluster:
-        work_uri = work_cluster.canonical_work_uri or work_uri
-        wikidata_qid = work_cluster.wikidata_qid or wikidata_qid
+        work_uri = work_cluster.canonical_work_curie or work_uri
+        if not wikidata_qid and work_cluster.canonical_work_curie:
+            wikidata_qid = extract_wikidata_qid(work_cluster.canonical_work_curie)
 
     if expression_cluster:
-        expression_uri = expression_cluster.canonical_expression_uri or expression_uri
+        expression_uri = expression_cluster.canonical_expression_curie or expression_uri
 
     if manifestation_cluster:
         pass

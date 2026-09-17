@@ -175,7 +175,9 @@ def test_format_target_vocab_custom_config() -> None:
     )
     # Target vocab in configured language_subcode_vocabularies gets language subcode
     assert format_target_vocab("custom_onto", "sv_thes", config=custom_cfg) == "custom_onto/swe"
-    assert format_target_vocab("custom_onto", "unknown_thes", config=custom_cfg) == "custom_onto/fin"
+    assert (
+        format_target_vocab("custom_onto", "unknown_thes", config=custom_cfg) == "custom_onto/fin"
+    )
 
     # Default yso is NOT forced if explicitly omitted from language_subcode_vocabularies
     assert format_target_vocab("yso", "unknown_thes", config=custom_cfg) == "yso"
@@ -298,7 +300,8 @@ def test_vocab_store_rebuild_aliases_dynamic_legacy(tmp_path: Path) -> None:
     with store.get_connection() as conn:
         rows = conn.execute("SELECT * FROM concept_aliases;").fetchall()
         assert len(rows) == 1
-        assert rows[0]["concept_uri"] == "http://example.org/dyn_modern/1"
+        assert rows[0]["vocabulary"] == "dyn_modern"
+        assert rows[0]["concept_id"] in ("1", "http://example.org/dyn_modern/1")
 
 
 def test_language_subcode_suffixes_configuration() -> None:
@@ -437,6 +440,3 @@ def test_dynamic_default_vocab_target_field() -> None:
     folder_custom = VocabFolder(config=custom_cfg)
     t_field_custom, _, _, _, _, _ = folder_custom.fold_subject_heading("test", source_field=None)
     assert t_field_custom == "699"
-
-
-

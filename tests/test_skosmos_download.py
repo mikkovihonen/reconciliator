@@ -319,8 +319,7 @@ download_skosmos:
     assert downloaded_file.exists()
     assert downloaded_file.read_bytes() == sample_turtle
 
-    # 2. Verify concepts were ingested into vocab.db
-    assert vocab_db.exists()
+    # 2. Verify concepts were ingested into vocab database
     store = VocabStore(vocab_db)
     concept = store.find_concept_by_label("filosofia", vocabulary="yso")
     assert concept is not None

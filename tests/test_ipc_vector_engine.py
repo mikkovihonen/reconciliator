@@ -355,7 +355,3 @@ def test_ipc_incompatible_backend_rejected(tmp_path: Path) -> None:
         )
 
     server.shutdown_gracefully(save=False)
-
-
-
-

@@ -69,7 +69,9 @@ class DaemonLifecycleManager:
         auto_start: bool = True,
     ) -> None:
         self.socket_path = Path(socket_path)
-        self.lock_path = Path(lock_path) if lock_path else get_default_lock_path(self.socket_path.parent)
+        self.lock_path = (
+            Path(lock_path) if lock_path else get_default_lock_path(self.socket_path.parent)
+        )
         if config_path:
             self.config_path = Path(config_path)
         elif Path("config.yaml").exists():
@@ -268,7 +270,7 @@ class IPCVectorIndexClient:
                             raise FileNotFoundError(msg)
                         raise RuntimeError(f"Daemon error: {msg}")
                     return resp_op, resp_payload
-                except (EOFError, ConnectionResetError, BrokenPipeError):
+                except EOFError, ConnectionResetError, BrokenPipeError:
                     self._close()
                     if attempt == 1:
                         raise

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from sqlalchemy import (
     Boolean,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Engine,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -22,12 +24,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
-    event,
     func,
     select,
 )
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.pool import NullPool, StaticPool
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.pool import QueuePool
 
 from reconciliator.config import StorageConfig
 
@@ -61,10 +62,9 @@ agents_table = Table(
     "agents",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("agent_uri", String, nullable=False, unique=True),
     Column("source", String, nullable=False),
+    Column("source_id", String, nullable=False),
     Column("record_origin", String, nullable=False, default="unknown", server_default="unknown"),
-    Column("wikidata_qid", String, nullable=True),
     Column("name", String, nullable=False),
     Column("name_normalized", String, nullable=False),
     Column("surname", String, nullable=True),
@@ -77,8 +77,8 @@ agents_table = Table(
     Column("metadata_json", Text, nullable=True),
     Column("is_personal", Boolean, nullable=False, default=True, server_default="1"),
     Column("is_fictional", Boolean, nullable=False, default=False, server_default="0"),
-    Index("idx_agents_uri", "agent_uri"),
-    Index("idx_agents_qid", "wikidata_qid"),
+    UniqueConstraint("source", "source_id", name="uq_agents_source_source_id"),
+    Index("idx_agents_source_id", "source", "source_id"),
     Index("idx_agents_name_norm", "name_normalized"),
     Index("idx_agents_surname", "surname"),
 )
@@ -87,24 +87,25 @@ works_table = Table(
     "works",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("work_uri", String, nullable=False, unique=True),
     Column("source", String, nullable=False),
     Column("source_id", String, nullable=False),
     Column("record_origin", String, nullable=False, default="unknown", server_default="unknown"),
-    Column("wikidata_qid", String, nullable=True),
     Column("title", String, nullable=False),
     Column("title_normalized", String, nullable=False),
     Column("original_language", String, nullable=True),
-    Column("primary_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
+    Column(
+        "primary_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    ),
     Column("ykl_class", String, nullable=True),
     Column("work_type", String, nullable=False, default="text", server_default="text"),
     Column("subjects_json", Text, nullable=False, default="[]", server_default="[]"),
     Column("serialized_text", Text, nullable=True),
-    Column("canonical_work_id", Integer, ForeignKey("works.id", ondelete="SET NULL"), nullable=True),
+    Column(
+        "canonical_work_id", Integer, ForeignKey("works.id", ondelete="SET NULL"), nullable=True
+    ),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
-    Index("idx_works_uri", "work_uri"),
+    UniqueConstraint("source", "source_id", name="uq_works_source_source_id"),
     Index("idx_works_canonical", "canonical_work_id"),
-    Index("idx_works_qid", "wikidata_qid"),
     Index("idx_works_source_id", "source", "source_id"),
     Index("idx_works_title_norm", "title_normalized"),
     Index("idx_works_primary_agent", "primary_agent_id"),
@@ -116,11 +117,9 @@ expressions_table = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("work_id", Integer, ForeignKey("works.id", ondelete="CASCADE"), nullable=False),
-    Column("expression_uri", String, nullable=False, unique=True),
     Column("source", String, nullable=False),
     Column("source_id", String, nullable=False),
     Column("record_origin", String, nullable=False, default="unknown", server_default="unknown"),
-    Column("wikidata_qid", String, nullable=True),
     Column("language", String, nullable=False),
     Column("content_type", String, nullable=False, default="text", server_default="text"),
     Column("title", String, nullable=True),
@@ -129,8 +128,9 @@ expressions_table = Table(
     Column("medium_of_performance", String, nullable=True),
     Column("serialized_text", Text, nullable=True),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
+    UniqueConstraint("source", "source_id", name="uq_expressions_source_source_id"),
     Index("idx_expressions_work_id", "work_id"),
-    Index("idx_expressions_uri", "expression_uri"),
+    Index("idx_expressions_source_id", "source", "source_id"),
     Index("idx_expressions_lookup", "work_id", "language", "content_type"),
 )
 
@@ -139,10 +139,11 @@ manifestations_table = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("work_id", Integer, ForeignKey("works.id", ondelete="SET NULL"), nullable=True),
-    Column("container_id", Integer, ForeignKey("manifestations.id", ondelete="CASCADE"), nullable=True),
+    Column(
+        "container_id", Integer, ForeignKey("manifestations.id", ondelete="CASCADE"), nullable=True
+    ),
     Column("is_component", Boolean, nullable=False, default=False, server_default="0"),
     Column("component_type", String, nullable=True),
-    Column("manifestation_uri", String, nullable=True),
     Column("source", String, nullable=False),
     Column("source_id", String, nullable=False),
     Column("record_origin", String, nullable=False, default="unknown", server_default="unknown"),
@@ -176,8 +177,15 @@ manifestations_table = Table(
 manifestation_expressions_table = Table(
     "manifestation_expressions",
     metadata,
-    Column("manifestation_id", Integer, ForeignKey("manifestations.id", ondelete="CASCADE"), primary_key=True),
-    Column("expression_id", Integer, ForeignKey("expressions.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "manifestation_id",
+        Integer,
+        ForeignKey("manifestations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "expression_id", Integer, ForeignKey("expressions.id", ondelete="CASCADE"), primary_key=True
+    ),
     Column("track_number", Integer, nullable=True),
     Column("disc_number", Integer, default=1, server_default="1"),
     Column("duration", String, nullable=True),
@@ -189,8 +197,12 @@ items_table = Table(
     "items",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("manifestation_id", Integer, ForeignKey("manifestations.id", ondelete="CASCADE"), nullable=False),
-    Column("item_uri", String, unique=True, nullable=True),
+    Column(
+        "manifestation_id",
+        Integer,
+        ForeignKey("manifestations.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
     Column("source", String, nullable=False),
     Column("source_id", String, nullable=False),
     Column("record_origin", String, nullable=False, default="unknown", server_default="unknown"),
@@ -200,7 +212,9 @@ items_table = Table(
     Column("custodial_history", String, nullable=True),
     Column("item_condition", String, nullable=True),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
+    UniqueConstraint("source", "source_id", name="uq_items_source_source_id"),
     Index("idx_items_manif_id", "manifestation_id"),
+    Index("idx_items_source_id", "source", "source_id"),
     Index("idx_items_barcode", "barcode"),
     Index("idx_items_org", "holding_organization"),
 )
@@ -211,14 +225,14 @@ identifiers_table = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("entity_type", String, nullable=False),
     Column("entity_id", Integer, nullable=False),
-    Column("scheme", String, nullable=False),
-    Column("value", String, nullable=False),
-    Column("value_normalized", String, nullable=False),
+    Column("source", String, nullable=False),
+    Column("source_id", String, nullable=False),
+    Column("source_id_normalized", String, nullable=False),
     CheckConstraint(
         "entity_type IN ('work', 'expression', 'manifestation', 'item', 'agent')",
         name="chk_identifiers_entity_type",
     ),
-    Index("idx_identifiers_lookup", "scheme", "value_normalized"),
+    Index("idx_identifiers_lookup", "source", "source_id_normalized"),
     Index("idx_identifiers_entity", "entity_type", "entity_id"),
 )
 
@@ -235,7 +249,10 @@ entity_keys_table = Table(
         name="chk_entity_keys_entity_type",
     ),
     UniqueConstraint(
-        "entity_type", "entity_id", "key_type", "key_value",
+        "entity_type",
+        "entity_id",
+        "key_type",
+        "key_value",
         name="uq_entity_keys_composite",
     ),
     Index("idx_entity_keys_entity", "entity_type", "entity_id"),
@@ -270,7 +287,9 @@ work_relationships_table = Table(
     Column("relationship_type", String, nullable=False),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
     UniqueConstraint(
-        "source_work_id", "target_work_id", "relationship_type",
+        "source_work_id",
+        "target_work_id",
+        "relationship_type",
         name="uq_work_relationships_edge",
     ),
     Index("idx_work_rel_source", "source_work_id", "relationship_type"),
@@ -299,7 +318,12 @@ manifestation_vectors_table = Table(
     "manifestation_vectors",
     metadata,
     Column("vector_id", Integer, primary_key=True),
-    Column("manifestation_id", Integer, ForeignKey("manifestations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "manifestation_id",
+        Integer,
+        ForeignKey("manifestations.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
     Index("idx_manifestation_vectors_manif_id", "manifestation_id"),
 )
 
@@ -320,7 +344,144 @@ harvest_state_table = Table(
 )
 
 # ===================================================================
-# 2. Corpus Staging and Clustering Tables (§4.2)
+# 2. Controlled Vocabularies & Subject Link Tables
+# ===================================================================
+
+concepts_table = Table(
+    "concepts",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("vocabulary", String(64), nullable=False),
+    Column("concept_id", String(128), nullable=False),
+    Column("is_deprecated", Boolean, nullable=False, default=False, server_default="0"),
+    Column("target_field", String(32), nullable=True),
+    UniqueConstraint("vocabulary", "concept_id", name="uq_concepts_vocab_id"),
+    Index("idx_concepts_vocab", "vocabulary"),
+    Index("idx_concepts_lookup", "vocabulary", "concept_id"),
+)
+
+concept_labels_table = Table(
+    "concept_labels",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "concept_row_id", Integer, ForeignKey("concepts.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("lang", String(16), nullable=False),
+    Column("label_type", String(32), nullable=False),
+    Column("label", String(512), nullable=False),
+    Index("idx_concept_labels_concept_id", "concept_row_id"),
+    Index("idx_concept_labels_text", "lang", "label_type", "label"),
+)
+
+concept_mappings_table = Table(
+    "concept_mappings",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("legacy_vocab", String(64), nullable=False),
+    Column("legacy_id", String(128), nullable=False),
+    Column("target_vocab", String(64), nullable=False),
+    Column("target_id", String(128), nullable=False),
+    Column("mapping_type", String(32), nullable=False),
+    Column("target_field", String(32), nullable=False),
+    Index("idx_mappings_legacy_lookup", "legacy_vocab", "legacy_id"),
+    Index("idx_mappings_target_lookup", "target_vocab", "target_id"),
+    Index("idx_mappings_vocab", "legacy_vocab"),
+)
+
+concept_mapping_labels_table = Table(
+    "concept_mapping_labels",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "mapping_id", Integer, ForeignKey("concept_mappings.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("lang", String(16), nullable=False),
+    Column("label", String(512), nullable=False),
+    Index("idx_concept_mapping_labels_mapping_id", "mapping_id"),
+)
+
+relator_terms_table = Table(
+    "relator_terms",
+    metadata,
+    Column("folded_term", String(128), primary_key=True),
+    Column("raw_term", String(256), nullable=False),
+    Column("lang", String(16), nullable=False),
+    Column("code", String(32), nullable=True),
+    Column("uri", String(512), nullable=True),
+    Index("idx_relators_lang", "lang"),
+)
+
+concept_aliases_table = Table(
+    "concept_aliases",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("folded_label", String(512), nullable=False),
+    Column("raw_label", String(512), nullable=False),
+    Column("lang", String(16), nullable=False),
+    Column("concept_id", String(512), nullable=True),
+    Column("vocabulary", String(64), nullable=False),
+    Column("target_field", String(32), nullable=False),
+    Column("is_preferred", Integer, nullable=False),
+    Column("source", String(64), nullable=False),
+    Index("idx_concept_aliases_lookup", "folded_label", "target_field"),
+    Index("idx_concept_aliases_concept", "vocabulary", "concept_id"),
+)
+
+entity_subjects_table = Table(
+    "entity_subjects",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "entity_type", String(32), nullable=False
+    ),  # 'work', 'expression', 'manifestation', 'agent'
+    Column("entity_id", Integer, nullable=False),
+    Column("source", String(64), nullable=False, default="unknown", server_default="unknown"),
+    Column("source_record_id", String(128), nullable=True),
+    Column("relation_type", String(32), nullable=False, default="topic", server_default="topic"),
+    Column("vocabulary", String(64), nullable=True),
+    Column("concept_id", String(128), nullable=True),
+    Column("raw_label", String(512), nullable=True),
+    Column("is_resolved", Boolean, nullable=False, default=False, server_default="0"),
+    Column("is_primary", Boolean, nullable=False, default=False, server_default="0"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    CheckConstraint(
+        "entity_type IN ('work', 'expression', 'manifestation', 'agent')",
+        name="chk_entity_subjects_entity_type",
+    ),
+    Index("idx_entity_subjects_entity", "entity_type", "entity_id"),
+    Index("idx_entity_subjects_concept", "vocabulary", "concept_id"),
+    Index("idx_entity_subjects_unresolved", "vocabulary", "is_resolved"),
+    Index("idx_entity_subjects_source", "source", "source_record_id"),
+)
+
+# ===================================================================
+# 3. Telemetry and Progress Tracking Tables (§4.3)
+# ===================================================================
+
+task_progress_table = Table(
+    "task_progress",
+    metadata,
+    Column("task_id", String(128), primary_key=True),
+    Column("task_type", String(64), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("current_stage", String(64), nullable=False),
+    Column("items_processed", Integer, default=0, server_default="0"),
+    Column("items_total", Integer, nullable=True),
+    Column("bytes_processed", Integer, default=0, server_default="0"),
+    Column("bytes_total", Integer, nullable=True),
+    Column("rate_per_sec", Float, default=0.0, server_default="0.0"),
+    Column("percentage", Float, default=0.0, server_default="0.0"),
+    Column("start_time", String(64), nullable=False),
+    Column("last_heartbeat", String(64), nullable=False),
+    Column("error_message", Text, nullable=True),
+    Column("metadata_json", Text, nullable=True),
+    Index("idx_progress_type", "task_type"),
+    Index("idx_progress_status", "status"),
+)
+
+# ===================================================================
+# 4. Corpus Staging and Clustering Tables (§4.4)
 # ===================================================================
 
 corpus_manifestation_clusters_table = Table(
@@ -341,8 +502,8 @@ corpus_work_clusters_table = Table(
     metadata,
     Column("cluster_id", String, primary_key=True),
     Column("work_type", String, nullable=False, default="text", server_default="text"),
-    Column("canonical_work_uri", String, nullable=True),
-    Column("wikidata_qid", String, nullable=True),
+    Column("canonical_work_source", String, nullable=True),
+    Column("canonical_work_source_id", String, nullable=True),
     Column("canonical_title", String, nullable=False),
     Column("canonical_author", String, nullable=True),
 )
@@ -351,8 +512,11 @@ corpus_expression_clusters_table = Table(
     "corpus_expression_clusters",
     metadata,
     Column("cluster_id", String, primary_key=True),
-    Column("work_cluster_id", String, ForeignKey("corpus_work_clusters.cluster_id"), nullable=False),
-    Column("canonical_expression_uri", String, nullable=True),
+    Column(
+        "work_cluster_id", String, ForeignKey("corpus_work_clusters.cluster_id"), nullable=False
+    ),
+    Column("canonical_expression_source", String, nullable=True),
+    Column("canonical_expression_source_id", String, nullable=True),
     Column("content_type", String, nullable=False, default="text", server_default="text"),
     Column("language", String, nullable=False),
     Column("version_designation", String, nullable=True),
@@ -365,11 +529,25 @@ corpus_linkages_table = Table(
     "corpus_linkages",
     metadata,
     Column("record_id", String, primary_key=True),
-    Column("manifestation_cluster_id", String, ForeignKey("corpus_manifestation_clusters.cluster_id"), nullable=True),
-    Column("work_cluster_id", String, ForeignKey("corpus_work_clusters.cluster_id"), nullable=False),
-    Column("expression_cluster_id", String, ForeignKey("corpus_expression_clusters.cluster_id"), nullable=False),
-    Column("final_work_uri", String, nullable=False, default="", server_default=""),
-    Column("final_expression_uri", String, nullable=False, default="", server_default=""),
+    Column(
+        "manifestation_cluster_id",
+        String,
+        ForeignKey("corpus_manifestation_clusters.cluster_id"),
+        nullable=True,
+    ),
+    Column(
+        "work_cluster_id", String, ForeignKey("corpus_work_clusters.cluster_id"), nullable=False
+    ),
+    Column(
+        "expression_cluster_id",
+        String,
+        ForeignKey("corpus_expression_clusters.cluster_id"),
+        nullable=False,
+    ),
+    Column("final_work_source", String, nullable=False, default="", server_default=""),
+    Column("final_work_source_id", String, nullable=False, default="", server_default=""),
+    Column("final_expression_source", String, nullable=False, default="", server_default=""),
+    Column("final_expression_source_id", String, nullable=False, default="", server_default=""),
     Column("sibling_manifestation_ids_json", Text, nullable=True),
     Index("idx_linkage_manifestation", "manifestation_cluster_id"),
     Index("idx_linkage_work", "work_cluster_id"),
@@ -387,91 +565,25 @@ sammelband_bindings_table = Table(
 )
 
 # ===================================================================
-# 3. FTS5 Virtual Tables & Triggers DDL Statements
+# 3. PostgreSQL Full-Text & Trigram Index Statements
 # ===================================================================
 
-FTS5_DDL_STATEMENTS = [
-    """
-    CREATE VIRTUAL TABLE IF NOT EXISTS works_fts USING fts5(
-        serialized_text,
-        content='works',
-        content_rowid='id',
-        tokenize='unicode61 remove_diacritics 2'
-    );
-    """,
-    """
-    CREATE VIRTUAL TABLE IF NOT EXISTS expressions_fts USING fts5(
-        serialized_text,
-        content='expressions',
-        content_rowid='id',
-        tokenize='unicode61 remove_diacritics 2'
-    );
-    """,
-    """
-    CREATE VIRTUAL TABLE IF NOT EXISTS manifestations_fts USING fts5(
-        serialized_text,
-        content='manifestations',
-        content_rowid='id',
-        tokenize='unicode61 remove_diacritics 2'
-    );
-    """,
-    # Works Triggers
-    """
-    CREATE TRIGGER IF NOT EXISTS works_ai AFTER INSERT ON works BEGIN
-        INSERT INTO works_fts(rowid, serialized_text) VALUES (new.id, new.serialized_text);
-    END;
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS works_ad AFTER DELETE ON works BEGIN
-        INSERT INTO works_fts(works_fts, rowid, serialized_text) VALUES('delete', old.id, old.serialized_text);
-    END;
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS works_au AFTER UPDATE ON works BEGIN
-        INSERT INTO works_fts(works_fts, rowid, serialized_text) VALUES('delete', old.id, old.serialized_text);
-        INSERT INTO works_fts(rowid, serialized_text) VALUES (new.id, new.serialized_text);
-    END;
-    """,
-    # Expressions Triggers
-    """
-    CREATE TRIGGER IF NOT EXISTS expressions_ai AFTER INSERT ON expressions BEGIN
-        INSERT INTO expressions_fts(rowid, serialized_text) VALUES (new.id, new.serialized_text);
-    END;
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS expressions_ad AFTER DELETE ON expressions BEGIN
-        INSERT INTO expressions_fts(expressions_fts, rowid, serialized_text) VALUES('delete', old.id, old.serialized_text);
-    END;
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS expressions_au AFTER UPDATE ON expressions BEGIN
-        INSERT INTO expressions_fts(expressions_fts, rowid, serialized_text) VALUES('delete', old.id, old.serialized_text);
-        INSERT INTO expressions_fts(rowid, serialized_text) VALUES (new.id, new.serialized_text);
-    END;
-    """,
-    # Manifestations Triggers
-    """
-    CREATE TRIGGER IF NOT EXISTS manifestations_ai AFTER INSERT ON manifestations BEGIN
-        INSERT INTO manifestations_fts(rowid, serialized_text) VALUES (new.id, new.serialized_text);
-    END;
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS manifestations_ad AFTER DELETE ON manifestations BEGIN
-        INSERT INTO manifestations_fts(manifestations_fts, rowid, serialized_text) VALUES('delete', old.id, old.serialized_text);
-    END;
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS manifestations_au AFTER UPDATE ON manifestations BEGIN
-        INSERT INTO manifestations_fts(manifestations_fts, rowid, serialized_text) VALUES('delete', old.id, old.serialized_text);
-        INSERT INTO manifestations_fts(rowid, serialized_text) VALUES (new.id, new.serialized_text);
-    END;
-    """,
+PG_SEARCH_DDL_STATEMENTS = [
+    "CREATE EXTENSION IF NOT EXISTS pg_trgm;",
+    "CREATE EXTENSION IF NOT EXISTS unaccent;",
+    "CREATE INDEX IF NOT EXISTS idx_works_title_trgm ON works USING gin (title_normalized gin_trgm_ops);",
+    "CREATE INDEX IF NOT EXISTS idx_agents_name_trgm ON agents USING gin (name_normalized gin_trgm_ops);",
+    "CREATE INDEX IF NOT EXISTS idx_manifestations_title_trgm ON manifestations USING gin (title_normalized gin_trgm_ops);",
+    "CREATE INDEX IF NOT EXISTS idx_works_fts ON works USING gin (to_tsvector('simple', coalesce(serialized_text, '')));",
+    "CREATE INDEX IF NOT EXISTS idx_expressions_fts ON expressions USING gin (to_tsvector('simple', coalesce(serialized_text, '')));",
+    "CREATE INDEX IF NOT EXISTS idx_manifestations_fts ON manifestations USING gin (to_tsvector('simple', coalesce(serialized_text, '')));",
 ]
 
 
 # ===================================================================
 # 4. Result & Connection Adapters
 # ===================================================================
+
 
 class RowAdapter:
     """Mapping & index-accessible row adapter for SQLAlchemy Row."""
@@ -481,22 +593,33 @@ class RowAdapter:
     def __init__(self, row: Any) -> None:
         self._row = row
 
+    @staticmethod
+    def _coerce_val(val: Any) -> Any:
+        import datetime
+
+        if isinstance(val, (datetime.date, datetime.datetime)):
+            return val.isoformat()
+        return val
+
     def __getitem__(self, key: Any) -> Any:
         if isinstance(key, (int, slice)):
-            return self._row[key]
-        return self._row._mapping[key]
+            val = self._row[key]
+        else:
+            val = self._row._mapping[key]
+        return self._coerce_val(val)
 
     def get(self, key: Any, default: Any = None) -> Any:
-        return self._row._mapping.get(key, default)
+        val = self._row._mapping.get(key, default)
+        return self._coerce_val(val)
 
     def keys(self) -> Any:
         return self._row._mapping.keys()
 
     def values(self) -> Any:
-        return self._row._mapping.values()
+        return [self._coerce_val(v) for v in self._row._mapping.values()]
 
     def items(self) -> Any:
-        return self._row._mapping.items()
+        return [(k, self._coerce_val(v)) for k, v in self._row._mapping.items()]
 
     def __iter__(self) -> Any:
         return iter(self._row._mapping)
@@ -547,9 +670,67 @@ class ConnectionAdapter:
     def __init__(self, conn: Any, auto_close: bool = False) -> None:
         self._conn = conn
         self._auto_close = auto_close
+        self._is_postgres = True
+
+    def _adapt_sql(self, statement: str) -> str:
+        if not self._is_postgres:
+            return statement
+        stmt = statement.replace("?", "%s")
+        if "INSERT OR IGNORE INTO" in stmt:
+            stmt = stmt.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+            if "ON CONFLICT" not in stmt:
+                stmt = stmt.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING;"
+        elif "INSERT OR REPLACE INTO" in stmt:
+            m = re.search(
+                r"INSERT\s+OR\s+REPLACE\s+INTO\s+([a-zA-Z0-9_]+)\s*\(([^\)]+)\)",
+                stmt,
+                re.IGNORECASE,
+            )
+            if m:
+                tbl = m.group(1).lower()
+                cols_str = m.group(2)
+                cols_in_insert = [c.strip() for c in cols_str.split(",")]
+                stmt = re.sub(
+                    r"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", stmt, flags=re.IGNORECASE
+                )
+                if "ON CONFLICT" not in stmt:
+                    table_obj = metadata.tables.get(tbl)
+                    if table_obj is not None and table_obj.primary_key.columns:
+                        pk_cols = [c.name for c in table_obj.primary_key.columns]
+                    else:
+                        pk_cols = ["id"]
+
+                    conflict_target = ", ".join(pk_cols)
+                    update_cols = [c for c in cols_in_insert if c not in pk_cols]
+                    if update_cols:
+                        updates = ", ".join(f"{col} = EXCLUDED.{col}" for col in update_cols)
+                        stmt = (
+                            stmt.rstrip().rstrip(";")
+                            + f" ON CONFLICT ({conflict_target}) DO UPDATE SET {updates};"
+                        )
+                    else:
+                        stmt = (
+                            stmt.rstrip().rstrip(";")
+                            + f" ON CONFLICT ({conflict_target}) DO NOTHING;"
+                        )
+        if "GROUP_CONCAT" in stmt.upper():
+            stmt = re.sub(
+                r"GROUP_CONCAT\s*\(\s*([^,\)]+)\s*,\s*([^)]+)\s*\)",
+                r"STRING_AGG(\1, \2)",
+                stmt,
+                flags=re.IGNORECASE,
+            )
+            stmt = re.sub(
+                r"GROUP_CONCAT\s*\(\s*([^,\)]+)\s*\)",
+                r"STRING_AGG(\1, ',')",
+                stmt,
+                flags=re.IGNORECASE,
+            )
+        return stmt
 
     def execute(self, statement: Any, parameters: Any = None) -> ResultAdapter:
         if isinstance(statement, str):
+            statement = self._adapt_sql(statement)
             if parameters is None:
                 res = self._conn.exec_driver_sql(statement)
             else:
@@ -563,6 +744,7 @@ class ConnectionAdapter:
 
     def executemany(self, statement: Any, parameters: Any) -> ResultAdapter:
         if isinstance(statement, str):
+            statement = self._adapt_sql(statement)
             res = self._conn.exec_driver_sql(statement, list(parameters))
         else:
             res = self._conn.execute(statement, parameters)
@@ -599,37 +781,70 @@ class ConnectionAdapter:
 # 5. Engine Lifecycle & Pragmas
 # ===================================================================
 
-def get_engine(db_path: Path | str, in_memory: bool = False) -> Engine:
-    """Create a configured SQLAlchemy 2.0 Engine with SQLite WAL pragmas."""
-    is_mem = in_memory or str(db_path) == ":memory:"
-    if is_mem:
-        engine = create_engine(
-            "sqlite:///:memory:",
-            poolclass=StaticPool,
-            connect_args={"check_same_thread": False},
-        )
+
+DEFAULT_PG_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/reconciliator"
+
+
+def get_engine(
+    db_target: Path | str | None = None,
+    in_memory: bool = False,
+    pool_size: int = 10,
+    max_overflow: int = 20,
+    pool_timeout: float = 30.0,
+    pool_recycle: int = 1800,
+    schema: Optional[str] = None,
+) -> Engine:
+    """Create a configured SQLAlchemy 2.0 Engine for PostgreSQL."""
+    import hashlib
+    import os
+
+    if db_target is None:
+        target_str = os.environ.get("RECONCILIATOR_DATABASE_URL", DEFAULT_PG_URL)
     else:
-        path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        engine = create_engine(
-            f"sqlite:///{path}",
-            poolclass=NullPool,
-            connect_args={"timeout": 30.0},
-        )
+        target_str = str(db_target)
+        if target_str.startswith("postgresql+psycopg:/") and not target_str.startswith(
+            "postgresql+psycopg://"
+        ):
+            target_str = target_str.replace("postgresql+psycopg:/", "postgresql+psycopg://", 1)
+        elif target_str.startswith("postgresql:/") and not target_str.startswith("postgresql://"):
+            target_str = target_str.replace("postgresql:/", "postgresql://", 1)
+        elif not (target_str.startswith("postgresql://") or target_str.startswith("postgresql+")):
+            if schema is None:
+                p = Path(target_str)
+                schema_path = str(p.parent.resolve()) if p.suffix == ".db" else str(p.resolve())
+                schema = f"test_{hashlib.md5(schema_path.encode()).hexdigest()[:10]}"
+            target_str = os.environ.get("RECONCILIATOR_DATABASE_URL", DEFAULT_PG_URL)
 
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode = WAL;")
-        cursor.execute("PRAGMA busy_timeout = 30000;")
-        cursor.execute("PRAGMA synchronous = NORMAL;")
-        cursor.execute("PRAGMA foreign_keys = ON;")
-        cursor.close()
+    if target_str.startswith("postgresql://"):
+        target_str = target_str.replace("postgresql://", "postgresql+psycopg://", 1)
 
+    connect_args: dict[str, Any] = {}
+    if schema:
+        try:
+            import psycopg
+
+            raw_url = target_str.split("?")[0].replace("postgresql+psycopg://", "postgresql://", 1)
+            with psycopg.connect(raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
+        except Exception:
+            pass
+        connect_args["options"] = f"-csearch_path={schema},public"
+
+    engine = create_engine(
+        target_str,
+        poolclass=QueuePool,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+        pool_pre_ping=True,
+        connect_args=connect_args,
+    )
     return engine
 
 
-def get_db_connection(db_path: Path | str) -> ConnectionAdapter:
+def get_db_connection(db_path: Path | str | None = None) -> ConnectionAdapter:
     """Create a configured connection adapter backed by SQLAlchemy Engine."""
     engine = get_engine(db_path)
     conn = engine.connect()
@@ -645,34 +860,78 @@ def _resolve_bind(target: Any) -> tuple[Any, Any]:
     if hasattr(target, "exec_driver_sql"):
         return target, lambda sql: target.exec_driver_sql(sql)
     if hasattr(target, "execute"):
-        engine = create_engine("sqlite://", creator=lambda: target)
+        engine = get_engine()
         return engine, lambda sql: target.execute(sql)
     raise TypeError(f"Unsupported target type for database initialization: {type(target)}")
 
 
+def create_schema_tables(conn: Any, tables: Sequence[Table]) -> None:
+    """Create the given tables in the connection's current_schema if they do not exist."""
+    if isinstance(conn, Engine):
+        with conn.begin() as c:
+            create_schema_tables(c, tables)
+        return
+    raw_conn = getattr(conn, "_conn", conn)
+    existing = set(
+        raw_conn.exec_driver_sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
+        ).scalars()
+    )
+    for table in tables:
+        if table.name not in existing:
+            table.create(raw_conn)
+
+
 def init_authority_db(target: Any) -> None:
-    """Initialize relational tables, indexes, and FTS5 virtual tables in authority.db."""
+    """Initialize relational tables, indexes, and PostgreSQL full-text/trigram indexes."""
+    if isinstance(target, Engine):
+        with target.begin() as conn:
+            create_schema_tables(conn, metadata.sorted_tables)
+            for stmt in PG_SEARCH_DDL_STATEMENTS:
+                try:
+                    with conn.begin_nested():
+                        conn.exec_driver_sql(stmt)
+                except Exception as e:
+                    logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
+        return
+
     bind, exec_sql = _resolve_bind(target)
-    metadata.create_all(bind)
-    for stmt in FTS5_DDL_STATEMENTS:
-        exec_sql(stmt)
+    if hasattr(bind, "begin"):
+        with bind.begin():
+            create_schema_tables(bind, metadata.sorted_tables)
+    else:
+        create_schema_tables(bind, metadata.sorted_tables)
+
+    for stmt in PG_SEARCH_DDL_STATEMENTS:
+        try:
+            exec_sql(stmt)
+        except Exception as e:
+            logger.debug("Execution of DDL statement failed: %s: %s", stmt, e)
+
     if hasattr(bind, "commit"):
         bind.commit()
 
 
 def init_corpus_db(target: Any) -> None:
     """Initialize corpus clustering and linkage tables."""
+    tables = [
+        corpus_manifestation_clusters_table,
+        corpus_work_clusters_table,
+        corpus_expression_clusters_table,
+        corpus_linkages_table,
+        sammelband_bindings_table,
+    ]
+    if isinstance(target, Engine):
+        with target.begin() as conn:
+            create_schema_tables(conn, tables)
+        return
+
     bind, _ = _resolve_bind(target)
-    metadata.create_all(
-        bind,
-        tables=[
-            corpus_manifestation_clusters_table,
-            corpus_work_clusters_table,
-            corpus_expression_clusters_table,
-            corpus_linkages_table,
-            sammelband_bindings_table,
-        ],
-    )
+    if hasattr(bind, "begin"):
+        with bind.begin():
+            create_schema_tables(bind, tables)
+    else:
+        create_schema_tables(bind, tables)
     if hasattr(bind, "commit"):
         bind.commit()
 
@@ -682,14 +941,14 @@ def set_metadata(target: Any, key: str, value: str) -> None:
     bind, _ = _resolve_bind(target)
     if isinstance(bind, Engine):
         with bind.begin() as conn:
-            stmt = sqlite_insert(db_metadata_table).values(key=key, value=value)
+            stmt = pg_insert(db_metadata_table).values(key=key, value=value)
             stmt = stmt.on_conflict_do_update(
                 index_elements=["key"],
                 set_={"value": stmt.excluded.value},
             )
             conn.execute(stmt)
     else:
-        stmt = sqlite_insert(db_metadata_table).values(key=key, value=value)
+        stmt = pg_insert(db_metadata_table).values(key=key, value=value)
         stmt = stmt.on_conflict_do_update(
             index_elements=["key"],
             set_={"value": stmt.excluded.value},
@@ -713,31 +972,17 @@ def get_metadata(target: Any, key: str) -> Optional[str]:
         return str(row[0]) if row and row[0] is not None else None
 
 
-def reset_database_file(db_path: Path | str) -> None:
-    """Safely unlink a SQLite database file and its WAL / SHM companions."""
-    path = Path(db_path)
-    wal_path = Path(f"{db_path}-wal")
-    shm_path = Path(f"{db_path}-shm")
-
-    for p in (path, wal_path, shm_path):
-        if p.exists():
-            try:
-                p.unlink()
-            except OSError:
-                pass
-
-
 def reset_all_storage(storage_config: StorageConfig) -> None:
-    """Delete every database and vector index, then reinitialize clean schemas."""
+    """Delete vector indices and reset all database tables in PostgreSQL."""
     from reconciliator.indexer.ipc.client import DaemonLifecycleManager
     from reconciliator.indexer.ipc.protocol import get_default_socket_path
-    from reconciliator.progress import init_progress_db
-    from reconciliator.vocab_store import init_vocab_db
 
     # Stop vector daemon first
     try:
-        base_dir = storage_config.authority_db.parent if storage_config.authority_db else Path.cwd()
-        sock_p = storage_config.vector_engine.daemon.socket_path or get_default_socket_path(base_dir)
+        base_dir = storage_config.data_dir if storage_config.data_dir else Path.cwd()
+        sock_p = storage_config.vector_engine.daemon.socket_path or get_default_socket_path(
+            base_dir
+        )
         lifecycle = DaemonLifecycleManager(sock_p)
         if lifecycle.is_running():
             lifecycle.shutdown(save=False)
@@ -756,15 +1001,25 @@ def reset_all_storage(storage_config: StorageConfig) -> None:
             except OSError:
                 pass
 
-    for db_path, initializer in (
-        (storage_config.authority_db, init_authority_db),
-        (storage_config.vocab_db, init_vocab_db),
-        (storage_config.progress_db, init_progress_db),
-    ):
-        if db_path:
-            reset_database_file(db_path)
-            engine = get_engine(db_path)
-            try:
-                initializer(engine)
-            finally:
-                engine.dispose()
+    db_url = getattr(storage_config, "database_url", None)
+    engine = get_engine(db_url)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("""
+                DO $$ DECLARE
+                    r RECORD;
+                BEGIN
+                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = current_schema()) LOOP
+                        EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
+                    END LOOP;
+                END $$;
+            """)
+        init_authority_db(engine)
+        init_corpus_db(engine)
+        from reconciliator.progress import init_progress_db
+        from reconciliator.vocab_store import init_vocab_db
+
+        init_vocab_db(engine)
+        init_progress_db(engine)
+    finally:
+        engine.dispose()

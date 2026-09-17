@@ -115,3 +115,5 @@ dumps/*
 .pi-container/agent/models-store.json
 .pi-container/exports/
 .pi-container/agent/sessions/
+
+.pg_socket/

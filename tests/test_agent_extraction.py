@@ -368,11 +368,20 @@ def test_record_normalizer_enriches_agent_subject_counts_from_folded_headings() 
 
     # Mock VocabFolder that folds 'historia' -> 'http://www.yso.fi/onto/yso/p2591' and 'elämäkerrat' -> 'http://urn.fi/URN:NBN:fi:au:slm:s123'
     class MockFolder:
-        def fold_subject_heading(self, heading, source_vocab=None, source_field="650", source_uri=None, lang=None):
+        def fold_subject_heading(
+            self, heading, source_vocab=None, source_field="650", source_uri=None, lang=None
+        ):
             if "historia" in heading.lower():
                 return ("650", "yso", "http://www.yso.fi/onto/yso/p2591", "historia", "exact", None)
             if "elämäkerrat" in heading.lower():
-                return ("655", "slm", "http://urn.fi/URN:NBN:fi:au:slm:s123", "elämäkerrat", "exact", None)
+                return (
+                    "655",
+                    "slm",
+                    "http://urn.fi/URN:NBN:fi:au:slm:s123",
+                    "elämäkerrat",
+                    "exact",
+                    None,
+                )
             return (source_field, source_vocab or "yso", source_uri or "", heading, "none", None)
 
     norm = RecordNormalizer(vocab_folder=MockFolder())
@@ -382,4 +391,3 @@ def test_record_normalizer_enriches_agent_subject_counts_from_folded_headings() 
     agent_subjects = rec.agents[0].subject_counts
     assert agent_subjects.get("yso:p2591") == 1
     assert agent_subjects.get("slm:s123") == 1
-

@@ -56,9 +56,14 @@ def store(tmp_path: Path) -> WEMIRepository:
 
 def _work(source_id: str, title: str) -> WorkEntity:
     return WorkEntity(
-        work_uri=f"urn:work:{SRC}:{source_id}", source=SRC, source_id=source_id,
-        record_origin=SRC, title=title, title_normalized=title.lower(),
-        work_type="music", serialized_text=f"Nimeke: {title}",
+        work_uri=f"urn:work:{SRC}:{source_id}",
+        source=SRC,
+        source_id=source_id,
+        record_origin=SRC,
+        title=title,
+        title_normalized=title.lower(),
+        work_type="music",
+        serialized_text=f"Nimeke: {title}",
     )
 
 
@@ -68,9 +73,14 @@ def _album_with_a_track(store: WEMIRepository, *, track_has_manifestation: bool 
     track = _work("c:deadbeef", "Yksi kappale")
     manifestations = [
         ManifestationEntity(
-            manifestation_uri=f"urn:manif:{SRC}:ALB", source=SRC, source_id="ALB",
-            record_origin=SRC, title="Kokoelma", title_normalized="kokoelma",
-            work_uri=container.work_uri, serialized_text="Nimeke: Kokoelma",
+            manifestation_uri=f"urn:manif:{SRC}:ALB",
+            source=SRC,
+            source_id="ALB",
+            record_origin=SRC,
+            title="Kokoelma",
+            title_normalized="kokoelma",
+            work_uri=container.work_uri,
+            serialized_text="Nimeke: Kokoelma",
         )
     ]
     if track_has_manifestation:
@@ -78,9 +88,13 @@ def _album_with_a_track(store: WEMIRepository, *, track_has_manifestation: bool 
         # and is a publication a record can match.
         manifestations.append(
             ManifestationEntity(
-                manifestation_uri=f"urn:manif:{SRC}:SINGLE", source=SRC,
-                source_id="SINGLE", record_origin=SRC, title="Yksi kappale",
-                title_normalized="yksi kappale", work_uri=track.work_uri,
+                manifestation_uri=f"urn:manif:{SRC}:SINGLE",
+                source=SRC,
+                source_id="SINGLE",
+                record_origin=SRC,
+                title="Yksi kappale",
+                title_normalized="yksi kappale",
+                work_uri=track.work_uri,
                 serialized_text="Nimeke: Yksi kappale",
             )
         )
@@ -88,17 +102,24 @@ def _album_with_a_track(store: WEMIRepository, *, track_has_manifestation: bool 
         works=[container, track],
         expressions=[
             ExpressionEntity(
-                work_id=0, work_uri=track.work_uri,
-                expression_uri=f"urn:exp:{SRC}:c:deadbeef:fin", source=SRC,
-                source_id="c:deadbeef", record_origin=SRC, language="fin",
-                content_type="audio_music", title="Yksi kappale",
+                work_id=0,
+                work_uri=track.work_uri,
+                expression_uri=f"urn:exp:{SRC}:c:deadbeef:fin",
+                source=SRC,
+                source_id="c:deadbeef",
+                record_origin=SRC,
+                language="fin",
+                content_type="audio_music",
+                title="Yksi kappale",
             )
         ],
         manifestations=manifestations,
         relationships=[
             WorkRelationship(
-                source_work_id=0, target_work_id=0,
-                source_work_uri=container.work_uri, target_work_uri=track.work_uri,
+                source_work_id=0,
+                target_work_id=0,
+                source_work_uri=container.work_uri,
+                target_work_uri=track.work_uri,
                 relationship_type="has_constituent",
             )
         ],
@@ -115,9 +136,7 @@ def _build(store: WEMIRepository, tmp_path: Path, **kwargs) -> int:
     return counts["works"]
 
 
-def test_constituent_works_stay_out_of_the_work_index(
-    store: WEMIRepository, tmp_path: Path
-):
+def test_constituent_works_stay_out_of_the_work_index(store: WEMIRepository, tmp_path: Path):
     """82% of the index on an album corpus, and they crowd albums out of the
     top-k window for short queries."""
     _album_with_a_track(store)
@@ -131,9 +150,7 @@ def test_the_flag_puts_them_back(store: WEMIRepository, tmp_path: Path):
     assert _build(store, tmp_path, include_constituent_works=True) == 2
 
 
-def test_a_constituent_that_was_also_published_is_indexed(
-    store: WEMIRepository, tmp_path: Path
-):
+def test_a_constituent_that_was_also_published_is_indexed(store: WEMIRepository, tmp_path: Path):
     """The test for "only a constituent" is having no manifestation of its own: a
     work nobody published separately is not something a record can match at the
     manifestation level, while a track released as a single is a publication."""
@@ -162,6 +179,4 @@ def test_an_excluded_constituent_is_still_reachable(store: WEMIRepository):
     exactly, from its container."""
     _album_with_a_track(store)
     container = store.get_work_by_source(SRC, "ALB")
-    assert [w.title for w in store.get_constituent_works(container.id)] == [
-        "Yksi kappale"
-    ]
+    assert [w.title for w in store.get_constituent_works(container.id)] == ["Yksi kappale"]

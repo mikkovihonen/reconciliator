@@ -140,11 +140,7 @@ def build_embodied_constituents(
             # work row for its own work plus an edge to it.
             continue
 
-        work_uri = (
-            source_id
-            if constituent.identity_ref
-            else f"urn:work:{source}:{source_id}"
-        )
+        work_uri = f"{source}:{source_id}"
         if source_id in seen:
             # Two constituents that differ in title but agree once stemmed. They
             # are one work row, and a second junction row for the same
@@ -152,9 +148,7 @@ def build_embodied_constituents(
             continue
         seen.add(source_id)
 
-        expression_uri = f"urn:exp:{source}:{source_id}:{language}"
-        if constituent.identity_ref:
-            expression_uri = f"{source_id}#expr-{language}"
+        expression_uri = f"{source}:{source_id}#expr-{language}"
         rows.works.append(
             WorkEntity(
                 work_uri=work_uri,
@@ -335,9 +329,7 @@ def reassign_constituent_contributions(
     return moved + len(added)
 
 
-def _creator_index(
-    constituents: list[Constituent], rows: ConstituentRows
-) -> dict[str, str]:
+def _creator_index(constituents: list[Constituent], rows: ConstituentRows) -> dict[str, str]:
     """Folded creator name to constituent work URI, for creators the profile says
     do not contribute to the container.
 

@@ -29,15 +29,18 @@ def test_reset_all_storage(tmp_path: Path) -> None:
     # Perform full reset
     reset_all_storage(storage)
 
-    # Verify files exist and fresh schema is empty
-    assert storage.authority_db.exists()
-    assert storage.vocab_db.exists()
-    assert storage.progress_db.exists()
     assert not storage.work_index.exists()
 
-    with get_db_connection(storage.authority_db) as conn:
+    with get_db_connection(storage.database_url) as conn:
         row = conn.execute("SELECT * FROM db_metadata WHERE key = 'test';").fetchone()
         assert row is None
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
+            ).fetchall()
+        }
+        assert {"works", "manifestations", "db_metadata"} <= tables
 
 
 def test_reset_all_storage_daemon_shutdown(tmp_path: Path, monkeypatch) -> None:
@@ -69,8 +72,6 @@ def test_reset_all_storage_daemon_shutdown(tmp_path: Path, monkeypatch) -> None:
     assert shutdown_calls == [False]
 
 
-
-
 def test_cli_reset_clears_every_store(tmp_path: Path) -> None:
     """Reset is all or nothing: every database and index is rebuilt clean."""
     cfg_file = tmp_path / "config.yaml"
@@ -96,11 +97,17 @@ storage:
     assert result.exit_code == 0, result.output
     assert "Successfully reset all storage" in result.output
 
-    # Every database is back with a clean schema...
-    for name in ("cli_auth.db", "cli_vocab.db", "cli_prog.db"):
-        path = tmp_path / name
-        assert path.exists(), f"{name} was not recreated"
-        assert path.read_bytes()[:16] == b"SQLite format 3\x00", f"{name} is not a fresh database"
+    from reconciliator.config import load_config
+
+    conf = load_config(cfg_file)
+    with get_db_connection(conf.storage.database_url) as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
+            ).fetchall()
+        }
+    assert {"works", "entity_keys", "corpus_work_clusters", "sources"} <= tables
 
     # ...and the stale vector index is gone rather than left pointing at deleted rows.
     assert not (tmp_path / "cli_auth.faiss").exists()
@@ -119,11 +126,16 @@ def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
     from reconciliator.repository import WEMIRepository
 
     storage = StorageConfig(data_dir=tmp_path)
-    repo = WEMIRepository(storage.authority_db)
-    assert repo.corpus_db_path == storage.authority_db
+    repo = WEMIRepository(storage.database_url)
+    assert repo.corpus_db_path == repo.db_path
 
     # Corpus and WEMI tables are reachable over the same connection, so a cluster
     # can be joined to the works it resolves to.
     with repo.get_connection() as conn:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema();"
+            ).fetchall()
+        }
     assert {"works", "entity_keys", "corpus_work_clusters", "sources"} <= tables

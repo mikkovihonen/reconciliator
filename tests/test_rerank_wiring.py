@@ -49,8 +49,12 @@ def _add_work(
     repo.insert_wemi_batch(
         works=[
             WorkEntity(
-                work_uri=work_uri, source="melinda", source_id=source_id,
-                record_origin="melinda", title=title, title_normalized=title.lower(),
+                work_uri=work_uri,
+                source="melinda",
+                source_id=source_id,
+                record_origin="melinda",
+                title=title,
+                title_normalized=title.lower(),
                 work_type="text",
             )
         ],
@@ -58,23 +62,35 @@ def _add_work(
         manifestations=[
             ManifestationEntity(
                 manifestation_uri=f"urn:manif:melinda:{source_id}:{i}",
-                source="melinda", source_id=f"{source_id}:{i}", record_origin="melinda",
-                title=title, title_normalized=title.lower(),
-                publication_year=year, volume_designation=volume,
+                source="melinda",
+                source_id=f"{source_id}:{i}",
+                record_origin="melinda",
+                title=title,
+                title_normalized=title.lower(),
+                publication_year=year,
+                volume_designation=volume,
             )
             for i, (year, volume) in enumerate(editions)
         ],
         agents=[
             AgentEntity(
-                agent_uri=f"urn:agent:melinda:{source_id}", source="melinda",
-                name=author, name_normalized=author.lower(),
-                surname=author.split(",")[0], record_origin="melinda",
+                agent_uri=f"urn:agent:melinda:{source_id}",
+                source="melinda",
+                name=author,
+                name_normalized=author.lower(),
+                surname=author.split(",")[0],
+                record_origin="melinda",
             )
         ],
         contributions=[
             ContributionEntity(
-                entity_type="work", entity_id=0, agent_id=0, entity_uri=work_uri,
-                agent_uri=f"urn:agent:melinda:{source_id}", role="aut", is_primary=True,
+                entity_type="work",
+                entity_id=0,
+                agent_id=0,
+                entity_uri=work_uri,
+                agent_uri=f"urn:agent:melinda:{source_id}",
+                role="aut",
+                is_primary=True,
             )
         ],
         record_origin="melinda",
@@ -92,8 +108,12 @@ def _matcher(repo: WEMIRepository, **rerank_overrides) -> WorkMatcher:
 
 def _record(**overrides) -> MatchRecord:
     base = dict(
-        record_id="T1", format="marcxml", title="Sinuhe egyptilainen",
-        title_stem="sinuhe egyptilainen", author_key="waltari", work_type="text",
+        record_id="T1",
+        format="marcxml",
+        title="Sinuhe egyptilainen",
+        title_stem="sinuhe egyptilainen",
+        author_key="waltari",
+        work_type="text",
     )
     base.update(overrides)
     return MatchRecord(**base)
@@ -196,8 +216,12 @@ def test_a_surname_mismatch_rejects(store: WEMIRepository):
     matcher = _matcher(store)
     # The record's author identity is its normalised author_key, so candidate
     # surnames are normalised the same way before comparison.
-    assert _rank(matcher, store, _record(author_key="waltari"),
-                 require_threshold=False)[0][1].surname_match is True
+    assert (
+        _rank(matcher, store, _record(author_key="waltari"), require_threshold=False)[0][
+            1
+        ].surname_match
+        is True
+    )
     ranked = matcher._rank_candidates(
         _record(author_key="linna"),
         [(store.find_works_by_author_and_title("waltari", "sinuhe egyptilainen")[0], 0.9)],
@@ -258,18 +282,16 @@ def test_a_work_matches_if_any_of_its_editions_is_compatible(store: WEMIReposito
     checks read as "do not penalise" - so they silently never fired.
     """
     _add_work(
-        store, "M1", "Sinuhe egyptilainen",
+        store,
+        "M1",
+        "Sinuhe egyptilainen",
         editions=((1945, "osa 1"), (1946, "osa 2"), (1947, "osa 3")),
     )
     matcher = _matcher(store)
     for volume in ("osa 1", "osa 2", "osa 3"):
-        ranked = _rank(
-            matcher, store, _record(volume_designation=volume), require_threshold=False
-        )
+        ranked = _rank(matcher, store, _record(volume_designation=volume), require_threshold=False)
         assert ranked[0][1].accepted is True, volume
-    ranked = _rank(
-        matcher, store, _record(volume_designation="osa 9"), require_threshold=False
-    )
+    ranked = _rank(matcher, store, _record(volume_designation="osa 9"), require_threshold=False)
     assert ranked[0][1].accepted is False, "no edition is volume 9"
 
 

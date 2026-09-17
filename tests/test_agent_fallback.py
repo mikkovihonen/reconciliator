@@ -204,9 +204,7 @@ def setup_authority_system(tmp_path: Path):
             waltari,
             isbn="9789510000001",
         ),
-        _authority_record(
-            "melinda-002", "Sisätautioppi ja diagnostiikka", 1960, virtanen_doctor
-        ),
+        _authority_record("melinda-002", "Sisätautioppi ja diagnostiikka", 1960, virtanen_doctor),
         _authority_record("melinda-003", "Moderni grafiikka", 1975, virtanen_artist),
     ):
         store.insert_wemi_batch(record_origin="authority", **parts)

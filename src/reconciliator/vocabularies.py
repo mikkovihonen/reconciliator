@@ -34,9 +34,7 @@ def get_concept_id_rules() -> dict[str, dict[str, Any]]:
     }
 
 
-def detect_vocabulary(
-    uri: str, patterns: Optional[dict[str, list[str]]] = None
-) -> Optional[str]:
+def detect_vocabulary(uri: str, patterns: Optional[dict[str, list[str]]] = None) -> Optional[str]:
     """Detect canonical vocabulary code from URI namespace or identifier string."""
     if not uri:
         return None
@@ -292,9 +290,7 @@ def normalize_subject_vocabulary(
         supp_set = {v.strip().lower() for v in supported_vocabularies if v}
     else:
         supp_set = {
-            v.strip().lower()
-            for v in defaults.get("supported_subject_vocabularies", [])
-            if v
+            v.strip().lower() for v in defaults.get("supported_subject_vocabularies", []) if v
         }
 
     leg_map: dict[str, str]
@@ -365,9 +361,7 @@ class VocabularyManager:
         self.allowed_vocabularies = {v.upper() for v in raw_allowed}
 
         raw_agent = (
-            agent_priority
-            if agent_priority is not None
-            else defaults.get("agent_priority", [])
+            agent_priority if agent_priority is not None else defaults.get("agent_priority", [])
         )
         self.agent_priority = [v.upper() for v in raw_agent]
 
@@ -401,9 +395,7 @@ class VocabularyManager:
             if concept_id_rules is not None
             else defaults.get("concept_id_rules", {})
         )
-        self.concept_id_rules = {
-            k.upper(): dict(v) for k, v in raw_concept_rules.items()
-        }
+        self.concept_id_rules = {k.upper(): dict(v) for k, v in raw_concept_rules.items()}
 
         if supported_subject_vocabularies is not None:
             self.supported_subject_vocabularies = {
@@ -411,9 +403,7 @@ class VocabularyManager:
             }
         else:
             self.supported_subject_vocabularies = {
-                v.strip().lower()
-                for v in defaults.get("supported_subject_vocabularies", [])
-                if v
+                v.strip().lower() for v in defaults.get("supported_subject_vocabularies", []) if v
             }
 
         if legacy_to_modern is not None:
@@ -439,7 +429,6 @@ class VocabularyManager:
     def format_wikidata_uri(self, qid: Optional[str]) -> Optional[str]:
         """Format a Wikidata entity URI using instance-configured rules."""
         return format_wikidata_uri(qid, rules=self.concept_id_rules)
-
 
     def is_allowed(self, uri: str) -> bool:
         """Check if URI belongs to an allowed vocabulary."""
@@ -579,4 +568,3 @@ class VocabularyManager:
                 selected_uris.append(u)
 
         return selected_uris, suppressed_uris
-

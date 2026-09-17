@@ -168,9 +168,13 @@ def _extract_agents(
                         # BFFI record's "kääntäjä" reached the matcher as its own
                         # role while the MARC path called the same thing "trl".
                         if isinstance(role_obj, URIRef):
-                            role = normalize_role_uri_or_label(str(role_obj), label=r_label, profile=profile)
+                            role = normalize_role_uri_or_label(
+                                str(role_obj), label=r_label, profile=profile
+                            )
                         elif isinstance(role_obj, Literal):
-                            role = normalize_role_uri_or_label(str(role_obj).strip(), profile=profile)
+                            role = normalize_role_uri_or_label(
+                                str(role_obj).strip(), profile=profile
+                            )
                         elif r_label:
                             role = normalize_role_uri_or_label(r_label, profile=profile)
 
@@ -182,7 +186,9 @@ def _extract_agents(
 
                         # Determine if personal or organization/meeting from configuration
                         agent_types = {str(t) for t in g.objects(agent_obj, RDF.type)}
-                        is_personal = not bool(profile.expanded_agent_corporate_classes.intersection(agent_types))
+                        is_personal = not bool(
+                            profile.expanded_agent_corporate_classes.intersection(agent_types)
+                        )
 
                         # Agent name: prefer label predicates and match keys from profile
                         name_preds = (
@@ -361,7 +367,9 @@ def _extract_provision_activity(
                             place = str(pl_obj).strip()
                             break
                         elif isinstance(pl_obj, IdentifiedNode):
-                            pl_labels = _get_literals(g, pl_obj, profile.expanded_agent_label_predicates)
+                            pl_labels = _get_literals(
+                                g, pl_obj, profile.expanded_agent_label_predicates
+                            )
                             if pl_labels:
                                 place = pl_labels[0]
                                 break
@@ -372,7 +380,8 @@ def _extract_provision_activity(
                 places = _get_literals(
                     g,
                     prov_obj,
-                    profile.expanded_provision_place_predicates | profile.expanded_agent_label_predicates,
+                    profile.expanded_provision_place_predicates
+                    | profile.expanded_agent_label_predicates,
                 )
                 if places:
                     place = places[0]

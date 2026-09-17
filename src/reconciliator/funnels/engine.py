@@ -217,9 +217,7 @@ def run_funnel(
 
     tier3 = getattr(handler, "tier3", None) if handler else None
     result = (
-        tier3(record, ctx)
-        if tier3
-        else ctx.vector_or_fts(record, spec.fallback_work_type, spec.id)
+        tier3(record, ctx) if tier3 else ctx.vector_or_fts(record, spec.fallback_work_type, spec.id)
     )
     if result:
         return _report(result, record, ctx)

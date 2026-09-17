@@ -349,13 +349,10 @@ telemetry:
     assert len(json_lines) == 2
     assert "reconciliation" in json_lines[0]
     assert json_lines[0]["reconciliation"]["status"] == "matched"
-    assert (
-        json_lines[0]["reconciliation"]["agents"][0]["kanto_uri"]
-        == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
-    )
+    assert json_lines[0]["reconciliation"]["agents"][0]["kanto_uri"] == "kanto:000123456"
 
     # Check TSV reports exist
     agent_detailed = reports_dir / "agent_uris.tsv"
     assert agent_detailed.exists()
     content = agent_detailed.read_text(encoding="utf-8")
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in content
+    assert "kanto:000123456" in content

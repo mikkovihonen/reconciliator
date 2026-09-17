@@ -42,6 +42,7 @@ from reconciliator.models import (
     CarrierType,
     ContributionEntity,
     EntityKey,
+    EntitySubject,
     ExpressionContentType,
     ExpressionEntity,
     IdentifierEntity,
@@ -316,14 +317,9 @@ def extract_bibframe_subjects(
     """
     field_category_map = get_subject_field_category_map()
     cat_default_field = get_category_default_field_map()
-    default_target_field = (
-        profile.default_subject_field
-        or cat_default_field["topical"]
-    )
+    default_target_field = profile.default_subject_field or cat_default_field["topical"]
     default_category = field_category_map[default_target_field]
-    subjects: dict[str, list[dict[str, Any]]] = {
-        cat: [] for cat in field_category_map.values()
-    }
+    subjects: dict[str, list[dict[str, Any]]] = {cat: [] for cat in field_category_map.values()}
     seen_uris: set[str] = set()
 
     type_to_field = profile.subject_type_fields
@@ -361,11 +357,7 @@ def extract_bibframe_subjects(
                     # has no MARC $2 to declare it with, so without this a legacy
                     # heading reached the target record with no vocabulary and
                     # nothing to fold.
-                    vocab = (
-                        detected_v.lower()
-                        if detected_v
-                        else vocabulary_hint_from_uri(uri)
-                    )
+                    vocab = detected_v.lower() if detected_v else vocabulary_hint_from_uri(uri)
 
                 for src_pred in source_preds:
                     for src_obj in g.objects(subj_obj, URIRef(src_pred)):
@@ -620,6 +612,7 @@ def decompose_bibframe_work(
     vocab_store: Optional[Any] = None,
     constituent_profile: Optional[Any] = None,
     constituent_sink: Optional[list[Any]] = None,
+    subject_sink: Optional[list[EntitySubject]] = None,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -792,8 +785,7 @@ def decompose_bibframe_work(
             agents_prov = _get_literals(
                 g,
                 prov_obj,
-                profile.expanded_provision_publisher_predicates
-                | profile.expanded_agent_predicates,
+                profile.expanded_provision_publisher_predicates | profile.expanded_agent_predicates,
             )
             if agents_prov and not publisher_str:
                 publisher_str = agents_prov[0]
@@ -858,9 +850,7 @@ def decompose_bibframe_work(
         # Translation Expression Decomposition
         assert translation_orig_node is not None
         work_id = derive_bibframe_node_id(g, translation_orig_node)
-        work_uri = (
-            None if is_blank_node(translation_orig_node) else str(translation_orig_node)
-        )
+        work_uri = None if is_blank_node(translation_orig_node) else str(translation_orig_node)
         work_title, _, _, _ = _extract_title_elements(g, translation_orig_node, profile)
         if not work_title and work_node:
             work_title, _, _, _ = _extract_title_elements(g, work_node, profile)
@@ -981,7 +971,9 @@ def decompose_bibframe_work(
             agent_ent.role_counts[role] = agent_ent.role_counts.get(role, 0) + 1
             extracted_agents_with_role.append((agent_ent, role))
             # Determine target entity partition: Work vs Expression
-            target_ent = "work" if (role in profile.work_creator_roles or is_primary) else "expression"
+            target_ent = (
+                "work" if (role in profile.work_creator_roles or is_primary) else "expression"
+            )
             field_tag: Optional[str] = None
             if marc_key:
                 parsed_mk = extract_marc_key_components(marc_key, profile=profile)
@@ -1129,6 +1121,32 @@ def decompose_bibframe_work(
         subjects_json=[subject.as_dict() for subject in folded_subjects],
     )
     work.serialized_text = engine.render_work(work, authors=authors_list)
+
+    if subject_sink is not None:
+        for s in folded_subjects:
+            field = str(s.field or "")
+            relation_type = "topic"
+            if field == "651":
+                relation_type = "geographic"
+            elif field == "655":
+                relation_type = "genre_form"
+            elif field == "648":
+                relation_type = "temporal"
+            subject_sink.append(
+                EntitySubject(
+                    entity_type="work",
+                    entity_id=0,
+                    entity_uri=work.work_uri,
+                    source=source,
+                    source_record_id=str(work_id),
+                    relation_type=relation_type,
+                    vocabulary=s.vocabulary,
+                    concept_id=s.concept_id,
+                    raw_label=s.heading,
+                    is_resolved=bool(s.vocabulary and s.concept_id),
+                    is_primary=False,
+                )
+            )
 
     translators_list = [{"name": ag.name} for ag, r in extracted_agents_with_role if r == "trl"]
     narrators_list = [
@@ -1349,9 +1367,9 @@ def derive_bibframe_node_id(g: Graph, node: Optional[IdentifiedNode]) -> str:
             if is_blank_node(obj):
                 if depth <= 0:
                     continue
-                inner = hashlib.sha1(
-                    "\n".join(pairs(obj, depth - 1)).encode("utf-8")
-                ).hexdigest()[:16]
+                inner = hashlib.sha1("\n".join(pairs(obj, depth - 1)).encode("utf-8")).hexdigest()[
+                    :16
+                ]
                 obj_text = f"_:{inner}"
             out.append(f"{predicate}\t{obj_text}")
         return out
@@ -1406,7 +1424,7 @@ def extract_bibframe_constituents(
                         source_field=field.predicate,
                         precedence=precedence,
                         identity_ref=(
-                            None if is_blank_node(part) else bibframe_work_uri(g, part, source)
+                            None if is_blank_node(part) else derive_bibframe_node_id(g, part)
                         ),
                     )
                 )
@@ -1437,8 +1455,7 @@ def _part_title(
                 literals = _get_literals(
                     g,
                     obj,
-                    profile.expanded_main_title_predicates
-                    | {str(RDFS.label), str(RDF.value)},
+                    profile.expanded_main_title_predicates | {str(RDFS.label), str(RDF.value)},
                 )
                 if literals:
                     return literals[0]
@@ -1448,9 +1465,7 @@ def _part_title(
     return title or None
 
 
-def _part_creator(
-    g: Graph, part: IdentifiedNode, profile: BIBFRAMESchemaProfile
-) -> Optional[str]:
+def _part_creator(g: Graph, part: IdentifiedNode, profile: BIBFRAMESchemaProfile) -> Optional[str]:
     """The first agent named on a part, by the dialect's own rules."""
     for agent, _role, _is_primary, _marc_key in _extract_node_agents(g, part, profile):
         if agent.name:
@@ -1459,20 +1474,15 @@ def _part_creator(
 
 
 def bibframe_work_uri(g: Graph, node: Optional[IdentifiedNode], source: str) -> str:
-    """The work URI a node will be stored under.
+    """The work URI (CURIE) a node will be stored under.
 
-    Mirrors how `decompose_bibframe_work` builds it: a node with a real URI *is*
-    its URI, and only a blank node gets the minted `urn:work:{source}:{digest}`
-    form. An edge endpoint computed any other way names a row that does not
-    exist, so it is dropped at insert - which is how the first attempt at this
-    produced `urn:work:bffi:http://example.org/w1` for a work stored as
-    `http://example.org/w1`.
+    Mirrors how `decompose_bibframe_work` builds it: every work is stored under
+    the canonical CURIE `source:node_id`.
     """
     if node is None:
         return ""
-    if not is_blank_node(node):
-        return str(node)
-    return f"urn:work:{source}:{derive_bibframe_node_id(g, node)}"
+    node_id = derive_bibframe_node_id(g, node)
+    return f"{source}:{node_id}"
 
 
 def derive_bibframe_keys(
@@ -1519,9 +1529,7 @@ def derive_bibframe_keys(
     if translator_names:
         _add(
             "translators_signature",
-            " ".join(
-                sorted(compute_author_key(n, None) for n in translator_names if n)
-            ).strip(),
+            " ".join(sorted(compute_author_key(n, None) for n in translator_names if n)).strip(),
         )
 
     return keys

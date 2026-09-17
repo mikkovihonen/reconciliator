@@ -122,8 +122,12 @@ class _DynamicDescriptions(dict[str, str]):
 
 
 DEFAULT_AGENT_VOCAB_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(describe_agent_vocabulary)
-DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(describe_source_thesaurus)
-DEFAULT_TARGET_ONTOLOGY_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(describe_target_ontology)
+DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(
+    describe_source_thesaurus
+)
+DEFAULT_TARGET_ONTOLOGY_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(
+    describe_target_ontology
+)
 DEFAULT_TAG_MIGRATION_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(describe_tag_migration)
 
 
@@ -918,9 +922,7 @@ class ReportGenerator:
         thesauri_denom = max(1, total_headings)
 
         vocab_norm_cfg = (
-            self.config.normalization.vocab
-            if self.config and self.config.normalization
-            else None
+            self.config.normalization.vocab if self.config and self.config.normalization else None
         )
         if vocab_norm_cfg and vocab_norm_cfg.legacy_to_modern:
             legacy_thesauri = list(vocab_norm_cfg.legacy_to_modern.keys())
@@ -1228,10 +1230,6 @@ class ReportGenerator:
                     sanitize_tsv_cell(r.action),
                 ]
                 f.write("\t".join(vals) + "\n")
-
-
-
-
 
     def write_wemi_summary_report(self, file_path: Path) -> None:
         """Write wemi_reconciliation_summary.tsv summarizing work & expression reconciliation."""

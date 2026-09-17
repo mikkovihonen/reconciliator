@@ -61,8 +61,10 @@ def _constituent_matches(work: Any, tracks: set[str], ctx: FunnelContext) -> lis
     tracklist as keys and not as rows.
     """
     stored = []
-    if work is not None and getattr(work, "id", None) and hasattr(
-        ctx.repo, "get_constituent_works"
+    if (
+        work is not None
+        and getattr(work, "id", None)
+        and hasattr(ctx.repo, "get_constituent_works")
     ):
         stored = ctx.repo.get_constituent_works(work.id)
     if not stored:

@@ -155,7 +155,9 @@ telemetry:
     tracker.complete_task()
 
     runner = CliRunner()
-    result = runner.invoke(app, ["status", "--config", str(cfg_file), "--watch", "--exit-when-done"])
+    result = runner.invoke(
+        app, ["status", "--config", str(cfg_file), "--watch", "--exit-when-done"]
+    )
     assert result.exit_code == 0
     assert "RECONCILIATOR" in result.output
     assert "TASK TELEMETRY MONITOR" in result.output
@@ -219,7 +221,9 @@ telemetry:
     tracker.complete_task()
 
     runner = CliRunner()
-    result = runner.invoke(app, ["status", "--config", str(cfg_file), "--watch", "--json", "--exit-when-done"])
+    result = runner.invoke(
+        app, ["status", "--config", str(cfg_file), "--watch", "--json", "--exit-when-done"]
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert len(data) == 1

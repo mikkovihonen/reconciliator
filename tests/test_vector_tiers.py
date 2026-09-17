@@ -68,8 +68,13 @@ def _ingest(store: WEMIRepository, control: str, title: str) -> None:
         _record(control, title), source="melinda", record_origin="melinda"
     )
     store.insert_wemi_batch(
-        works=[w], expressions=[e], manifestations=[m], agents=agts,
-        identifiers=idents, contributions=contribs, record_origin="melinda",
+        works=[w],
+        expressions=[e],
+        manifestations=[m],
+        agents=agts,
+        identifiers=idents,
+        contributions=contribs,
+        record_origin="melinda",
     )
 
 
@@ -93,9 +98,7 @@ def test_build_wemi_indexes_indexes_both_tiers(repo: WEMIRepository):
 
 def test_build_wemi_indexes_can_build_one_tier_only(repo: WEMIRepository):
     _ingest(repo, "A1", "Seitseman veljesta")
-    counts = repo.build_wemi_indexes(
-        embedder=_BagOfWordsEmbedder(), work_indexer=repo.work_indexer
-    )
+    counts = repo.build_wemi_indexes(embedder=_BagOfWordsEmbedder(), work_indexer=repo.work_indexer)
     assert counts == {"works": 1, "manifestations": 0}
     assert repo.manifestation_indexer.total_vectors == 0
 
@@ -107,15 +110,17 @@ def test_build_wemi_indexes_skips_rows_without_serialized_text(repo: WEMIReposit
     repo.insert_works_batch(
         [
             WorkEntity(
-                work_uri="urn:work:melinda:blank", source="melinda", source_id="blank",
-                record_origin="melinda", title="T", title_normalized="t",
+                work_uri="urn:work:melinda:blank",
+                source="melinda",
+                source_id="blank",
+                record_origin="melinda",
+                title="T",
+                title_normalized="t",
                 serialized_text=None,
             )
         ]
     )
-    counts = repo.build_wemi_indexes(
-        embedder=_BagOfWordsEmbedder(), work_indexer=repo.work_indexer
-    )
+    counts = repo.build_wemi_indexes(embedder=_BagOfWordsEmbedder(), work_indexer=repo.work_indexer)
     assert counts["works"] == 0
 
 
@@ -168,11 +173,10 @@ def test_dense_tier_fires_when_an_index_is_wired(repo: WEMIRepository):
 def test_without_an_embedder_the_dense_tier_cannot_run(repo: WEMIRepository):
     """Pins the old CLI behaviour, so a regression to it is visible."""
     _ingest(repo, "A1", "Seitseman veljesta kertomus")
-    repo.build_wemi_indexes(
-        embedder=_BagOfWordsEmbedder(), work_indexer=repo.work_indexer
-    )
+    repo.build_wemi_indexes(embedder=_BagOfWordsEmbedder(), work_indexer=repo.work_indexer)
     matcher = WorkMatcher(
-        wemi_repo=repo, embedder=None,
+        wemi_repo=repo,
+        embedder=None,
         config=ReconcileConfig(target_file=Path("x"), threshold=0.5),
     )
     assert matcher.match_target(_unmatchable_by_earlier_tiers(repo)).match_tier == "unmatched"
@@ -182,7 +186,8 @@ def test_an_unbuilt_index_is_harmless(repo: WEMIRepository):
     """Wiring indexes before build-index has run must not break matching."""
     _ingest(repo, "A1", "Seitseman veljesta")
     matcher = WorkMatcher(
-        wemi_repo=repo, embedder=_BagOfWordsEmbedder(),
+        wemi_repo=repo,
+        embedder=_BagOfWordsEmbedder(),
         config=ReconcileConfig(target_file=Path("x")),
     )
     assert repo.work_indexer.total_vectors == 0
@@ -197,9 +202,7 @@ def test_retrieval_depth_comes_from_rerank_top_k(repo: WEMIRepository):
     for configured, expected in ((5, 5), (50, 50), (200, 200)):
         matcher = WorkMatcher(
             wemi_repo=repo,
-            config=ReconcileConfig(
-                target_file=Path("x"), rerank=RerankConfig(top_k=configured)
-            ),
+            config=ReconcileConfig(target_file=Path("x"), rerank=RerankConfig(top_k=configured)),
         )
         assert matcher._retrieval_top_k() == expected
 
@@ -234,9 +237,13 @@ def test_manifestation_vector_merge_joins_groups_the_keys_left_apart(tmp_path: P
     store.insert_manifestations_batch(
         [
             ManifestationEntity(
-                manifestation_uri=f"urn:manif:{src}:{rid}", source=src, source_id=rid,
-                record_origin=src, title="Seitseman veljesta",
-                title_normalized="seitseman veljesta", serialized_text=serialization,
+                manifestation_uri=f"urn:manif:{src}:{rid}",
+                source=src,
+                source_id=rid,
+                record_origin=src,
+                title="Seitseman veljesta",
+                title_normalized="seitseman veljesta",
+                serialized_text=serialization,
             )
             for src, rid in (("cat_a", "r1"), ("cat_b", "r2"))
         ]
@@ -255,8 +262,11 @@ def test_manifestation_vector_merge_joins_groups_the_keys_left_apart(tmp_path: P
 
     def _rec(rid: str, standard: str) -> MatchRecord:
         return MatchRecord(
-            record_id=rid, format="marcxml", title="Seitseman veljesta",
-            title_stem="seitseman veljesta", keys={"standard": [standard]},
+            record_id=rid,
+            format="marcxml",
+            title="Seitseman veljesta",
+            title_stem="seitseman veljesta",
+            keys={"standard": [standard]},
             serialized_manifestation=serialization,
         )
 
@@ -300,8 +310,12 @@ def test_manifestation_vector_merge_keeps_distinct_editions_apart(tmp_path: Path
     store.insert_manifestations_batch(
         [
             ManifestationEntity(
-                manifestation_uri=f"urn:manif:s:{rid}", source="s", source_id=rid,
-                record_origin="s", title=title, title_normalized=title.lower(),
+                manifestation_uri=f"urn:manif:s:{rid}",
+                source="s",
+                source_id=rid,
+                record_origin="s",
+                title=title,
+                title_normalized=title.lower(),
                 serialized_text=text,
             )
             for rid, title, text in (
@@ -310,9 +324,7 @@ def test_manifestation_vector_merge_keeps_distinct_editions_apart(tmp_path: Path
             )
         ]
     )
-    store.build_wemi_indexes(
-        embedder=embedder, manifestation_indexer=store.manifestation_indexer
-    )
+    store.build_wemi_indexes(embedder=embedder, manifestation_indexer=store.manifestation_indexer)
 
     class _Matcher:
         embedder = None
@@ -324,14 +336,18 @@ def test_manifestation_vector_merge_keeps_distinct_editions_apart(tmp_path: Path
     groups = {
         "a::0::": [
             MatchRecord(
-                record_id="r1", format="marcxml", title="Seitseman veljesta",
+                record_id="r1",
+                format="marcxml",
+                title="Seitseman veljesta",
                 title_stem="seitseman veljesta",
                 serialized_manifestation="Seitseman veljesta Otava 1870",
             )
         ],
         "b::0::": [
             MatchRecord(
-                record_id="r2", format="marcxml", title="Nummisuutarit",
+                record_id="r2",
+                format="marcxml",
+                title="Nummisuutarit",
                 title_stem="nummisuutarit",
                 serialized_manifestation="Nummisuutarit Weilin Goos 1902 komedia",
             )
@@ -369,7 +385,7 @@ def test_tracklist_tier_matches_two_releases_of_one_album(tmp_path: Path):
 
     assert result.funnel_used == "funnel_b_music_sound"
     assert result.match_tier == "tier3_tracklist_jaccard"
-    assert result.work_uri == "urn:work:melinda:A1"
+    assert result.work_uri == "melinda:A1"
     assert result.confidence_score == pytest.approx(1.0)
     assert sorted(c.title for c in result.constituent_matches) == sorted(tracks)
 
@@ -380,7 +396,10 @@ def test_tracklist_tier_respects_the_overlap_threshold(tmp_path: Path):
     store = WEMIRepository(db_path=tmp_path / "authority.db", dimension=DIM)
     store.register_source("melinda", is_authoritative=True)
     _ingest_album(
-        store, "A1", "Sibelius", "ODE-111",
+        store,
+        "A1",
+        "Sibelius",
+        "ODE-111",
         ["Finlandia", "Valse triste", "Karelia-sarja", "Tuonelan joutsen"],
     )
 
@@ -388,7 +407,9 @@ def test_tracklist_tier_respects_the_overlap_threshold(tmp_path: Path):
     # 3 of 6 distinct titles shared -> 0.5, under the 0.75 threshold.
     target = build_target_record_from_marc(
         _album_marc(
-            "T2", "Partial", "P-1",
+            "T2",
+            "Partial",
+            "P-1",
             ["Finlandia", "Valse triste", "Karelia-sarja", "Something Else", "Another"],
         ),
         source="corpus",
@@ -410,7 +431,7 @@ def test_tracklist_tier_picks_the_album_whose_tracks_actually_agree(tmp_path: Pa
     target = build_target_record_from_marc(
         _album_marc("T3", "Grieg reissue", "O-1", grieg), source="corpus"
     )
-    assert matcher.match_target(target).work_uri == "urn:work:melinda:A2"
+    assert matcher.match_target(target).work_uri == "melinda:A2"
 
 
 def test_tracklist_tier_does_not_match_tracks_in_no_stored_album(tmp_path: Path):
@@ -449,10 +470,17 @@ def _ingest_album(
     keys: list = []
     w, e, m, _itms, agts, _rels, idents, _assoc, _mops, contribs = decompose_marc_wemi(
         _album_marc(control, title, pubnum, tracks),
-        source="melinda", record_origin="melinda", key_sink=keys,
+        source="melinda",
+        record_origin="melinda",
+        key_sink=keys,
     )
     store.insert_wemi_batch(
-        works=[w], expressions=[e], manifestations=[m], agents=agts,
-        identifiers=idents, contributions=contribs, entity_keys=keys,
+        works=[w],
+        expressions=[e],
+        manifestations=[m],
+        agents=agts,
+        identifiers=idents,
+        contributions=contribs,
+        entity_keys=keys,
         record_origin="melinda",
     )

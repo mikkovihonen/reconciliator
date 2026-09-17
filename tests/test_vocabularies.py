@@ -81,7 +81,9 @@ def test_detect_vocabulary_custom_patterns() -> None:
         "CUSTOM_VOCAB": ["custom.org/term/"],
         "SPECIAL": ["special:id:"],
     }
-    assert detect_vocabulary("http://custom.org/term/123", patterns=custom_patterns) == "CUSTOM_VOCAB"
+    assert (
+        detect_vocabulary("http://custom.org/term/123", patterns=custom_patterns) == "CUSTOM_VOCAB"
+    )
     assert detect_vocabulary("urn:special:id:999", patterns=custom_patterns) == "SPECIAL"
     assert detect_vocabulary("http://custom.org/unknown", patterns=custom_patterns) is None
 
@@ -103,7 +105,9 @@ def test_vocabulary_manager_custom_patterns_and_priorities() -> None:
 
     assert vm.is_allowed(my_uri)
     assert vm.is_allowed(other_uri)
-    assert not vm.is_allowed("https://urn.fi/URN:NBN:fi:au:pn:000123456")  # KANTO not in custom allowed
+    assert not vm.is_allowed(
+        "https://urn.fi/URN:NBN:fi:au:pn:000123456"
+    )  # KANTO not in custom allowed
 
     selected, suppressed = vm.select_agent_uris([other_uri, my_uri])
     assert selected == [my_uri]
@@ -219,6 +223,7 @@ def test_select_subject_uris() -> None:
     assert len(selected_ortho) == 2
     assert len(suppressed_ortho) == 1
 
+
 def test_format_wikidata_uri() -> None:
     """Test format_wikidata_uri function and VocabularyManager integration."""
     from reconciliator.vocabularies import format_wikidata_uri
@@ -231,9 +236,18 @@ def test_format_wikidata_uri() -> None:
     assert format_wikidata_uri("wikidata:Q273115") == "http://www.wikidata.org/entity/Q273115"
     assert format_wikidata_uri("wikidata:q273115") == "http://www.wikidata.org/entity/Q273115"
     # Full URI preserved (and trailing slash stripped)
-    assert format_wikidata_uri("http://www.wikidata.org/entity/Q273115") == "http://www.wikidata.org/entity/Q273115"
-    assert format_wikidata_uri("http://www.wikidata.org/entity/Q273115/") == "http://www.wikidata.org/entity/Q273115"
-    assert format_wikidata_uri("https://www.wikidata.org/wiki/Q273115") == "https://www.wikidata.org/wiki/Q273115"
+    assert (
+        format_wikidata_uri("http://www.wikidata.org/entity/Q273115")
+        == "http://www.wikidata.org/entity/Q273115"
+    )
+    assert (
+        format_wikidata_uri("http://www.wikidata.org/entity/Q273115/")
+        == "http://www.wikidata.org/entity/Q273115"
+    )
+    assert (
+        format_wikidata_uri("https://www.wikidata.org/wiki/Q273115")
+        == "https://www.wikidata.org/wiki/Q273115"
+    )
 
     # None and empty
     assert format_wikidata_uri(None) is None

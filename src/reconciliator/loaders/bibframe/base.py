@@ -50,7 +50,13 @@ def normalize_role_uri_or_label(
     for prefix in p.role_uri_prefixes:
         pref_lower = prefix.lower()
         if pref_lower in c_lower:
-            token = clean[c_lower.find(pref_lower) + len(pref_lower) :].strip("/").split(":")[-1].split("/")[-1].lower()
+            token = (
+                clean[c_lower.find(pref_lower) + len(pref_lower) :]
+                .strip("/")
+                .split(":")[-1]
+                .split("/")[-1]
+                .lower()
+            )
             mts_map = get_mts_role_map()
             if token in mts_map:
                 return mts_map[token]

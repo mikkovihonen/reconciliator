@@ -247,7 +247,9 @@ class USearchVectorEngine:
                     self._next_id = int(self.metadata["next_id"])
                 elif len(self.index) > 0:
                     try:
-                        self._next_id = int(np.max(np.fromiter(self.index.keys, dtype=np.int64))) + 1
+                        self._next_id = (
+                            int(np.max(np.fromiter(self.index.keys, dtype=np.int64))) + 1
+                        )
                     except Exception:
                         self._next_id = len(self.index)
 

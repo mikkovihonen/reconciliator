@@ -73,7 +73,6 @@ class RelatorRegistry:
             if clean:
                 self._custom_terms.add(clean)
 
-
     def register(self, code: str, term: str) -> None:
         """Register a custom relator term and its mapping to a MARC code."""
         clean_term = term.strip().casefold().rstrip(".")
@@ -98,10 +97,7 @@ class RelatorRegistry:
             if self.vocab_store.is_known_relator(clean):
                 return True
 
-        return (
-            clean in DEFAULT_RELATOR_MAPPINGS
-            or fold_relator_term(clean) in _FOLDED_DEFAULTS
-        )
+        return clean in DEFAULT_RELATOR_MAPPINGS or fold_relator_term(clean) in _FOLDED_DEFAULTS
 
     def strip_relator(self, name: str) -> str:
         """Strip trailing role markers from name literals."""
@@ -188,9 +184,7 @@ def get_default_relator_registry() -> RelatorRegistry:
     return _DEFAULT_REGISTRY
 
 
-def normalize_role(
-    token: str, relator_mappings: Optional[dict[str, str]] = None
-) -> str:
+def normalize_role(token: str, relator_mappings: Optional[dict[str, str]] = None) -> str:
     """Normalize a contributor role or relator string to a canonical 3-letter MARC code."""
     if relator_mappings is not None:
         registry = RelatorRegistry(relator_mappings=relator_mappings)

@@ -37,6 +37,7 @@ class MarcBibliographicLoader(RecordLoader):
         from reconciliator.loaders.marcxml import decompose_marc_wemi
 
         keys: list[Any] = []
+        subjects: list[Any] = []
         w, e, m, items, agents, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
             item,
             source=ctx.source,
@@ -51,12 +52,21 @@ class MarcBibliographicLoader(RecordLoader):
             strip_isbd_punctuation=ctx.strip_isbd_punctuation,
             isbd_punctuation=ctx.isbd_punctuation,
             key_sink=keys,
+            subject_sink=subjects,
         )
         record = DecomposedRecord(
-            works=[w], expressions=[e], manifestations=[m], items=list(items),
-            agents=list(agents), relationships=list(rels), identifiers=list(idents),
-            associations=list(assoc), mediums=list(mops), contributions=list(contribs),
+            works=[w],
+            expressions=[e],
+            manifestations=[m],
+            items=list(items),
+            agents=list(agents),
+            relationships=list(rels),
+            identifiers=list(idents),
+            associations=list(assoc),
+            mediums=list(mops),
+            contributions=list(contribs),
             entity_keys=keys,
+            entity_subjects=subjects,
         )
         _add_constituents(record, item, ctx, w, e, m, keys=None)
         return record
@@ -83,6 +93,7 @@ class MarcAuthorityLoader(RecordLoader):
     def _decompose(self, item: Any, ctx: LoadContext) -> DecomposedRecord:
         from reconciliator.loaders.marcxml import decompose_marc_authority
 
+        subjects: list[Any] = []
         works, exprs, manifs, items, agents, rels, idents, assoc, mops, contribs = (
             decompose_marc_authority(
                 item,
@@ -92,13 +103,21 @@ class MarcAuthorityLoader(RecordLoader):
                 serialization_engine=ctx.serialization_engine,
                 strip_isbd_punctuation=ctx.strip_isbd_punctuation,
                 isbd_punctuation=ctx.isbd_punctuation,
+                subject_sink=subjects,
             )
         )
         return DecomposedRecord(
-            works=list(works), expressions=list(exprs), manifestations=list(manifs),
-            items=list(items), agents=list(agents), relationships=list(rels),
-            identifiers=list(idents), associations=list(assoc), mediums=list(mops),
+            works=list(works),
+            expressions=list(exprs),
+            manifestations=list(manifs),
+            items=list(items),
+            agents=list(agents),
+            relationships=list(rels),
+            identifiers=list(idents),
+            associations=list(assoc),
+            mediums=list(mops),
             contributions=list(contribs),
+            entity_subjects=subjects,
         )
 
 
@@ -122,25 +141,33 @@ class BibframeLoader(RecordLoader):
         )
 
         constituents: list[Any] = []
-        w, e, m, items, agents, rels, idents, assoc, mops, contribs = (
-            decompose_bibframe_work(
-                g=item,
-                profile=ctx.profile,
-                source=ctx.source,
-                serialization_engine=ctx.serialization_engine,
-                relator_mappings=ctx.relator_mappings,
-                supported_subject_vocabularies=ctx.supported_subject_vocabularies,
-                legacy_to_modern=ctx.legacy_to_modern,
-                vocab_store=ctx.vocab_store,
-                constituent_profile=ctx.constituent_profile,
-                constituent_sink=constituents,
-            )
+        subjects: list[Any] = []
+        w, e, m, items, agents, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
+            g=item,
+            profile=ctx.profile,
+            source=ctx.source,
+            serialization_engine=ctx.serialization_engine,
+            relator_mappings=ctx.relator_mappings,
+            supported_subject_vocabularies=ctx.supported_subject_vocabularies,
+            legacy_to_modern=ctx.legacy_to_modern,
+            vocab_store=ctx.vocab_store,
+            constituent_profile=ctx.constituent_profile,
+            constituent_sink=constituents,
+            subject_sink=subjects,
         )
         record = DecomposedRecord(
-            works=[w], expressions=[e], manifestations=[m], items=list(items),
-            agents=list(agents), relationships=list(rels), identifiers=list(idents),
-            associations=list(assoc), mediums=list(mops), contributions=list(contribs),
+            works=[w],
+            expressions=[e],
+            manifestations=[m],
+            items=list(items),
+            agents=list(agents),
+            relationships=list(rels),
+            identifiers=list(idents),
+            associations=list(assoc),
+            mediums=list(mops),
+            contributions=list(contribs),
             entity_keys=bibframe_entity_keys(m, w, list(agents), list(idents)),
+            entity_subjects=subjects,
         )
         _add_constituents(record, item, ctx, w, e, m, constituents)
         return record
@@ -254,6 +281,7 @@ def _add_constituents(
         build_embodied_constituents,
         reassign_constituent_contributions,
     )
+
     if extracted is None:
         # MARC reads them here: the element is in hand and nothing about the
         # extraction needs anything the decomposer resolved.
@@ -269,9 +297,7 @@ def _add_constituents(
     # A record that is itself a part: the host-item entry describes its
     # container, so this is a fact about the manifestation already in hand rather
     # than more rows.
-    apply_component_containment(
-        constituents, manifestation=manifestation, source=ctx.source
-    )
+    apply_component_containment(constituents, manifestation=manifestation, source=ctx.source)
 
     main_entry = _container_creator(item, ctx)
     rows = build_embodied_constituents(
@@ -344,9 +370,7 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         and isinstance(n.value, ast.Constant)
         and isinstance(n.value.value, str)
     }
-    work_types = (
-        literals | set(SLM_WORK_TYPES.values()) | set(CONTENT_TYPE_WORK_TYPES.values())
-    )
+    work_types = literals | set(SLM_WORK_TYPES.values()) | set(CONTENT_TYPE_WORK_TYPES.values())
 
     key_types: set[str] = set()
     if keys:
@@ -388,9 +412,21 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         key_types=key_types,
         identifier_schemes=(
             {
-                "isbn", "issn", "issn_l", "ismn", "isrc", "ean", "doi", "urn",
-                "other_ids", "fingerprint", "patent_number", "publisher_number",
-                "plate_number", "strn", "control_number",
+                "isbn",
+                "issn",
+                "issn_l",
+                "ismn",
+                "isrc",
+                "ean",
+                "doi",
+                "urn",
+                "other_ids",
+                "fingerprint",
+                "patent_number",
+                "publisher_number",
+                "plate_number",
+                "strn",
+                "control_number",
             }
             # Authority URIs carried on agent $0/$1 become identifiers whose
             # scheme is whichever vocabulary `detect_vocabulary` recognises, plus
@@ -430,7 +466,11 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         ),
         content_types=set(BIBFRAME_CONTENT_TYPES.values()) | {"text", "audio_music"},
         key_types={
-            "author", "title_stem", "work", "music_work", "standard",
+            "author",
+            "title_stem",
+            "work",
+            "music_work",
+            "standard",
             "translators_signature",
         },
         identifier_schemes={"isbn", "issn", "urn", "doi", "other"},
@@ -462,8 +502,7 @@ def _bibframe_capabilities() -> LoaderCapabilities:
                 "505/700 $t subfields, so no analytic keys are derived"
             ),
             "sammelband": (
-                "bound-with is a holdings-level relationship with no BIBFRAME "
-                "equivalent"
+                "bound-with is a holdings-level relationship with no BIBFRAME equivalent"
             ),
         },
     )
@@ -472,7 +511,5 @@ def _bibframe_capabilities() -> LoaderCapabilities:
 MarcBibliographicLoader.capabilities = _marc_capabilities(
     "marc_bibliographic", keys=True, folds=True
 )
-MarcAuthorityLoader.capabilities = _marc_capabilities(
-    "marc_authority", keys=False, folds=False
-)
+MarcAuthorityLoader.capabilities = _marc_capabilities("marc_authority", keys=False, folds=False)
 BibframeLoader.capabilities = _bibframe_capabilities()

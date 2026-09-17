@@ -82,8 +82,7 @@ def finalise(
         # A real contents note can list a 500-track box set, and a malformed one
         # can list anything at all. Truncating loudly beats writing 500 works.
         logger.warning(
-            "Record %s lists %d constituents; profile %r caps at %d. Keeping the "
-            "first %d.",
+            "Record %s lists %d constituents; profile %r caps at %d. Keeping the first %d.",
             record_id,
             len(deduped),
             profile.name,
@@ -112,9 +111,7 @@ def _numbers_by_position(profile: ConstituentProfile, constituent: Constituent) 
     return False
 
 
-def _dedup(
-    constituents: list[Constituent], profile: ConstituentProfile
-) -> list[Constituent]:
+def _dedup(constituents: list[Constituent], profile: ConstituentProfile) -> list[Constituent]:
     if profile.dedup == "none" or not constituents:
         return list(constituents)
 

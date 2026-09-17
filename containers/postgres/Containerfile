@@ -1,0 +1,11 @@
+FROM docker.io/library/postgres:16-alpine
+
+# Copy initialization script to run on container first start
+COPY init.sql /docker-entrypoint-initdb.d/init.sql
+
+# Copy tuned configuration template
+COPY postgresql.conf /etc/postgresql/postgresql.conf
+
+# Run postgres with custom configuration file
+CMD ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+

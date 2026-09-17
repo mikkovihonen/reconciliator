@@ -80,8 +80,7 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
             target_uri = _resolve(m_match.group(1))
 
             labels: dict[str, str] = {
-                lang.lower(): val
-                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', body)
+                lang.lower(): val for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', body)
             }
             m_not = re.search(r'skos:notation\s+"([^"]+)"', body)
 
@@ -113,7 +112,7 @@ def get_mts_role_map(vocab_store: Optional[Any] = None) -> dict[str, str]:
             with vocab_store.get_connection() as conn:
                 rows = conn.execute(
                     """
-                    SELECT legacy_uri, target_uri FROM concept_mappings
+                    SELECT legacy_vocab, legacy_id, target_vocab, target_id FROM concept_mappings
                     WHERE (legacy_vocab = 'loc-relators' OR target_vocab = 'loc-relators'
                            OR legacy_vocab = 'mts' OR target_vocab = 'mts')
                       AND mapping_type = 'exact_match';
@@ -122,16 +121,14 @@ def get_mts_role_map(vocab_store: Optional[Any] = None) -> dict[str, str]:
                 if rows:
                     res: dict[str, str] = {}
                     for row in rows:
-                        leg = str(row["legacy_uri"])
-                        tgt = str(row["target_uri"])
-                        if "relators/" in leg and "mts:" in tgt:
-                            code = leg.rstrip("/").split("/")[-1].lower()
-                            token = tgt.rstrip("/").split(":")[-1].split("/")[-1].lower()
-                            res[token] = code
-                        elif "relators/" in tgt and "mts:" in leg:
-                            code = tgt.rstrip("/").split("/")[-1].lower()
-                            token = leg.rstrip("/").split(":")[-1].split("/")[-1].lower()
-                            res[token] = code
+                        l_voc = str(row["legacy_vocab"])
+                        l_id = str(row["legacy_id"]).lower()
+                        t_voc = str(row["target_vocab"])
+                        t_id = str(row["target_id"]).lower()
+                        if l_voc == "loc-relators" and t_voc == "mts":
+                            res[t_id] = l_id
+                        elif t_voc == "loc-relators" and l_voc == "mts":
+                            res[l_id] = t_id
                     if res:
                         return res
         except Exception:
@@ -149,7 +146,9 @@ def get_mts_role_map(vocab_store: Optional[Any] = None) -> dict[str, str]:
             src = b["source_uri"]
             tgt = b["target_uri"]
             notation = b.get("notation")
-            code = notation or (src.rstrip("/").split("/")[-1].lower() if "relators/" in src else None)
+            code = notation or (
+                src.rstrip("/").split("/")[-1].lower() if "relators/" in src else None
+            )
             if not code:
                 continue
             token: Optional[str] = None

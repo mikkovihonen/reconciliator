@@ -158,9 +158,7 @@ doesn't verify vector index membership.
 def get_indexed_source_ids(self, source: str) -> set[str]:
     """Return set of manifestation source_ids stored and indexed for a given source."""
     with self.get_connection() as conn:
-        cursor = conn.execute(
-            "SELECT source_id FROM manifestations WHERE source = ?;", (source,)
-        )
+        cursor = conn.execute("SELECT source_id FROM manifestations WHERE source = ?;", (source,))
         return {row["source_id"] for row in cursor if row["source_id"]}
 ```
 
@@ -1193,9 +1191,9 @@ questions that were fused:
 So `match_target_record` dissolves into:
 
 ```python
-record = build_match_record(payload, fmt, profile)   # one construction
-match  = matcher.match(record)                        # one dispatch
-agents = matcher.resolve_agents(match, record.agents) # hydrate, align, fallback, select
+record = build_match_record(payload, fmt, profile)  # one construction
+match = matcher.match(record)  # one dispatch
+agents = matcher.resolve_agents(match, record.agents)  # hydrate, align, fallback, select
 ```
 
 Agent resolution keeps every step it has today — the hydration, the coupled

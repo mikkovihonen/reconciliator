@@ -185,8 +185,8 @@ def test_dual_path_consistency_matching():
     )
 
     work, expression, manifestation, _, _, _, _, _, _, _ = decompose_bibframe_work(g)
-    assert work.work_uri == "http://example.org/work/canonical"
-    assert expression.expression_uri == "http://example.org/expression/dual1"
+    assert work.work_uri == "bibframe:http://example.org/work/canonical"
+    assert expression.expression_uri == "bibframe:http://example.org/expression/dual1"
 
 
 def test_dual_path_consistency_discrepancy_warning(caplog):
@@ -218,7 +218,7 @@ def test_dual_path_consistency_discrepancy_warning(caplog):
         work, expression, manifestation, _, _, _, _, _, _, _ = decompose_bibframe_work(g)
 
     # Canonical expression-mediated work must be preferred
-    assert work.work_uri == "http://example.org/work/canonical_work"
+    assert work.work_uri == "bibframe:http://example.org/work/canonical_work"
     assert "Dual-path work discrepancy detected" in caplog.text
     assert "http://example.org/work/canonical_work" in caplog.text
     assert "http://example.org/work/stale_shortcut" in caplog.text

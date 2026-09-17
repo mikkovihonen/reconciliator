@@ -48,9 +48,7 @@ KNOWN_UNREACHABLE_FROM_MARC = {
 
 def _function_body(name: str) -> ast.FunctionDef:
     tree = ast.parse(LOADER.read_text())
-    return next(
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name
-    )
+    return next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
 
 
 def _returned_literals(name: str) -> set[str]:
@@ -133,10 +131,7 @@ def _satisfiable(when: FunnelWhen, caps: dict[str, set[str]]) -> bool:
         return False
     if any(k not in caps["keys"] for k in (*when.has_key, *when.key_matches)):
         return False
-    if any(
-        s not in caps["identifiers"]
-        for s in (*when.has_identifier, *when.identifier_matches)
-    ):
+    if any(s not in caps["identifiers"] for s in (*when.has_identifier, *when.identifier_matches)):
         return False
     return True
 
@@ -145,9 +140,7 @@ def _unreachable(caps: dict[str, set[str]]) -> set[str]:
     return {
         spec.id
         for spec in BUILTIN_SPECS
-        if spec.when
-        and not spec.default
-        and not any(_satisfiable(w, caps) for w in spec.when)
+        if spec.when and not spec.default and not any(_satisfiable(w, caps) for w in spec.when)
     }
 
 
@@ -478,7 +471,7 @@ def test_857_marks_a_resource_held_in_a_web_archive():
 
 
 def test_857_second_indicator_1_marks_a_digital_surrogate():
-    """"Aineiston versio": the record describes a physical item and the archived
+    """ "Aineiston versio": the record describes a physical item and the archived
     copy is its electronic version - a surrogate, not a born-digital resource."""
     extra = (
         '<datafield tag="857" ind1="4" ind2="1">'
@@ -490,7 +483,7 @@ def test_857_second_indicator_1_marks_a_digital_surrogate():
 def test_533_reproduction_note_marks_a_surrogate():
     extra = (
         '<datafield tag="533" ind1=" " ind2=" ">'
-        "<subfield code=\"a\">Digitoitu näköispainos</subfield></datafield>"
+        '<subfield code="a">Digitoitu näköispainos</subfield></datafield>'
     )
     assert _work_type_of(extra) == "preservation_surrogate"
 
@@ -514,7 +507,9 @@ def test_a_digitised_map_stays_a_map():
     Whether "preservation_surrogate" should be a work type at all is an open
     question - being a surrogate is a property of the manifestation.
     """
-    extra = '<datafield tag="533" ind1=" " ind2=" "><subfield code="a">Digitoitu</subfield></datafield>'
+    extra = (
+        '<datafield tag="533" ind1=" " ind2=" "><subfield code="a">Digitoitu</subfield></datafield>'
+    )
     assert _work_type_of(extra, leader="00000cem a2200000 i 4500") == "cartography"
 
 
@@ -529,7 +524,7 @@ def test_501_bound_with_becomes_a_sammelband_key():
 
     extra = (
         '<datafield tag="501" ind1=" " ind2=" ">'
-        "<subfield code=\"a\">Yhteissidos: Toinen teos</subfield>"
+        '<subfield code="a">Yhteissidos: Toinen teos</subfield>'
         '<subfield code="5">FI-Hul</subfield></datafield>'
     )
     record = build_target_record_from_marc(_marc_with(extra), source="m")
@@ -567,7 +562,7 @@ def _work_type_for_genre(term: str) -> str:
 
     extra = (
         '<datafield tag="655" ind1=" " ind2="7">'
-        f"<subfield code=\"a\">{term}</subfield>"
+        f'<subfield code="a">{term}</subfield>'
         '<subfield code="2">slm/fin</subfield></datafield>'
     )
     return build_target_record_from_marc(_marc_with(extra), source="m").work_type
@@ -604,9 +599,11 @@ def test_slm_anthology_terms_classify_as_anthology(term: str):
 
 @pytest.mark.parametrize(
     ("term", "not_broadcast"),
-    [("dokumenttielokuvat", "documentary films, not programmes"),
-     ("elämäkerrat", "biographies"),
-     ("romaanit", "novels")],
+    [
+        ("dokumenttielokuvat", "documentary films, not programmes"),
+        ("elämäkerrat", "biographies"),
+        ("romaanit", "novels"),
+    ],
 )
 def test_similar_slm_terms_are_not_swept_into_broadcast(term: str, not_broadcast: str):
     """Why the table is exact-match rather than substring.
@@ -629,7 +626,7 @@ def test_a_cartographic_dataset_is_spatial_data_not_a_map():
     def funnel_for(code: str) -> str:
         extra = (
             '<datafield tag="336" ind1=" " ind2=" ">'
-            f"<subfield code=\"b\">{code}</subfield>"
+            f'<subfield code="b">{code}</subfield>'
             '<subfield code="2">rdacontent</subfield></datafield>'
         )
         record = build_target_record_from_marc(_marc_with(extra), source="m")

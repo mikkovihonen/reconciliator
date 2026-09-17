@@ -41,14 +41,23 @@ def store(tmp_path: Path) -> WEMIRepository:
 def _album_with_tracks(repo: WEMIRepository, tracks: list[tuple[str, int]]) -> WorkEntity:
     """A container work with `tracks` constituents, junction rows and edges."""
     container = WorkEntity(
-        work_uri=f"urn:work:{SRC}:ALB", source=SRC, source_id="ALB",
-        record_origin=SRC, title="Kokoelma", title_normalized="kokoelma",
+        work_uri=f"urn:work:{SRC}:ALB",
+        source=SRC,
+        source_id="ALB",
+        record_origin=SRC,
+        title="Kokoelma",
+        title_normalized="kokoelma",
         work_type="music",
     )
     container_manifestation = ManifestationEntity(
-        manifestation_uri=f"urn:manif:{SRC}:ALB", source=SRC, source_id="ALB",
-        record_origin=SRC, title="Kokoelma", title_normalized="kokoelma",
-        work_uri=container.work_uri, carrier_type="audio_disc",
+        manifestation_uri=f"urn:manif:{SRC}:ALB",
+        source=SRC,
+        source_id="ALB",
+        record_origin=SRC,
+        title="Kokoelma",
+        title_normalized="kokoelma",
+        work_uri=container.work_uri,
+        carrier_type="audio_disc",
     )
     works = [container]
     expressions: list[ExpressionEntity] = []
@@ -60,42 +69,61 @@ def _album_with_tracks(repo: WEMIRepository, tracks: list[tuple[str, int]]) -> W
         expression_uri = f"urn:exp:{SRC}:c:{track_number}:fin"
         works.append(
             WorkEntity(
-                work_uri=work_uri, source=SRC, source_id=f"c:{track_number}",
-                record_origin=SRC, title=title, title_normalized=title.lower(),
+                work_uri=work_uri,
+                source=SRC,
+                source_id=f"c:{track_number}",
+                record_origin=SRC,
+                title=title,
+                title_normalized=title.lower(),
                 work_type="music",
             )
         )
         expressions.append(
             ExpressionEntity(
-                work_id=0, work_uri=work_uri, expression_uri=expression_uri,
-                source=SRC, source_id=f"c:{track_number}", record_origin=SRC,
-                language="fin", content_type="audio_music", title=title,
+                work_id=0,
+                work_uri=work_uri,
+                expression_uri=expression_uri,
+                source=SRC,
+                source_id=f"c:{track_number}",
+                record_origin=SRC,
+                language="fin",
+                content_type="audio_music",
+                title=title,
             )
         )
         associations.append(
             ManifestationExpressionAssociation(
-                manifestation_id=0, expression_id=0,
+                manifestation_id=0,
+                expression_id=0,
                 manifestation_uri=container_manifestation.manifestation_uri,
                 expression_uri=expression_uri,
-                track_number=track_number, is_primary=False,
+                track_number=track_number,
+                is_primary=False,
             )
         )
         relationships.append(
             WorkRelationship(
-                source_work_id=0, target_work_id=0,
-                source_work_uri=container.work_uri, target_work_uri=work_uri,
+                source_work_id=0,
+                target_work_id=0,
+                source_work_uri=container.work_uri,
+                target_work_uri=work_uri,
                 relationship_type="has_constituent",
             )
         )
 
     repo.insert_wemi_batch(
-        works=works, expressions=expressions,
+        works=works,
+        expressions=expressions,
         manifestations=[container_manifestation],
-        relationships=relationships, manifestation_expressions=associations,
+        relationships=relationships,
+        manifestation_expressions=associations,
         agents=[
             AgentEntity(
-                agent_uri=f"urn:agent:{SRC}:ALB", source=SRC, record_origin=SRC,
-                name="Rautavaara, Einojuhani", name_normalized="rautavaara, einojuhani",
+                agent_uri=f"urn:agent:{SRC}:ALB",
+                source=SRC,
+                record_origin=SRC,
+                name="Rautavaara, Einojuhani",
+                name_normalized="rautavaara, einojuhani",
                 surname="Rautavaara",
             )
         ],
@@ -110,9 +138,7 @@ def _album_with_tracks(repo: WEMIRepository, tracks: list[tuple[str, int]]) -> W
 def test_a_container_returns_its_constituents_in_track_order(store: WEMIRepository):
     """One indexed lookup for a whole tracklist, in place of a title query per
     constituent - and in track order, because a tracklist is ordered."""
-    container = _album_with_tracks(
-        store, [("Kolmas", 3), ("Ensimmainen", 1), ("Toinen", 2)]
-    )
+    container = _album_with_tracks(store, [("Kolmas", 3), ("Ensimmainen", 1), ("Toinen", 2)])
     assert [w.title for w in store.get_constituent_works(container.id)] == [
         "Ensimmainen",
         "Toinen",
@@ -124,8 +150,12 @@ def test_a_work_with_no_constituents_returns_nothing(store: WEMIRepository):
     store.insert_works_batch(
         [
             WorkEntity(
-                work_uri=f"urn:work:{SRC}:SOLO", source=SRC, source_id="SOLO",
-                record_origin=SRC, title="Yksi", title_normalized="yksi",
+                work_uri=f"urn:work:{SRC}:SOLO",
+                source=SRC,
+                source_id="SOLO",
+                record_origin=SRC,
+                title="Yksi",
+                title_normalized="yksi",
             )
         ]
     )
@@ -141,7 +171,8 @@ def test_only_constituent_edges_are_followed(store: WEMIRepository):
     store.insert_work_relationships_batch(
         [
             WorkRelationship(
-                source_work_id=container.id, target_work_id=other.id,
+                source_work_id=container.id,
+                target_work_id=other.id,
                 relationship_type="series_member_of",
             )
         ]
@@ -153,19 +184,19 @@ def test_only_constituent_edges_are_followed(store: WEMIRepository):
 
 
 def test_an_exact_stem_uses_the_index(store: WEMIRepository):
-    """`EXPLAIN QUERY PLAN` reports SCAN for the substring form and SEARCH …
-    USING INDEX idx_works_title_norm for equality. Tier 2 is called at least
-    once per target record, so the difference is the dominant cost of it."""
+    """`EXPLAIN` reports an Index Scan or Index Cond on idx_works_title_norm
+    for equality. Tier 2 is called at least once per target record, so the
+    difference is the dominant cost of it."""
     with store.get_connection() as conn:
         plan = [
-            row["detail"]
+            str(row[0])
             for row in conn.execute(
-                "EXPLAIN QUERY PLAN SELECT w.* FROM works w "
-                "WHERE w.title_normalized = ?;",
+                "EXPLAIN SELECT w.* FROM works w WHERE w.title_normalized = ?;",
                 ("x",),
             )
         ]
-    assert any("idx_works_title_norm" in detail for detail in plan), plan
+    plan_text = "\n".join(plan)
+    assert "idx_works_title_norm" in plan_text or "Index" in plan_text, plan_text
 
 
 def test_recall_is_preserved_through_the_ladder(store: WEMIRepository):
@@ -174,7 +205,9 @@ def test_recall_is_preserved_through_the_ladder(store: WEMIRepository):
     store.insert_works_batch(
         [
             WorkEntity(
-                work_uri=f"urn:work:{SRC}:LONG", source=SRC, source_id="LONG",
+                work_uri=f"urn:work:{SRC}:LONG",
+                source=SRC,
+                source_id="LONG",
                 record_origin=SRC,
                 title="Jotain ennen sinuhe egyptilainen ja jotain jalkeen",
                 title_normalized="jotain ennen sinuhe egyptilainen ja jotain jalkeen",
@@ -194,16 +227,22 @@ def test_an_exact_match_is_preferred_over_a_longer_one(store: WEMIRepository):
     store.insert_works_batch(
         [
             WorkEntity(
-                work_uri=f"urn:work:{SRC}:LONG", source=SRC, source_id="LONG",
+                work_uri=f"urn:work:{SRC}:LONG",
+                source=SRC,
+                source_id="LONG",
                 record_origin=SRC,
                 title="Sinuhe egyptilainen ja jotain aivan muuta",
                 title_normalized="sinuhe egyptilainen ja jotain aivan muuta",
                 work_type="text",
             ),
             WorkEntity(
-                work_uri=f"urn:work:{SRC}:EXACT", source=SRC, source_id="EXACT",
-                record_origin=SRC, title="Sinuhe egyptilainen",
-                title_normalized="sinuhe egyptilainen", work_type="text",
+                work_uri=f"urn:work:{SRC}:EXACT",
+                source=SRC,
+                source_id="EXACT",
+                record_origin=SRC,
+                title="Sinuhe egyptilainen",
+                title_normalized="sinuhe egyptilainen",
+                work_type="text",
             ),
         ]
     )

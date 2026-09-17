@@ -113,7 +113,9 @@ class CorpusClusterer:
         elif wt == "thesis":
             _add("thesis", f"{target.author_key or ''}::{target.title_stem}")
         elif wt == "cartography":
-            _add("cartographic", target.get_first_key("geodata_spatial") or target.work_blocking_key)
+            _add(
+                "cartographic", target.get_first_key("geodata_spatial") or target.work_blocking_key
+            )
         elif wt == "still_image":
             _add(
                 "still_image",
@@ -124,7 +126,10 @@ class CorpusClusterer:
 
         if wt == "tactile":
             _add("accessible_repro", target.work_blocking_key)
-        if target.get_first_key("translators_signature") and "parallel" in target.get_first_key("translators_signature").lower():
+        if (
+            target.get_first_key("translators_signature")
+            and "parallel" in target.get_first_key("translators_signature").lower()
+        ):
             _add("parallel_multilingual", target.work_blocking_key)
 
         # 3. Standard identifiers extracted from target
@@ -292,7 +297,11 @@ class CorpusClusterer:
         if content_type == "text":
             sub_key = (target.get_first_key("translators_signature") or "").strip().lower()
         elif content_type == "spoken_word":
-            sub_key = (target.get_first_key("translators_signature") or target.author_key or "").strip().lower()
+            sub_key = (
+                (target.get_first_key("translators_signature") or target.author_key or "")
+                .strip()
+                .lower()
+            )
         elif content_type == "audio_music":
             sub_key = f"{(target.author_key or '').strip().lower()}_{target.year or ''}"
         elif content_type == "notated_music":
@@ -452,43 +461,40 @@ class CorpusClusterer:
             )
             canon_rec = member_recs[0]
 
-            # External Authority URI Hoisting
-            hoisted_work_uri: Optional[str] = None
-            hoisted_qid: Optional[str] = None
-            hoisted_expr_uris: dict[tuple[str, str], str] = {}
+            # External Authority CURIE Hoisting
+            hoisted_work_curie: Optional[str] = None
+            hoisted_expr_curies: dict[tuple[str, str], str] = {}
 
             if self.matcher:
                 for rec in member_recs:
                     m_res = self.matcher.match_target(rec)
                     if m_res.matched_work and m_res.confidence_score >= 0.70:
-                        if not hoisted_work_uri and m_res.work_uri:
-                            hoisted_work_uri = m_res.work_uri
-                            hoisted_qid = m_res.matched_work.wikidata_qid
-                        if m_res.expression_uri and m_res.matched_expression:
+                        if not hoisted_work_curie and m_res.work_curie:
+                            hoisted_work_curie = m_res.work_curie
+                        if m_res.expression_curie and m_res.matched_expression:
                             exp_key = (
                                 m_res.matched_expression.content_type,
                                 (m_res.matched_expression.language or "und").lower(),
                             )
-                            if exp_key not in hoisted_expr_uris:
-                                hoisted_expr_uris[exp_key] = m_res.expression_uri
+                            if exp_key not in hoisted_expr_curies:
+                                hoisted_expr_curies[exp_key] = m_res.expression_curie
 
-            if not hoisted_work_uri:
+            if not hoisted_work_curie:
                 work_sig = (
                     f"{canon_rec.title_stem}::{canon_rec.author_key or ''}::{canon_rec.work_type}"
                 )
                 h_work = hashlib.sha256(work_sig.encode("utf-8")).hexdigest()[:16]
-                canonical_work_uri = f"urn:reconciliator:work:{h_work}"
+                canonical_work_curie = f"reconciliator:work_{h_work}"
                 work_cluster_id = f"wc_{h_work}"
             else:
-                canonical_work_uri = hoisted_work_uri
-                h_work = hashlib.sha256(canonical_work_uri.encode("utf-8")).hexdigest()[:16]
+                canonical_work_curie = hoisted_work_curie
+                h_work = hashlib.sha256(canonical_work_curie.encode("utf-8")).hexdigest()[:16]
                 work_cluster_id = f"wc_{h_work}"
 
             w_cluster = WorkCluster(
                 cluster_id=work_cluster_id,
                 work_type=canon_rec.work_type,
-                canonical_work_uri=canonical_work_uri,
-                wikidata_qid=hoisted_qid,
+                canonical_work_curie=canonical_work_curie,
                 canonical_title=canon_rec.uniform_title or canon_rec.title,
                 canonical_author=canon_rec.author_key,
             )
@@ -501,15 +507,15 @@ class CorpusClusterer:
                 exp_groups[e_key].append(rec)
 
             for (content_type, lang, sub_key), exp_recs in exp_groups.items():
-                hoisted_exp_uri = hoisted_expr_uris.get((content_type, lang))
-                if hoisted_exp_uri:
-                    canonical_exp_uri = hoisted_exp_uri
-                    h_exp = hashlib.sha256(canonical_exp_uri.encode("utf-8")).hexdigest()[:16]
+                hoisted_exp_curie = hoisted_expr_curies.get((content_type, lang))
+                if hoisted_exp_curie:
+                    canonical_exp_curie = hoisted_exp_curie
+                    h_exp = hashlib.sha256(canonical_exp_curie.encode("utf-8")).hexdigest()[:16]
                     exp_cluster_id = f"ec_{h_exp}"
                 else:
                     exp_sig = f"{work_cluster_id}::{content_type}::{lang}::{sub_key}"
                     h_exp = hashlib.sha256(exp_sig.encode("utf-8")).hexdigest()[:16]
-                    canonical_exp_uri = f"urn:reconciliator:exp:{h_exp}"
+                    canonical_exp_curie = f"reconciliator:exp_{h_exp}"
                     exp_cluster_id = f"ec_{h_exp}"
 
                 translators = [sub_key] if sub_key and content_type == "text" else []
@@ -518,7 +524,7 @@ class CorpusClusterer:
                 e_cluster = ExpressionCluster(
                     cluster_id=exp_cluster_id,
                     work_cluster_id=work_cluster_id,
-                    canonical_expression_uri=canonical_exp_uri,
+                    canonical_expression_curie=canonical_exp_curie,
                     content_type=content_type,  # type: ignore[arg-type]
                     language=lang,
                     version_designation=sub_key or None,
@@ -564,8 +570,8 @@ class CorpusClusterer:
                             manifestation_cluster_id=manif_cluster_id,
                             work_cluster_id=work_cluster_id,
                             expression_cluster_id=exp_cluster_id,
-                            final_work_uri=canonical_work_uri,
-                            final_expression_uri=canonical_exp_uri,
+                            final_work_curie=canonical_work_curie,
+                            final_expression_curie=canonical_exp_curie,
                             sibling_manifestation_ids_json=json.dumps(sibs) if sibs else None,
                         )
                         corpus_linkages.append(linkage)

@@ -7,13 +7,34 @@ project's default ``data/`` directory.
 
 from __future__ import annotations
 
+import hashlib
+import logging
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 import yaml
 
 from reconciliator.config import StorageConfig
+from reconciliator.db import get_engine, init_authority_db, init_corpus_db
+from reconciliator.progress import init_progress_db
+from reconciliator.vocab_store import init_vocab_db
+
+logger = logging.getLogger(__name__)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_postgres_container():
+    """Ensure PostgreSQL container or instance is running."""
+    from reconciliator.db_container import start_postgres_container, wait_for_postgres
+
+    if not wait_for_postgres(timeout_seconds=0.5):
+        try:
+            start_postgres_container(timeout_seconds=30.0)
+        except Exception as e:
+            logger.warning("Could not auto-start postgres container: %s", e)
 
 
 def init_test_storage(
@@ -24,43 +45,69 @@ def init_test_storage(
     progress_db: Path | str | None = None,
     work_index: Path | str | None = None,
     reset: bool = True,
+    schema: str | None = None,
 ) -> StorageConfig:
-    """Centralized database initialization inside a temporary directory.
-
-    Initializes all database schemas (authority, vocab, progress, corpus)
-    and vector indices within `base_dir` so that tests never touch the
-    project's default ``data/`` location.
-    """
+    """Centralized database initialization inside an isolated PostgreSQL schema."""
     base = Path(base_dir)
     base.mkdir(parents=True, exist_ok=True)
+
+    if schema is None:
+        schema = f"test_{hashlib.md5(str(base).encode()).hexdigest()[:10]}"
+
+    try:
+        with psycopg.connect(
+            "host=localhost port=5432 user=postgres password=postgres dbname=reconciliator"
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
+    except Exception as e:
+        logger.debug("Failed to create test schema %s: %s", schema, e)
+
+    pg_url = f"postgresql+psycopg://postgres:postgres@localhost:5432/reconciliator?options=-csearch_path%3D{schema},public"
+
     storage = StorageConfig(
         data_dir=base,
-        authority_db=Path(authority_db) if authority_db else None,
-        vocab_db=Path(vocab_db) if vocab_db else None,
-        progress_db=Path(progress_db) if progress_db else None,
+        database_url=pg_url,
         work_index=Path(work_index) if work_index else None,
     )
-    if reset:
-        from reconciliator.db import reset_all_storage
 
-        reset_all_storage(storage)
+    if reset:
+        engine = get_engine(pg_url)
+        try:
+            init_authority_db(engine)
+            init_vocab_db(engine)
+            init_corpus_db(engine)
+            init_progress_db(engine)
+        finally:
+            engine.dispose()
+
     return storage
 
 
 @pytest.fixture
-def tmp_storage(tmp_path: Path) -> StorageConfig:
-    """Return an initialized StorageConfig with all databases inside tmp_path."""
-    return init_test_storage(tmp_path)
+def tmp_storage(tmp_path: Path) -> Generator[StorageConfig, None, None]:
+    """Return an initialized StorageConfig with all databases inside isolated test schema."""
+    schema = f"test_{hashlib.md5(str(tmp_path).encode()).hexdigest()[:10]}"
+    storage = init_test_storage(tmp_path, schema=schema)
+    yield storage
+    try:
+        with psycopg.connect(
+            "host=localhost port=5432 user=postgres password=postgres dbname=reconciliator"
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE;")
+    except Exception:
+        pass
 
 
 @pytest.fixture
-def tmp_storage_yaml(tmp_path: Path) -> str:
-    """Return a YAML ``storage:`` block directing all databases to tmp_path."""
-    return f'storage:\n  data_dir: "{tmp_path}"\n'
+def tmp_storage_yaml(tmp_storage: StorageConfig) -> str:
+    """Return a YAML ``storage:`` block directing all databases to isolated test schema."""
+    return f'storage:\n  data_dir: "{tmp_storage.data_dir}"\n  database_url: "{tmp_storage.database_url}"\n'
 
 
 @pytest.fixture
-def make_config_file(tmp_path: Path):
+def make_config_file(tmp_path: Path, tmp_storage: StorageConfig):
     """Factory fixture: create a config YAML file with storage in tmp_path.
 
     Returns a callable that accepts optional extra config sections as a dict
@@ -74,13 +121,16 @@ def make_config_file(tmp_path: Path):
     """
 
     def _make(extra_sections: dict[str, Any] | None = None) -> Path:
-        data: dict[str, Any] = {"storage": {"data_dir": str(tmp_path)}}
+        data: dict[str, Any] = {
+            "storage": {
+                "data_dir": str(tmp_path),
+                "database_url": tmp_storage.database_url,
+            }
+        }
         if extra_sections:
             data.update(extra_sections)
         cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text(
-            yaml.dump(data, default_flow_style=False), encoding="utf-8"
-        )
+        cfg_file.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
         return cfg_file
 
     return _make
@@ -106,32 +156,47 @@ def persist_match_records(repo, records, origin: str = "corpus") -> int:
     works, exprs, manifs, keys, idents = [], [], [], [], []
     for rec in records:
         rid = rec.record_id
-        work_uri = rec.work_uri or f"urn:work:{origin}:{rid}"
+        curie = f"{origin}:{rid}"
+        work_curie = rec.work_curie or curie
         lang = rec.language or "und"
-        expr_uri = rec.expression_uri or f"urn:exp:{origin}:{rid}:{lang}"
-        manif_uri = rec.manifestation_uri or f"urn:manif:{origin}:{rid}"
+        manif_curie = rec.manifestation_curie or curie
 
         works.append(
             WorkEntity(
-                work_uri=work_uri, source=origin, source_id=rid, record_origin=origin,
-                title=rec.uniform_title or rec.title, title_normalized=rec.title_stem,
-                work_type=rec.work_type, serialized_text=rec.serialized_work,
+                source=origin,
+                source_id=rid,
+                record_origin=origin,
+                title=rec.uniform_title or rec.title,
+                title_normalized=rec.title_stem,
+                work_type=rec.work_type,
+                serialized_text=rec.serialized_work,
             )
         )
         exprs.append(
             ExpressionEntity(
-                work_id=0, expression_uri=expr_uri, source=origin, source_id=rid,
-                record_origin=origin, language=lang,
-                content_type=rec.content_type or "text", title=rec.title,
+                work_id=0,
+                work_curie=work_curie,
+                source=origin,
+                source_id=f"{rid}_{lang}",
+                record_origin=origin,
+                language=lang,
+                content_type=rec.content_type or "text",
+                title=rec.title,
                 serialized_text=rec.serialized_expression,
             )
         )
         manifs.append(
             ManifestationEntity(
-                manifestation_uri=manif_uri, source=origin, source_id=rid,
-                record_origin=origin, title=rec.title, title_normalized=rec.title_stem,
-                publication_year=rec.year, volume_designation=rec.volume_designation,
-                is_component=rec.is_component, serialized_text=rec.serialized_manifestation,
+                work_curie=work_curie,
+                source=origin,
+                source_id=rid,
+                record_origin=origin,
+                title=rec.title,
+                title_normalized=rec.title_stem,
+                publication_year=rec.year,
+                volume_designation=rec.volume_designation,
+                is_component=rec.is_component,
+                serialized_text=rec.serialized_manifestation,
             )
         )
 
@@ -149,22 +214,34 @@ def persist_match_records(repo, records, origin: str = "corpus") -> int:
             for value in values:
                 keys.append(
                     EntityKey(
-                        entity_type="manifestation", entity_id=0, key_type=key_type,
-                        key_value=value, entity_uri=manif_uri,
+                        entity_type="manifestation",
+                        entity_id=0,
+                        key_type=key_type,
+                        key_value=value,
+                        entity_curie=manif_curie,
                     )
                 )
         for scheme, values in (rec.identifiers or {}).items():
             for value in values:
                 idents.append(
                     IdentifierEntity(
-                        entity_type="manifestation", entity_id=0, scheme=scheme,
-                        value=value, value_normalized=value.lower(), entity_uri=manif_uri,
+                        entity_type="manifestation",
+                        entity_id=0,
+                        source=scheme,
+                        source_id=value,
+                        source_id_normalized=value.lower(),
+                        curie=f"{scheme}:{value}",
+                        entity_curie=manif_curie,
                     )
                 )
 
     repo.register_source(origin, is_authoritative=False)
     repo.insert_wemi_batch(
-        works=works, expressions=exprs, manifestations=manifs,
-        identifiers=idents, entity_keys=keys, record_origin=origin,
+        works=works,
+        expressions=exprs,
+        manifestations=manifs,
+        entity_keys=keys,
+        identifiers=idents,
+        record_origin=origin,
     )
     return len(records)

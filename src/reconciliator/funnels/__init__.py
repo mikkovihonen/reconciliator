@@ -47,6 +47,7 @@ BUILTIN_HANDLERS: dict[str, str] = {
     "audiobook": "reconciliator.funnels.audiobook",
 }
 
+
 class FunnelHandlerError(ValueError):
     """A funnel's handler could not be resolved."""
 

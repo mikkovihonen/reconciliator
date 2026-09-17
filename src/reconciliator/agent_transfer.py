@@ -348,7 +348,11 @@ def check_homonym_ambiguity(
     if len(top_candidates) <= 1:
         return True, "unambiguous_single_candidate"
 
-    if vocab_store is None and authority_store is not None and hasattr(authority_store, "vocab_store"):
+    if (
+        vocab_store is None
+        and authority_store is not None
+        and hasattr(authority_store, "vocab_store")
+    ):
         vocab_store = authority_store.vocab_store
 
     top_score = top_candidates[0].get("score", 0.0)
@@ -368,7 +372,8 @@ def check_homonym_ambiguity(
     # 1. ORCID check
     if target_orcid:
         matching_orcid_cands = [
-            c for c in close_candidates
+            c
+            for c in close_candidates
             if c.get("orcid") and verify_orcid(target_orcid, c.get("orcid"))[0]
         ]
         if len(matching_orcid_cands) == 1:
@@ -413,8 +418,10 @@ def check_homonym_ambiguity(
     # 5. Language distribution overlap
     if target_languages:
         matching_l_cands = [
-            c for c in close_candidates
-            if c.get("language_counts") and verify_languages(target_languages, c["language_counts"])[0]
+            c
+            for c in close_candidates
+            if c.get("language_counts")
+            and verify_languages(target_languages, c["language_counts"])[0]
         ]
         if len(matching_l_cands) == 1:
             return True, "ambiguity_resolved_by_language"
@@ -422,8 +429,10 @@ def check_homonym_ambiguity(
     # 6. Subject distribution overlap
     if target_subjects:
         matching_s_cands = [
-            c for c in close_candidates
-            if c.get("subject_counts") and verify_subjects(target_subjects, c["subject_counts"], vocab_store=vocab_store)[0]
+            c
+            for c in close_candidates
+            if c.get("subject_counts")
+            and verify_subjects(target_subjects, c["subject_counts"], vocab_store=vocab_store)[0]
         ]
         if len(matching_s_cands) == 1:
             return True, "ambiguity_resolved_by_subjects"
@@ -442,11 +451,13 @@ def check_homonym_ambiguity(
             for c in close_candidates:
                 cid = c.get("id")
                 ev = rel_evidence.get(cid, {})
-                matches = sum([
-                    1 if ev.get("has_coauthor_match") else 0,
-                    1 if ev.get("has_publisher_match") else 0,
-                    1 if ev.get("has_classification_match") else 0,
-                ])
+                matches = sum(
+                    [
+                        1 if ev.get("has_coauthor_match") else 0,
+                        1 if ev.get("has_publisher_match") else 0,
+                        1 if ev.get("has_classification_match") else 0,
+                    ]
+                )
                 if matches > 0:
                     scored_rel_cands.append((matches, c))
 

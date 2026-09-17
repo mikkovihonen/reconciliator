@@ -155,8 +155,12 @@ def test_check_output_catches_an_undeclared_key():
     loader = MarcBibliographicLoader()
     record = DecomposedRecord(
         entity_keys=[
-            EntityKey(entity_type="manifestation", entity_id=1,
-                      key_type="not_a_declared_key", key_value="x")
+            EntityKey(
+                entity_type="manifestation",
+                entity_id=1,
+                key_type="not_a_declared_key",
+                key_value="x",
+            )
         ]
     )
     findings = loader.check_output(record)
@@ -171,8 +175,7 @@ def test_check_output_catches_a_contradicted_declaration():
     assert "citation" in loader.capabilities.not_produced
     record = DecomposedRecord(
         entity_keys=[
-            EntityKey(entity_type="manifestation", entity_id=1,
-                      key_type="citation", key_value="x")
+            EntityKey(entity_type="manifestation", entity_id=1, key_type="citation", key_value="x")
         ]
     )
     assert any("does not produce" in f for f in loader.check_output(record))
@@ -186,8 +189,11 @@ def test_check_output_catches_an_unstable_id_under_a_determinism_claim():
     record = DecomposedRecord(
         works=[
             WorkEntity(
-                work_uri="n93338243e01e43288030d7d010615c7cb1", source="s",
-                source_id="s1", record_origin="s", title="T", title_normalized="t",
+                source="s",
+                source_id="n93338243e01e43288030d7d010615c7cb1",
+                record_origin="s",
+                title="T",
+                title_normalized="t",
             )
         ]
     )
@@ -261,9 +267,7 @@ def test_both_formats_fold_the_same_subjects_to_the_same_concepts(ctx: LoadConte
     bibframe = load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx)
 
     def concepts(record):
-        return sorted(
-            f"{s['scheme']}:{s['code']}" for s in record.works[0].subjects_json
-        )
+        return sorted(f"{s['scheme']}:{s['code']}" for s in record.works[0].subjects_json)
 
     assert concepts(marc) == ["yso:Y1002", "yso:p2591"]
     assert concepts(bibframe) == concepts(marc)
@@ -463,9 +467,7 @@ def test_a_blank_node_role_is_read_from_its_label(ctx: LoadContext):
 def test_a_configured_relator_mapping_reaches_the_bibframe_path():
     """`ctx.relator_mappings` is how a deployment adds a term the registry does
     not know; the BibFrame path used to ignore the field entirely."""
-    graph = Graph().parse(
-        data=ROLE_TTL.replace('"kääntäjä"', '"tulkitsija"'), format="turtle"
-    )
+    graph = Graph().parse(data=ROLE_TTL.replace('"kääntäjä"', '"tulkitsija"'), format="turtle")
     ctx = LoadContext(source="melinda", relator_mappings={"tulkitsija": "trl"})
     record = load_record(graph, ctx)
     assert sorted({c.role for c in record.contributions}) == ["aut", "trl"]
@@ -551,9 +553,9 @@ def test_blank_node_identity_follows_content(ctx: LoadContext):
 def test_blank_node_uris_follow_the_same_scheme_as_marc(ctx: LoadContext):
     """A derived id must still yield a real URI, not a bare parse label."""
     record = load_record(_blank_node_graph(), ctx)
-    assert record.works[0].work_uri.startswith("urn:work:melinda:")
-    assert record.expressions[0].expression_uri.startswith("urn:exp:melinda:")
-    assert record.manifestations[0].manifestation_uri.startswith("urn:manif:melinda:")
+    assert record.works[0].work_uri.startswith(f"{ctx.source}:sha1:")
+    assert record.expressions[0].expression_uri.startswith(f"{ctx.source}:sha1:")
+    assert record.manifestations[0].manifestation_uri.startswith(f"{ctx.source}:sha1:")
 
 
 AGENT_BNODE_TTL = """
@@ -580,7 +582,7 @@ def test_a_blank_node_agent_gets_stable_identity(ctx: LoadContext):
         seen.add(tuple(a.agent_uri for a in record.agents))
     assert len(seen) == 1, f"agent identity differed between parses: {seen}"
     (uris,) = seen
-    assert uris and all(u.startswith("urn:agent:melinda:") for u in uris), uris
+    assert uris and all(u.startswith(f"{ctx.source}:sha1:") for u in uris), uris
     assert not any(_looks_like_blank_node(u) for u in uris)
 
 
@@ -595,7 +597,9 @@ def test_a_blank_node_instance_gets_a_stable_target_id():
     for _ in range(3):
         g = Graph().parse(data=AGENT_BNODE_TTL, format="turtle")
         seen.add(
-            tuple(raw["source_id"] for raw, _nodes in parse_bibframe_graph(g, profile=get_profile()))
+            tuple(
+                raw["source_id"] for raw, _nodes in parse_bibframe_graph(g, profile=get_profile())
+            )
         )
     assert len(seen) == 1, f"target id differed between parses: {seen}"
     (ids,) = seen
@@ -605,7 +609,8 @@ def test_a_blank_node_instance_gets_a_stable_target_id():
 def test_a_graph_with_real_uris_keeps_them(ctx: LoadContext):
     """Derivation is a fallback: a node with a URI is identified by it."""
     record = load_record(_bibframe_graph(), ctx)
-    assert record.works[0].work_uri.startswith("http://example.org/")
+    assert record.works[0].source_id == "http://example.org/w1"
+    assert record.works[0].work_uri == f"{ctx.source}:http://example.org/w1"
 
 
 def test_str_of_a_blank_node_has_no_prefix():

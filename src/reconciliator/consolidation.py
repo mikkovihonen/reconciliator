@@ -21,6 +21,7 @@ from typing import Any, Iterable, Optional
 from rapidfuzz import fuzz
 
 from reconciliator.config import WorkConsolidationConfig
+from reconciliator.curie import to_curie
 from reconciliator.models import WorkRelationship
 from reconciliator.repository import WEMIRepository
 
@@ -41,13 +42,24 @@ class WorkSignature:
     """Everything consolidation needs to decide whether two work rows are one work."""
 
     work_id: int
-    work_uri: str
+    work_curie: str
     source: str
+    source_id: str
     title_normalized: str
     work_type: str
-    wikidata_qid: Optional[str] = None
     author_keys: set[str] = field(default_factory=set)
     identifiers: set[str] = field(default_factory=set)
+
+    @property
+    def work_uri(self) -> str:
+        return self.work_curie
+
+    @property
+    def wikidata_qid(self) -> Optional[str]:
+        for ident in self.identifiers:
+            if ident.startswith("wikidata:"):
+                return ident.split(":", 1)[1].upper()
+        return None
 
 
 @dataclass
@@ -113,20 +125,24 @@ class WorkConsolidator:
         with self.repo.get_connection() as conn:
             for row in conn.execute(
                 f"""
-                SELECT id, work_uri, source, title_normalized, work_type, wikidata_qid
+                SELECT id, source, source_id, title_normalized, work_type
                 FROM works
                 WHERE 1=1{origin_sql};
                 """,
                 origin_params,
             ):
-                signatures[row["id"]] = WorkSignature(
+                work_curie = to_curie(row["source"] or "", row["source_id"] or "")
+                sig = WorkSignature(
                     work_id=row["id"],
-                    work_uri=row["work_uri"],
+                    work_curie=work_curie,
                     source=row["source"] or "",
+                    source_id=row["source_id"] or "",
                     title_normalized=(row["title_normalized"] or "").strip().lower(),
                     work_type=row["work_type"] or "text",
-                    wikidata_qid=row["wikidata_qid"],
                 )
+                if sig.source.lower() == "wikidata" and sig.source_id:
+                    sig.identifiers.add(f"wikidata:{sig.source_id.upper()}")
+                signatures[row["id"]] = sig
             if not signatures:
                 return signatures
 
@@ -148,37 +164,40 @@ class WorkConsolidator:
                         sig.author_keys.add(re.sub(r"[^\w]", "", str(value).lower()))
 
             schemes = {s.lower() for s in self.config.strong_identifier_schemes}
-            if schemes:
-                placeholders = ",".join("?" for _ in schemes)
+            sources = {("wikidata" if s == "wikidata_qid" else s) for s in schemes}
+            if self.config.use_wikidata_qid:
+                sources.add("wikidata")
+            if sources:
+                placeholders = ",".join("?" for _ in sources)
                 # Identifiers attached to the work itself.
                 for row in conn.execute(
                     f"""
-                    SELECT entity_id AS work_id, scheme, value
+                    SELECT entity_id AS work_id, source, source_id
                     FROM identifiers
-                    WHERE entity_type = 'work' AND LOWER(scheme) IN ({placeholders});
+                    WHERE entity_type = 'work' AND LOWER(source) IN ({placeholders});
                     """,
-                    list(schemes),
+                    list(sources),
                 ):
                     sig = signatures.get(row["work_id"])
                     if sig is not None:
-                        self._add_identifier(sig, row["scheme"], row["value"])
+                        self._add_identifier(sig, row["source"], row["source_id"])
 
                 # Identifiers on the work's manifestations. An ISBN identifies a
                 # manifestation, but a shared ISBN between two work rows means both
                 # describe the work that manifestation embodies.
                 for row in conn.execute(
                     f"""
-                    SELECT m.work_id AS work_id, i.scheme, i.value
+                    SELECT m.work_id AS work_id, i.source, i.source_id
                     FROM identifiers i
                     JOIN manifestations m
                       ON i.entity_type = 'manifestation' AND i.entity_id = m.id
-                    WHERE m.work_id IS NOT NULL AND LOWER(i.scheme) IN ({placeholders});
+                    WHERE m.work_id IS NOT NULL AND LOWER(i.source) IN ({placeholders});
                     """,
-                    list(schemes),
+                    list(sources),
                 ):
                     sig = signatures.get(row["work_id"])
                     if sig is not None:
-                        self._add_identifier(sig, row["scheme"], row["value"])
+                        self._add_identifier(sig, row["source"], row["source_id"])
 
         return signatures
 
@@ -188,6 +207,8 @@ class WorkConsolidator:
         if not norm:
             return
         scheme_l = str(scheme or "").strip().lower()
+        if scheme_l == "wikidata_qid":
+            scheme_l = "wikidata"
         # A bare source-minted URI is not shared identity; skip it.
         if scheme_l in ("urn", "uri") and str(value).startswith(_LOCAL_URI_PREFIXES):
             return
@@ -215,12 +236,7 @@ class WorkConsolidator:
                 author_sim = 1.0
             else:
                 author_sim = (
-                    max(
-                        fuzz.ratio(x, y)
-                        for x in a.author_keys
-                        for y in b.author_keys
-                    )
-                    / 100.0
+                    max(fuzz.ratio(x, y) for x in a.author_keys for y in b.author_keys) / 100.0
                 )
         elif not a.author_keys and not b.author_keys:
             # Anonymous works: the title has to carry the decision alone.
@@ -310,7 +326,7 @@ class WorkConsolidator:
                 source_rank = priority.index(sig.source.lower())
             except ValueError:
                 source_rank = len(priority)
-            return (has_qid, source_rank, sig.work_uri)
+            return (has_qid, source_rank, sig.work_curie)
 
         return min(members, key=rank)
 

@@ -106,10 +106,10 @@ explicit statement that the output is not produced.*
 
 ```python
 class LoaderCapabilities(BaseModel):
-    formats: list[str]                 # metadata prefixes / format names accepted
-    work_types: set[str]               # classifications it can assign
+    formats: list[str]  # metadata prefixes / format names accepted
+    work_types: set[str]  # classifications it can assign
     content_types: set[str]
-    key_types: set[str]                # entity_key types it emits
+    key_types: set[str]  # entity_key types it emits
     identifier_schemes: set[str]
 
     # normalisation guarantees, one flag per LoadContext concern
@@ -132,7 +132,7 @@ not_produced = {
     "analytic": "constituent works are modelled as related Works, not 505/700 $t",
     "sammelband": "bound-with is a holdings-level relationship, absent from BIBFRAME",
     "deterministic_ids": "identity comes from graph node URIs; blank nodes are "
-                         "not stable across parses (see plan §Why)",
+    "not stable across parses (see plan §Why)",
 }
 ```
 

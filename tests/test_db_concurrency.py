@@ -24,11 +24,10 @@ def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO works (
-                        work_uri, source, source_id, title, title_normalized, work_type
-                    ) VALUES (?, 'melinda', ?, ?, ?, 'text');
+                        source, source_id, title, title_normalized, work_type
+                    ) VALUES ('melinda', ?, ?, ?, 'text');
                     """,
                     (
-                        f"urn:work:melinda:REC_{worker_id}_{i}",
                         f"REC_{worker_id}_{i}",
                         f"Title {worker_id} - {i}",
                         f"title {worker_id} - {i}",

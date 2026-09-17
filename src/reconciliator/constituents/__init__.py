@@ -183,9 +183,7 @@ def resolve_for_source(
     if mode == "off":
         return SourceConstituents(mode="off", profile=None, extractor=None)
 
-    profile = get_constituent_profile(
-        profile_ref, config_dir=config_dir, subject=source_name
-    )
+    profile = get_constituent_profile(profile_ref, config_dir=config_dir, subject=source_name)
     if profile.is_empty:
         # Nothing to look for, whatever the mode says. Reported as `off` so a
         # caller does not have to ask a second question.
@@ -194,9 +192,7 @@ def resolve_for_source(
     return SourceConstituents(mode=mode, profile=profile, extractor=extractor)
 
 
-def _validate(
-    data: Any, *, subject: str, origin: str, default_name: str
-) -> ConstituentProfile:
+def _validate(data: Any, *, subject: str, origin: str, default_name: str) -> ConstituentProfile:
     if not isinstance(data, dict):
         raise ConstituentProfileError(
             f"source {subject!r}: constituent profile at {origin} is not a mapping"

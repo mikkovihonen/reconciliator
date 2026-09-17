@@ -33,6 +33,7 @@ from reconciliator.models import (
     CarrierType,
     ContributionEntity,
     EntityKey,
+    EntitySubject,
     ExpressionContentType,
     ExpressionEntity,
     IdentifierEntity,
@@ -58,6 +59,7 @@ from reconciliator.normalizers.relators import normalize_role
 from reconciliator.template import WEMISerializationEngine
 from reconciliator.vocabularies import (
     detect_vocabulary,
+    extract_concept_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,9 +128,7 @@ def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
             parts.append(f"C|{child.get('tag')}|{(child.text or '').strip()}")
         elif tag == "datafield":
             subs = "|".join(
-                f"{s.get('code')}={(s.text or '').strip()}"
-                for s in child
-                if isinstance(s.tag, str)
+                f"{s.get('code')}={(s.text or '').strip()}" for s in child if isinstance(s.tag, str)
             )
             parts.append(
                 f"D|{child.get('tag')}|{child.get('ind1') or ' '}{child.get('ind2') or ' '}|{subs}"
@@ -581,7 +581,11 @@ def parse_marc_record_elem(
                 birth_yr, death_yr = parse_marc_dates(sub_d)
                 full_literal = f"{name} {' '.join(sub_cs)}".strip()
                 is_fictional = any(q in full_literal.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
-                raw_roles = [r.strip(" ,;.") for r in (_get_subfields(f, "4") + _get_subfields(f, "e")) if r.strip(" ,;.")]
+                raw_roles = [
+                    r.strip(" ,;.")
+                    for r in (_get_subfields(f, "4") + _get_subfields(f, "e"))
+                    if r.strip(" ,;.")
+                ]
                 norm_roles = [normalize_role(r, relator_mappings) for r in raw_roles]
                 norm_roles = [r for r in norm_roles if r]
                 if not norm_roles and tag in MAIN_ENTRY_TAGS:
@@ -595,7 +599,7 @@ def parse_marc_record_elem(
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
                 orcid_val: Optional[str] = None
-                for u in (u1 + u0):
+                for u in u1 + u0:
                     if "orcid.org" in u.lower():
                         orcid_val = u
                         break
@@ -629,7 +633,11 @@ def parse_marc_record_elem(
                 sub_us = [u.strip(" ,;.") for u in _get_subfields(f, "u") if u.strip(" ,;.")]
                 full_literal = f"{name} {' '.join(sub_cs)}".strip()
                 is_fictional = any(q in full_literal.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
-                raw_roles = [r.strip(" ,;.") for r in (_get_subfields(f, "4") + _get_subfields(f, "e")) if r.strip(" ,;.")]
+                raw_roles = [
+                    r.strip(" ,;.")
+                    for r in (_get_subfields(f, "4") + _get_subfields(f, "e"))
+                    if r.strip(" ,;.")
+                ]
                 norm_roles = [normalize_role(r, relator_mappings) for r in raw_roles]
                 norm_roles = [r for r in norm_roles if r]
                 if not norm_roles and tag in MAIN_ENTRY_TAGS:
@@ -643,7 +651,7 @@ def parse_marc_record_elem(
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
                 orcid_val = None
-                for u in (u1 + u0):
+                for u in u1 + u0:
                     if "orcid.org" in u.lower():
                         orcid_val = u
                         break
@@ -1018,27 +1026,27 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
 RDA_CONTENT_TYPES: dict[str, ExpressionContentType] = {
     "txt": "text",
     "ntm": "notated_music",
-    "prm": "audio_music",              # performed music
+    "prm": "audio_music",  # performed music
     "spw": "spoken_word",
     "snd": "sounds",
     "sti": "still_image",
-    "tdi": "moving_image",             # two-dimensional moving image: film, video
+    "tdi": "moving_image",  # two-dimensional moving image: film, video
     "tdm": "three_dimensional_moving_image",
-    "tdf": "three_dimensional",        # three-dimensional form
+    "tdf": "three_dimensional",  # three-dimensional form
     "cri": "cartographic_image",
     "crd": "cartographic_dataset",
-    "crm": "moving_image",             # cartographic moving image
-    "crf": "cartographic_image",       # cartographic three-dimensional form
-    "crt": "tactile_cartographic",     # cartographic tactile image
-    "crn": "tactile_cartographic",     # cartographic tactile 3-D form
-    "cod": "dataset",                  # computer dataset
+    "crm": "moving_image",  # cartographic moving image
+    "crf": "cartographic_image",  # cartographic three-dimensional form
+    "crt": "tactile_cartographic",  # cartographic tactile image
+    "crn": "tactile_cartographic",  # cartographic tactile 3-D form
+    "cod": "dataset",  # computer dataset
     "cop": "computer_program",
-    "ntv": "choreographic_movement",   # notated movement
-    "tci": "tactile_graphic",          # tactile image
+    "ntv": "choreographic_movement",  # notated movement
+    "tci": "tactile_graphic",  # tactile image
     "tcm": "tactile_notated_music",
-    "tcn": "tactile_notated_music",    # tactile notated movement
+    "tcn": "tactile_notated_music",  # tactile notated movement
     "tct": "tactile_text",
-    "tcf": "three_dimensional",        # tactile three-dimensional form
+    "tcf": "three_dimensional",  # tactile three-dimensional form
 }
 
 # RDA content type -> WorkType, used only when Leader/06 was not specific.
@@ -1049,16 +1057,16 @@ CONTENT_TYPE_WORK_TYPES: dict[str, str] = {
     "crd": "cartography",
     "crm": "cartography",
     "crf": "cartography",
-    "cod": "dataset",              # computer dataset
-    "cop": "software",             # computer program
-    "ntm": "music",                # notated music
-    "prm": "music",                # performed music
-    "spw": "audio_nonmusic",       # spoken word
+    "cod": "dataset",  # computer dataset
+    "cop": "software",  # computer program
+    "ntm": "music",  # notated music
+    "prm": "music",  # performed music
+    "spw": "audio_nonmusic",  # spoken word
     "sti": "still_image",
-    "tdi": "moving_image",         # two-dimensional moving image
-    "tdm": "moving_image",         # three-dimensional moving image
-    "tdf": "realia",               # three-dimensional form
-    "ntv": "choreography",         # notated movement
+    "tdi": "moving_image",  # two-dimensional moving image
+    "tdm": "moving_image",  # three-dimensional moving image
+    "tdf": "realia",  # three-dimensional form
+    "ntv": "choreography",  # notated movement
 }
 
 # The tactile subset, which is what makes a resource tactile regardless of what
@@ -1261,6 +1269,7 @@ def decompose_marc_authority(
     serialization_engine: Optional[WEMISerializationEngine] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
+    subject_sink: Optional[list[EntitySubject]] = None,
 ) -> tuple[
     list[WorkEntity],
     list[ExpressionEntity],
@@ -1341,7 +1350,9 @@ def decompose_marc_authority(
         if agent_field is not None:
             agent_name = _get_subfield(agent_field, "a")
             if agent_name:
-                agent_name_clean = strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
+                agent_name_clean = (
+                    strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
+                )
                 agent_dates = _get_subfield(agent_field, "d")
                 b_yr, d_yr = parse_marc_dates(agent_dates)
                 sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
@@ -1355,7 +1366,9 @@ def decompose_marc_authority(
                     record_origin=record_origin,
                     name=agent_name_clean,
                     name_normalized=agent_name_clean.strip().lower(),
-                    surname=agent_name_clean.split(",")[0].strip() if "," in agent_name_clean else None,
+                    surname=agent_name_clean.split(",")[0].strip()
+                    if "," in agent_name_clean
+                    else None,
                     dates=agent_dates,
                     birth_year=b_yr,
                     death_year=d_yr,
@@ -1397,12 +1410,16 @@ def decompose_marc_authority(
         for f in _get_datafields(record_elem, "430"):
             vt = _get_subfield(f, "a")
             if vt:
-                variant_titles.append(strip_isbd(vt, strip_isbd_punctuation, isbd_punctuation) or vt)
+                variant_titles.append(
+                    strip_isbd(vt, strip_isbd_punctuation, isbd_punctuation) or vt
+                )
         for tag in ("400", "410", "411"):
             for f in _get_datafields(record_elem, tag):
                 vt = _get_subfield(f, "t")
                 if vt:
-                    variant_titles.append(strip_isbd(vt, strip_isbd_punctuation, isbd_punctuation) or vt)
+                    variant_titles.append(
+                        strip_isbd(vt, strip_isbd_punctuation, isbd_punctuation) or vt
+                    )
 
         # Relationships from 5xx
         relationships: list[WorkRelationship] = []
@@ -1432,7 +1449,10 @@ def decompose_marc_authority(
         identifiers: list[IdentifierEntity] = []
         for scheme, val in raw_identifiers:
             norm = val.replace("-", "").strip().lower()
-            if not work_uri and (scheme in ("uri", "urn", "asteri") or val.startswith(("http://", "https://", "urn:"))):
+            if not work_uri and (
+                scheme in ("uri", "urn", "asteri")
+                or val.startswith(("http://", "https://", "urn:"))
+            ):
                 work_uri = val
             identifiers.append(
                 IdentifierEntity(
@@ -1471,8 +1491,7 @@ def decompose_marc_authority(
             # docs/pipeline_overview.md for the open question of a proper
             # variant-title column.
             subjects_json=[
-                {"heading": vt, "pref_label": vt, "kind": "variant_title"}
-                for vt in variant_titles
+                {"heading": vt, "pref_label": vt, "kind": "variant_title"} for vt in variant_titles
             ],
         )
 
@@ -1491,7 +1510,9 @@ def decompose_marc_authority(
         )
 
         engine = serialization_engine or WEMISerializationEngine()
-        work.serialized_text = engine.render_work(work, authors=[{"name": a.name} for a in agents_list])
+        work.serialized_text = engine.render_work(
+            work, authors=[{"name": a.name} for a in agents_list]
+        )
         expression.serialized_text = engine.render_expression(expression, work_title=work.title)
 
         return (
@@ -1513,7 +1534,9 @@ def decompose_marc_authority(
         # -------------------------------------------------------------
         agent_field = (f100 or f110 or f111)[0]
         agent_name = _get_subfield(agent_field, "a") or "Unknown Agent"
-        agent_name_clean = strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
+        agent_name_clean = (
+            strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
+        )
         agent_dates = _get_subfield(agent_field, "d")
         birth_yr, death_yr = parse_marc_dates(agent_dates)
 
@@ -1533,7 +1556,9 @@ def decompose_marc_authority(
             for f in _get_datafields(record_elem, tag):
                 v = _get_subfield(f, "a")
                 if v:
-                    variant_names.append(strip_isbd(v, strip_isbd_punctuation, isbd_punctuation) or v)
+                    variant_names.append(
+                        strip_isbd(v, strip_isbd_punctuation, isbd_punctuation) or v
+                    )
 
         # Affiliations from 373
         affiliations: dict[str, int] = {}
@@ -1550,7 +1575,10 @@ def decompose_marc_authority(
             norm = val.replace("-", "").strip().lower()
             if scheme == "orcid" or "orcid.org" in val:
                 orcid = val
-            if not agent_uri and (scheme in ("isni", "viaf", "uri", "urn", "asteri") or val.startswith(("http://", "https://", "urn:"))):
+            if not agent_uri and (
+                scheme in ("isni", "viaf", "uri", "urn", "asteri")
+                or val.startswith(("http://", "https://", "urn:"))
+            ):
                 agent_uri = val
             identifiers.append(
                 IdentifierEntity(
@@ -1611,6 +1639,71 @@ def decompose_marc_authority(
             affiliation_counts=affiliations,
         )
 
+        if subject_sink is not None:
+            for f in _get_datafields(record_elem, "372"):
+                val = _get_subfield(f, "a")
+                if val:
+                    val_clean = strip_isbd(val, strip_isbd_punctuation, isbd_punctuation) or val
+                    v_sub2 = _get_subfield(f, "2")
+                    v_sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
+                    cid = extract_concept_id(v_sub0) if v_sub0 else None
+                    subject_sink.append(
+                        EntitySubject(
+                            entity_type="agent",
+                            entity_id=0,
+                            entity_uri=agent_uri,
+                            source=source,
+                            source_record_id=source_id,
+                            relation_type="field_of_activity",
+                            vocabulary=v_sub2,
+                            concept_id=cid,
+                            raw_label=val_clean,
+                            is_resolved=bool(v_sub2 and cid),
+                        )
+                    )
+            for f in _get_datafields(record_elem, "374"):
+                val = _get_subfield(f, "a")
+                if val:
+                    val_clean = strip_isbd(val, strip_isbd_punctuation, isbd_punctuation) or val
+                    v_sub2 = _get_subfield(f, "2")
+                    v_sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
+                    cid = extract_concept_id(v_sub0) if v_sub0 else None
+                    subject_sink.append(
+                        EntitySubject(
+                            entity_type="agent",
+                            entity_id=0,
+                            entity_uri=agent_uri,
+                            source=source,
+                            source_record_id=source_id,
+                            relation_type="occupation",
+                            vocabulary=v_sub2,
+                            concept_id=cid,
+                            raw_label=val_clean,
+                            is_resolved=bool(v_sub2 and cid),
+                        )
+                    )
+            for f in _get_datafields(record_elem, "370"):
+                val = _get_subfield(f, "c") or _get_subfield(f, "f") or _get_subfield(f, "e")
+                if val:
+                    val_clean = strip_isbd(val, strip_isbd_punctuation, isbd_punctuation) or val
+                    v_sub2 = _get_subfield(f, "2")
+                    v_sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
+                    cid = extract_concept_id(v_sub0) if v_sub0 else None
+                    subject_sink.append(
+                        EntitySubject(
+                            entity_type="agent",
+                            entity_id=0,
+                            entity_uri=agent_uri,
+                            source=source,
+                            source_record_id=source_id,
+                            relation_type="associated_place",
+                            vocabulary=v_sub2,
+                            concept_id=cid,
+                            raw_label=val_clean,
+                            is_resolved=bool(v_sub2 and cid),
+                        )
+                    )
+
         return ([], [], [], [], [agent], [], identifiers, [], [], [])
 
     # Subject/topical/form authority without work or agent heading
@@ -1629,6 +1722,7 @@ def decompose_marc_wemi(
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     key_sink: Optional[list[EntityKey]] = None,
+    subject_sink: Optional[list[EntitySubject]] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
 ) -> tuple[
@@ -1786,12 +1880,16 @@ def decompose_marc_wemi(
     assoc = ManifestationExpressionAssociation(
         manifestation_id=0,
         expression_id=0,
+        manifestation_uri=manifestation.manifestation_uri,
+        expression_uri=expression.expression_uri,
         is_primary=True,
     )
 
     # 5. Items
     items = (
-        parse_marc_items(record_elem, manifestation_id=0, source=source, record_origin=effective_origin)
+        parse_marc_items(
+            record_elem, manifestation_id=0, source=source, record_origin=effective_origin
+        )
         if include_items
         else []
     )
@@ -1983,8 +2081,7 @@ def decompose_marc_wemi(
 
     # Pre-render serializations using the WEMI Triad
     translators = [
-        a for a in parsed["agents"]
-        if "trl" in a.get("role_counts", {}) or a.get("role") == "trl"
+        a for a in parsed["agents"] if "trl" in a.get("role_counts", {}) or a.get("role") == "trl"
     ]
     narrators = [
         a
@@ -2073,7 +2170,9 @@ def decompose_marc_wemi(
             for uri in uri_list:
                 if not uri:
                     continue
-                scheme = (detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")).lower()
+                scheme = (
+                    detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")
+                ).lower()
                 identifiers.append(
                     IdentifierEntity(
                         entity_type="agent",
@@ -2131,6 +2230,79 @@ def decompose_marc_wemi(
                     )
                 )
 
+    # 600 personal name subjects -> Agent + Contribution (role="subject")
+    for f in _get_datafields(record_elem, "600"):
+        name_sub = _get_subfield(f, "a")
+        if name_sub:
+            name_sub_clean = (
+                strip_isbd(name_sub, strip_isbd_punctuation, isbd_punctuation) or name_sub
+            )
+            dates_sub = _get_subfield(f, "d")
+            b_yr, d_yr = parse_marc_dates(dates_sub)
+            sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
+            a_sub_uri = (
+                sub0
+                or f"urn:agent:{source}:{source_id}:{derive_agent_id(name_sub_clean, dates_sub)}"
+            )
+            if not any(ag.agent_uri == a_sub_uri for ag in agents_list):
+                agents_list.append(
+                    AgentEntity(
+                        agent_uri=a_sub_uri,
+                        source=source,
+                        source_id=source_id,
+                        record_origin=effective_origin,
+                        name=name_sub_clean,
+                        name_normalized=name_sub_clean.strip().lower(),
+                        surname=name_sub_clean.split(",")[0].strip()
+                        if "," in name_sub_clean
+                        else None,
+                        dates=dates_sub,
+                        birth_year=b_yr,
+                        death_year=d_yr,
+                        is_personal=True,
+                    )
+                )
+            contributions.append(
+                ContributionEntity(
+                    entity_type="work",
+                    entity_id=0,
+                    agent_id=0,
+                    entity_uri=work.work_uri,
+                    agent_uri=a_sub_uri,
+                    role="subject",
+                    is_primary=False,
+                    field_tag="600",
+                )
+            )
+
+    if subject_sink is not None:
+        for s in parsed.get("subjects_folded") or []:
+            field = str(s.get("field") or "")
+            relation_type = "topic"
+            if field == "651":
+                relation_type = "geographic"
+            elif field == "655":
+                relation_type = "genre_form"
+            elif field == "648":
+                relation_type = "temporal"
+            vocab = s.get("vocabulary")
+            cid = s.get("code") or s.get("concept_id")
+            subject_sink.append(
+                EntitySubject(
+                    entity_type="work",
+                    entity_id=0,
+                    entity_uri=work.work_uri,
+                    source=source,
+                    source_record_id=source_id,
+                    relation_type=relation_type,
+                    vocabulary=vocab,
+                    concept_id=cid,
+                    raw_label=s.get("heading"),
+                    is_resolved=bool(vocab and cid),
+                    is_primary=False,
+                )
+            )
+
     return (
         work,
         expression,
@@ -2159,7 +2331,7 @@ def decode_analytic(value: str) -> tuple[str, Optional[str]]:
     """Decode a key value written by `encode_analytic`."""
     try:
         title, creator = json.loads(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return value, None
     return title, creator
 
@@ -2299,7 +2471,7 @@ def _as_int(value: Optional[str]) -> Optional[int]:
 
 
 def _clean_duration(value: Optional[str]) -> Optional[str]:
-    """"(4:32)" is one duration written for a card catalogue; store "4:32"."""
+    """ "(4:32)" is one duration written for a card catalogue; store "4:32"."""
     if not value:
         return None
     cleaned = value.strip().strip("()[]").strip()
@@ -2414,9 +2586,7 @@ def derive_domain_keys(
     if translator_names:
         _add(
             "translators_signature",
-            " ".join(
-                sorted(compute_author_key(n, None) for n in translator_names if n)
-            ).strip(),
+            " ".join(sorted(compute_author_key(n, None) for n in translator_names if n)).strip(),
         )
 
     # Bound-with, from 501 "Huomautus julkaisemisesta jonkin kanssa". The RDA

@@ -22,7 +22,14 @@ from reconciliator.config import (
     configure_logging,
     load_config,
 )
+from reconciliator.curie import extract_wikidata_qid
 from reconciliator.db import reset_all_storage
+from reconciliator.db_container import (
+    is_container_present,
+    is_container_running,
+    start_postgres_container,
+    stop_postgres_container,
+)
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.indexer.ipc.client import DaemonLifecycleManager
 from reconciliator.indexer.ipc.protocol import get_default_socket_path
@@ -90,8 +97,98 @@ from reconciliator.xml_enricher import MARCXMLEnricher
 app = typer.Typer(
     help="Reconciliator: High-Performance Finnish Bibliographic Authority Reconciliation Engine"
 )
+db_app = typer.Typer(help="Manage local PostgreSQL container via Podman")
+app.add_typer(db_app, name="db")
+
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+@db_app.command("start")
+def db_start_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    timeout: float = typer.Option(
+        30.0, "--timeout", "-t", help="Timeout in seconds to wait for PostgreSQL readiness"
+    ),
+) -> None:
+    """Start local containerized PostgreSQL instance using Podman."""
+    cfg_path = _resolve_cli_config(config)
+    cfg = load_config(cfg_path)
+    pg = cfg.storage.postgres
+    console.print(
+        f"[bold blue]Starting PostgreSQL container '{pg.container_name}' on port {pg.port}...[/bold blue]"
+    )
+    try:
+        start_postgres_container(
+            host=pg.host,
+            port=pg.port,
+            database=pg.database,
+            user=pg.user,
+            password=pg.password,
+            name=pg.container_name,
+            image=pg.container_image,
+            wait_ready=True,
+            timeout_seconds=timeout,
+        )
+        console.print(
+            f"[bold green]PostgreSQL is running and ready on {pg.host}:{pg.port}/{pg.database}[/bold green]"
+        )
+    except Exception as e:
+        console.print(f"[bold red]Failed to start PostgreSQL container: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@db_app.command("stop")
+def db_stop_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+) -> None:
+    """Stop the local PostgreSQL container."""
+    cfg_path = _resolve_cli_config(config)
+    cfg = load_config(cfg_path)
+    cname = cfg.storage.postgres.container_name
+    console.print(f"[bold yellow]Stopping PostgreSQL container '{cname}'...[/bold yellow]")
+    if stop_postgres_container(name=cname):
+        console.print(f"[bold green]Container '{cname}' stopped.[/bold green]")
+    else:
+        console.print(f"[bold yellow]Container '{cname}' was not running.[/bold yellow]")
+
+
+@db_app.command("status")
+def db_status_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+) -> None:
+    """Check status of the local PostgreSQL container."""
+    from rich.table import Table
+
+    cfg_path = _resolve_cli_config(config)
+    cfg = load_config(cfg_path)
+    pg = cfg.storage.postgres
+    cname = pg.container_name
+    running = is_container_running(name=cname)
+    present = is_container_present(name=cname)
+
+    table = Table(title="PostgreSQL Container & Connection Status")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="green" if running else "yellow")
+
+    table.add_row("Container Name", cname)
+    table.add_row("Container Present", "Yes" if present else "No")
+    table.add_row(
+        "Container Running",
+        "[bold green]Running[/bold green]" if running else "[bold red]Stopped[/bold red]",
+    )
+    table.add_row("Host / Port", f"{pg.host}:{pg.port}")
+    table.add_row("Database", pg.database)
+    table.add_row("User", pg.user)
+    table.add_row("Database URL", pg.get_database_url())
+
+    console.print(table)
 
 
 def _resolve_cli_config(config: Path | str) -> Path:
@@ -132,9 +229,7 @@ def reset_cmd(
 
 @app.command("status")
 def status_cmd(
-    action: Optional[str] = typer.Argument(
-        None, help="Optional subcommand or alias like 'watch'"
-    ),
+    action: Optional[str] = typer.Argument(None, help="Optional subcommand or alias like 'watch'"),
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
@@ -168,7 +263,7 @@ def status_cmd(
     lifecycle: Optional[DaemonLifecycleManager] = None
     if cfg.storage.vector_engine.mode == "daemon":
         sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
-            cfg.storage.authority_db.parent
+            cfg.storage.data_dir
         )
         lifecycle = DaemonLifecycleManager(sock_p)
         daemon_status = lifecycle.query_status()
@@ -186,7 +281,11 @@ def status_cmd(
                     tasks = fetch_tasks()
                     d_status = lifecycle.query_status() if lifecycle else None
                     console.print(render_status_json(tasks, daemon_status=d_status))
-                    if exit_when_done and tasks and all(t.status in ("completed", "failed") for t in tasks):
+                    if (
+                        exit_when_done
+                        and tasks
+                        and all(t.status in ("completed", "failed") for t in tasks)
+                    ):
                         break
                     time.sleep(poll_interval)
             except KeyboardInterrupt:
@@ -231,13 +330,16 @@ def daemon_status_cmd(
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
-        cfg.storage.authority_db.parent
+        cfg.storage.data_dir
     )
     lifecycle = DaemonLifecycleManager(sock_p, config_path=resolved_config)
     status = lifecycle.query_status()
     if json_output:
         import json as _json
-        console.print(_json.dumps(status or {"status": "stopped", "socket_path": str(sock_p)}, indent=2))
+
+        console.print(
+            _json.dumps(status or {"status": "stopped", "socket_path": str(sock_p)}, indent=2)
+        )
     else:
         console.print(render_vector_daemon_panel(status))
 
@@ -252,7 +354,7 @@ def daemon_start_cmd(
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
-        cfg.storage.authority_db.parent
+        cfg.storage.data_dir
     )
     lifecycle = DaemonLifecycleManager(sock_p, config_path=resolved_config, auto_start=True)
     if lifecycle.is_running():
@@ -276,7 +378,7 @@ def daemon_stop_cmd(
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     sock_p = cfg.storage.vector_engine.daemon.socket_path or get_default_socket_path(
-        cfg.storage.authority_db.parent
+        cfg.storage.data_dir
     )
     lifecycle = DaemonLifecycleManager(sock_p, config_path=resolved_config)
     if not lifecycle.is_running():
@@ -784,9 +886,9 @@ def _wemi_repo(cfg: Any, embedder: Optional[Any] = None) -> WEMIRepository:
     `total_vectors == 0`, so wiring them before `build-index` has run is safe.
     """
     if embedder is None:
-        return WEMIRepository(cfg.storage.authority_db, fts_config=cfg.storage.fts)
+        return WEMIRepository(cfg.storage.database_url, fts_config=cfg.storage.fts)
     return WEMIRepository(
-        cfg.storage.authority_db,
+        cfg.storage.database_url,
         fts_config=cfg.storage.fts,
         work_index_path=cfg.storage.work_index,
         manifestation_index_path=cfg.storage.manifestation_index,
@@ -831,6 +933,7 @@ def _ingest_corpus_as_wemi(
             mediums_of_performance=batch.get("mediums") or [],
             contributions=batch.get("contributions") or [],
             entity_keys=batch.get("entity_keys") or [],
+            entity_subjects=batch.get("entity_subjects") or [],
             record_origin=source_name,
         )
         batch.clear()
@@ -840,6 +943,7 @@ def _ingest_corpus_as_wemi(
 
     for rec_fmt, orig_payload, _raw_rec, _offset in records:
         keys: list[Any] = []
+        subjs: list[Any] = []
         try:
             if rec_fmt == "marcxml":
                 w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
@@ -849,6 +953,7 @@ def _ingest_corpus_as_wemi(
                     strip_isbd_punctuation=strip_isbd_punctuation,
                     isbd_punctuation=isbd_punctuation,
                     key_sink=keys,
+                    subject_sink=subjs,
                 )
             elif rec_fmt in ("bibframe_rdf", "bibframe_jsonld"):
                 if rec_fmt == "bibframe_rdf":
@@ -859,7 +964,7 @@ def _ingest_corpus_as_wemi(
                     g.parse(data=json.dumps(orig_payload), format="json-ld")
                     node = None
                 w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
-                    g=g, instance_node=node, profile=profile, source=source_name
+                    g=g, instance_node=node, profile=profile, source=source_name, subject_sink=subjs
                 )
                 keys = bibframe_entity_keys(m, w, agts, idents)
             else:
@@ -878,6 +983,7 @@ def _ingest_corpus_as_wemi(
         _stage("mediums", mops)
         _stage("contributions", contribs)
         _stage("entity_keys", keys)
+        _stage("entity_subjects", subjs)
         total += 1
         if total % batch_size == 0:
             _flush()
@@ -1101,7 +1207,9 @@ def reconcile_cmd(
                 raw_rec_item = parse_marc_record_elem(
                     r_elem,
                     source="target",
-                    supported_subject_vocabularies=getattr(vocab_cfg, "supported_subject_vocabularies", None),
+                    supported_subject_vocabularies=getattr(
+                        vocab_cfg, "supported_subject_vocabularies", None
+                    ),
                     legacy_to_modern=getattr(vocab_cfg, "legacy_to_modern", None),
                     relator_mappings=getattr(rec_norm_cfg, "relator_mappings", None),
                     vocab_store=vocab_store,
@@ -1224,7 +1332,9 @@ def reconcile_cmd(
                             field_occurrence=idx + 1,
                             subfield_code=subfield_code,
                             target_heading=agent.name,
-                            target_role=", ".join(agent.role_counts.keys()) if agent.role_counts else None,
+                            target_role=", ".join(agent.role_counts.keys())
+                            if agent.role_counts
+                            else None,
                             uri=uri,
                             vocabulary=detect_vocabulary(uri) or "OTHER",
                             authority_label=agent.name,
@@ -1269,7 +1379,9 @@ def reconcile_cmd(
                             field_occurrence=idx + 1,
                             subfield_code=subfield_code,
                             target_heading=agent.name,
-                            target_role=", ".join(agent.role_counts.keys()) if agent.role_counts else None,
+                            target_role=", ".join(agent.role_counts.keys())
+                            if agent.role_counts
+                            else None,
                             uri=uri,
                             vocabulary=detect_vocabulary(uri) or "OTHER",
                             authority_label=agent.name,
@@ -1395,9 +1507,11 @@ def reconcile_cmd(
                 or (linkage.final_work_uri if linkage else None)
                 or record_level_w_uri
             )
-            qid = (
-                wemi_res.matched_work.wikidata_qid if (wemi_res and wemi_res.matched_work) else None
-            ) or (w_cluster.wikidata_qid if w_cluster else None)
+            qid = None
+            if wemi_res and wemi_res.matched_work and wemi_res.matched_work.source == "wikidata":
+                qid = wemi_res.matched_work.source_id
+            if not qid and matched_w_uri:
+                qid = extract_wikidata_qid(matched_w_uri)
             w_action = (
                 "injected"
                 if (r_cfg.enrich and matched_w_uri)
@@ -1668,11 +1782,7 @@ def consolidate_works_cmd(
         canonical = result.canonical_by_work[members[0]]
         others = [m for m in members if m != canonical]
         evidence = sorted(
-            {
-                ev
-                for (a, b), ev in result.evidence.items()
-                if a in members and b in members
-            }
+            {ev for (a, b), ev in result.evidence.items() if a in members and b in members}
         )
         table.add_row(
             signatures[canonical].work_uri,

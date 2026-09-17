@@ -128,7 +128,7 @@ def normalize_doi(
     )
     for p in sorted(prefixes, key=len, reverse=True):
         if clean.lower().startswith(p.lower()):
-            clean = clean[len(p):].strip()
+            clean = clean[len(p) :].strip()
 
     pat = pattern or r"(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)"
     m = re.search(pat, clean, re.IGNORECASE)
@@ -139,7 +139,6 @@ def normalize_doi(
         return clean
 
     return None
-
 
 
 def normalize_source_id(

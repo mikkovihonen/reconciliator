@@ -435,21 +435,18 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
     w_repo.register_source("melinda", is_authoritative=True)
     auth_work = WorkEntity(
         record_origin="melinda",
-        work_uri="http://urn.fi/URN:NBN:fi:au:pn:000000042",
         source="melinda",
         source_id="kivi_veljekset",
         title="Seitsemän veljestä",
         title_normalized="seitseman veljesta",
         author_key="kivi aleksis",
         work_type="text",
-        wikidata_qid="Q1234567",
     )
     w_id = w_repo.insert_works_batch([auth_work])[0]
 
     auth_expr = ExpressionEntity(
         record_origin="melinda",
         work_id=w_id,
-        expression_uri="http://urn.fi/URN:NBN:fi:au:pn:000000042#fin",
         source="melinda",
         source_id="veljekset_fin",
         language="fin",
@@ -460,7 +457,6 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
 
     auth_manif = ManifestationEntity(
         record_origin="melinda",
-        manifestation_uri="http://example.org/manif/veljekset_1870",
         source="melinda",
         source_id="veljekset_m1",
         work_id=w_id,
@@ -519,14 +515,13 @@ def test_cluster_corpus_external_uri_hoisting(temp_dbs):
     assert res.work_clusters_count == 1
 
     w = c_repo.get_all_work_clusters()[0]
-    # Verify hoisted external URI!
-    assert w.canonical_work_uri == "http://urn.fi/URN:NBN:fi:au:pn:000000042"
-    assert w.wikidata_qid == "Q1234567"
+    # Verify hoisted external CURIE!
+    assert w.canonical_work_curie == "melinda:kivi_veljekset"
 
-    # Verify hoisted expression URI!
+    # Verify hoisted expression CURIE!
     exps = c_repo.get_expression_clusters_for_work(w.cluster_id)
     assert len(exps) == 1
-    assert exps[0].canonical_expression_uri == "http://urn.fi/URN:NBN:fi:au:pn:000000042#fin"
+    assert exps[0].canonical_expression_curie == "melinda:veljekset_fin"
 
 
 def test_cluster_corpus_specialized_domains(temp_dbs):

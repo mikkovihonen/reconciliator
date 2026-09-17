@@ -322,6 +322,7 @@ def write_wemi_batch(
         mediums_of_performance=payload.get("mediums") or [],
         contributions=payload.get("contributions") or [],
         entity_keys=payload.get("entity_keys") or [],
+        entity_subjects=payload.get("entity_subjects") or [],
         record_origin=record_origin,
     )
     return record_count or (len(works) or len(agents))
@@ -477,14 +478,8 @@ def ingest_oai_pipeline(
                         len(done_slices),
                         already_harvested,
                     )
-            elif (
-                prior.status == "completed"
-                and not config.from_date
-                and prior.last_harvest_until
-            ):
-                effective_config = config.model_copy(
-                    update={"from_date": prior.last_harvest_until}
-                )
+            elif prior.status == "completed" and not config.from_date and prior.last_harvest_until:
+                effective_config = config.model_copy(update={"from_date": prior.last_harvest_until})
                 logger.info(
                     "Source '%s': incremental harvest from %s",
                     source_name,
@@ -546,7 +541,9 @@ def ingest_oai_pipeline(
     # after every watermark has been promoted cannot regress it.
     safe_token: Optional[str] = initial_token
     finished_slices: list[tuple[Optional[str], Optional[str]]] = [
-        tuple(s) for s in slices if tuple(s) in done_slices  # type: ignore[misc]
+        tuple(s)
+        for s in slices
+        if tuple(s) in done_slices  # type: ignore[misc]
     ]
 
     def _telemetry() -> dict[str, Any]:
@@ -569,8 +566,7 @@ def ingest_oai_pipeline(
                 metadata_prefix=effective_config.metadata_prefix,
                 set_spec=effective_config.set_spec,
                 last_harvest_from=from_date,
-                last_harvest_until=until_date
-                or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                last_harvest_until=until_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 resumption_token=token,
                 records_harvested=already_harvested + total_ingested,
                 status=status,
@@ -733,9 +729,7 @@ def ingest_oai_pipeline(
             _checkpoint()
             return
 
-        written = write_wemi_batch(
-            store, payload["batch"]
-        )
+        written = write_wemi_batch(store, payload["batch"])
         with counters_lock:
             total_ingested += written
             snapshot = _telemetry()
@@ -823,9 +817,7 @@ def ingest_oai_pipeline(
 
     if tracker:
         meta = (
-            _telemetry()
-            if is_oai
-            else {"records_ingested": total_ingested, "source": source_name}
+            _telemetry() if is_oai else {"records_ingested": total_ingested, "source": source_name}
         )
         tracker.complete_task(metadata=meta)
 

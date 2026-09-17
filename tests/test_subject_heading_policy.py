@@ -116,9 +116,7 @@ def test_no_duplicate_when_heading_already_matches_pref_label(
     """Nothing is retained when the catalogued form already is the preferred label."""
     cfg = VocabNormalizationConfig(preserve_original_heading=True)
     enricher = MARCXMLEnricher(vocab_folder=VocabFolder(vocab_store, config=cfg))
-    record = etree.fromstring(
-        RECORD.replace(">tohtorit<", ">lääkärit<").encode("utf-8")
-    )
+    record = etree.fromstring(RECORD.replace(">tohtorit<", ">lääkärit<").encode("utf-8"))
     enricher.enrich_record_tree(record, enrich=True, fold_legacy=True)
     subs = _subject_field(record)
     assert subs["a"] == ["lääkärit"]

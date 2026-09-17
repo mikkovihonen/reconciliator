@@ -114,15 +114,19 @@ def test_the_music_split_keys_on_content_type_not_on_the_music_work_key():
         "funnel_b_music_sound"
     )
     # A music_work key on a sound recording must not divert it.
-    assert _select(
-        _record(work_type="music", content_type="audio_music", keys={"music_work": ["x"]})
-    ).id == "funnel_b_music_sound"
+    assert (
+        _select(
+            _record(work_type="music", content_type="audio_music", keys={"music_work": ["x"]})
+        ).id
+        == "funnel_b_music_sound"
+    )
 
 
 def test_exhibition_takes_precedence_over_conference_for_events():
-    assert _select(
-        _record(work_type="event", keys={"exhibition_event": ["x"]})
-    ).id == "funnel_ll_exhibition"
+    assert (
+        _select(_record(work_type="event", keys={"exhibition_event": ["x"]})).id
+        == "funnel_ll_exhibition"
+    )
     # Events that are not exhibitions fall through to the conference funnel,
     # which is what the old chain did after its exhibition test failed.
     assert _select(_record(work_type="event")).id == "funnel_j_conference"
@@ -135,16 +139,18 @@ def test_component_records_reach_the_article_funnel():
 
 def test_government_is_claimed_by_work_type_or_by_a_valto_urn():
     assert _select(_record(work_type="government")).id == "funnel_p_government"
-    assert _select(
-        _record(work_type="text"), {"urn": ["URN:ISBN:valto-123"]}
-    ).id == "funnel_p_government"
+    assert (
+        _select(_record(work_type="text"), {"urn": ["URN:ISBN:valto-123"]}).id
+        == "funnel_p_government"
+    )
 
 
 def test_broadcast_claims_both_audio_and_moving_image_with_a_timecode():
     for work_type in ("audio_nonmusic", "moving_image"):
-        assert _select(
-            _record(work_type=work_type, keys={"broadcast": ["t"]})
-        ).id == "funnel_gg_broadcast"
+        assert (
+            _select(_record(work_type=work_type, keys={"broadcast": ["t"]})).id
+            == "funnel_gg_broadcast"
+        )
 
 
 # --- predicates ----------------------------------------------------------
@@ -194,9 +200,7 @@ def test_handler_resolves_by_builtin_name():
 
 
 def test_handler_resolves_by_relative_path_against_the_config_directory():
-    module = resolve_handler(
-        "src/reconciliator/funnels/recorded_sound.py", "f", Path.cwd()
-    )
+    module = resolve_handler("src/reconciliator/funnels/recorded_sound.py", "f", Path.cwd())
     assert hasattr(module, "tier3")
 
 
@@ -241,9 +245,7 @@ def test_an_override_replaces_a_builtin_in_place_keeping_its_precedence():
 
 
 def test_a_new_funnel_is_inserted_before_the_fall_through():
-    merged = _merge_funnel_specs(
-        [FunnelSpec(id="funnel_custom", when={"work_type": ["hub"]})]
-    )
+    merged = _merge_funnel_specs([FunnelSpec(id="funnel_custom", when={"work_type": ["hub"]})])
     ids = [s.id for s in merged]
     assert ids[-1] == "funnel_a_monograph", "the default must stay last"
     assert ids[-2] == "funnel_custom"

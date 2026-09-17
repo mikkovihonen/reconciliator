@@ -34,8 +34,12 @@ ingest_wikidata:
         assert mock_pipeline.called
         # The second positional argument should be a WEMIRepository instance
         repo_arg = mock_pipeline.call_args[0][1]
-        assert isinstance(repo_arg, WEMIRepository)
-        assert repo_arg.db_path == tmp_path / "authority.db"
+        from urllib.parse import unquote
+
+        from reconciliator.config import load_config
+
+        conf = load_config(cfg_file)
+        assert unquote(repo_arg.db_path) == unquote(conf.storage.database_url)
 
 
 def test_every_source_routes_to_the_single_authority_database(tmp_path: Path) -> None:
@@ -84,8 +88,11 @@ ingest_oai:
             assert result.exit_code == 0, result.output
             store = mock_pipeline.call_args.kwargs.get("store")
             assert isinstance(store, WEMIRepository)
-            assert store.db_path == tmp_path / "authority.db"
+            from urllib.parse import unquote
+
+            from reconciliator.config import load_config
+
+            conf = load_config(cfg_file)
+            assert unquote(store.db_path) == unquote(conf.storage.database_url)
             passed_config = mock_pipeline.call_args.kwargs.get("config")
             assert passed_config.authoritative is expected_authoritative
-
-

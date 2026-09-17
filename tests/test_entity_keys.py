@@ -35,7 +35,9 @@ def repo(tmp_path: Path) -> WEMIRepository:
     )
 
 
-def _record(control: str, title: str, author: str = "Waltari, Mika", extra: str = "") -> etree._Element:
+def _record(
+    control: str, title: str, author: str = "Waltari, Mika", extra: str = ""
+) -> etree._Element:
     return etree.fromstring(
         f"""<record xmlns="{MARC_NS}">
             <controlfield tag="001">{control}</controlfield>
@@ -69,7 +71,7 @@ def test_analytic_encoding_survives_stripping():
 
 
 def test_analytic_encoding_tolerates_punctuation_heavy_titles():
-    for title in ('Quo vadis?', 'A "quoted" title', "Title: subtitle / author", "Ääni"):
+    for title in ("Quo vadis?", 'A "quoted" title', "Title: subtitle / author", "Ääni"):
         assert decode_analytic(encode_analytic(title, None)) == (title, None)
 
 

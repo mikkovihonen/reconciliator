@@ -196,4 +196,3 @@ def test_usearch_ipc_pool_manager(tmp_path: Path) -> None:
 
     scores, found = managed.engine.search(vecs[2:3], top_k=1)
     assert found[0][0] == 3
-

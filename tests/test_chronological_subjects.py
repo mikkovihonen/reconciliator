@@ -20,11 +20,40 @@ from reconciliator.xml_enricher import MARCXMLEnricher
 
 def test_subjects_container_helpers() -> None:
     container = SubjectsContainer(
-        topical=[SubjectItem(uri="http://example.org/1", pref_label="kissa", vocabulary="yso", target_field="650")],
-        genre_form=[SubjectItem(uri="http://example.org/2", pref_label="runot", vocabulary="slm", target_field="655")],
-        geographic=[SubjectItem(uri="http://example.org/3", pref_label="Helsinki", vocabulary="yso-paikat", target_field="651")],
-        chronological=[SubjectItem(uri="http://example.org/4", pref_label="1800-luku", vocabulary="yso-aika", target_field="648")],
-        medium_of_performance=[SubjectItem(uri="http://example.org/5", pref_label="viulu", vocabulary="seko", target_field="382")],
+        topical=[
+            SubjectItem(
+                uri="http://example.org/1", pref_label="kissa", vocabulary="yso", target_field="650"
+            )
+        ],
+        genre_form=[
+            SubjectItem(
+                uri="http://example.org/2", pref_label="runot", vocabulary="slm", target_field="655"
+            )
+        ],
+        geographic=[
+            SubjectItem(
+                uri="http://example.org/3",
+                pref_label="Helsinki",
+                vocabulary="yso-paikat",
+                target_field="651",
+            )
+        ],
+        chronological=[
+            SubjectItem(
+                uri="http://example.org/4",
+                pref_label="1800-luku",
+                vocabulary="yso-aika",
+                target_field="648",
+            )
+        ],
+        medium_of_performance=[
+            SubjectItem(
+                uri="http://example.org/5",
+                pref_label="viulu",
+                vocabulary="seko",
+                target_field="382",
+            )
+        ],
     )
 
     items = container.all_items()
@@ -70,33 +99,37 @@ def test_marcxml_loader_parses_648() -> None:
 def test_record_normalizer_folds_and_retags_chronological(tmp_path: Path) -> None:
     store = VocabStore(tmp_path / "vocab_648.db")
     # Setup yso-aika concept
-    store.insert_concepts([
-        VocabConcept(
-            uri="http://www.yso.fi/onto/yso-aika/p1800",
-            vocabulary="yso-aika",
-            pref_label_fi="1800-luku",
-            pref_label_sv="1800-talet",
-            target_field="648",
-        ),
-        VocabConcept(
-            uri="http://www.yso.fi/onto/yso/p456",
-            vocabulary="yso",
-            pref_label_fi="historia",
-            target_field="650",
-        ),
-    ])
+    store.insert_concepts(
+        [
+            VocabConcept(
+                uri="http://www.yso.fi/onto/yso-aika/p1800",
+                vocabulary="yso-aika",
+                pref_label_fi="1800-luku",
+                pref_label_sv="1800-talet",
+                target_field="648",
+            ),
+            VocabConcept(
+                uri="http://www.yso.fi/onto/yso/p456",
+                vocabulary="yso",
+                pref_label_fi="historia",
+                target_field="650",
+            ),
+        ]
+    )
     # Setup mapping from a legacy temporal concept in 650 to yso-aika in 648
-    store.insert_mappings([
-        ConceptMapping(
-            legacy_uri="http://www.yso.fi/onto/ysa/Y9999",
-            legacy_vocab="ysa",
-            legacy_label_fi="1800-luku",
-            target_uri="http://www.yso.fi/onto/yso-aika/p1800",
-            target_vocab="yso-aika",
-            mapping_type="exact_match",
-            target_field="648",
-        )
-    ])
+    store.insert_mappings(
+        [
+            ConceptMapping(
+                legacy_uri="http://www.yso.fi/onto/ysa/Y9999",
+                legacy_vocab="ysa",
+                legacy_label_fi="1800-luku",
+                target_uri="http://www.yso.fi/onto/yso-aika/p1800",
+                target_vocab="yso-aika",
+                mapping_type="exact_match",
+                target_field="648",
+            )
+        ]
+    )
 
     folder = VocabFolder(store)
     normalizer = RecordNormalizer(vocab_folder=folder)
@@ -127,7 +160,7 @@ def test_record_normalizer_folds_and_retags_chronological(tmp_path: Path) -> Non
                     "heading": "historia",
                     "field": "650",
                     "vocabulary": "yso",
-                }
+                },
             ],
         },
     }
@@ -147,25 +180,29 @@ def test_record_normalizer_folds_and_retags_chronological(tmp_path: Path) -> Non
 
 def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
     store = VocabStore(tmp_path / "vocab_enrich_648.db")
-    store.insert_concepts([
-        VocabConcept(
-            uri="http://www.yso.fi/onto/yso-aika/p1800",
-            vocabulary="yso-aika",
-            pref_label_fi="1800-luku",
-            target_field="648",
-        )
-    ])
-    store.insert_mappings([
-        ConceptMapping(
-            legacy_uri="http://www.yso.fi/onto/ysa/Y1800",
-            legacy_vocab="ysa",
-            legacy_label_fi="1800-luku",
-            target_uri="http://www.yso.fi/onto/yso-aika/p1800",
-            target_vocab="yso-aika",
-            mapping_type="exact_match",
-            target_field="648",
-        )
-    ])
+    store.insert_concepts(
+        [
+            VocabConcept(
+                uri="http://www.yso.fi/onto/yso-aika/p1800",
+                vocabulary="yso-aika",
+                pref_label_fi="1800-luku",
+                target_field="648",
+            )
+        ]
+    )
+    store.insert_mappings(
+        [
+            ConceptMapping(
+                legacy_uri="http://www.yso.fi/onto/ysa/Y1800",
+                legacy_vocab="ysa",
+                legacy_label_fi="1800-luku",
+                target_uri="http://www.yso.fi/onto/yso-aika/p1800",
+                target_vocab="yso-aika",
+                mapping_type="exact_match",
+                target_field="648",
+            )
+        ]
+    )
     folder = VocabFolder(store)
     enricher = MARCXMLEnricher(vocab_folder=folder)
 
@@ -186,12 +223,21 @@ def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
         enrich=True,
     )
 
-    f648 = root.findall(".//marc:datafield[@tag='648']", MARC_NS) or root.findall(".//datafield[@tag='648']")
+    f648 = root.findall(".//marc:datafield[@tag='648']", MARC_NS) or root.findall(
+        ".//datafield[@tag='648']"
+    )
     assert len(f648) == 1
     f = f648[0]
-    sub2 = (f.findall("marc:subfield[@code='2']", MARC_NS) or f.findall("subfield[@code='2']"))[0].text
+    sub2 = (f.findall("marc:subfield[@code='2']", MARC_NS) or f.findall("subfield[@code='2']"))[
+        0
+    ].text
     assert sub2 == "yso-aika"
-    sub0 = [e.text for e in (f.findall("marc:subfield[@code='0']", MARC_NS) or f.findall("subfield[@code='0']"))]
+    sub0 = [
+        e.text
+        for e in (
+            f.findall("marc:subfield[@code='0']", MARC_NS) or f.findall("subfield[@code='0']")
+        )
+    ]
     assert "http://www.yso.fi/onto/yso-aika/p1800" in sub0
 
 
@@ -259,7 +305,9 @@ def test_bibframe_jsonld_temporal_subject(tmp_path: Path) -> None:
         {
             "@id": "http://example.org/inst/1",
             "@type": ["http://id.loc.gov/ontologies/bibframe/Instance"],
-            "http://id.loc.gov/ontologies/bibframe/instanceOf": [{"@id": "http://example.org/work/1"}],
+            "http://id.loc.gov/ontologies/bibframe/instanceOf": [
+                {"@id": "http://example.org/work/1"}
+            ],
         },
         {
             "@id": "http://example.org/work/1",
@@ -396,5 +444,3 @@ def test_bibframe_dynamic_default_subject_field() -> None:
     assert len(rec["subjects"]["medium_of_performance"]) == 1
     assert rec["subjects"]["medium_of_performance"][0]["heading"] == "Musiikki"
     assert rec["subjects"]["medium_of_performance"][0]["field"] == "382"
-
-

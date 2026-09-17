@@ -26,6 +26,7 @@ from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
     EntityKey,
+    EntitySubject,
     ExpressionEntity,
     IdentifierEntity,
     ItemEntity,
@@ -53,8 +54,13 @@ ISBD_TEXT_FIELDS: dict[str, tuple[str, ...]] = {
     "works": ("title", "original_title"),
     "expressions": ("title",),
     "manifestations": (
-        "title", "subtitle", "publisher", "publication_place",
-        "edition_statement", "series_title", "host_title",
+        "title",
+        "subtitle",
+        "publisher",
+        "publication_place",
+        "edition_statement",
+        "series_title",
+        "host_title",
     ),
     "agents": ("name", "surname", "fuller_name"),
 }
@@ -106,6 +112,7 @@ class DecomposedRecord:
     mediums: list[MediumOfPerformance] = field(default_factory=list)
     contributions: list[ContributionEntity] = field(default_factory=list)
     entity_keys: list[EntityKey] = field(default_factory=list)
+    entity_subjects: list[EntitySubject] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (self.works or self.manifestations or self.agents)
@@ -113,9 +120,18 @@ class DecomposedRecord:
     def extend(self, other: DecomposedRecord) -> None:
         """Accumulate another record's entities into this one."""
         for name in (
-            "works", "expressions", "manifestations", "items", "agents",
-            "relationships", "identifiers", "associations", "mediums",
-            "contributions", "entity_keys",
+            "works",
+            "expressions",
+            "manifestations",
+            "items",
+            "agents",
+            "relationships",
+            "identifiers",
+            "associations",
+            "mediums",
+            "contributions",
+            "entity_keys",
+            "entity_subjects",
         ):
             getattr(self, name).extend(getattr(other, name))
 
@@ -287,10 +303,7 @@ class RecordLoader(ABC):
                     setattr(
                         entity,
                         name,
-                        [
-                            (v.rstrip(chars) or v) if isinstance(v, str) else v
-                            for v in values
-                        ],
+                        [(v.rstrip(chars) or v) if isinstance(v, str) else v for v in values],
                     )
 
     def check_output(
@@ -312,22 +325,18 @@ class RecordLoader(ABC):
         produced_keys = {key.key_type for key in record.entity_keys}
         undeclared = produced_keys - caps.key_types
         if undeclared:
-            findings.append(
-                f"{caps.name} emitted undeclared key types: {sorted(undeclared)}"
-            )
+            findings.append(f"{caps.name} emitted undeclared key types: {sorted(undeclared)}")
         contradicted = produced_keys & set(caps.not_produced)
         if contradicted:
             findings.append(
-                f"{caps.name} declares it does not produce {sorted(contradicted)} "
-                f"but emitted them"
+                f"{caps.name} declares it does not produce {sorted(contradicted)} but emitted them"
             )
 
         produced_schemes = {i.scheme for i in record.identifiers}
         undeclared_schemes = produced_schemes - caps.identifier_schemes
         if undeclared_schemes:
             findings.append(
-                f"{caps.name} emitted undeclared identifier schemes: "
-                f"{sorted(undeclared_schemes)}"
+                f"{caps.name} emitted undeclared identifier schemes: {sorted(undeclared_schemes)}"
             )
 
         if caps.deterministic_ids:
@@ -390,9 +399,7 @@ class RecordLoader(ABC):
                 # A blank-node label is never a role: a BIBFRAME role is usually
                 # `bf:role [ rdfs:label "..." ]`, and reading the node instead of
                 # its label put rdflib's parse label in the role column.
-                return bool(role) and (
-                    normalize_role(role) != role or _looks_like_blank_node(role)
-                )
+                return bool(role) and (normalize_role(role) != role or _looks_like_blank_node(role))
 
             raw_roles = sorted(
                 {
@@ -417,8 +424,7 @@ class RecordLoader(ABC):
             ]
             if unstamped:
                 findings.append(
-                    f"{caps.name} claims stamps_record_origin but left "
-                    f"{unstamped[:3]} unstamped"
+                    f"{caps.name} claims stamps_record_origin but left {unstamped[:3]} unstamped"
                 )
 
         return findings
@@ -430,8 +436,10 @@ def _looks_like_blank_node(value: str) -> bool:
         return True
     # rdflib default: 'N' + 32 hex chars, lowercased by some paths.
     bare = value.split(":")[-1]
-    return len(bare) >= 32 and bare[0] in "nN" and all(
-        c in "0123456789abcdefABCDEF" for c in bare[1:33]
+    return (
+        len(bare) >= 32
+        and bare[0] in "nN"
+        and all(c in "0123456789abcdefABCDEF" for c in bare[1:33])
     )
 
 

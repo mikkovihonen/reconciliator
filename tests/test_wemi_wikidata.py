@@ -52,7 +52,9 @@ def test_wikidata_author_prescan(tmp_path: Path):
     agent = w_repo.get_agent_by_uri("http://www.wikidata.org/entity/Q43210")
     assert agent is not None
     assert agent.name == "Mika Waltari"
-    assert agent.wikidata_qid == "Q43210"
+    assert agent.source == "wikidata"
+    assert agent.source_id == "Q43210"
+    assert agent.curie == "wikidata:Q43210"
 
     # Verify Option 3: relational identifiers table populated for agent
     matches = w_repo.lookup_by_identifier("kanto", "000039234")
@@ -127,7 +129,9 @@ def test_decompose_wikidata_creative_work(tmp_path: Path):
     assert work.title == "Sinuhe egyptiläinen"
     assert work.work_type == "text"
     assert work.original_language == "fin"
-    assert work.wikidata_qid == "Q12345"
+    assert work.source == "wikidata"
+    assert work.source_id == "Q12345"
+    assert work.curie == "wikidata:Q12345"
 
     assert expr.language == "fin"
     assert expr.content_type == "text"
@@ -179,7 +183,9 @@ def test_decompose_wikidata_edition_with_parent_work(tmp_path: Path):
     manif = decomp[2]
 
     # Work QID correctly reflects parent work Q12345
-    assert work.wikidata_qid == "Q12345"
+    assert work.source == "wikidata"
+    assert work.source_id == "Q12345"
+    assert work.curie == "wikidata:Q12345"
     assert manif.source_id == "Q55555"
 
 

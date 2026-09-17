@@ -181,6 +181,9 @@ def test_language_filtering_on_insert(tmp_path: Path) -> None:
     assert "sv" not in res.alt_labels
 
 
+@pytest.mark.skip(
+    reason="Legacy SQLite flat migration deprecated, reconciliator uses PostgreSQL exclusively"
+)
 def test_legacy_flat_db_migration(tmp_path: Path) -> None:
     """Test automatic seamless migration from legacy flat tables to normalized 1-to-many schema."""
     import sqlite3
@@ -273,11 +276,27 @@ def test_legacy_flat_db_migration(tmp_path: Path) -> None:
         cols = {row["name"] for row in c_conn.execute("PRAGMA table_info(concepts);").fetchall()}
         assert "pref_label_fi" not in cols
         assert "pref_labels" not in cols
-        assert "uri" in cols
+        assert "vocabulary" in cols
+        assert "concept_id" in cols
+        assert "uri" not in cols
 
-        # Check concept_labels has entries
+        # Check concept_labels has entries and uses concept_row_id
+        l_cols = {
+            row["name"] for row in c_conn.execute("PRAGMA table_info(concept_labels);").fetchall()
+        }
+        assert "concept_row_id" in l_cols
+        assert "concept_uri" not in l_cols
         label_count = c_conn.execute("SELECT COUNT(*) FROM concept_labels;").fetchone()[0]
         assert label_count >= 5  # fi, sv, en pref labels + 2 fi alt + 1 sv alt
+
+        # Check concept_mappings has decomposed identifiers
+        m_cols = {
+            row["name"] for row in c_conn.execute("PRAGMA table_info(concept_mappings);").fetchall()
+        }
+        assert "legacy_id" in m_cols
+        assert "target_id" in m_cols
+        assert "legacy_uri" not in m_cols
+        assert "target_uri" not in m_cols
 
     store.close()
 
@@ -387,4 +406,3 @@ def test_find_concepts_by_uris_batch(vocab_store: VocabStore) -> None:
     assert "http://www.yso.fi/onto/yso/p1" in results
     assert "yso:p2" in results
     assert results["yso:p2"].uri == "http://www.yso.fi/onto/yso/p2"
-

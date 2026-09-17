@@ -185,7 +185,9 @@ class IndexPoolManager:
             engine: VectorIndex
             if backend == "torch":
                 target_dev: Literal["auto", "mps", "cuda", "cpu"] = (
-                    "mps" if self.device_str == "mps" else ("cuda" if self.device_str == "cuda" else "cpu")
+                    "mps"
+                    if self.device_str == "mps"
+                    else ("cuda" if self.device_str == "cuda" else "cpu")
                 )
                 engine = TorchVectorEngine(
                     index_path=resolved_key,
@@ -348,28 +350,29 @@ class VectorDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
     def _write_progress_heartbeat(self, idle_duration: float) -> None:
         """Emit telemetry status record to progress.db if initialized."""
         try:
-            progress_db = self.config.storage.progress_db
-            if not progress_db.exists():
+            target = self.config.storage.database_url or self.config.storage.progress_db
+            if not target:
                 return
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-            from reconciliator.db import get_engine
-            from reconciliator.progress import task_progress_table
+            from reconciliator.db import get_engine, task_progress_table
 
             now_iso = datetime.now(timezone.utc).isoformat()
             status_data = self.get_telemetry_dict()
-            engine = get_engine(progress_db)
+            engine = get_engine(target)
             try:
                 with engine.begin() as conn:
-                    stmt = sqlite_insert(task_progress_table).values(
+                    stmt = pg_insert(task_progress_table).values(
                         task_id="system_vector_daemon",
                         task_type="system",
                         status="running",
                         current_stage=f"{len(self.pool.indices)} active index(es)",
-                        items_processed=sum(m.engine.total_vectors for m in self.pool.indices.values()),
+                        items_processed=sum(
+                            m.engine.total_vectors for m in self.pool.indices.values()
+                        ),
                         items_total=None,
-                        rate_per_sec=sum(m.searches_total for m in self.pool.indices.values()) / max(1.0, time.monotonic() - self.start_time),
+                        rate_per_sec=sum(m.searches_total for m in self.pool.indices.values())
+                        / max(1.0, time.monotonic() - self.start_time),
                         start_time=now_iso,
                         last_heartbeat=now_iso,
                         metadata_json=json_dumps(status_data),
@@ -459,6 +462,7 @@ class VectorDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
 
 def json_dumps(obj: Any) -> str:
     import json
+
     return json.dumps(obj, ensure_ascii=False)
 
 
@@ -654,7 +658,9 @@ class VectorDaemonRequestHandler(socketserver.BaseRequestHandler):
                     save_indices = bool(req.get("save", True))
                 except Exception:
                     pass
-            send_frame(sock, OP_SHUTDOWN_RESP, encode_json({"status": "shutting_down"}), msg_id=msg_id)
+            send_frame(
+                sock, OP_SHUTDOWN_RESP, encode_json({"status": "shutting_down"}), msg_id=msg_id
+            )
             server.shutdown_gracefully(save=save_indices)
             return
 
@@ -736,4 +742,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any, Final, Literal, Optional, Self, Union
@@ -39,9 +40,7 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
     raw = dict(get_bundled_defaults().get("vocabularies") or {})
     sf = raw.get("subject_fields") or {}
     if "field_to_vocabularies" not in raw:
-        raw["field_to_vocabularies"] = {
-            k: list(v.get("allowed_vocabs", [])) for k, v in sf.items()
-        }
+        raw["field_to_vocabularies"] = {k: list(v.get("allowed_vocabs", [])) for k, v in sf.items()}
     if "default_field_vocabularies" not in raw:
         raw["default_field_vocabularies"] = {
             k: str(v.get("default_vocab", "")) for k, v in sf.items()
@@ -53,9 +52,7 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
             if v.get("category") != "topical"
         }
     if "subject_field_category_map" not in raw:
-        raw["subject_field_category_map"] = {
-            k: str(v.get("category", "")) for k, v in sf.items()
-        }
+        raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
     if "default_vocab_target_field" not in raw:
         raw["default_vocab_target_field"] = "650"
     if "default_target_field" not in raw:
@@ -133,9 +130,7 @@ def get_bundled_record_defaults() -> dict[str, Any]:
     vocab = dict(data.get("vocabularies") or {})
     sf = vocab.get("subject_fields") or {}
     if "subject_field_category_map" not in raw:
-        raw["subject_field_category_map"] = {
-            k: str(v.get("category", "")) for k, v in sf.items()
-        }
+        raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
     if "default_subject_field" not in raw:
         raw["default_subject_field"] = "650"
     return raw
@@ -166,7 +161,9 @@ DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES: list[str] = list(
     DEFAULT_BIOGRAPHICAL_DATES.get("century_suffixes", [])
 )
 
-DEFAULT_NON_FILING_ARTICLES: dict[str, list[str]] = dict(_REC_DEFAULTS.get("non_filing_articles", {}))
+DEFAULT_NON_FILING_ARTICLES: dict[str, list[str]] = dict(
+    _REC_DEFAULTS.get("non_filing_articles", {})
+)
 DEFAULT_PUBLISHER_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("publisher_suffixes", []))
 DEFAULT_VOLUME_PREFIXES: list[str] = list(_REC_DEFAULTS.get("volume_prefixes", []))
 DEFAULT_VOLUME_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("volume_suffixes", []))
@@ -285,13 +282,52 @@ class RepositoryFTSConfig(BaseModel):
     prefix_search: bool = False
 
 
+class PostgresConfig(BaseModel):
+    """PostgreSQL connection, engine tuning, and container configuration."""
+
+    host: str = "localhost"
+    port: int = 5432
+    database: str = "reconciliator"
+    user: str = "postgres"
+    password: str = "postgres"
+    database_url: Optional[str] = None
+
+    # Connection pooling & timeouts
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_timeout: float = 30.0
+    pool_recycle: int = 1800
+    pool_pre_ping: bool = True
+
+    # Performance tuning parameters
+    shared_buffers: str = "1GB"
+    work_mem: str = "64MB"
+    maintenance_work_mem: str = "256MB"
+    effective_cache_size: str = "3GB"
+    random_page_cost: float = 1.1
+    synchronous_commit: str = "off"
+
+    # Container settings
+    container_name: str = "reconciliator-pg"
+    container_image: str = "docker.io/library/postgres:16-alpine"
+    auto_start_container: bool = True
+
+    def get_database_url(self) -> str:
+        if self.database_url:
+            return self.database_url
+        return f"postgresql+psycopg://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+
 class StorageConfig(BaseModel):
     """File paths for databases, vector indices, and backend engines."""
 
     data_dir: Path = Path("data")
+    database_url: Optional[str] = None
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     authority_db: Optional[Path] = None
     vocab_db: Optional[Path] = None
     progress_db: Optional[Path] = None
+    concept_index: Optional[Path] = None
     work_index: Optional[Path] = None
     manifestation_index: Optional[Path] = None
     agent_index: Optional[Path] = None
@@ -301,12 +337,36 @@ class StorageConfig(BaseModel):
     @model_validator(mode="after")
     def _resolve_defaults(self) -> Self:
         d = self.data_dir
+        if self.database_url is None:
+            base_url = (
+                os.environ.get("RECONCILIATOR_DATABASE_URL") or self.postgres.get_database_url()
+            )
+            if d != Path("data") and "?" not in base_url:
+                import hashlib
+
+                import psycopg
+
+                schema = f"test_{hashlib.md5(str(d.resolve()).encode()).hexdigest()[:10]}"
+                raw_url = base_url.split("?")[0].replace(
+                    "postgresql+psycopg://", "postgresql://", 1
+                )
+                try:
+                    with psycopg.connect(raw_url) as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
+                except Exception:
+                    pass
+                self.database_url = f"{base_url}?options=-csearch_path%3D{schema},public"
+            else:
+                self.database_url = base_url
         if self.authority_db is None:
             self.authority_db = d / "authority.db"
         if self.vocab_db is None:
             self.vocab_db = d / "vocab.db"
         if self.progress_db is None:
             self.progress_db = d / "progress.db"
+        if self.concept_index is None:
+            self.concept_index = d / "concept.index"
         if self.work_index is None:
             self.work_index = d / "work.index"
         if self.manifestation_index is None:
@@ -582,7 +642,9 @@ class RecordNormalizationConfig(BaseModel):
     volume_suffixes: list[str] = Field(default_factory=lambda: list(DEFAULT_VOLUME_SUFFIXES))
     volume_format_template: str = Field(default=DEFAULT_VOLUME_FORMAT_TEMPLATE)
     roman_numerals: dict[str, int] = Field(default_factory=lambda: dict(DEFAULT_ROMAN_NUMERALS))
-    fictional_qualifiers: list[str] = Field(default_factory=lambda: list(DEFAULT_FICTIONAL_QUALIFIERS))
+    fictional_qualifiers: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_FICTIONAL_QUALIFIERS)
+    )
     responsibility_prefixes: list[str] = Field(
         default_factory=lambda: list(DEFAULT_RESPONSIBILITY_PREFIXES)
     )
@@ -744,9 +806,7 @@ class EnrichmentConfig(BaseModel):
     inject_hub_links: bool = True
     inject_same_as: bool = True
     inject_component_links: bool = True
-    active_profiles: list[str] = Field(
-        default_factory=lambda: ["bibframe", "bffi", "rda"]
-    )
+    active_profiles: list[str] = Field(default_factory=lambda: ["bibframe", "bffi", "rda"])
     predicate_profiles: dict[str, dict[str, tuple[str, str]]] = Field(
         default_factory=lambda: {
             k: {rel: tuple(pair) for rel, pair in v.items()}
@@ -1113,9 +1173,7 @@ class ReconcileFTSFallbackConfig(BaseModel):
     @model_validator(mode="after")
     def validate_params(self) -> ReconcileFTSFallbackConfig:
         if not (0.0 <= self.confidence_score <= 1.0):
-            raise ValueError(
-                f"confidence_score must be in [0.0, 1.0], got {self.confidence_score}"
-            )
+            raise ValueError(f"confidence_score must be in [0.0, 1.0], got {self.confidence_score}")
         if self.limit <= 0:
             raise ValueError(f"limit must be a positive integer, got {self.limit}")
         return self
@@ -1374,9 +1432,7 @@ class AppConfig(BaseModel):
             if self.ingest_vocab.vocabularies is None:
                 self.ingest_vocab.vocabularies = list(self.vocabularies.download_list)
             if self.ingest_vocab.legacy_thesauri is None:
-                self.ingest_vocab.legacy_thesauri = list(
-                    self.vocabularies.legacy_to_modern.keys()
-                )
+                self.ingest_vocab.legacy_thesauri = list(self.vocabularies.legacy_to_modern.keys())
 
         # Propagate wikidata author properties to ingest_wikidata
         if self.ingest_wikidata is not None:
@@ -1608,9 +1664,7 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
             )  # type: ignore[assignment]
         if config.reconcile.templates:
             config.reconcile.templates.work = resolve_p(config.reconcile.templates.work)  # type: ignore[assignment]
-            config.reconcile.templates.expression = resolve_p(
-                config.reconcile.templates.expression
-            )  # type: ignore[assignment]
+            config.reconcile.templates.expression = resolve_p(config.reconcile.templates.expression)  # type: ignore[assignment]
             config.reconcile.templates.manifestation = resolve_p(
                 config.reconcile.templates.manifestation
             )  # type: ignore[assignment]
@@ -1678,9 +1732,7 @@ def load_config(config_path: Path | str, configure_log: bool = False) -> AppConf
 
     base_dir = path.parent
     if "download_skosmos" in raw_data:
-        raw_data["download_skosmos"] = _load_modular_sources(
-            raw_data["download_skosmos"], base_dir
-        )
+        raw_data["download_skosmos"] = _load_modular_sources(raw_data["download_skosmos"], base_dir)
     if "ingest_oai" in raw_data:
         raw_data["ingest_oai"] = _load_modular_sources(raw_data["ingest_oai"], base_dir)
     if "ingest_vocab" in raw_data and isinstance(raw_data["ingest_vocab"], dict):

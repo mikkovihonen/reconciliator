@@ -209,4 +209,3 @@ def test_record_normalizer_standard_identifiers() -> None:
     assert "10.1234/test.5678" in rec.identifiers.doi
     assert "10.9999/other" in rec.identifiers.doi
     assert "urn:nbn:fi:jyu-20210101" in rec.identifiers.urn
-

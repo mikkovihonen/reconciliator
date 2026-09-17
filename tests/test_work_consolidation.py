@@ -42,9 +42,7 @@ def _repo(tmp_path: Path) -> WEMIRepository:
         db_path=tmp_path / "authority.db",
         work_index_path=tmp_path / "work.index",
         dimension=8,
-        vector_engine_config=VectorEngineConfig(
-            backend="usearch", device="cpu", mode="embedded"
-        ),
+        vector_engine_config=VectorEngineConfig(backend="usearch", device="cpu", mode="embedded"),
     )
 
 
@@ -59,15 +57,14 @@ def _add_work(
     work_type: str = "text",
 ) -> int:
     """Insert one authority work with its manifestation, creator and identifiers."""
-    work_uri = f"urn:work:{source}:{source_id}"
-    manifestation_uri = f"urn:manif:{source}:{source_id}"
+    curie = f"{source}:{source_id}"
     agents = []
     contributions = []
     if author:
         agents.append(
             AgentEntity(
-                agent_uri=f"urn:agent:{source}:{source_id}",
                 source=source,
+                source_id=f"agent-{source_id}",
                 name=author,
                 name_normalized=author.lower(),
                 surname=author.split(",")[0],
@@ -78,8 +75,8 @@ def _add_work(
                 entity_type="work",
                 entity_id=0,
                 agent_id=0,
-                entity_uri=work_uri,
-                agent_uri=f"urn:agent:{source}:{source_id}",
+                entity_curie=curie,
+                agent_curie=f"{source}:agent-{source_id}",
                 role="aut",
                 is_primary=True,
             )
@@ -90,20 +87,31 @@ def _add_work(
             IdentifierEntity(
                 entity_type="manifestation",
                 entity_id=0,
-                entity_uri=manifestation_uri,
-                scheme="isbn",
-                value=isbn,
-                value_normalized=isbn,
+                entity_curie=curie,
+                source="isbn",
+                source_id=isbn,
+                curie=f"isbn:{isbn}",
+                source_id_normalized=isbn,
+            )
+        )
+    if qid:
+        identifiers.append(
+            IdentifierEntity(
+                entity_type="work",
+                entity_id=0,
+                entity_curie=curie,
+                source="wikidata",
+                source_id=qid,
+                curie=f"wikidata:{qid}",
+                source_id_normalized=qid.lower(),
             )
         )
     repo.insert_wemi_batch(
         works=[
             WorkEntity(
-                work_uri=work_uri,
                 source=source,
                 source_id=source_id,
                 record_origin="authority",
-                wikidata_qid=qid,
                 title=title,
                 title_normalized=title.strip().lower(),
                 work_type=work_type,  # type: ignore[arg-type]
@@ -112,7 +120,7 @@ def _add_work(
         expressions=[
             ExpressionEntity(
                 work_id=0,
-                expression_uri=f"urn:exp:{source}:{source_id}:fin",
+                work_curie=curie,
                 source=source,
                 source_id=source_id,
                 language="fin",
@@ -123,7 +131,7 @@ def _add_work(
         manifestations=[
             ManifestationEntity(
                 work_id=0,
-                manifestation_uri=manifestation_uri,
+                work_curie=curie,
                 source=source,
                 source_id=source_id,
                 title=title,
@@ -138,7 +146,9 @@ def _add_work(
     )
     with repo.get_connection() as conn:
         return int(
-            conn.execute("SELECT id FROM works WHERE work_uri = ?;", (work_uri,)).fetchone()["id"]
+            conn.execute(
+                "SELECT id FROM works WHERE source = ? AND source_id = ?;", (source, source_id)
+            ).fetchone()["id"]
         )
 
 
@@ -396,25 +406,25 @@ storage:
   data_dir: "{tmp_path}"
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
-  template_path: "{templates / 'default_serialization.j2'}"
+  template_path: "{templates / "default_serialization.j2"}"
   device: "cpu"
 ingest_vocab:
-  input_path: "{FIXTURES / 'sample_finto.ttl'}"
+  input_path: "{FIXTURES / "sample_finto.ttl"}"
   vocabularies: ["yso"]
   legacy_thesauri: ["ysa"]
 ingest_oai:
   source_a:
     enabled: true
     source_type: "file"
-    input_path: "{tmp_path / 'auth_a.xml'}"
+    input_path: "{tmp_path / "auth_a.xml"}"
     batch_size: 10
   source_b:
     enabled: true
     source_type: "file"
-    input_path: "{tmp_path / 'auth_b.xml'}"
+    input_path: "{tmp_path / "auth_b.xml"}"
     batch_size: 10
 reconcile:
-  target_file: "{tmp_path / 'target.xml'}"
+  target_file: "{tmp_path / "target.xml"}"
   output_file: "{out_xml}"
   enrich: true
   cluster:
@@ -457,7 +467,7 @@ telemetry:
             for df in rec.findall(f"{MARC}datafield")
             if df.get("tag") == "758"
             for s in df.findall(f"{MARC}subfield")
-            if s.get("code") == "0" and s.text and ":work:" in s.text
+            if s.get("code") == "0" and s.text and ":exp" not in s.text
         ]
 
     lines = (reports / "work.tsv").read_text(encoding="utf-8").splitlines()
@@ -475,9 +485,12 @@ def test_cli_consolidation_gives_both_sources_one_identity(consolidated_run: dic
         # the same database now and contributes works of its own.
         auth = repo.authoritative_sources()
         ph = ", ".join("?" for _ in auth)
-        assert conn.execute(
-            f"SELECT COUNT(*) c FROM works WHERE record_origin IN ({ph})", auth
-        ).fetchone()["c"] == 2
+        assert (
+            conn.execute(
+                f"SELECT COUNT(*) c FROM works WHERE record_origin IN ({ph})", auth
+            ).fetchone()["c"]
+            == 2
+        )
 
 
 def test_records_matching_different_sources_export_one_work_uri(

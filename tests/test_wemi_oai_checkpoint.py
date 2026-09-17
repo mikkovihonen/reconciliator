@@ -180,8 +180,7 @@ def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
     # The corpus record is WEMI, not staging, and projects back out as a record
     # carrying its blocking keys.
     staged = next(
-        r for r in repo.get_all_match_records(origins=["target_src"])
-        if r.record_id == "FI-MEL-101"
+        r for r in repo.get_all_match_records(origins=["target_src"]) if r.record_id == "FI-MEL-101"
     )
     assert staged.work_type == "text"
     assert staged.get_first_key("standard") == "9789510000012"

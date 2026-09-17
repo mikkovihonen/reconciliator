@@ -284,7 +284,6 @@ def test_decompose_marc_wemi_missing_id(caplog):
     assert again.source_id == work.source_id, "the same record must keep the same id"
 
 
-
 def test_derive_content_id_is_stable_and_content_sensitive() -> None:
     """Records without a control number get an id derived from their own fields.
 
@@ -448,16 +447,13 @@ def test_isbd_stripping_does_not_move_any_blocking_key():
     assert compute_author_key("Waltari, Mika,", "Waltari,") == compute_author_key(
         "Waltari, Mika", "Waltari"
     )
-    assert compute_title_stem("Sinuhe egyptilainen.") == compute_title_stem(
-        "Sinuhe egyptilainen"
-    )
+    assert compute_title_stem("Sinuhe egyptilainen.") == compute_title_stem("Sinuhe egyptilainen")
     # Regression guard: names where extract_surname returns empty/None previously crashed
     # with AttributeError ('tuple' object has no attribute 'split') when normalize_agent_name
     # returned a tuple.
     assert compute_author_key(", ") == ""
     assert compute_author_key(",") == ""
     assert compute_author_key("   ") == ""
-
 
 
 def test_configured_isbd_character_set_reaches_both_paths():
@@ -584,7 +580,7 @@ def test_an_authority_uri_beats_any_derived_id():
         </record>""".encode()
     )
     agent = decompose_marc_wemi(rec, source="melinda")[4][0]
-    assert agent.agent_uri == "https://urn.fi/URN:NBN:fi:au:pn:000123"
+    assert agent.agent_uri == "kanto:000123"
 
 
 def test_all_decomposition_paths_mint_the_same_uri_shape():
@@ -604,7 +600,7 @@ def test_all_decomposition_paths_mint_the_same_uri_shape():
             <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Kivi, Aleksis</subfield><subfield code="d">1834-1872</subfield></datafield>
         </record>""".encode()
     )
-    shape = re.compile(r"^urn:agent:[^:]+:[^:]+:[0-9a-f]{16}$")
+    shape = re.compile(r"^[^:]+:[^:]+:[0-9a-f]{16}$")
     for agent in decompose_marc_wemi(bib, source="melinda")[4]:
         assert shape.match(agent.agent_uri), agent.agent_uri
     for agent in decompose_marc_authority(auth, source="kanto")[4]:

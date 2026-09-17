@@ -24,8 +24,13 @@ from tests.test_oai_harvest_resume import FakeEndpoint, make_repo, oai_config, s
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
 COUNTED = [
-    "works", "expressions", "manifestations", "agents",
-    "identifiers", "entity_keys", "contributions",
+    "works",
+    "expressions",
+    "manifestations",
+    "agents",
+    "identifiers",
+    "entity_keys",
+    "contributions",
 ]
 
 
@@ -47,9 +52,17 @@ def _ingest(store: WEMIRepository, source: str, control: str, title: str) -> Non
         _record(control, title), source=source, record_origin=source, key_sink=keys
     )
     store.insert_wemi_batch(
-        works=[w], expressions=[e], manifestations=[m], items=itms, agents=agts,
-        relationships=rels, identifiers=idents, manifestation_expressions=assoc,
-        mediums_of_performance=mops, contributions=contribs, entity_keys=keys,
+        works=[w],
+        expressions=[e],
+        manifestations=[m],
+        items=itms,
+        agents=agts,
+        relationships=rels,
+        identifiers=idents,
+        manifestation_expressions=assoc,
+        mediums_of_performance=mops,
+        contributions=contribs,
+        entity_keys=keys,
         record_origin=source,
     )
 
@@ -164,12 +177,8 @@ def test_replace_clears_before_a_fresh_harvest(tmp_path: Path):
     assert "OLD1" in stored_ids(repo)
 
     endpoint = FakeEndpoint(pages=[["N1", "N2"]])
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint
-    ):
-        ingest_oai_pipeline(
-            source_name="src", config=oai_config(ingest_mode="replace"), store=repo
-        )
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint):
+        ingest_oai_pipeline(source_name="src", config=oai_config(ingest_mode="replace"), store=repo)
 
     ids = stored_ids(repo)
     assert "OLD1" not in ids, "replace must remove rows the source wrote before"
@@ -181,9 +190,7 @@ def test_accumulate_keeps_earlier_rows(tmp_path: Path):
     _ingest(repo, "src", "OLD1", "Earlier record")
 
     endpoint = FakeEndpoint(pages=[["N1"]])
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint
-    ):
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint):
         ingest_oai_pipeline(
             source_name="src", config=oai_config(ingest_mode="accumulate"), store=repo
         )
@@ -211,9 +218,7 @@ def test_replace_does_not_clear_when_resuming_an_interrupted_harvest(tmp_path: P
     )
 
     endpoint = FakeEndpoint(pages=[["A1"], ["B1"]])
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint
-    ):
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint):
         ingest_oai_pipeline(
             source_name="src", config=oai_config(ingest_mode="replace"), store=repo, resume=True
         )

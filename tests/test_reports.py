@@ -163,9 +163,7 @@ def test_agent_reports_dynamic_vocabularies(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.reconcile = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -557,9 +555,7 @@ def test_derive_quality_brackets_default() -> None:
 def test_derive_quality_brackets_custom_threshold() -> None:
     rec_cfg = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -578,9 +574,7 @@ def test_derive_quality_brackets_custom_threshold() -> None:
 def test_derive_quality_brackets_disabled_short_circuit() -> None:
     rec_cfg = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -600,9 +594,7 @@ def test_derive_quality_brackets_disabled_short_circuit() -> None:
 def test_derive_quality_brackets_explicit_user_override() -> None:
     rec_cfg = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -684,9 +676,7 @@ def test_agent_reports_custom_threshold_and_explicit_brackets(tmp_path: Path) ->
     cfg = AppConfig()
     cfg.reconcile = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -745,9 +735,7 @@ def test_agent_reports_acceptance_threshold_captures_borderline(tmp_path: Path) 
     cfg = AppConfig()
     cfg.reconcile = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -814,7 +802,9 @@ def test_describe_tag_migration() -> None:
     )
 
     # Fallback for arbitrary key
-    assert describe_tag_migration("custom_migration") == "Subject migration/folding custom_migration"
+    assert (
+        describe_tag_migration("custom_migration") == "Subject migration/folding custom_migration"
+    )
 
 
 def test_subject_reports_dynamic_tag_migrations_and_foldings(tmp_path: Path) -> None:
@@ -986,9 +976,7 @@ def test_agent_reports_configurable_rerank_engine(tmp_path: Path) -> None:
     cfg_ce = AppConfig()
     cfg_ce.reconcile = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -1041,9 +1029,7 @@ def test_agent_reports_configurable_rerank_engine(tmp_path: Path) -> None:
     cfg_off = AppConfig()
     cfg_off.reconcile = ReconcileConfig(
         target_file=Path("data/test.xml"),
-        agent_reports=ReportSetPathsConfig(
-            detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")
-        ),
+        agent_reports=ReportSetPathsConfig(detailed_file=Path("a.tsv"), summary_file=Path("b.tsv")),
         subject_reports=ReportSetPathsConfig(
             detailed_file=Path("c.tsv"), summary_file=Path("d.tsv")
         ),
@@ -1103,9 +1089,15 @@ def test_dynamic_vocabulary_descriptions() -> None:
     assert describe_agent_vocabulary("ISNI") == "ISNI agent identifier URIs ($0)"
     assert describe_agent_vocabulary("VIAF") == "VIAF agent identifier URIs ($0)"
     assert describe_agent_vocabulary("OTHER") == "Unclassified or external agent identifier URIs"
-    assert describe_agent_vocabulary("unclassified") == "Unclassified or external agent identifier URIs"
+    assert (
+        describe_agent_vocabulary("unclassified")
+        == "Unclassified or external agent identifier URIs"
+    )
     assert describe_agent_vocabulary("GND") == "GND agent identifier URIs ($0)"
-    assert describe_agent_vocabulary("custom_authority") == "CUSTOM_AUTHORITY agent identifier URIs ($0)"
+    assert (
+        describe_agent_vocabulary("custom_authority")
+        == "CUSTOM_AUTHORITY agent identifier URIs ($0)"
+    )
     assert describe_agent_vocabulary("") == "Unspecified agent vocabulary"
 
     # Backwards compatibility mapping for agent vocabs
@@ -1123,13 +1115,18 @@ def test_dynamic_vocabulary_descriptions() -> None:
     assert describe_source_thesaurus("bella") == "Terms originated from Bella"
     assert describe_source_thesaurus("mesh") == "Terms originated from MESH"
     assert describe_source_thesaurus("custom") == "Terms originated from Custom"
-    assert describe_source_thesaurus("unspecified_legacy") == "Legacy terms with no $2 or local tags"
+    assert (
+        describe_source_thesaurus("unspecified_legacy") == "Legacy terms with no $2 or local tags"
+    )
     assert describe_source_thesaurus("") == "Legacy terms with no $2 or local tags"
 
     # Backwards compatibility mapping for source thesauri
     assert DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS["ysa"] == "Terms originated from YSA"
     assert DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS["mesh"] == "Terms originated from MESH"
-    assert DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS["unspecified_legacy"] == "Legacy terms with no $2 or local tags"
+    assert (
+        DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS["unspecified_legacy"]
+        == "Legacy terms with no $2 or local tags"
+    )
 
     # 3. Target ontology descriptions (no verbose expansions; readers know the abbreviations)
     assert describe_target_ontology("yso") == "Mapped to YSO"
@@ -1148,6 +1145,6 @@ def test_dynamic_vocabulary_descriptions() -> None:
     # Backwards compatibility mapping for target ontologies
     assert DEFAULT_TARGET_ONTOLOGY_DESCRIPTIONS["yso"] == "Mapped to YSO"
     assert DEFAULT_TARGET_ONTOLOGY_DESCRIPTIONS["lcsh"] == "Mapped to LCSH"
-    assert DEFAULT_TAG_MIGRATION_DESCRIPTIONS["650_to_655_slm"] == "Terms in 650 retagged to 655 SLM"
-
-
+    assert (
+        DEFAULT_TAG_MIGRATION_DESCRIPTIONS["650_to_655_slm"] == "Terms in 650 retagged to 655 SLM"
+    )

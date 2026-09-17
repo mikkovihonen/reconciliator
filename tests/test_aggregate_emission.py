@@ -127,7 +127,7 @@ def _junction(repo: WEMIRepository, manifestation_id: int) -> list[dict]:
                 FROM manifestation_expressions me
                 JOIN expressions e ON e.id = me.expression_id
                 WHERE me.manifestation_id = ?
-                ORDER BY me.disc_number, me.track_number;
+                ORDER BY me.disc_number, me.track_number NULLS FIRST;
                 """,
                 (manifestation_id,),
             )
@@ -220,9 +220,7 @@ def test_a_constituent_finds_its_container_without_a_second_edge(repo: WEMIRepos
     constituent is enough and the inverse `constituent_of` need not be stored."""
     _ingest(repo, load_record(ALBUM_A, _ctx("entities")))
     container = repo.get_work_by_source(SRC, "ALB-1")
-    track = next(
-        w for w in _all_works(repo) if w["title"] == "Angel of light"
-    )
+    track = next(w for w in _all_works(repo) if w["title"] == "Angel of light")
     edges = repo.get_work_relationships(track["id"])
     assert [(e.source_work_id, e.relationship_type) for e in edges] == [
         (container.id, "has_constituent")
@@ -246,7 +244,9 @@ def test_two_releases_of_one_track_converge_on_one_work(repo: WEMIRepository):
     works = _all_works(repo)
     # Two containers, three distinct constituents: Cantus arcticus is shared.
     assert len(works) == 5
-    cantus = [w for w in works if w["title"] == "Cantus arcticus" and w["source_id"].startswith("c:")]
+    cantus = [
+        w for w in works if w["title"] == "Cantus arcticus" and w["source_id"].startswith("c:")
+    ]
     assert len(cantus) == 1
 
     with repo.get_connection() as conn:

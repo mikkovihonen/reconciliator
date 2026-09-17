@@ -85,6 +85,9 @@ class WEMIMatchResult:
     matched_work: Optional[WorkEntity] = None
     matched_expression: Optional[ExpressionEntity] = None
     matched_manifestation: Optional[ManifestationEntity] = None
+    work_curie: Optional[str] = None
+    expression_curie: Optional[str] = None
+    manifestation_curie: Optional[str] = None
     work_uri: Optional[str] = None
     expression_uri: Optional[str] = None
     manifestation_uri: Optional[str] = None
@@ -94,7 +97,21 @@ class WEMIMatchResult:
     constituent_matches: list[ConstituentWorkMatch] = field(default_factory=list)
     relationships: list[WorkRelationship] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if not self.work_curie and self.work_uri:
+            self.work_curie = self.work_uri
+        elif not self.work_uri and self.work_curie:
+            self.work_uri = self.work_curie
 
+        if not self.expression_curie and self.expression_uri:
+            self.expression_curie = self.expression_uri
+        elif not self.expression_uri and self.expression_curie:
+            self.expression_uri = self.expression_curie
+
+        if not self.manifestation_curie and self.manifestation_uri:
+            self.manifestation_curie = self.manifestation_uri
+        elif not self.manifestation_uri and self.manifestation_curie:
+            self.manifestation_uri = self.manifestation_curie
 
 
 def compute_jaccard_overlap(set1: set[str], set2: set[str]) -> float:
@@ -144,7 +161,11 @@ def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]
             if target.work_type in ("music", "audio_nonmusic"):
                 _add("publisher_number", sk)
 
-    if target.get_first_key("series") and "-" in target.get_first_key("series") and len(target.get_first_key("series")) == 9:
+    if (
+        target.get_first_key("series")
+        and "-" in target.get_first_key("series")
+        and len(target.get_first_key("series")) == 9
+    ):
         _add("issn", target.get_first_key("series"))
 
     if target.get_first_key("patent"):
@@ -412,7 +433,9 @@ class WorkMatcher:
                         if not exps and work:
                             exps = self.repo.get_expressions_for_work(work.id)
                         exp = self._align_expression(
-                            exps, target.language, translator_signature=target.get_first_key("translators_signature")
+                            exps,
+                            target.language,
+                            translator_signature=target.get_first_key("translators_signature"),
                         )
                         if not work and exp and exp.work_id:
                             work = self.repo.get_work(exp.work_id)
@@ -453,7 +476,9 @@ class WorkMatcher:
                     if work:
                         exps = self.repo.get_expressions_for_work(work.id)
                         exp = self._align_expression(
-                            exps, target.language, translator_signature=target.get_first_key("translators_signature")
+                            exps,
+                            target.language,
+                            translator_signature=target.get_first_key("translators_signature"),
                         )
                         return WEMIMatchResult(
                             target_record_id=target.record_id,
@@ -552,7 +577,9 @@ class WorkMatcher:
                             continue
                         exps = self.repo.get_expressions_for_work(cand_work.id)
                         exp = self._align_expression(
-                            exps, target.language, translator_signature=target.get_first_key("translators_signature")
+                            exps,
+                            target.language,
+                            translator_signature=target.get_first_key("translators_signature"),
                         )
                         return WEMIMatchResult(
                             target_record_id=target.record_id,
@@ -572,48 +599,6 @@ class WorkMatcher:
     # -----------------------------------------------------------------------
     # Domain Funnels (A through PP)
     # -----------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     # -----------------------------------------------------------------------
     # Master Dispatcher
@@ -719,7 +704,6 @@ class WorkMatcher:
             self._equivalence_cache = cached
         return cached
 
-
     def _agent_uris_from_identifiers(self, agent: AgentEntity) -> tuple[list[str], list[str]]:
         """Collect an authority agent's $0 and $1 URIs from the identifiers table and its own columns."""
         u0: list[str] = []
@@ -739,13 +723,16 @@ class WorkMatcher:
 
         if agent.id:
             for ident in self.repo.get_identifiers_for_entity("agent", agent.id):
-                scheme = (ident.scheme or "").lower()
-                _add(ident.value, "1" if scheme == "wikidata" else "0")
+                src = (ident.source or "").lower()
+                if src == "wikidata":
+                    _add(format_wikidata_uri(ident.source_id), "1")
+                else:
+                    _add(ident.curie or f"{src}:{ident.source_id}", "0")
 
-        _add(agent.agent_uri)
+        _add(agent.curie)
         _add(agent.orcid)
-        if agent.wikidata_qid:
-            _add(format_wikidata_uri(agent.wikidata_qid), "1")
+        if agent.source.lower() == "wikidata" and agent.source_id:
+            _add(format_wikidata_uri(agent.source_id), "1")
 
         return u0, u1
 
@@ -788,9 +775,7 @@ class WorkMatcher:
         rerank_cfg = getattr(self.config, "rerank", None)
         max_year = getattr(rerank_cfg, "max_year_difference", None)
         year_ok = (
-            verdict.year_diff is None
-            or max_year is None
-            or abs(verdict.year_diff) <= max_year
+            verdict.year_diff is None or max_year is None or abs(verdict.year_diff) <= max_year
         )
         return bool(verdict.volume_match and verdict.surname_match and year_ok)
 
@@ -954,7 +939,9 @@ class WorkMatcher:
         identifiers = RecordIdentifiers()
         if manifestation and manifestation.id:
             try:
-                for ident in self.repo.get_identifiers_for_entity("manifestation", manifestation.id):
+                for ident in self.repo.get_identifiers_for_entity(
+                    "manifestation", manifestation.id
+                ):
                     bucket = getattr(identifiers, (ident.scheme or "").lower(), None)
                     if isinstance(bucket, list) and ident.value not in bucket:
                         bucket.append(ident.value)
@@ -1016,9 +1003,7 @@ class WorkMatcher:
                 continue
 
             q_vec = self.embedder.embed_texts([agent_text])
-            cand_scores, cand_ids = self.agent_indexer.search(
-                q_vec, top_k=self._retrieval_top_k()
-            )
+            cand_scores, cand_ids = self.agent_indexer.search(q_vec, top_k=self._retrieval_top_k())
             if len(cand_ids) == 0 or len(cand_ids[0]) == 0:
                 continue
 
@@ -1083,6 +1068,34 @@ class WorkMatcher:
                 )
                 existing_uris.add(uri)
 
+            if best_cand.get("id"):
+                try:
+                    agent_idents = self.repo.get_identifiers_for_entity(
+                        "agent", int(best_cand["id"])
+                    )
+                    for ident in agent_idents:
+                        is_wd = ident.scheme.lower() == "wikidata"
+                        _accept(
+                            ident.curie,
+                            "1" if is_wd else "0",
+                            "WIKIDATA" if is_wd else ident.scheme.upper(),
+                        )
+                except Exception:
+                    pass
+
+            c_src = best_cand.get("source")
+            c_sid = best_cand.get("source_id")
+            if c_src and c_sid and not str(c_src).startswith(("urn", "unknown")):
+                is_wd = str(c_src).lower() == "wikidata"
+                if str(c_src).lower() == "kanto":
+                    _accept(f"http://urn.fi/URN:NBN:fi:au:pn:{c_sid}", "0", "KANTO")
+                elif str(c_src).lower() == "isni":
+                    _accept(f"https://isni.org/isni/{c_sid}", "0", "ISNI")
+                elif is_wd:
+                    _accept(format_wikidata_uri(str(c_sid)), "1", "WIKIDATA")
+                else:
+                    _accept(f"{c_src}:{c_sid}", "1" if is_wd else "0", str(c_src).upper())
+
             if best_cand.get("agent_uri"):
                 a_uri = str(best_cand["agent_uri"])
                 if not a_uri.startswith(("urn:agent:", "urn:reconciliator:")):
@@ -1104,12 +1117,24 @@ class WorkMatcher:
                     if item:
                         _accept(str(item), subfield, default_vocab)
 
-            if best_cand.get("wikidata_qid"):
+            if best_cand.get("source") == "wikidata" and best_cand.get("source_id"):
+                _accept(format_wikidata_uri(str(best_cand["source_id"])), "1", "WIKIDATA")
+            elif best_cand.get("wikidata_qid"):
                 _accept(format_wikidata_uri(str(best_cand["wikidata_qid"])), "1", "WIKIDATA")
 
+            cand_rec_id = str(
+                best_cand.get("curie")
+                or (
+                    f"{best_cand['source']}:{best_cand['source_id']}"
+                    if best_cand.get("source") and best_cand.get("source_id")
+                    else None
+                )
+                or best_cand.get("agent_uri")
+                or best_cand.get("id")
+            )
             matches.append(
                 ReconciliationMatch(
-                    candidate_record_id=str(best_cand.get("agent_uri") or best_cand.get("id")),
+                    candidate_record_id=cand_rec_id,
                     source=cand_source,
                     match_tier="tier3_agent_fallback",
                     match_score=best_score,
@@ -1200,9 +1225,7 @@ class WorkMatcher:
         # Query corpus_linkages for linkage context
         corpus_linkage: Optional[CorpusLinkage] = None
         try:
-            corpus_linkage = self.repo.get_corpus_linkage(
-                target_record.source_id
-            )
+            corpus_linkage = self.repo.get_corpus_linkage(target_record.source_id)
         except Exception:
             # Corpus linkage may not exist if record hasn't been linked yet
             pass

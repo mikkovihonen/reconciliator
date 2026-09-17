@@ -185,8 +185,8 @@ telemetry:
         for f in fields_758
         for s in f.findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='0']")
     ]
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456#work" in u0_links
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456#exp_fin" in u0_links
+    assert "melinda:sinuhe_canonical_work" in u0_links
+    assert "melinda:sinuhe_exp_fin" in u0_links
 
     # Verify second record clustered with first record
     rec2 = records[1]

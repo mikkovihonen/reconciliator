@@ -127,7 +127,7 @@ telemetry:
     assert len(f100) > 0
     u0_list = _get_subfields(f100[0], "0")
     # Asteri KANTO URN injected
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in u0_list
+    assert "kanto:000123456" in u0_list
 
     # Subject checks for Rec 1:
     # 650 lääkärit folded to YSO
@@ -160,6 +160,4 @@ telemetry:
 
     agent_lines = agent_detailed_tsv.read_text(encoding="utf-8").splitlines()
     assert len(agent_lines) >= 2  # Header + rows
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in agent_detailed_tsv.read_text(
-        encoding="utf-8"
-    )
+    assert "kanto:000123456" in agent_detailed_tsv.read_text(encoding="utf-8")

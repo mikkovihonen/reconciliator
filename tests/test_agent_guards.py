@@ -187,7 +187,11 @@ def test_check_homonym_ambiguity() -> None:
 
     # Resolved by subject counts
     cands_with_subj = [
-        {"name": "Matti Virtanen", "score": 0.95, "subject_counts": {"yso:historia": 12, "slm:elämäkerrat": 4}},
+        {
+            "name": "Matti Virtanen",
+            "score": 0.95,
+            "subject_counts": {"yso:historia": 12, "slm:elämäkerrat": 4},
+        },
         {"name": "Matti Virtanen", "score": 0.94, "subject_counts": {"yso:fysiikka": 20}},
     ]
     ok, reason = check_homonym_ambiguity(
@@ -211,8 +215,16 @@ def test_check_homonym_ambiguity() -> None:
     class MockAuthorityStore:
         def get_relational_disambiguation_evidence(self, candidate_agent_ids, **kwargs):
             return {
-                1: {"has_coauthor_match": True, "has_publisher_match": True, "has_classification_match": False},
-                2: {"has_coauthor_match": False, "has_publisher_match": False, "has_classification_match": False},
+                1: {
+                    "has_coauthor_match": True,
+                    "has_publisher_match": True,
+                    "has_classification_match": False,
+                },
+                2: {
+                    "has_coauthor_match": False,
+                    "has_publisher_match": False,
+                    "has_classification_match": False,
+                },
             }
 
     cands_rel = [
@@ -220,7 +232,10 @@ def test_check_homonym_ambiguity() -> None:
         {"id": 2, "name": "Matti Virtanen", "score": 0.94},
     ]
     ok, reason = check_homonym_ambiguity(
-        cands_rel, score_margin=0.03, authority_store=MockAuthorityStore(), target_coauthors=["Kivi, Aleksis"]
+        cands_rel,
+        score_margin=0.03,
+        authority_store=MockAuthorityStore(),
+        target_coauthors=["Kivi, Aleksis"],
     )
     assert ok is True
     assert reason == "ambiguity_resolved_by_relational_graph"
@@ -389,6 +404,7 @@ def test_verify_subjects_distribution() -> None:
 
 def test_verify_subjects_with_concept_ids_and_vocab_mapping() -> None:
     """Verify that verify_subjects matches concept IDs and checks mapped concept URIs via vocab_store."""
+
     class MockMapping:
         target_uri = "http://www.yso.fi/onto/yso/p2591"
 
@@ -450,42 +466,44 @@ def test_wemi_repository_relational_disambiguation_evidence(tmp_path) -> None:
     )
 
     # Insert agents
-    agent_1920_id = store.insert_agents_batch([
-        AgentEntity(
-            agent_uri="http://example.org/agent1",
-            source="test",
-            name="Virtanen, Matti",
-            name_normalized="virtanen matti",
-            surname="Virtanen",
-            dates="1920-1990",
-            birth_year=1920,
-            death_year=1990,
-        ),
-        AgentEntity(
-            agent_uri="http://example.org/agent2",
-            source="test",
-            name="Mäkinen, Kalle",
-            name_normalized="mäkinen kalle",
-            surname="Mäkinen",
-        ),
-        AgentEntity(
-            agent_uri="http://example.org/agent3",
-            source="test",
-            name="Virtanen, Matti",
-            name_normalized="virtanen matti",
-            surname="Virtanen",
-            dates="1950-2010",
-            birth_year=1950,
-            death_year=2010,
-        ),
-        AgentEntity(
-            agent_uri="http://example.org/agent4",
-            source="test",
-            name="Aaltonen, Pekka",
-            name_normalized="aaltonen pekka",
-            surname="Aaltonen",
-        ),
-    ])
+    agent_1920_id = store.insert_agents_batch(
+        [
+            AgentEntity(
+                agent_uri="http://example.org/agent1",
+                source="test",
+                name="Virtanen, Matti",
+                name_normalized="virtanen matti",
+                surname="Virtanen",
+                dates="1920-1990",
+                birth_year=1920,
+                death_year=1990,
+            ),
+            AgentEntity(
+                agent_uri="http://example.org/agent2",
+                source="test",
+                name="Mäkinen, Kalle",
+                name_normalized="mäkinen kalle",
+                surname="Mäkinen",
+            ),
+            AgentEntity(
+                agent_uri="http://example.org/agent3",
+                source="test",
+                name="Virtanen, Matti",
+                name_normalized="virtanen matti",
+                surname="Virtanen",
+                dates="1950-2010",
+                birth_year=1950,
+                death_year=2010,
+            ),
+            AgentEntity(
+                agent_uri="http://example.org/agent4",
+                source="test",
+                name="Aaltonen, Pekka",
+                name_normalized="aaltonen pekka",
+                surname="Aaltonen",
+            ),
+        ]
+    )
 
     agent_1920 = agent_1920_id[0]
     agent_1950 = agent_1920_id[2]
@@ -504,33 +522,57 @@ def test_wemi_repository_relational_disambiguation_evidence(tmp_path) -> None:
     store.insert_work(work)
 
     # Insert manifestations with publisher
-    store.insert_manifestation(ManifestationEntity(
-        manifestation_uri="http://example.org/manifest/rec-001",
-        source="test",
-        source_id="rec-001",
-        title="Yhteistyöteos (Otava)",
-        title_normalized="yhteistyöteos otava",
-        publisher="Otava",
-        carrier_type="volume",
-    ))
-    store.insert_manifestation(ManifestationEntity(
-        manifestation_uri="http://example.org/manifest/rec-002",
-        source="test",
-        source_id="rec-002",
-        title="Toinen teos (Gummerus)",
-        title_normalized="toinen teos gummerus",
-        publisher="Gummerus",
-        carrier_type="volume",
-    ))
+    store.insert_manifestation(
+        ManifestationEntity(
+            manifestation_uri="http://example.org/manifest/rec-001",
+            source="test",
+            source_id="rec-001",
+            title="Yhteistyöteos (Otava)",
+            title_normalized="yhteistyöteos otava",
+            publisher="Otava",
+            carrier_type="volume",
+        )
+    )
+    store.insert_manifestation(
+        ManifestationEntity(
+            manifestation_uri="http://example.org/manifest/rec-002",
+            source="test",
+            source_id="rec-002",
+            title="Toinen teos (Gummerus)",
+            title_normalized="toinen teos gummerus",
+            publisher="Gummerus",
+            carrier_type="volume",
+        )
+    )
 
     # Insert contributions
     from reconciliator.models import ContributionEntity
 
-    store.insert_contributions_batch([
-        ContributionEntity(entity_type="manifestation", entity_id=1, agent_id=agent_1920, role="aut", is_primary=True),
-        ContributionEntity(entity_type="manifestation", entity_id=1, agent_id=agent_1920_id[1], role="aut", is_primary=False),
-        ContributionEntity(entity_type="manifestation", entity_id=2, agent_id=agent_1950, role="aut", is_primary=True),
-    ])
+    store.insert_contributions_batch(
+        [
+            ContributionEntity(
+                entity_type="manifestation",
+                entity_id=1,
+                agent_id=agent_1920,
+                role="aut",
+                is_primary=True,
+            ),
+            ContributionEntity(
+                entity_type="manifestation",
+                entity_id=1,
+                agent_id=agent_1920_id[1],
+                role="aut",
+                is_primary=False,
+            ),
+            ContributionEntity(
+                entity_type="manifestation",
+                entity_id=2,
+                agent_id=agent_1950,
+                role="aut",
+                is_primary=True,
+            ),
+        ]
+    )
 
     # Query relational evidence for target record with coauthor "Mäkinen, Kalle", publisher "Otava"
     evidence = store.get_relational_disambiguation_evidence(
@@ -551,5 +593,3 @@ def test_wemi_repository_relational_disambiguation_evidence(tmp_path) -> None:
     assert ev2["has_coauthor_match"] is False
     assert ev2["has_publisher_match"] is False
     assert ev2["has_classification_match"] is False
-
-

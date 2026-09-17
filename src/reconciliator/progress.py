@@ -17,63 +17,25 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from sqlalchemy import (
-    Column,
     Engine,
-    Float,
-    Index,
-    Integer,
-    MetaData,
-    String,
     and_,
     delete,
     select,
-    text,
     update,
 )
-from sqlalchemy import (
-    Table as SQLTable,
-)
-from sqlalchemy import (
-    Text as SQLText,
-)
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from reconciliator.db import get_engine
+from reconciliator.db import get_engine, task_progress_table
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
 
 logger = logging.getLogger(__name__)
 
-# ===================================================================
-# Progress Schema & Table Definition
-# ===================================================================
 
-progress_metadata = MetaData()
-
-task_progress_table = SQLTable(
-    "task_progress",
-    progress_metadata,
-    Column("task_id", String, primary_key=True),
-    Column("task_type", String, nullable=False),
-    Column("status", String, nullable=False),
-    Column("current_stage", String, nullable=False),
-    Column("items_processed", Integer, default=0, server_default="0"),
-    Column("items_total", Integer, nullable=True),
-    Column("bytes_processed", Integer, default=0, server_default="0"),
-    Column("bytes_total", Integer, nullable=True),
-    Column("rate_per_sec", Float, default=0.0, server_default="0.0"),
-    Column("percentage", Float, default=0.0, server_default="0.0"),
-    Column("start_time", String, nullable=False),
-    Column("last_heartbeat", String, nullable=False),
-    Column("error_message", String, nullable=True),
-    Column("metadata_json", SQLText, nullable=True),
-    Index("idx_progress_type", "task_type"),
-    Index("idx_progress_status", "status"),
-)
-
-
-def init_progress_db(engine: Engine) -> None:
+def init_progress_db(engine: Any) -> None:
     """Initialize task_progress table in progress.db."""
-    progress_metadata.create_all(engine)
+    from reconciliator.db import create_schema_tables, task_progress_table
+
+    create_schema_tables(engine, [task_progress_table])
 
 
 def _now_iso() -> str:
@@ -85,18 +47,21 @@ class ProgressTracker:
 
     def __init__(
         self,
-        db_path: Path | str,
-        task_id: str,
-        task_type: TaskType,
+        db_path: Path | str | None = None,
+        task_id: str = "",
+        task_type: TaskType = "reconcile",
         heartbeat_interval: float = 1.0,
+        engine: Optional[Engine] = None,
     ) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(db_path) if db_path else None
         self.task_id = task_id
         self.task_type = task_type
         self.heartbeat_interval = heartbeat_interval
 
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = get_engine(self.db_path)
+        if engine is not None:
+            self.engine = engine
+        else:
+            self.engine = get_engine(db_path)
         init_progress_db(self.engine)
 
         self._start_time_sec = time.time()
@@ -110,19 +75,22 @@ class ProgressTracker:
         self._metadata: dict[str, Any] = {}
         self._error_message: Optional[str] = None
         self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._live: Optional[Live] = None
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine and release connection pool."""
         self.engine.dispose()
 
-    def start_task(
+    def start(
         self,
-        stage: str = "running",
+        stage: str = "init",
         items_total: Optional[int] = None,
         bytes_total: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Start task and record initial row in progress.db."""
+        """Start tracking and emit the initial status entry in progress.db."""
         with self._lock:
             self._start_time_sec = time.time()
             self._current_stage = stage
@@ -135,7 +103,7 @@ class ProgressTracker:
             now = _now_iso()
             meta_json = json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
             with self.engine.begin() as conn:
-                stmt = sqlite_insert(task_progress_table).values(
+                stmt = pg_insert(task_progress_table).values(
                     task_id=self.task_id,
                     task_type=self.task_type,
                     status=self._status,
@@ -164,6 +132,9 @@ class ProgressTracker:
                 )
                 conn.execute(stmt)
             self._last_heartbeat_sec = time.time()
+
+    # Alias for backward compatibility
+    start_task = start
 
     def update_progress(
         self,
@@ -254,10 +225,7 @@ class ProgressTracker:
 
 def get_task_progress(db_path: Path | str, task_id: str) -> Optional[TaskProgress]:
     """Retrieve progress model for a specific task."""
-    path = Path(db_path)
-    if not path.exists():
-        return None
-    engine = get_engine(path)
+    engine = get_engine(db_path)
     try:
         with engine.connect() as conn:
             stmt = select(task_progress_table).where(task_progress_table.c.task_id == task_id)
@@ -286,13 +254,14 @@ def get_task_progress(db_path: Path | str, task_id: str) -> Optional[TaskProgres
 
 def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
     """Retrieve all recent task progress records."""
-    path = Path(db_path)
-    if not path.exists():
-        return []
-    engine = get_engine(path)
+    engine = get_engine(db_path)
     try:
         with engine.connect() as conn:
-            stmt = select(task_progress_table).order_by(task_progress_table.c.last_heartbeat.desc()).limit(limit)
+            stmt = (
+                select(task_progress_table)
+                .order_by(task_progress_table.c.last_heartbeat.desc())
+                .limit(limit)
+            )
             rows = conn.execute(stmt).mappings().all()
             return [
                 TaskProgress(
@@ -348,11 +317,8 @@ def prune_tasks(
     include_running: bool = False,
 ) -> int:
     """Prune task telemetry records from progress.db."""
-    path = Path(db_path)
-    if not path.exists():
-        return 0
-
-    engine = get_engine(path)
+    engine = get_engine(db_path)
+    init_progress_db(engine)
     try:
         with engine.begin() as conn:
             conditions = []
@@ -389,12 +355,6 @@ def prune_tasks(
                 stmt = stmt.where(and_(*conditions))
             result = conn.execute(stmt)
             deleted_count = result.rowcount
-
-            if deleted_count > 0:
-                try:
-                    conn.execute(text("VACUUM;"))
-                except Exception:
-                    pass
 
             return max(deleted_count, 0)
     finally:
@@ -458,10 +418,14 @@ def render_vector_daemon_panel(status: Optional[dict[str, Any]] = None) -> Panel
         content.append("○ ", style="dim yellow")
         content.append("Daemon Status: ", style="bold")
         content.append("STANDBY", style="dim yellow")
-        content.append(" (Inactive — will auto-spawn on demand when vector queries execute)\n", style="dim")
+        content.append(
+            " (Inactive — will auto-spawn on demand when vector queries execute)\n", style="dim"
+        )
         content.append("Mode: ", style="bold dim")
         content.append("IPC Singleton Service", style="cyan")
-        return Panel(content, title="[bold cyan]Vector Daemon Service[/]", style="dim", padding=(0, 1))
+        return Panel(
+            content, title="[bold cyan]Vector Daemon Service[/]", style="dim", padding=(0, 1)
+        )
 
     content = Text()
     pid = status.get("pid", "?")

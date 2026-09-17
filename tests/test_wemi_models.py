@@ -25,10 +25,8 @@ from reconciliator.models import (
 
 def test_work_entity_validations():
     work = WorkEntity(
-        work_uri="https://kansalliskirjasto.finna.fi/Record/work_123",
         source="melinda",
         source_id="000123456",
-        wikidata_qid="Q42",
         title="Tuntematon sotilas",
         title_normalized="tuntematon sotilas",
         original_language="fin",
@@ -37,7 +35,7 @@ def test_work_entity_validations():
     )
     assert work.work_type == "text"
     assert len(work.subjects_json) == 3
-    assert work.wikidata_qid == "Q42"
+    assert work.curie == "melinda:000123456"
 
     # Test subjects_json validator when passed as JSON string
     work_from_json_str = WorkEntity(
@@ -93,16 +91,15 @@ def test_work_types_controlled_vocabulary():
 def test_expression_entity_validations():
     exp = ExpressionEntity(
         work_id=1,
-        expression_uri="https://kansalliskirjasto.finna.fi/Record/exp_123_fin",
         source="melinda",
         source_id="exp_001",
-        wikidata_qid="Q100",
         language="fin",
         content_type="text",
         title="Tuntematon sotilas (alkuperäinen laitos)",
         version_designation="1. painoksen teksti",
     )
     assert exp.work_id == 1
+    assert exp.curie == "melinda:exp_001"
     assert exp.content_type == "text"
     assert exp.language == "fin"
 
@@ -219,15 +216,15 @@ def test_polymorphic_identifiers():
 
 def test_agent_and_contributions():
     agent = AgentEntity(
-        agent_uri="https://kanto.kansalliskirjasto.fi/finaf/000012345",
-        source="asteri",
-        wikidata_qid="Q312456",
+        source="kanto",
+        source_id="000012345",
         name="Linna, Väinö",
         name_normalized="linna vaino",
         surname="Linna",
         is_personal=True,
     )
     assert agent.surname == "Linna"
+    assert agent.curie == "kanto:000012345"
     assert agent.is_personal is True
 
     contrib = ContributionEntity(

@@ -163,9 +163,7 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
         # author keys derive from these strings, so the paths disagreed about
         # identity. `record_normalization.strip_isbd_punctuation: false` retains
         # the literal subfield.
-        agent_names = sorted(
-            r["name"] for r in conn.execute("SELECT name FROM agents;").fetchall()
-        )
+        agent_names = sorted(r["name"] for r in conn.execute("SELECT name FROM agents;").fetchall())
         assert agent_names == ["Author Alpha", "Author Beta"]
 
 

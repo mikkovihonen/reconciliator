@@ -266,7 +266,11 @@ def parse_jsonld_dict(
                     m_titles = _get_string_values(res_title, main_title_keys)
                     s_titles = _get_string_values(res_title, subtitle_keys)
                     types = _get_node_types(res_title)
-                    variant_classes = profile.expanded_title_variant_classes | set(profile.title_variant_classes) | {c.split(":")[-1] for c in profile.title_variant_classes}
+                    variant_classes = (
+                        profile.expanded_title_variant_classes
+                        | set(profile.title_variant_classes)
+                        | {c.split(":")[-1] for c in profile.title_variant_classes}
+                    )
                     is_variant = bool(types.intersection(variant_classes))
 
                     if m_titles:
@@ -306,9 +310,15 @@ def parse_jsonld_dict(
         other_ids: list[str] = []
 
         scheme_map = profile.expanded_identifier_scheme_mappings
-        isbn_cands = scheme_map.get("isbn", set()) | {c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("isbn", [])}
-        issn_cands = scheme_map.get("issn", set()) | {c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("issn", [])}
-        urn_cands = scheme_map.get("urn", set()) | {c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("urn", [])}
+        isbn_cands = scheme_map.get("isbn", set()) | {
+            c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("isbn", [])
+        }
+        issn_cands = scheme_map.get("issn", set()) | {
+            c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("issn", [])
+        }
+        urn_cands = scheme_map.get("urn", set()) | {
+            c.split(":")[-1] for c in profile.identifier_scheme_mappings.get("urn", [])
+        }
 
         for id_val in _extract_values(inst, id_keys):
             res_id = _resolve_node(id_val, node_index)
@@ -339,12 +349,17 @@ def parse_jsonld_dict(
                         if v not in other_ids:
                             other_ids.append(v)
             elif isinstance(id_val, str):
-                if id_val.lower().startswith("urn:") or any(cand.lower() in id_val.lower() for cand in urn_cands):
+                if id_val.lower().startswith("urn:") or any(
+                    cand.lower() in id_val.lower() for cand in urn_cands
+                ):
                     urns.append(id_val)
                 else:
                     other_ids.append(id_val)
 
-        if inst_id and (any(cand.lower() in inst_id.lower() for cand in urn_cands) or inst_id.lower().startswith("urn:")):
+        if inst_id and (
+            any(cand.lower() in inst_id.lower() for cand in urn_cands)
+            or inst_id.lower().startswith("urn:")
+        ):
             if inst_id not in urns:
                 urns.append(inst_id)
 
@@ -465,14 +480,9 @@ def parse_jsonld_dict(
         )
         field_category_map = get_subject_field_category_map()
         cat_default_field = get_category_default_field_map()
-        default_target_field = (
-            profile.default_subject_field
-            or cat_default_field["topical"]
-        )
+        default_target_field = profile.default_subject_field or cat_default_field["topical"]
         default_category = field_category_map[default_target_field]
-        subjects: dict[str, list[dict[str, Any]]] = {
-            cat: [] for cat in field_category_map.values()
-        }
+        subjects: dict[str, list[dict[str, Any]]] = {cat: [] for cat in field_category_map.values()}
 
         type_to_field = profile.subject_type_fields
         src_keys = (

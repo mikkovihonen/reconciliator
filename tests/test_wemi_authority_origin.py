@@ -88,13 +88,16 @@ def test_record_origin_names_the_ingest_source():
     ]
 
     # An unregistered row is not silently treated as authoritative.
-    assert WorkEntity(
-        work_uri="urn:work:3",
-        source="x",
-        source_id="3",
-        title="T",
-        title_normalized="t",
-    ).record_origin == "unknown"
+    assert (
+        WorkEntity(
+            work_uri="urn:work:3",
+            source="x",
+            source_id="3",
+            title="T",
+            title_normalized="t",
+        ).record_origin
+        == "unknown"
+    )
 
 
 def test_source_registry_decides_authoritativeness(tmp_path):
@@ -224,9 +227,7 @@ def test_repository_origin_filtering_and_counts(tmp_path):
     repo.register_source("authority", is_authoritative=True)
     repo.register_source("target", is_authoritative=False)
 
-    auth_matches = repo.lookup_by_identifier(
-        "isbn", "978-951-0-12345-6", authoritative_only=True
-    )
+    auth_matches = repo.lookup_by_identifier("isbn", "978-951-0-12345-6", authoritative_only=True)
     assert len(auth_matches) == 1
     m_type, m_id = auth_matches[0]
     manif_retrieved = repo.get_manifestation(m_id)
@@ -264,7 +265,11 @@ def test_repository_origin_filtering_and_counts(tmp_path):
     assert len(default_works) == 1
     assert default_works[0].record_origin == "authority"
 
-    target_works = [w for w in repo.find_works_by_author_and_title(None, "sinuhe", authoritative_only=False) if w.record_origin == "target"]
+    target_works = [
+        w
+        for w in repo.find_works_by_author_and_title(None, "sinuhe", authoritative_only=False)
+        if w.record_origin == "target"
+    ]
     assert len(target_works) == 1
     assert target_works[0].record_origin == "target"
 
@@ -352,14 +357,17 @@ def test_decompose_marc_authority_work():
     assert len(works) == 1
     w = works[0]
     assert w.title == "Kalevala"
-    assert w.work_uri == "http://urn.fi/URN:NBN:fi:au:work:001"
+    assert w.work_uri == "asteri:auth_work_001"
     assert w.record_origin == "authority"
     assert w.record_origin == "authority"
     # 4XX variant titles ride in subjects_json, tagged as such, because that
     # list is what the work serialisation renders and WorkEntity has no variant
     # title column.
-    assert {"heading": "Vanha Kalevala", "pref_label": "Vanha Kalevala",
-            "kind": "variant_title"} in w.subjects_json
+    assert {
+        "heading": "Vanha Kalevala",
+        "pref_label": "Vanha Kalevala",
+        "kind": "variant_title",
+    } in w.subjects_json
 
     assert len(expressions) == 1
     assert expressions[0].language == "fin"
@@ -575,4 +583,3 @@ def test_work_matcher_authority_isolation(tmp_path):
     assert res_title is not None
     assert res_title.matched_work.record_origin == "authority"
     assert res_title.matched_work.source == "asteri"
-

@@ -341,9 +341,12 @@ def test_the_inverse_direction_is_available():
     """Both halves of the pair exist, so a constituent can name its container as
     well as the other way round."""
     for kind in ("has_constituent", "constituent_of"):
-        assert WorkRelationship(
-            source_work_id=1, target_work_id=2, relationship_type=kind
-        ).relationship_type == kind
+        assert (
+            WorkRelationship(
+                source_work_id=1, target_work_id=2, relationship_type=kind
+            ).relationship_type
+            == kind
+        )
 
 
 def test_re_ingesting_a_record_adds_no_duplicates(repo: WEMIRepository):

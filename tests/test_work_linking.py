@@ -38,7 +38,9 @@ def _marc(rec_id: str, title: str, author: str, year: str, isbn: str, org: str) 
 def _collection(records: list[str]) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<collection xmlns="http://www.loc.gov/MARC21/slim">\n' + "".join(records) + "</collection>\n"
+        '<collection xmlns="http://www.loc.gov/MARC21/slim">\n'
+        + "".join(records)
+        + "</collection>\n"
     )
 
 
@@ -81,27 +83,27 @@ storage:
   data_dir: "{tmp}"
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
-  template_path: "{templates / 'default_serialization.j2'}"
+  template_path: "{templates / "default_serialization.j2"}"
   device: "cpu"
 ingest_vocab:
-  input_path: "{FIXTURES / 'sample_finto.ttl'}"
+  input_path: "{FIXTURES / "sample_finto.ttl"}"
   vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
   legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 ingest_oai:
   source_a:
     enabled: true
     source_type: "file"
-    input_path: "{tmp / 'auth_a.xml'}"
+    input_path: "{tmp / "auth_a.xml"}"
     workers: 1
     batch_size: 10
   source_b:
     enabled: true
     source_type: "file"
-    input_path: "{tmp / 'auth_b.xml'}"
+    input_path: "{tmp / "auth_b.xml"}"
     workers: 1
     batch_size: 10
 reconcile:
-  target_file: "{tmp / 'target.xml'}"
+  target_file: "{tmp / "target.xml"}"
   output_file: "{out_xml}"
   enrich: true
   fold_legacy: true
@@ -158,7 +160,9 @@ telemetry:
                 uris += [
                     s.text
                     for s in df.findall(f"{MARC}subfield")
-                    if s.get("code") == "0" and s.text and ":work:" in s.text
+                    if s.get("code") == "0"
+                    and s.text
+                    and (s.text.startswith("source_") or s.text.startswith("reconciliator:work_"))
                 ]
         exported[rid] = uris
 
@@ -202,8 +206,8 @@ def test_unmatched_work_still_gets_a_stable_internal_uri(linked: dict) -> None:
     """A work absent from every authority source is still linkable within the corpus."""
     clusters, linkages = linked["clusters"], linked["linkages"]
     cluster = clusters[_cluster_of(linkages, "T-TUNT-1")]
-    assert cluster.canonical_work_uri.startswith("urn:reconciliator:work:")
-    assert linked["exported"]["T-TUNT-1"] == [cluster.canonical_work_uri]
+    assert cluster.canonical_work_curie.startswith("reconciliator:work_")
+    assert linked["exported"]["T-TUNT-1"] == [cluster.canonical_work_curie]
 
 
 # ---------------------------------------------------------------------------
@@ -214,16 +218,16 @@ def test_unmatched_work_still_gets_a_stable_internal_uri(linked: dict) -> None:
 def test_cluster_adopts_an_authority_work_uri(linked: dict) -> None:
     clusters, linkages = linked["clusters"], linked["linkages"]
     cluster = clusters[_cluster_of(linkages, "T-SIN-1")]
-    assert not cluster.canonical_work_uri.startswith("urn:reconciliator:"), (
+    assert not cluster.canonical_work_curie.startswith("reconciliator:"), (
         "a cluster matching an authority work should adopt its URI, not mint one"
     )
-    assert cluster.canonical_work_uri.startswith("urn:work:source_")
+    assert cluster.canonical_work_curie.startswith("source_")
 
 
 def test_every_cluster_member_exports_the_same_work_uri(linked: dict) -> None:
     """The point of clustering: siblings must not disagree about their work."""
     clusters, linkages, exported = linked["clusters"], linked["linkages"], linked["exported"]
-    canonical = clusters[_cluster_of(linkages, "T-SIN-1")].canonical_work_uri
+    canonical = clusters[_cluster_of(linkages, "T-SIN-1")].canonical_work_curie
     for rec_id in ("T-SIN-1", "T-SIN-2", "T-SIN-3"):
         assert exported[rec_id] == [canonical], (
             f"{rec_id} exported {exported[rec_id]}, expected {canonical}"
@@ -251,8 +255,7 @@ def test_record_level_match_is_retained_as_provenance(linked: dict) -> None:
     divergent = [
         r
         for r in work_rows.values()
-        if r["record_level_work_uri"]
-        and r["record_level_work_uri"] != r["matched_work_uri"]
+        if r["record_level_work_uri"] and r["record_level_work_uri"] != r["matched_work_uri"]
     ]
     assert divergent, (
         "expected at least one record whose own match differed from its cluster's "
@@ -261,8 +264,8 @@ def test_record_level_match_is_retained_as_provenance(linked: dict) -> None:
     # Both sides of the divergence are real authority URIs, i.e. the same work
     # exists under two source identities.
     for row in divergent:
-        assert row["record_level_work_uri"].startswith("urn:work:source_")
-        assert row["matched_work_uri"].startswith("urn:work:source_")
+        assert row["record_level_work_uri"].startswith("source_")
+        assert row["matched_work_uri"].startswith("source_")
 
 
 def test_sources_keep_separate_identities_until_consolidation_runs(linked: dict) -> None:
@@ -281,7 +284,7 @@ def test_sources_keep_separate_identities_until_consolidation_runs(linked: dict)
         authoritative = repo.authoritative_sources()
         placeholders = ", ".join("?" for _ in authoritative)
         works = conn.execute(
-            f"SELECT source, work_uri FROM works WHERE record_origin IN ({placeholders}) ORDER BY id",
+            f"SELECT source, source_id FROM works WHERE record_origin IN ({placeholders}) ORDER BY id",
             authoritative,
         ).fetchall()
         same_work_edges = conn.execute(

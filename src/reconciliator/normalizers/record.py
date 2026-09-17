@@ -548,9 +548,7 @@ class RecordNormalizer:
 
         field_to_cat = cfg.subject_field_category_map
         cat_default_field = {cat: tag for tag, cat in field_to_cat.items()}
-        folded_categories: dict[str, list[SubjectItem]] = {
-            cat: [] for cat in field_to_cat.values()
-        }
+        folded_categories: dict[str, list[SubjectItem]] = {cat: [] for cat in field_to_cat.values()}
 
         for cat_name, items in raw_subjects.items():
             fallback_field = cat_default_field.get(cat_name) or self.config.default_subject_field
@@ -559,12 +557,14 @@ class RecordNormalizer:
                 field = item.get("field", fallback_field)
                 vocab = item.get("vocabulary")
                 uri = item.get("uri")
-                t_field, t_vocab, t_uri, t_label, m_type, qid = self.vocab_folder.fold_subject_heading(
-                    heading=heading,
-                    source_vocab=vocab,
-                    source_field=field,
-                    source_uri=uri,
-                    lang=rec_lang_folding,
+                t_field, t_vocab, t_uri, t_label, m_type, qid = (
+                    self.vocab_folder.fold_subject_heading(
+                        heading=heading,
+                        source_vocab=vocab,
+                        source_field=field,
+                        source_uri=uri,
+                        lang=rec_lang_folding,
+                    )
                 )
                 sub_item = SubjectItem(
                     uri=t_uri,
@@ -576,7 +576,6 @@ class RecordNormalizer:
                     source_uri=uri,
                     source_heading=heading,
                     mapping_type=m_type,
-                    wikidata_qid=qid,
                 )
                 target_cat = field_to_cat.get(
                     t_field, cat_name if cat_name in folded_categories else "topical"
@@ -595,15 +594,15 @@ class RecordNormalizer:
         resolved_subject_keys: list[str] = []
         for s_item in subjects.all_subjects():
             if s_item.uri and s_item.vocabulary:
-                    norm_v = normalize_subject_vocabulary(
-                        s_item.vocabulary,
-                        uri=s_item.uri,
-                    )
-                    if not norm_v:
-                        continue
-                    cid = extract_concept_id(s_item.uri)
-                    if cid:
-                        resolved_subject_keys.append(f"{norm_v}:{cid.lower()}")
+                norm_v = normalize_subject_vocabulary(
+                    s_item.vocabulary,
+                    uri=s_item.uri,
+                )
+                if not norm_v:
+                    continue
+                cid = extract_concept_id(s_item.uri)
+                if cid:
+                    resolved_subject_keys.append(f"{norm_v}:{cid.lower()}")
 
         if resolved_subject_keys:
             resolved_counts = dict(Counter(resolved_subject_keys))

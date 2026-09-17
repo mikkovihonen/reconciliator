@@ -27,6 +27,7 @@ from reconciliator.models import (
     AgentEntity,
     CarrierType,
     ContributionEntity,
+    EntityType,
     ExpressionEntity,
     IdentifierEntity,
     ItemEntity,
@@ -305,7 +306,9 @@ def _extract_author_data(
             "birth_year": birth_year,
             "death_year": death_year,
             "occupations": json.dumps(occupations, ensure_ascii=False) if occupations else None,
-            "fields_of_work": json.dumps(fields_of_work, ensure_ascii=False) if fields_of_work else None,
+            "fields_of_work": json.dumps(fields_of_work, ensure_ascii=False)
+            if fields_of_work
+            else None,
             "affiliations": json.dumps(affiliations, ensure_ascii=False) if affiliations else None,
             "metadata_json": json.dumps(meta_dict, ensure_ascii=False) if meta_dict else None,
         }
@@ -589,9 +592,7 @@ def parse_wikidata_entity(
     # Subjects — hydrate names from SQLite
     cat_defaults = get_category_default_field_map()
     field_to_cat = get_subject_field_category_map()
-    subjects: dict[str, list[dict[str, Any]]] = {
-        cat: [] for cat in field_to_cat.values()
-    }
+    subjects: dict[str, list[dict[str, Any]]] = {cat: [] for cat in field_to_cat.values()}
     topical_field = cat_defaults["topical"]
     genre_field = cat_defaults["genre_form"]
     geo_field = cat_defaults["geographic"]
@@ -970,10 +971,9 @@ def decompose_wikidata_entity(
     )
 
     work_qid = get_claim_qids(claims, "P629")[0] if has_p629 else qid
-    work_uri = format_wikidata_uri(work_qid)
-    qid_uri = format_wikidata_uri(qid)
-    expr_uri = f"{qid_uri}#exp-{language or 'und'}"
-    manif_uri = qid_uri
+    work_curie = f"wikidata:{work_qid}"
+    expr_curie = f"wikidata:{qid}_exp_{language or 'und'}"
+    manif_curie = f"wikidata:{qid}"
 
     primary_creator_name: Optional[str] = None
     for prop, role in creator_props:
@@ -981,7 +981,6 @@ def decompose_wikidata_entity(
             c_name = _lookup_entity_name(c_qid, store) or c_qid
             if not primary_creator_name and not re.match(r"^Q\d+$", c_name):
                 primary_creator_name = c_name
-            agent_uri = format_wikidata_uri(c_qid)
             author_data = store.get_wikidata_author(c_qid) if store else None
             c_meta: dict[str, Any] = {}
             if author_data and author_data.get("metadata_json"):
@@ -990,14 +989,13 @@ def decompose_wikidata_entity(
                 except Exception:
                     c_meta = {}
             agent = AgentEntity(
-                agent_uri=agent_uri,
                 name=c_name,
                 name_normalized=c_name.strip().lower(),
                 surname=author_data.get("family_name") if author_data else None,
                 birth_year=author_data.get("birth_year") if author_data else None,
                 death_year=author_data.get("death_year") if author_data else None,
                 source="wikidata",
-                wikidata_qid=c_qid,
+                source_id=c_qid,
                 orcid=c_meta.get("orcid"),
                 variant_names=c_meta.get("variant_names", []),
                 qualifier_counts=c_meta.get("qualifier_counts", {}),
@@ -1011,7 +1009,9 @@ def decompose_wikidata_entity(
                 ContributionEntity(
                     entity_type="work",
                     entity_id=0,
+                    entity_curie=work_curie,
                     agent_id=0,
+                    agent_curie=f"wikidata:{c_qid}",
                     role=role,
                     is_primary=(primary_creator_name == c_name),
                 )
@@ -1020,7 +1020,6 @@ def decompose_wikidata_entity(
     for prop, role in realizer_props:
         for r_qid in get_claim_qids(claims, prop):
             r_name = _lookup_entity_name(r_qid, store) or r_qid
-            agent_uri = format_wikidata_uri(r_qid)
             author_data = store.get_wikidata_author(r_qid) if store else None
             r_meta: dict[str, Any] = {}
             if author_data and author_data.get("metadata_json"):
@@ -1029,14 +1028,13 @@ def decompose_wikidata_entity(
                 except Exception:
                     r_meta = {}
             agent = AgentEntity(
-                agent_uri=agent_uri,
                 name=r_name,
                 name_normalized=r_name.strip().lower(),
                 surname=author_data.get("family_name") if author_data else None,
                 birth_year=author_data.get("birth_year") if author_data else None,
                 death_year=author_data.get("death_year") if author_data else None,
                 source="wikidata",
-                wikidata_qid=r_qid,
+                source_id=r_qid,
                 orcid=r_meta.get("orcid"),
                 variant_names=r_meta.get("variant_names", []),
                 qualifier_counts=r_meta.get("qualifier_counts", {}),
@@ -1050,14 +1048,37 @@ def decompose_wikidata_entity(
                 ContributionEntity(
                     entity_type="expression",
                     entity_id=0,
+                    entity_curie=expr_curie,
                     agent_id=0,
+                    agent_curie=f"wikidata:{r_qid}",
                     role=role,
                     is_primary=False,
                 )
             )
 
     # Identifiers
-    identifiers: list[IdentifierEntity] = []
+    identifiers: list[IdentifierEntity] = [
+        IdentifierEntity(
+            entity_type="work",
+            entity_id=0,
+            source="wikidata",
+            source_id=work_qid,
+            curie=work_curie,
+            entity_curie=work_curie,
+        )
+    ]
+    if work_qid != qid:
+        identifiers.append(
+            IdentifierEntity(
+                entity_type="manifestation",
+                entity_id=0,
+                source="wikidata",
+                source_id=qid,
+                curie=manif_curie,
+                entity_curie=manif_curie,
+            )
+        )
+
     id_claims = (
         ("P212", "isbn"),
         ("P957", "isbn"),
@@ -1074,15 +1095,18 @@ def decompose_wikidata_entity(
             if val and isinstance(val, str):
                 v_clean = val.strip()
                 v_norm = re.sub(r"[^0-9a-zA-Z]", "", v_clean).lower()
+                target_etype: EntityType = (
+                    "manifestation" if scheme in ("isbn", "issn", "doi", "oclc") else "work"
+                )
                 identifiers.append(
                     IdentifierEntity(
-                        entity_type="manifestation"
-                        if scheme in ("isbn", "issn", "doi", "oclc")
-                        else "work",
+                        entity_type=target_etype,
                         entity_id=0,
-                        scheme=scheme,
-                        value=v_clean,
-                        value_normalized=v_norm,
+                        source=scheme,
+                        source_id=v_clean,
+                        source_id_normalized=v_norm,
+                        curie=f"{scheme}:{v_clean}",
+                        entity_curie=manif_curie if target_etype == "manifestation" else work_curie,
                     )
                 )
 
@@ -1102,19 +1126,19 @@ def decompose_wikidata_entity(
                 WorkRelationship(
                     source_work_id=0,
                     target_work_id=0,
+                    source_work_curie=work_curie,
+                    target_work_curie=f"wikidata:{target_qid}",
                     relationship_type=rel_type,
                 )
             )
 
     work = WorkEntity(
-        work_uri=work_uri,
         title=title,
         title_normalized=compute_title_stem(title, lang=original_language),
         original_language=original_language,
         work_type=work_type,
         source="wikidata",
-        source_id=qid,
-        wikidata_qid=work_qid if has_p629 else qid,
+        source_id=work_qid,
     )
     work.serialized_text = engine.render_work(
         work,
@@ -1123,13 +1147,12 @@ def decompose_wikidata_entity(
 
     expression = ExpressionEntity(
         work_id=0,
-        expression_uri=expr_uri,
+        work_curie=work_curie,
         title=title,
         content_type="audio_music" if work_type == "music" else "text",
         language=language or "und",
         source="wikidata",
-        source_id=qid,
-        wikidata_qid=qid,
+        source_id=f"{qid}_{language or 'und'}",
     )
     expression.serialized_text = engine.render_expression(
         expression,
@@ -1138,7 +1161,7 @@ def decompose_wikidata_entity(
 
     manifestation = ManifestationEntity(
         work_id=0,
-        manifestation_uri=manif_uri,
+        work_curie=work_curie,
         title=title,
         subtitle=subtitle,
         title_normalized=compute_title_stem(title, lang=language),
@@ -1157,6 +1180,8 @@ def decompose_wikidata_entity(
         ManifestationExpressionAssociation(
             manifestation_id=0,
             expression_id=0,
+            manifestation_curie=manif_curie,
+            expression_curie=expr_curie,
             is_primary=True,
         )
     ]
@@ -1303,13 +1328,11 @@ def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]
         return []
 
     yso_str = str(yso_id).strip()
-    if not yso_str.startswith("http"):
-        yso_uri = (
-            concept_id_to_uri(f"yso:{yso_str}")
-            or f"http://www.yso.fi/onto/yso/{yso_str if yso_str.startswith('p') else 'p' + yso_str}"
-        )
-    else:
-        yso_uri = yso_str
+    yso_clean = yso_str.split("/")[-1] if "/" in yso_str else yso_str
+    if yso_clean and not yso_clean.startswith("p"):
+        yso_clean = "p" + yso_clean
+    concept_id = yso_clean or qid
+    concept_vocab = "yso" if yso_clean else "wikidata"
 
     instance_of = get_claim_qids(claims, "P31")
     is_place = any(
@@ -1330,12 +1353,11 @@ def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]
                         "folded_label": folded,
                         "raw_label": val.strip(),
                         "lang": lang,
-                        "concept_uri": yso_uri,
-                        "wikidata_qid": qid,
-                        "vocabulary": "yso",
+                        "concept_id": concept_id,
+                        "vocabulary": concept_vocab,
                         "target_field": target_field,
                         "is_preferred": 1,
-                        "source": "wikidata",
+                        "source": f"wikidata:{qid}" if qid else "wikidata",
                     }
                 )
 
@@ -1352,12 +1374,11 @@ def extract_wikidata_yso_aliases(entity: dict[str, Any]) -> list[dict[str, Any]]
                                 "folded_label": folded,
                                 "raw_label": val.strip(),
                                 "lang": lang,
-                                "concept_uri": yso_uri,
-                                "wikidata_qid": qid,
-                                "vocabulary": "yso",
+                                "concept_id": concept_id,
+                                "vocabulary": concept_vocab,
                                 "target_field": target_field,
                                 "is_preferred": 0,
-                                "source": "wikidata",
+                                "source": f"wikidata:{qid}" if qid else "wikidata",
                             }
                         )
 

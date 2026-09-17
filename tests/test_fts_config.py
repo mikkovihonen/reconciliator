@@ -245,6 +245,6 @@ def test_work_matcher_fts_fallback_config(tmp_path: Path):
     assert res_enabled is not None
     assert res_enabled.match_tier == "tier3_fts_fallback"
     assert res_enabled.confidence_score == 0.88
-    assert res_enabled.matched_work.work_uri == "urn:work:100"
+    assert res_enabled.matched_work.work_uri == "test:w100"
     assert res_enabled.matched_expression is not None
-    assert res_enabled.matched_expression.expression_uri == "urn:exp:100"
+    assert res_enabled.matched_expression.expression_uri == "test:e100"

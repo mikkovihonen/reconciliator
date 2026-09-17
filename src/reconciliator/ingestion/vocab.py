@@ -176,7 +176,9 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
         stem = bf.stem.replace(".ttl", "")
         content = bf.read_text(encoding="utf-8")
         bridges = parse_bridge_turtle(content, bridge_vocab=stem)
-        target_field = geo_field if "countries" in stem else ("100" if "relators" in stem else topical_field)
+        target_field = (
+            geo_field if "countries" in stem else ("100" if "relators" in stem else topical_field)
+        )
 
         for b in bridges:
             source_uri = b["source_uri"]
@@ -321,9 +323,8 @@ def ingest_vocab_file(
         else vocab_store.config.ingest_alt_label_languages
     )
 
-    vocab_target_fields = (
-        getattr(config, "vocab_target_fields", None)
-        or getattr(vocab_store.config, "vocab_target_fields", None)
+    vocab_target_fields = getattr(config, "vocab_target_fields", None) or getattr(
+        vocab_store.config, "vocab_target_fields", None
     )
 
     if tracker:
@@ -356,9 +357,13 @@ def ingest_vocab_file(
     # Ingest MTS contributor roles into relator_terms
     mts_to_code: dict[str, str] = {}
     for m in total_mappings:
-        if "id.loc.gov/vocabulary/relators/" in m.target_uri and ("mts:" in m.legacy_uri or "/mts/" in m.legacy_uri):
+        if "id.loc.gov/vocabulary/relators/" in m.target_uri and (
+            "mts:" in m.legacy_uri or "/mts/" in m.legacy_uri
+        ):
             mts_to_code[m.legacy_uri] = m.target_uri.rstrip("/").split("/")[-1].lower()
-        elif "id.loc.gov/vocabulary/relators/" in m.legacy_uri and ("mts:" in m.target_uri or "/mts/" in m.target_uri):
+        elif "id.loc.gov/vocabulary/relators/" in m.legacy_uri and (
+            "mts:" in m.target_uri or "/mts/" in m.target_uri
+        ):
             mts_to_code[m.target_uri] = m.legacy_uri.rstrip("/").split("/")[-1].lower()
 
     mts_roles: list[dict[str, Any]] = []

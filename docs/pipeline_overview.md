@@ -298,8 +298,8 @@ Matching a record and resolving its agents are two questions, so they are two
 calls:
 
 ```python
-record = _to_target_record(payload, fmt, profile)   # one construction
-match  = matcher.match_target(record)               # one dispatch
+record = _to_target_record(payload, fmt, profile)  # one construction
+match = matcher.match_target(record)  # one dispatch
 result = matcher.resolve_agents(match, bib_record)  # hydrate, align, fallback
 ```
 

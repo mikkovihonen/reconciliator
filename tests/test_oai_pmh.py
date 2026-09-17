@@ -278,28 +278,34 @@ def test_wemi_repository_get_indexed_source_ids(tmp_path: Path) -> None:
     dim = 8
 
     vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
-    store = WEMIRepository(db_path=db_path, work_index_path=index_path, dimension=dim, vector_engine_config=vec_cfg)
+    store = WEMIRepository(
+        db_path=db_path, work_index_path=index_path, dimension=dim, vector_engine_config=vec_cfg
+    )
     assert store.get_indexed_source_ids("melinda") == set()
 
     # Insert two manifestations
     from reconciliator.models import ManifestationEntity
 
-    store.insert_manifestation(ManifestationEntity(
-        manifestation_uri="http://example.org/manifest/rec_101",
-        source="melinda",
-        source_id="rec_101",
-        title="Title 1",
-        title_normalized="title 1",
-        carrier_type="volume",
-    ))
-    store.insert_manifestation(ManifestationEntity(
-        manifestation_uri="http://example.org/manifest/rec_102",
-        source="melinda",
-        source_id="rec_102",
-        title="Title 2",
-        title_normalized="title 2",
-        carrier_type="volume",
-    ))
+    store.insert_manifestation(
+        ManifestationEntity(
+            manifestation_uri="http://example.org/manifest/rec_101",
+            source="melinda",
+            source_id="rec_101",
+            title="Title 1",
+            title_normalized="title 1",
+            carrier_type="volume",
+        )
+    )
+    store.insert_manifestation(
+        ManifestationEntity(
+            manifestation_uri="http://example.org/manifest/rec_102",
+            source="melinda",
+            source_id="rec_102",
+            title="Title 2",
+            title_normalized="title 2",
+            carrier_type="volume",
+        )
+    )
     indexed_ids = store.get_indexed_source_ids("melinda")
     assert indexed_ids == {"rec_101", "rec_102"}
     assert store.get_indexed_source_ids("other_source") == set()
@@ -355,14 +361,16 @@ def test_wemi_repository_get_indexed_source_ids_variants(tmp_path: Path) -> None
         dimension=8,
         vector_engine_config=vec_cfg,
     )
-    store.insert_manifestation(ManifestationEntity(
-        manifestation_uri="http://example.org/manifest/rec_variant",
-        source="melinda",
-        source_id="(FI-MELINDA)000298022",
-        title="Sample Book",
-        title_normalized="sample book",
-        carrier_type="volume",
-    ))
+    store.insert_manifestation(
+        ManifestationEntity(
+            manifestation_uri="http://example.org/manifest/rec_variant",
+            source="melinda",
+            source_id="(FI-MELINDA)000298022",
+            title="Sample Book",
+            title_normalized="sample book",
+            carrier_type="volume",
+        )
+    )
 
     ids = store.get_indexed_source_ids("melinda")
     assert "(FI-MELINDA)000298022" in ids

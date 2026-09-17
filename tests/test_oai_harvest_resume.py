@@ -105,9 +105,7 @@ def test_completed_harvest_records_state(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     endpoint = FakeEndpoint([["r1", "r2"], ["r3", "r4"]])
 
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint
-    ):
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint):
         total = ingest_oai_pipeline("melinda", oai_config(), repo)
 
     assert total == 4
@@ -127,9 +125,7 @@ def test_interrupted_harvest_checkpoints_a_safe_token(tmp_path: Path) -> None:
     # Serve two full pages, then die partway through the third.
     endpoint = FakeEndpoint([["r1", "r2"], ["r3", "r4"], ["r5", "r6"]], fail_after=5)
 
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint
-    ):
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint):
         with pytest.raises(RuntimeError, match="endpoint died mid-harvest"):
             ingest_oai_pipeline("melinda", oai_config(), repo)
 
@@ -256,9 +252,7 @@ def test_workers_partition_the_date_range(tmp_path: Path) -> None:
                 cb()
 
     endpoint = PerSliceEndpoint([])
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint
-    ):
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint):
         total = ingest_oai_pipeline("melinda", cfg, repo)
 
     # 2024-01-01..2024-02-10 in 10-day slices is more than one partition, and each
@@ -329,9 +323,7 @@ def test_single_worker_does_not_partition(tmp_path: Path) -> None:
     cfg = oai_config(workers=1, from_date="2024-01-01", until_date="2024-12-31")
     endpoint = FakeEndpoint([["r1"]])
 
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint
-    ):
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint):
         ingest_oai_pipeline("melinda", cfg, repo)
 
     assert len(endpoint.calls) == 1
@@ -348,9 +340,7 @@ def test_multiworker_without_from_date_discovers_earliest_datestamp(tmp_path: Pa
         "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
         return_value="2023-01-01",
     ) as discover:
-        with patch(
-            "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint
-        ):
+        with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint):
             ingest_oai_pipeline("melinda", cfg, repo)
 
     discover.assert_called_once()
@@ -367,9 +357,7 @@ def test_multiworker_falls_back_when_discovery_fails(tmp_path: Path) -> None:
         "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
         return_value=None,
     ):
-        with patch(
-            "reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint
-        ):
+        with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", endpoint):
             total = ingest_oai_pipeline("melinda", cfg, repo)
 
     # No window to slice: one continuous stream, still fully harvested.
@@ -385,14 +373,10 @@ def test_multiworker_falls_back_when_discovery_fails(tmp_path: Path) -> None:
 
 def test_file_source_writes_no_harvest_state(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    cfg = OAIIngestConfig(
-        source_type="file", input_path=Path("dummy.xml"), batch_size=2
-    )
+    cfg = OAIIngestConfig(source_type="file", input_path=Path("dummy.xml"), batch_size=2)
     records = [make_marc_record("f1", "File One"), make_marc_record("f2", "File Two")]
 
-    with patch(
-        "reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=records
-    ):
+    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=records):
         total = ingest_oai_pipeline("localfile", cfg, repo)
 
     assert total == 2
@@ -410,9 +394,7 @@ def test_single_worker_never_queries_identify() -> None:
     from reconciliator.ingestion.oai import _resolve_harvest_window
 
     cfg = oai_config(workers=1, from_date=None, until_date=None)
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp"
-    ) as identify:
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp") as identify:
         assert _resolve_harvest_window("melinda", cfg) == (None, None)
     identify.assert_not_called()
 
@@ -433,9 +415,7 @@ def test_explicit_window_is_left_alone() -> None:
     from reconciliator.ingestion.oai import _resolve_harvest_window
 
     cfg = oai_config(workers=4, from_date="2024-01-01", until_date="2024-06-30")
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp"
-    ) as identify:
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp") as identify:
         assert _resolve_harvest_window("melinda", cfg) == ("2024-01-01", "2024-06-30")
     identify.assert_not_called()
 
@@ -443,11 +423,7 @@ def test_explicit_window_is_left_alone() -> None:
 def test_file_source_never_queries_identify() -> None:
     from reconciliator.ingestion.oai import _resolve_harvest_window
 
-    cfg = OAIIngestConfig(
-        source_type="file", input_path=Path("dummy.xml"), workers=8
-    )
-    with patch(
-        "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp"
-    ) as identify:
+    cfg = OAIIngestConfig(source_type="file", input_path=Path("dummy.xml"), workers=8)
+    with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp") as identify:
         assert _resolve_harvest_window("localfile", cfg) == (None, None)
     identify.assert_not_called()

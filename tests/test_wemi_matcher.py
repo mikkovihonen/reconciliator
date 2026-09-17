@@ -111,8 +111,12 @@ def test_analytics_come_from_keys_not_the_payload():
         format="marcxml",
         title="Kokoelma",
         title_stem="kokoelma",
-        keys={"analytic": [encode_analytic("Finlandia", "Sibelius, Jean"),
-                           encode_analytic("Valse triste", None)]},
+        keys={
+            "analytic": [
+                encode_analytic("Finlandia", "Sibelius, Jean"),
+                encode_analytic("Valse triste", None),
+            ]
+        },
     )
     assert extract_target_analytics(target) == [
         ("Finlandia", "Sibelius, Jean"),
@@ -195,11 +199,11 @@ def test_work_matcher_fast_path_isbn(repo: WEMIRepository):
     assert result.match_tier == "tier1_exact_identifier"
     assert result.confidence_score == 1.0
     assert result.matched_work is not None
-    assert result.matched_work.work_uri == "http://example.org/work/sinuhe"
+    assert result.matched_work.work_uri == work.curie
     assert result.matched_expression is not None
     assert result.matched_expression.language == "fin"
     assert result.matched_manifestation is not None
-    assert result.matched_manifestation.manifestation_uri == "http://example.org/manif/sinuhe_1945"
+    assert result.matched_manifestation.manifestation_uri == manif.curie
 
 
 def test_work_matcher_monograph_author_title_and_vector_fallback(repo: WEMIRepository):
@@ -252,7 +256,7 @@ def test_work_matcher_monograph_author_title_and_vector_fallback(repo: WEMIRepos
     res1 = matcher.match_target(target1)
     assert res1.match_tier == "tier2_domain_key"
     assert res1.matched_work is not None
-    assert res1.matched_work.work_uri == "http://example.org/work/tuntematon"
+    assert res1.matched_work.work_uri == work.curie
 
     # 2. Vector fallback for uncataloged edition with altered wording
     mock_embedder = MagicMock()
@@ -272,7 +276,7 @@ def test_work_matcher_monograph_author_title_and_vector_fallback(repo: WEMIRepos
     res_vec = matcher_vec.match_target(target_uncataloged)
     assert res_vec.match_tier == "tier2_vector_fallback"
     assert res_vec.matched_work is not None
-    assert res_vec.matched_work.work_uri == "http://example.org/work/tuntematon"
+    assert res_vec.matched_work.work_uri == work.curie
 
 
 def test_work_matcher_audiobook_cross_format(repo: WEMIRepository):
@@ -318,7 +322,7 @@ def test_work_matcher_audiobook_cross_format(repo: WEMIRepository):
     assert res.funnel_used == "funnel_e_audiobook"
     assert res.match_tier == "cross_format"
     assert res.matched_work is not None
-    assert res.matched_work.work_uri == "http://example.org/work/sinuhe"
+    assert res.matched_work.work_uri == work.curie
     assert res.matched_work.work_type == "text"
     assert res.matched_expression is not None
     assert res.matched_expression.content_type == "spoken_word"
@@ -376,7 +380,7 @@ def test_work_matcher_recorded_sound_and_tracklist(repo: WEMIRepository):
     assert res.funnel_used == "funnel_b_music_sound"
     assert res.match_tier == "tier1_exact_identifier"
     assert res.matched_work is not None
-    assert res.matched_work.work_uri == "http://example.org/work/sibelius_finlandia"
+    assert res.matched_work.work_uri == m_work.curie
 
 
 def test_work_matcher_notated_music_and_mop(repo: WEMIRepository):
@@ -437,7 +441,7 @@ def test_work_matcher_notated_music_and_mop(repo: WEMIRepository):
     assert res.funnel_used == "funnel_d_notated_music"
     assert res.match_tier == "tier2_music_signature"
     assert res.matched_work is not None
-    assert res.matched_work.work_uri == "http://example.org/work/karelia_suite"
+    assert res.matched_work.work_uri == work.curie
 
 
 def test_work_matcher_articles_host_citation(repo: WEMIRepository):
@@ -471,7 +475,7 @@ def test_work_matcher_articles_host_citation(repo: WEMIRepository):
     assert res.funnel_used == "funnel_c_article"
     assert res.match_tier == "tier2_host_citation_key"
     assert res.matched_work is not None
-    assert res.matched_work.work_uri == "http://example.org/work/article_virtanen"
+    assert res.matched_work.work_uri == work.curie
 
 
 def test_work_matcher_serials_succession_chain(repo: WEMIRepository):
@@ -573,7 +577,7 @@ def test_work_matcher_board_game_expansion(repo: WEMIRepository):
     res = matcher.match_target(game_target)
     assert res.funnel_used == "funnel_x_board_game"
     assert res.matched_work is not None
-    assert res.matched_work.work_uri == "http://example.org/work/catan_merenkavijat"
+    assert res.matched_work.work_uri == expansion_game.curie
     assert len(res.relationships) == 1
     assert res.relationships[0].relationship_type == "expansion_of"
 

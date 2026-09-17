@@ -13,6 +13,7 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
+from reconciliator.curie import extract_wikidata_qid
 from reconciliator.loaders.marcxml import (
     MARC_NS,
     _get_controlfield,
@@ -152,12 +153,8 @@ class MARCXMLEnricher:
                                 and original_heading.strip() != target_label
                             ):
                                 keep_code = vocab_cfg.original_heading_subfield
-                                if original_heading.strip() not in _get_subfields(
-                                    field, keep_code
-                                ):
-                                    sub_keep = etree.SubElement(
-                                        field, subfield_tag, code=keep_code
-                                    )
+                                if original_heading.strip() not in _get_subfields(field, keep_code):
+                                    sub_keep = etree.SubElement(field, subfield_tag, code=keep_code)
                                     sub_keep.text = original_heading.strip()
                             a_elems[0].text = target_label
 
@@ -178,8 +175,10 @@ class MARCXMLEnricher:
                     if enrich and qid:
                         existing_subj_u1 = _get_subfields(field, "1")
                         wikidata_uri = format_wikidata_uri(qid)
-                        if wikidata_uri and wikidata_uri not in existing_subj_u1 and not any(
-                            e.endswith(qid) for e in existing_subj_u1
+                        if (
+                            wikidata_uri
+                            and wikidata_uri not in existing_subj_u1
+                            and not any(e.endswith(qid) for e in existing_subj_u1)
                         ):
                             sub_1 = etree.SubElement(field, subfield_tag, code="1")
                             sub_1.text = wikidata_uri
@@ -244,7 +243,12 @@ class MARCXMLEnricher:
             expression_uri = wemi_res.expression_uri
             if wemi_res.matched_work:
                 work_title = wemi_res.matched_work.title
-                wikidata_qid = wemi_res.matched_work.wikidata_qid
+                if wemi_res.matched_work.source == "wikidata":
+                    wikidata_qid = wemi_res.matched_work.source_id
+                elif getattr(wemi_res.matched_work, "wikidata_qid", None):
+                    wikidata_qid = wemi_res.matched_work.wikidata_qid
+                elif wemi_res.matched_work.curie:
+                    wikidata_qid = extract_wikidata_qid(wemi_res.matched_work.curie)
             if wemi_res.matched_expression:
                 expression_title = wemi_res.matched_expression.title
 
@@ -265,7 +269,11 @@ class MARCXMLEnricher:
         if work_cluster:
             work_uri = work_cluster.canonical_work_uri or work_uri
             work_title = work_cluster.canonical_title or work_title
-            wikidata_qid = work_cluster.wikidata_qid or wikidata_qid
+            if not wikidata_qid and work_cluster.canonical_work_curie:
+                wikidata_qid = extract_wikidata_qid(work_cluster.canonical_work_curie)
+
+        if not wikidata_qid and work_uri:
+            wikidata_qid = extract_wikidata_qid(work_uri)
 
         if expression_cluster:
             expression_uri = expression_cluster.canonical_expression_uri or expression_uri
@@ -286,7 +294,11 @@ class MARCXMLEnricher:
         predicate_profiles = toggles.predicate_profiles or DEFAULT_MARC_PREDICATE_PROFILES
         profiles = [p for p in toggles.marc_predicate_profiles if p in predicate_profiles]
         if not profiles:
-            profiles = ["bibframe"] if "bibframe" in predicate_profiles else list(predicate_profiles.keys())[:1]
+            profiles = (
+                ["bibframe"]
+                if "bibframe" in predicate_profiles
+                else list(predicate_profiles.keys())[:1]
+            )
 
         # 3.1 Inject 758 Work Link
         if work_uri and toggles.inject_work_links:
@@ -319,7 +331,9 @@ class MARCXMLEnricher:
                         s4 = etree.SubElement(df758, subfield_tag, code="4")
                         s4.text = pred_uri
                         si = etree.SubElement(df758, subfield_tag, code="i")
-                        si.text = toggles.get_relationship_label("work_manifested", lang=record_lang)
+                        si.text = toggles.get_relationship_label(
+                            "work_manifested", lang=record_lang
+                        )
                         sa = etree.SubElement(df758, subfield_tag, code="a")
                         sa.text = work_title
                         s0 = etree.SubElement(df758, subfield_tag, code="0")
@@ -376,7 +390,9 @@ class MARCXMLEnricher:
                         s4 = etree.SubElement(df758, subfield_tag, code="4")
                         s4.text = pred_uri
                         si = etree.SubElement(df758, subfield_tag, code="i")
-                        si.text = toggles.get_relationship_label("expression_manifested", lang=record_lang)
+                        si.text = toggles.get_relationship_label(
+                            "expression_manifested", lang=record_lang
+                        )
                         sa = etree.SubElement(df758, subfield_tag, code="a")
                         sa.text = expression_title or work_title
                         s0 = etree.SubElement(df758, subfield_tag, code="0")
@@ -395,7 +411,9 @@ class MARCXMLEnricher:
                             s4.text = pred_uri
                             seen_preds.add(pred_uri)
                     si = etree.SubElement(df758, subfield_tag, code="i")
-                    si.text = toggles.get_relationship_label("expression_manifested", lang=record_lang)
+                    si.text = toggles.get_relationship_label(
+                        "expression_manifested", lang=record_lang
+                    )
                     sa = etree.SubElement(df758, subfield_tag, code="a")
                     sa.text = expression_title or work_title
                     s0 = etree.SubElement(df758, subfield_tag, code="0")
@@ -465,7 +483,10 @@ class MARCXMLEnricher:
 
         if target_record and (
             target_record.work_type in ("tactile", "heritage_model")
-            or any(kw in (target_record.title_stem or "").lower() for kw in toggles.surrogate_title_keywords)
+            or any(
+                kw in (target_record.title_stem or "").lower()
+                for kw in toggles.surrogate_title_keywords
+            )
         ):
             if work_uri and not any(
                 work_uri in _get_subfields(f, "w") for f in _get_datafields(record_elem, "776")
@@ -494,7 +515,7 @@ class MARCXMLEnricher:
             for f830 in _get_datafields(record_elem, "830"):
                 if not _get_subfields(f830, "0"):
                     s0 = etree.SubElement(f830, subfield_tag, code="0")
-                    s0.text = concept_id_to_uri(f"series:{target_record.get_first_key("series")}")
+                    s0.text = concept_id_to_uri(f"series:{target_record.get_first_key('series')}")
 
         # 3.8 Enrich 770 / 772 Board Game Dependencies
         if target_record and target_record.get_first_key("board_game"):
@@ -618,7 +639,13 @@ class MARCXMLEnricher:
 
         # 3.16 Enrich Ephemera Corporate Authority 655 #7
         if target_record and target_record.get_first_key("ephemera_corp"):
-            ephemera_terms: set[str] = {"pienpainatteet", "småtryck", "accidenstryck", "tilapäispainatteet", "ephemera"}
+            ephemera_terms: set[str] = {
+                "pienpainatteet",
+                "småtryck",
+                "accidenstryck",
+                "tilapäispainatteet",
+                "ephemera",
+            }
             if self.vocab_folder and self.vocab_folder.vocab_store:
                 e_concept_id = toggles.domain_concepts.get("ephemera", "slm:s1492")
                 c = self.vocab_folder.vocab_store.find_concept_by_uri(e_concept_id)
@@ -631,7 +658,10 @@ class MARCXMLEnricher:
 
             genre_field = get_category_default_field_map()["genre_form"]
             for f655 in _get_datafields(record_elem, genre_field):
-                if any(any(term in a.lower() for term in ephemera_terms) for a in _get_subfields(f655, "a")):
+                if any(
+                    any(term in a.lower() for term in ephemera_terms)
+                    for a in _get_subfields(f655, "a")
+                ):
                     if work_uri and work_uri not in _get_subfields(f655, "0"):
                         s0 = etree.SubElement(f655, subfield_tag, code="0")
                         s0.text = work_uri

@@ -9,4 +9,3 @@ __all__ = [
     "get_default_lock_path",
     "get_default_socket_path",
 ]
-

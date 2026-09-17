@@ -105,9 +105,7 @@ def test_a_creator_before_the_title_is_still_found():
     """A 700 puts `$a` ahead of `$t`, so the creator is outside the group it
     belongs to; subfields before the first title are the fallback."""
     got = extract_marc_constituents(_record(ANALYTIC_700), ENHANCED)
-    assert [(c.title, c.creator) for c in got] == [
-        ("Cantus arcticus", "Rautavaara, Einojuhani")
-    ]
+    assert [(c.title, c.creator) for c in got] == [("Cantus arcticus", "Rautavaara, Einojuhani")]
 
 
 # --- indicator filters ----------------------------------------------------
@@ -134,9 +132,7 @@ def test_a_blank_indicator_matches_whether_written_as_space_or_omitted():
     with_space = _record(
         '<datafield tag="505" ind1="0" ind2=" "><subfield code="t">A</subfield></datafield>'
     )
-    omitted = _record(
-        '<datafield tag="505" ind1="0"><subfield code="t">A</subfield></datafield>'
-    )
+    omitted = _record('<datafield tag="505" ind1="0"><subfield code="t">A</subfield></datafield>')
     assert len(extract_marc_constituents(with_space, profile)) == 1
     assert len(extract_marc_constituents(omitted, profile)) == 1
 
@@ -165,13 +161,13 @@ def test_the_two_descriptions_are_merged_attribute_by_attribute():
     entries for one track are two descriptions of it, not two candidates."""
     got = extract_marc_constituents(_record(ALBUM_505, ANALYTIC_700), ENHANCED)
     cantus = got[0]
-    assert cantus.duration == "18:20"                     # from the 505
-    assert cantus.creator == "Rautavaara, Einojuhani"     # from the 700
+    assert cantus.duration == "18:20"  # from the 505
+    assert cantus.creator == "Rautavaara, Einojuhani"  # from the 700
     assert cantus.ordinal == 1
 
 
 def test_the_authority_controlled_name_wins_over_the_transcribed_one():
-    """"Rautavaara, Einojuhani" and "Rautavaara" are the same person, and only
+    """ "Rautavaara, Einojuhani" and "Rautavaara" are the same person, and only
     the first will match an authority record. The 505 takes precedence for every
     other attribute; `creator_controlled` is the one stated exception."""
     got = extract_marc_constituents(_record(ALBUM_505, ANALYTIC_700), ENHANCED)
@@ -196,9 +192,7 @@ def test_dedup_on_title_and_creator_keeps_different_creators_apart():
     profile = ConstituentProfile(
         name="t",
         dedup="title_and_creator",
-        fields=[
-            ConstituentField(tag="700", title="t", creator="a", indicators={"ind2": "2"})
-        ],
+        fields=[ConstituentField(tag="700", title="t", creator="a", indicators={"ind2": "2"})],
     )
     record = _record(
         ANALYTIC_700,

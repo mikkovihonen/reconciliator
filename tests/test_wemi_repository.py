@@ -39,9 +39,8 @@ def repo(tmp_path: Path) -> WEMIRepository:
 
 def test_insert_and_get_agents(repo: WEMIRepository):
     agent = AgentEntity(
-        agent_uri="http://kanto.fi/agent/1",
         source="asteri",
-        wikidata_qid="Q1234",
+        source_id="1",
         name="Mika Waltari",
         name_normalized="mika waltari",
         surname="Waltari",
@@ -54,17 +53,16 @@ def test_insert_and_get_agents(repo: WEMIRepository):
     fetched = repo.get_agent(agent_id)
     assert fetched is not None
     assert fetched.name == "Mika Waltari"
-    assert fetched.wikidata_qid == "Q1234"
+    assert fetched.curie == "asteri:1"
 
-    fetched_by_uri = repo.get_agent_by_uri("http://kanto.fi/agent/1")
-    assert fetched_by_uri is not None
-    assert fetched_by_uri.id == agent_id
+    fetched_by_curie = repo.get_agent_by_curie("asteri:1")
+    assert fetched_by_curie is not None
+    assert fetched_by_curie.id == agent_id
 
 
 def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
     works = [
         WorkEntity(
-            work_uri="urn:work:sinuhe",
             source="melinda",
             source_id="w_sinuhe",
             title="Sinuhe egyptiläinen",
@@ -75,7 +73,6 @@ def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
             serialized_text="Mika Waltari Sinuhe egyptiläinen historiallinen romaani",
         ),
         WorkEntity(
-            work_uri="urn:work:turms",
             source="melinda",
             source_id="w_turms",
             title="Turms kuolematon",
@@ -103,9 +100,9 @@ def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
     assert w1.title == "Sinuhe egyptiläinen"
     assert "muinainen egypti" in [s["heading"] for s in w1.subjects_json]
 
-    w_by_uri = repo.get_work_by_uri("urn:work:turms")
-    assert w_by_uri is not None
-    assert w_by_uri.id == work_ids[1]
+    w_by_curie = repo.get_work_by_curie("melinda:w_turms")
+    assert w_by_curie is not None
+    assert w_by_curie.id == work_ids[1]
 
     w_by_source = repo.get_work_by_source("melinda", "w_sinuhe")
     assert w_by_source is not None
@@ -483,9 +480,9 @@ def test_wemi_repository_wikidata_author_canonical_uri(repo: WEMIRepository) -> 
     agent = repo.get_agent_by_uri("http://www.wikidata.org/entity/Q42")
     assert agent is not None
     assert agent.name == "Douglas Adams"
-    assert agent.agent_uri == "http://www.wikidata.org/entity/Q42"
+    assert agent.curie == "wikidata:Q42"
 
-    agent_by_cid = repo.get_agent_by_uri("wikidata:Q42")
+    agent_by_cid = repo.get_agent_by_curie("wikidata:Q42")
     assert agent_by_cid is not None
     assert agent_by_cid.id == agent.id
 
@@ -539,5 +536,3 @@ def test_wemi_repository_dynamic_author_identifiers_option3(repo: WEMIRepository
 # The AuthorityStore source_identifier_templates variant expansion is gone by
 # design: WEMI stores canonical source_ids, so get_indexed_source_ids returns
 # them as-is. Covered by test_wemi_repository_get_indexed_source_ids_variants.
-
-

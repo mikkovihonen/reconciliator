@@ -231,9 +231,7 @@ class BIBFRAMESchemaProfile(BaseModel):
 
     @functools.cached_property
     def expanded_source_predicates(self) -> set[str]:
-        return {self.expand_curie(p) for p in self.source_predicates} | set(
-            self.source_predicates
-        )
+        return {self.expand_curie(p) for p in self.source_predicates} | set(self.source_predicates)
 
     @functools.cached_property
     def expanded_provision_activity_predicates(self) -> set[str]:
@@ -258,7 +256,6 @@ class BIBFRAMESchemaProfile(BaseModel):
         if not self.provenance_predicate:
             return None
         return self.expand_curie(self.provenance_predicate)
-
 
     @functools.cached_property
     def expanded_agent_corporate_classes(self) -> set[str]:
