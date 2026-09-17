@@ -19,9 +19,18 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from rapidfuzz import fuzz
+from sqlalchemy import and_, func, select
 
 from reconciliator.config import WorkConsolidationConfig
 from reconciliator.curie import to_curie
+from reconciliator.db import (
+    agents_table,
+    contributions_table,
+    identifiers_table,
+    manifestations_table,
+    work_relationships_table,
+    works_table,
+)
 from reconciliator.models import WorkRelationship
 from reconciliator.repository import WEMIRepository
 
@@ -121,16 +130,19 @@ class WorkConsolidator:
         signatures: dict[int, WorkSignature] = {}
         # Only authoritative sources take part: consolidating a corpus row into an
         # authority work would give the corpus record the authority's identity.
-        origin_sql, origin_params = self.repo._origin_clause("record_origin", True)
+        auth_sources = self.repo.authoritative_sources()
+        stmt_works = select(
+            works_table.c.id,
+            works_table.c.source,
+            works_table.c.source_id,
+            works_table.c.title_normalized,
+            works_table.c.work_type,
+        )
+        if auth_sources:
+            stmt_works = stmt_works.where(works_table.c.record_origin.in_(auth_sources))
+
         with self.repo.get_connection() as conn:
-            for row in conn.execute(
-                f"""
-                SELECT id, source, source_id, title_normalized, work_type
-                FROM works
-                WHERE 1=1{origin_sql};
-                """,
-                origin_params,
-            ):
+            for row in conn.execute(stmt_works):
                 work_curie = to_curie(row["source"] or "", row["source_id"] or "")
                 sig = WorkSignature(
                     work_id=row["id"],
@@ -148,14 +160,16 @@ class WorkConsolidator:
 
             # Creators, for metadata comparison. Roles are not filtered: any agent
             # shared between two same-titled works is evidence of the same work.
-            for row in conn.execute(
-                """
-                SELECT c.entity_id AS work_id, a.name_normalized, a.surname
-                FROM contributions c
-                JOIN agents a ON c.agent_id = a.id
-                WHERE c.entity_type = 'work';
-                """
-            ):
+            stmt_creators = (
+                select(
+                    contributions_table.c.entity_id.label("work_id"),
+                    agents_table.c.name_normalized,
+                    agents_table.c.surname,
+                )
+                .join(agents_table, contributions_table.c.agent_id == agents_table.c.id)
+                .where(contributions_table.c.entity_type == "work")
+            )
+            for row in conn.execute(stmt_creators):
                 sig = signatures.get(row["work_id"])
                 if sig is None:
                     continue
@@ -168,16 +182,17 @@ class WorkConsolidator:
             if self.config.use_wikidata_qid:
                 sources.add("wikidata")
             if sources:
-                placeholders = ",".join("?" for _ in sources)
+                sources_list = [s.lower() for s in sources]
                 # Identifiers attached to the work itself.
-                for row in conn.execute(
-                    f"""
-                    SELECT entity_id AS work_id, source, source_id
-                    FROM identifiers
-                    WHERE entity_type = 'work' AND LOWER(source) IN ({placeholders});
-                    """,
-                    list(sources),
-                ):
+                stmt_work_idents = select(
+                    identifiers_table.c.entity_id.label("work_id"),
+                    identifiers_table.c.source,
+                    identifiers_table.c.source_id,
+                ).where(
+                    identifiers_table.c.entity_type == "work",
+                    func.lower(identifiers_table.c.source).in_(sources_list),
+                )
+                for row in conn.execute(stmt_work_idents):
                     sig = signatures.get(row["work_id"])
                     if sig is not None:
                         self._add_identifier(sig, row["source"], row["source_id"])
@@ -185,16 +200,25 @@ class WorkConsolidator:
                 # Identifiers on the work's manifestations. An ISBN identifies a
                 # manifestation, but a shared ISBN between two work rows means both
                 # describe the work that manifestation embodies.
-                for row in conn.execute(
-                    f"""
-                    SELECT m.work_id AS work_id, i.source, i.source_id
-                    FROM identifiers i
-                    JOIN manifestations m
-                      ON i.entity_type = 'manifestation' AND i.entity_id = m.id
-                    WHERE m.work_id IS NOT NULL AND LOWER(i.source) IN ({placeholders});
-                    """,
-                    list(sources),
-                ):
+                stmt_manif_idents = (
+                    select(
+                        manifestations_table.c.work_id.label("work_id"),
+                        identifiers_table.c.source,
+                        identifiers_table.c.source_id,
+                    )
+                    .join(
+                        manifestations_table,
+                        and_(
+                            identifiers_table.c.entity_type == "manifestation",
+                            identifiers_table.c.entity_id == manifestations_table.c.id,
+                        ),
+                    )
+                    .where(
+                        manifestations_table.c.work_id.is_not(None),
+                        func.lower(identifiers_table.c.source).in_(sources_list),
+                    )
+                )
+                for row in conn.execute(stmt_manif_idents):
                     sig = signatures.get(row["work_id"])
                     if sig is not None:
                         self._add_identifier(sig, row["source"], row["source_id"])
@@ -388,12 +412,9 @@ class WorkConsolidator:
         return result
 
     def _existing_edges(self) -> set[tuple[int, int]]:
+        stmt = select(
+            work_relationships_table.c.source_work_id,
+            work_relationships_table.c.target_work_id,
+        ).where(work_relationships_table.c.relationship_type == SAME_WORK)
         with self.repo.get_connection() as conn:
-            return {
-                (r["source_work_id"], r["target_work_id"])
-                for r in conn.execute(
-                    "SELECT source_work_id, target_work_id FROM work_relationships "
-                    "WHERE relationship_type = ?;",
-                    (SAME_WORK,),
-                )
-            }
+            return {(r["source_work_id"], r["target_work_id"]) for r in conn.execute(stmt)}

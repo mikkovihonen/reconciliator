@@ -627,6 +627,14 @@ class RowAdapter:
     def __len__(self) -> int:
         return len(self._row)
 
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self._coerce_val(getattr(self._row, name))
+        except AttributeError:
+            if hasattr(self._row, "_mapping") and name in self._row._mapping:
+                return self._coerce_val(self._row._mapping[name])
+            raise
+
 
 class ResultAdapter:
     """Cursor/Result adapter for SQLAlchemy CursorResult."""
@@ -649,6 +657,21 @@ class ResultAdapter:
 
     def fetchall(self) -> list[RowAdapter]:
         return [RowAdapter(r) for r in self._result.fetchall()]
+
+    def scalar(self) -> Any:
+        return self._result.scalar()
+
+    def scalar_one(self) -> Any:
+        return self._result.scalar_one()
+
+    def scalar_one_or_none(self) -> Any:
+        return self._result.scalar_one_or_none()
+
+    def scalars(self) -> Any:
+        return self._result.scalars()
+
+    def mappings(self) -> Any:
+        return self._result.mappings()
 
     def __iter__(self) -> Any:
         for r in self._result:

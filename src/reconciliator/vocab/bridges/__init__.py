@@ -10,6 +10,10 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from sqlalchemy import or_, select
+
+from reconciliator.db import concept_mappings_table
+
 _BRIDGES_DIR = Path(__file__).resolve().parent
 
 
@@ -110,14 +114,19 @@ def get_mts_role_map(vocab_store: Optional[Any] = None) -> dict[str, str]:
     if vocab_store is not None and hasattr(vocab_store, "get_connection"):
         try:
             with vocab_store.get_connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT legacy_vocab, legacy_id, target_vocab, target_id FROM concept_mappings
-                    WHERE (legacy_vocab = 'loc-relators' OR target_vocab = 'loc-relators'
-                           OR legacy_vocab = 'mts' OR target_vocab = 'mts')
-                      AND mapping_type = 'exact_match';
-                    """
-                ).fetchall()
+                stmt = select(
+                    concept_mappings_table.c.legacy_vocab,
+                    concept_mappings_table.c.legacy_id,
+                    concept_mappings_table.c.target_vocab,
+                    concept_mappings_table.c.target_id,
+                ).where(
+                    or_(
+                        concept_mappings_table.c.legacy_vocab.in_(("loc-relators", "mts")),
+                        concept_mappings_table.c.target_vocab.in_(("loc-relators", "mts")),
+                    ),
+                    concept_mappings_table.c.mapping_type == "exact_match",
+                )
+                rows = conn.execute(stmt).fetchall()
                 if rows:
                     res: dict[str, str] = {}
                     for row in rows:

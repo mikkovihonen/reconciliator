@@ -10,12 +10,46 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 from rapidfuzz import fuzz
+from sqlalchemy import (
+    Table,
+    and_,
+    delete,
+    distinct,
+    func,
+    nulls_last,
+    or_,
+    select,
+    union,
+    update,
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.curie import parse_curie, to_curie
 from reconciliator.db import (
     ConnectionAdapter,
+    agents_table,
+    contributions_table,
+    corpus_expression_clusters_table,
+    corpus_linkages_table,
+    corpus_manifestation_clusters_table,
+    corpus_work_clusters_table,
+    entity_keys_table,
+    entity_subjects_table,
+    expressions_table,
     get_engine,
+    harvest_state_table,
+    identifiers_table,
     init_authority_db,
+    items_table,
+    manifestation_expressions_table,
+    manifestation_vectors_table,
+    manifestations_table,
+    sammelband_bindings_table,
+    sources_table,
+    work_medium_of_performance_table,
+    work_relationships_table,
+    work_vectors_table,
+    works_table,
 )
 from reconciliator.indexer import VectorIndex, create_vector_engine
 from reconciliator.models import (
@@ -233,48 +267,55 @@ class WEMIRepository:
                     agent_meta["variant_names"] = agent.variant_names
                 meta_str = json.dumps(agent_meta, ensure_ascii=False) if agent_meta else None
 
-                cursor = conn.execute(
-                    """
-                    INSERT INTO agents (
-                        source, source_id, record_origin, name, name_normalized,
-                        surname, qualifier, dates, birth_year, death_year,
-                        fuller_name, affiliation, metadata_json, is_personal, is_fictional
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(source, source_id) DO UPDATE SET
-                        record_origin = excluded.record_origin,
-                        name = excluded.name,
-                        name_normalized = excluded.name_normalized,
-                        surname = COALESCE(excluded.surname, agents.surname),
-                        qualifier = COALESCE(excluded.qualifier, agents.qualifier),
-                        dates = COALESCE(excluded.dates, agents.dates),
-                        birth_year = COALESCE(excluded.birth_year, agents.birth_year),
-                        death_year = COALESCE(excluded.death_year, agents.death_year),
-                        fuller_name = COALESCE(excluded.fuller_name, agents.fuller_name),
-                        affiliation = COALESCE(excluded.affiliation, agents.affiliation),
-                        metadata_json = COALESCE(excluded.metadata_json, agents.metadata_json),
-                        is_personal = excluded.is_personal,
-                        is_fictional = excluded.is_fictional
-                    RETURNING id;
-                    """,
-                    (
-                        agent.source,
-                        agent.source_id,
-                        agent.record_origin,
-                        agent.name,
-                        agent.name_normalized,
-                        agent.surname,
-                        None,
-                        agent.dates,
-                        agent.birth_year,
-                        agent.death_year,
-                        agent.fuller_name,
-                        None,
-                        meta_str,
-                        bool(agent.is_personal),
-                        bool(agent.is_fictional),
-                    ),
+                stmt = pg_insert(agents_table).values(
+                    source=agent.source,
+                    source_id=agent.source_id,
+                    record_origin=agent.record_origin,
+                    name=agent.name,
+                    name_normalized=agent.name_normalized,
+                    surname=agent.surname,
+                    qualifier=None,
+                    dates=agent.dates,
+                    birth_year=agent.birth_year,
+                    death_year=agent.death_year,
+                    fuller_name=agent.fuller_name,
+                    affiliation=None,
+                    metadata_json=meta_str,
+                    is_personal=bool(agent.is_personal),
+                    is_fictional=bool(agent.is_fictional),
                 )
-                agent_ids.append(cursor.fetchone()["id"])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source", "source_id"],
+                    set_={
+                        "record_origin": stmt.excluded.record_origin,
+                        "name": stmt.excluded.name,
+                        "name_normalized": stmt.excluded.name_normalized,
+                        "surname": func.coalesce(stmt.excluded.surname, agents_table.c.surname),
+                        "qualifier": func.coalesce(
+                            stmt.excluded.qualifier, agents_table.c.qualifier
+                        ),
+                        "dates": func.coalesce(stmt.excluded.dates, agents_table.c.dates),
+                        "birth_year": func.coalesce(
+                            stmt.excluded.birth_year, agents_table.c.birth_year
+                        ),
+                        "death_year": func.coalesce(
+                            stmt.excluded.death_year, agents_table.c.death_year
+                        ),
+                        "fuller_name": func.coalesce(
+                            stmt.excluded.fuller_name, agents_table.c.fuller_name
+                        ),
+                        "affiliation": func.coalesce(
+                            stmt.excluded.affiliation, agents_table.c.affiliation
+                        ),
+                        "metadata_json": func.coalesce(
+                            stmt.excluded.metadata_json, agents_table.c.metadata_json
+                        ),
+                        "is_personal": stmt.excluded.is_personal,
+                        "is_fictional": stmt.excluded.is_fictional,
+                    },
+                ).returning(agents_table.c.id)
+                res = conn.execute(stmt).fetchone()
+                agent_ids.append(res["id"] if res else 0)
         return agent_ids
 
     def insert_works_batch(
@@ -288,49 +329,52 @@ class WEMIRepository:
         work_ids: list[int] = []
         with self.get_connection() as conn:
             for work in works:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO works (
-                        source, source_id, record_origin, title,
-                        title_normalized, original_language, primary_agent_id,
-                        ykl_class, work_type, subjects_json, serialized_text
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(source, source_id) DO UPDATE SET
-                        record_origin = excluded.record_origin,
-                        title = excluded.title,
-                        title_normalized = excluded.title_normalized,
-                        original_language = COALESCE(excluded.original_language, works.original_language),
-                        primary_agent_id = COALESCE(excluded.primary_agent_id, works.primary_agent_id),
-                        ykl_class = COALESCE(excluded.ykl_class, works.ykl_class),
-                        work_type = excluded.work_type,
-                        subjects_json = excluded.subjects_json,
-                        serialized_text = excluded.serialized_text
-                    RETURNING id;
-                    """,
-                    (
-                        work.source,
-                        work.source_id,
-                        work.record_origin,
-                        work.title,
-                        work.title_normalized,
-                        work.original_language,
-                        work.primary_agent_id,
-                        work.ykl_class,
-                        work.work_type,
-                        json.dumps(work.subjects_json, ensure_ascii=False),
-                        work.serialized_text,
-                    ),
+                stmt = pg_insert(works_table).values(
+                    source=work.source,
+                    source_id=work.source_id,
+                    record_origin=work.record_origin,
+                    title=work.title,
+                    title_normalized=work.title_normalized,
+                    original_language=work.original_language,
+                    primary_agent_id=work.primary_agent_id,
+                    ykl_class=work.ykl_class,
+                    work_type=work.work_type,
+                    subjects_json=json.dumps(work.subjects_json, ensure_ascii=False),
+                    serialized_text=work.serialized_text,
                 )
-                work_ids.append(cursor.fetchone()["id"])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source", "source_id"],
+                    set_={
+                        "record_origin": stmt.excluded.record_origin,
+                        "title": stmt.excluded.title,
+                        "title_normalized": stmt.excluded.title_normalized,
+                        "original_language": func.coalesce(
+                            stmt.excluded.original_language, works_table.c.original_language
+                        ),
+                        "primary_agent_id": func.coalesce(
+                            stmt.excluded.primary_agent_id, works_table.c.primary_agent_id
+                        ),
+                        "ykl_class": func.coalesce(
+                            stmt.excluded.ykl_class, works_table.c.ykl_class
+                        ),
+                        "work_type": stmt.excluded.work_type,
+                        "subjects_json": stmt.excluded.subjects_json,
+                        "serialized_text": stmt.excluded.serialized_text,
+                    },
+                ).returning(works_table.c.id)
+                res = conn.execute(stmt).fetchone()
+                work_ids.append(res["id"] if res else 0)
 
         if vectors is not None and self.work_indexer is not None and len(vectors) == len(works):
             vector_ids = self.work_indexer.add_vectors(vectors, ids=work_ids)
             with self.get_connection() as conn:
-                mapping_rows = list(zip(vector_ids, work_ids))
-                conn.executemany(
-                    "INSERT OR REPLACE INTO work_vectors (vector_id, work_id) VALUES (?, ?);",
-                    mapping_rows,
-                )
+                for v_id, w_id in zip(vector_ids, work_ids):
+                    v_stmt = pg_insert(work_vectors_table).values(vector_id=v_id, work_id=w_id)
+                    v_stmt = v_stmt.on_conflict_do_update(
+                        index_elements=["vector_id"],
+                        set_={"work_id": v_stmt.excluded.work_id},
+                    )
+                    conn.execute(v_stmt)
 
         for work, wid in zip(works, work_ids):
             if getattr(work, "wikidata_qid", None) and work.source != "wikidata":
@@ -358,40 +402,35 @@ class WEMIRepository:
         expression_ids: list[int] = []
         with self.get_connection() as conn:
             for exp in expressions:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO expressions (
-                        work_id, source, source_id, record_origin,
-                        language, content_type, title, version_designation,
-                        arrangement_note, medium_of_performance, serialized_text
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(source, source_id) DO UPDATE SET
-                        work_id = excluded.work_id,
-                        record_origin = excluded.record_origin,
-                        language = excluded.language,
-                        content_type = excluded.content_type,
-                        title = excluded.title,
-                        version_designation = excluded.version_designation,
-                        arrangement_note = excluded.arrangement_note,
-                        medium_of_performance = excluded.medium_of_performance,
-                        serialized_text = excluded.serialized_text
-                    RETURNING id;
-                    """,
-                    (
-                        exp.work_id,
-                        exp.source,
-                        exp.source_id,
-                        exp.record_origin,
-                        exp.language,
-                        exp.content_type,
-                        exp.title,
-                        exp.version_designation,
-                        exp.arrangement_note,
-                        exp.medium_of_performance,
-                        exp.serialized_text,
-                    ),
+                stmt = pg_insert(expressions_table).values(
+                    work_id=exp.work_id,
+                    source=exp.source,
+                    source_id=exp.source_id,
+                    record_origin=exp.record_origin,
+                    language=exp.language,
+                    content_type=exp.content_type,
+                    title=exp.title,
+                    version_designation=exp.version_designation,
+                    arrangement_note=exp.arrangement_note,
+                    medium_of_performance=exp.medium_of_performance,
+                    serialized_text=exp.serialized_text,
                 )
-                expression_ids.append(cursor.fetchone()["id"])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source", "source_id"],
+                    set_={
+                        "work_id": stmt.excluded.work_id,
+                        "record_origin": stmt.excluded.record_origin,
+                        "language": stmt.excluded.language,
+                        "content_type": stmt.excluded.content_type,
+                        "title": stmt.excluded.title,
+                        "version_designation": stmt.excluded.version_designation,
+                        "arrangement_note": stmt.excluded.arrangement_note,
+                        "medium_of_performance": stmt.excluded.medium_of_performance,
+                        "serialized_text": stmt.excluded.serialized_text,
+                    },
+                ).returning(expressions_table.c.id)
+                res = conn.execute(stmt).fetchone()
+                expression_ids.append(res["id"] if res else 0)
 
         return expression_ids
 
@@ -406,70 +445,65 @@ class WEMIRepository:
         manif_ids: list[int] = []
         with self.get_connection() as conn:
             for manif in manifestations:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO manifestations (
-                        work_id, container_id, is_component, component_type,
-                        source, source_id, record_origin, title,
-                        title_normalized, subtitle, publication_year, publisher,
-                        publication_place, edition_statement, edition_number,
-                        series_title, series_numbering, volume_designation,
-                        issue_enumeration, pagination, extent, carrier_type,
-                        host_title, serialized_text
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(source, source_id) DO UPDATE SET
-                        work_id = COALESCE(excluded.work_id, manifestations.work_id),
-                        container_id = COALESCE(excluded.container_id, manifestations.container_id),
-                        is_component = excluded.is_component,
-                        component_type = excluded.component_type,
-                        record_origin = excluded.record_origin,
-                        title = excluded.title,
-                        title_normalized = excluded.title_normalized,
-                        subtitle = excluded.subtitle,
-                        publication_year = excluded.publication_year,
-                        publisher = excluded.publisher,
-                        publication_place = excluded.publication_place,
-                        edition_statement = excluded.edition_statement,
-                        edition_number = excluded.edition_number,
-                        series_title = excluded.series_title,
-                        series_numbering = excluded.series_numbering,
-                        volume_designation = excluded.volume_designation,
-                        issue_enumeration = excluded.issue_enumeration,
-                        pagination = excluded.pagination,
-                        extent = excluded.extent,
-                        carrier_type = excluded.carrier_type,
-                        host_title = excluded.host_title,
-                        serialized_text = excluded.serialized_text
-                    RETURNING id;
-                    """,
-                    (
-                        manif.work_id,
-                        manif.container_id,
-                        bool(manif.is_component),
-                        manif.component_type,
-                        manif.source,
-                        manif.source_id,
-                        manif.record_origin,
-                        manif.title,
-                        manif.title_normalized,
-                        manif.subtitle,
-                        manif.publication_year,
-                        manif.publisher,
-                        manif.publication_place,
-                        manif.edition_statement,
-                        manif.edition_number,
-                        manif.series_title,
-                        manif.series_numbering,
-                        manif.volume_designation,
-                        manif.issue_enumeration,
-                        manif.pagination,
-                        manif.extent,
-                        manif.carrier_type,
-                        manif.host_title,
-                        manif.serialized_text,
-                    ),
+                stmt = pg_insert(manifestations_table).values(
+                    work_id=manif.work_id,
+                    container_id=manif.container_id,
+                    is_component=bool(manif.is_component),
+                    component_type=manif.component_type,
+                    source=manif.source,
+                    source_id=manif.source_id,
+                    record_origin=manif.record_origin,
+                    title=manif.title,
+                    title_normalized=manif.title_normalized,
+                    subtitle=manif.subtitle,
+                    publication_year=manif.publication_year,
+                    publisher=manif.publisher,
+                    publication_place=manif.publication_place,
+                    edition_statement=manif.edition_statement,
+                    edition_number=manif.edition_number,
+                    series_title=manif.series_title,
+                    series_numbering=manif.series_numbering,
+                    volume_designation=manif.volume_designation,
+                    issue_enumeration=manif.issue_enumeration,
+                    pagination=manif.pagination,
+                    extent=manif.extent,
+                    carrier_type=manif.carrier_type,
+                    host_title=manif.host_title,
+                    serialized_text=manif.serialized_text,
                 )
-                manif_ids.append(cursor.fetchone()["id"])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source", "source_id"],
+                    set_={
+                        "work_id": func.coalesce(
+                            stmt.excluded.work_id, manifestations_table.c.work_id
+                        ),
+                        "container_id": func.coalesce(
+                            stmt.excluded.container_id, manifestations_table.c.container_id
+                        ),
+                        "is_component": stmt.excluded.is_component,
+                        "component_type": stmt.excluded.component_type,
+                        "record_origin": stmt.excluded.record_origin,
+                        "title": stmt.excluded.title,
+                        "title_normalized": stmt.excluded.title_normalized,
+                        "subtitle": stmt.excluded.subtitle,
+                        "publication_year": stmt.excluded.publication_year,
+                        "publisher": stmt.excluded.publisher,
+                        "publication_place": stmt.excluded.publication_place,
+                        "edition_statement": stmt.excluded.edition_statement,
+                        "edition_number": stmt.excluded.edition_number,
+                        "series_title": stmt.excluded.series_title,
+                        "series_numbering": stmt.excluded.series_numbering,
+                        "volume_designation": stmt.excluded.volume_designation,
+                        "issue_enumeration": stmt.excluded.issue_enumeration,
+                        "pagination": stmt.excluded.pagination,
+                        "extent": stmt.excluded.extent,
+                        "carrier_type": stmt.excluded.carrier_type,
+                        "host_title": stmt.excluded.host_title,
+                        "serialized_text": stmt.excluded.serialized_text,
+                    },
+                ).returning(manifestations_table.c.id)
+                res = conn.execute(stmt).fetchone()
+                manif_ids.append(res["id"] if res else 0)
 
         if (
             vectors is not None
@@ -478,11 +512,15 @@ class WEMIRepository:
         ):
             vector_ids = self.manifestation_indexer.add_vectors(vectors, ids=manif_ids)
             with self.get_connection() as conn:
-                mapping_rows = list(zip(vector_ids, manif_ids))
-                conn.executemany(
-                    "INSERT OR REPLACE INTO manifestation_vectors (vector_id, manifestation_id) VALUES (?, ?);",
-                    mapping_rows,
-                )
+                for v_id, m_id in zip(vector_ids, manif_ids):
+                    v_stmt = pg_insert(manifestation_vectors_table).values(
+                        vector_id=v_id, manifestation_id=m_id
+                    )
+                    v_stmt = v_stmt.on_conflict_do_update(
+                        index_elements=["vector_id"],
+                        set_={"manifestation_id": v_stmt.excluded.manifestation_id},
+                    )
+                    conn.execute(v_stmt)
 
         return manif_ids
 
@@ -492,26 +530,26 @@ class WEMIRepository:
         """Insert or replace junction associations between Manifestations and Expressions."""
         if not assocs:
             return
-        rows = [
-            (
-                a.manifestation_id,
-                a.expression_id,
-                a.track_number,
-                a.disc_number,
-                a.duration,
-                bool(a.is_primary),
-            )
-            for a in assocs
-        ]
         with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO manifestation_expressions (
-                    manifestation_id, expression_id, track_number, disc_number, duration, is_primary
-                ) VALUES (?, ?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+            for a in assocs:
+                stmt = pg_insert(manifestation_expressions_table).values(
+                    manifestation_id=a.manifestation_id,
+                    expression_id=a.expression_id,
+                    track_number=a.track_number,
+                    disc_number=a.disc_number,
+                    duration=a.duration,
+                    is_primary=bool(a.is_primary),
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["manifestation_id", "expression_id"],
+                    set_={
+                        "track_number": stmt.excluded.track_number,
+                        "disc_number": stmt.excluded.disc_number,
+                        "duration": stmt.excluded.duration,
+                        "is_primary": stmt.excluded.is_primary,
+                    },
+                )
+                conn.execute(stmt)
 
     def link_manifestation_expression(
         self, manifestation_id: int, expression_id: int, is_primary: bool = True
@@ -533,14 +571,7 @@ class WEMIRepository:
         return self.insert_works_batch([work], vectors=vectors)[0]
 
     def insert_expression(self, expression: ExpressionEntity) -> int:
-        """Insert a single ExpressionEntity.
-
-        Takes no vector: expressions are not embedded. The expression tier added
-        no discrimination the work and manifestation tiers do not already
-        provide, and its search APIs had no callers. The parameter is removed
-        rather than ignored, so a caller still passing one gets an error instead
-        of silently storing nothing.
-        """
+        """Insert a single ExpressionEntity."""
         return self.insert_expressions_batch([expression])[0]
 
     def insert_manifestation(
@@ -557,27 +588,23 @@ class WEMIRepository:
         item_ids: list[int] = []
         with self.get_connection() as conn:
             for item in items:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO items (
-                        manifestation_id, source, source_id, record_origin,
-                        holding_organization, shelf_mark, barcode, custodial_history, item_condition
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    RETURNING id;
-                    """,
-                    (
-                        item.manifestation_id,
-                        item.source,
-                        item.source_id,
-                        item.record_origin,
-                        item.holding_organization,
-                        item.shelf_mark,
-                        item.barcode,
-                        item.custodial_history,
-                        item.item_condition,
-                    ),
+                stmt = (
+                    pg_insert(items_table)
+                    .values(
+                        manifestation_id=item.manifestation_id,
+                        source=item.source,
+                        source_id=item.source_id,
+                        record_origin=item.record_origin,
+                        holding_organization=item.holding_organization,
+                        shelf_mark=item.shelf_mark,
+                        barcode=item.barcode,
+                        custodial_history=item.custodial_history,
+                        item_condition=item.item_condition,
+                    )
+                    .returning(items_table.c.id)
                 )
-                item_ids.append(cursor.fetchone()["id"])
+                res = conn.execute(stmt).fetchone()
+                item_ids.append(res["id"] if res else 0)
         return item_ids
 
     def insert_identifiers_batch(self, identifiers: list[IdentifierEntity]) -> list[int]:
@@ -587,22 +614,19 @@ class WEMIRepository:
         id_ids: list[int] = []
         with self.get_connection() as conn:
             for ident in identifiers:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO identifiers (
-                        entity_type, entity_id, source, source_id, source_id_normalized
-                    ) VALUES (?, ?, ?, ?, ?)
-                    RETURNING id;
-                    """,
-                    (
-                        ident.entity_type,
-                        ident.entity_id,
-                        ident.source,
-                        ident.source_id,
-                        ident.source_id_normalized,
-                    ),
+                stmt = (
+                    pg_insert(identifiers_table)
+                    .values(
+                        entity_type=ident.entity_type,
+                        entity_id=ident.entity_id,
+                        source=ident.source,
+                        source_id=ident.source_id,
+                        source_id_normalized=ident.source_id_normalized,
+                    )
+                    .returning(identifiers_table.c.id)
                 )
-                id_ids.append(cursor.fetchone()["id"])
+                res = conn.execute(stmt).fetchone()
+                id_ids.append(res["id"] if res else 0)
         return id_ids
 
     def insert_entity_keys_batch(self, keys: list[EntityKey]) -> None:
@@ -614,26 +638,34 @@ class WEMIRepository:
         if not keys:
             return
         with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR IGNORE INTO entity_keys (
-                    entity_type, entity_id, key_type, key_value
-                ) VALUES (?, ?, ?, ?);
-                """,
-                [(k.entity_type, k.entity_id, k.key_type, k.key_value) for k in keys],
-            )
+            for k in keys:
+                stmt = (
+                    pg_insert(entity_keys_table)
+                    .values(
+                        entity_type=k.entity_type,
+                        entity_id=k.entity_id,
+                        key_type=k.key_type,
+                        key_value=k.key_value,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["entity_type", "entity_id", "key_type", "key_value"]
+                    )
+                )
+                conn.execute(stmt)
 
     def get_entity_keys(self, entity_type: str, entity_id: int) -> dict[str, list[str]]:
         """Return the key bag for one entity, shaped as the funnels consume it."""
         bag: dict[str, list[str]] = {}
+        stmt = (
+            select(entity_keys_table.c.key_type, entity_keys_table.c.key_value)
+            .where(
+                entity_keys_table.c.entity_type == entity_type,
+                entity_keys_table.c.entity_id == entity_id,
+            )
+            .order_by(entity_keys_table.c.id)
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT key_type, key_value FROM entity_keys
-                WHERE entity_type = ? AND entity_id = ? ORDER BY id;
-                """,
-                (entity_type, entity_id),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
         for row in rows:
             bag.setdefault(row["key_type"], []).append(row["key_value"])
         return bag
@@ -647,14 +679,17 @@ class WEMIRepository:
         build its blocking index and would otherwise issue one query per record.
         """
         out: dict[int, dict[str, list[str]]] = {}
+        stmt = (
+            select(
+                entity_keys_table.c.entity_id,
+                entity_keys_table.c.key_type,
+                entity_keys_table.c.key_value,
+            )
+            .where(entity_keys_table.c.entity_type == entity_type)
+            .order_by(entity_keys_table.c.entity_id, entity_keys_table.c.id)
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT entity_id, key_type, key_value FROM entity_keys
-                WHERE entity_type = ? ORDER BY entity_id, id;
-                """,
-                (entity_type,),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
         for row in rows:
             out.setdefault(row["entity_id"], {}).setdefault(row["key_type"], []).append(
                 row["key_value"]
@@ -662,53 +697,53 @@ class WEMIRepository:
         return out
 
     def get_all_match_records(self, origins: Optional[list[str]] = None) -> list[MatchRecord]:
-        """Project every stored record back out of WEMI rows as MatchRecords.
-
-        Replaces `get_all_target_records()`, which read a parallel staging table.
-        A record is its manifestation joined to the expression and work above it,
-        plus its `entity_keys` and `identifiers` - no separate staging, so a
-        corpus is queried exactly like any other source.
-
-        `origins` restricts to given `record_origin` values; omitting it returns
-        every source.
-        """
-        clause, params = "", []
+        """Project every stored record back out of WEMI rows as MatchRecords."""
+        stmt = (
+            select(
+                manifestations_table.c.id.label("manif_id"),
+                manifestations_table.c.source.label("m_source"),
+                manifestations_table.c.source_id,
+                manifestations_table.c.title.label("m_title"),
+                manifestations_table.c.publication_year,
+                manifestations_table.c.volume_designation,
+                manifestations_table.c.is_component,
+                manifestations_table.c.serialized_text.label("m_serialized"),
+                manifestations_table.c.record_origin,
+                works_table.c.id.label("work_id"),
+                works_table.c.source.label("w_source"),
+                works_table.c.source_id.label("w_source_id"),
+                works_table.c.title.label("w_title"),
+                works_table.c.work_type,
+                works_table.c.serialized_text.label("w_serialized"),
+                expressions_table.c.source.label("e_source"),
+                expressions_table.c.source_id.label("e_source_id"),
+                expressions_table.c.language,
+                expressions_table.c.content_type,
+                expressions_table.c.serialized_text.label("e_serialized"),
+            )
+            .distinct(manifestations_table.c.id)
+            .select_from(
+                manifestations_table.outerjoin(
+                    works_table, works_table.c.id == manifestations_table.c.work_id
+                ).outerjoin(expressions_table, expressions_table.c.work_id == works_table.c.id)
+            )
+        )
         if origins:
-            placeholders = ", ".join("?" for _ in origins)
-            clause = f" WHERE m.record_origin IN ({placeholders})"
-            params = list(origins)
+            stmt = stmt.where(manifestations_table.c.record_origin.in_(origins))
+        stmt = stmt.order_by(manifestations_table.c.id)
 
         with self.get_connection() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT DISTINCT ON (m.id)
-                    m.id AS manif_id, m.source AS m_source, m.source_id, m.title AS m_title,
-                    m.publication_year, m.volume_designation, m.is_component,
-                    m.serialized_text AS m_serialized,
-                    m.record_origin,
-                    w.id AS work_id, w.source AS w_source, w.source_id AS w_source_id,
-                    w.title AS w_title, w.work_type,
-                    w.serialized_text AS w_serialized,
-                    e.source AS e_source, e.source_id AS e_source_id,
-                    e.language, e.content_type,
-                    e.serialized_text AS e_serialized
-                FROM manifestations m
-                LEFT JOIN works w ON w.id = m.work_id
-                LEFT JOIN expressions e ON e.work_id = w.id
-                {clause}
-                ORDER BY m.id;
-                """,
-                params,
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
 
             key_bags = self.get_all_entity_keys("manifestation")
 
-            ident_rows = conn.execute(
-                """
-                SELECT entity_type, entity_id, source AS scheme, source_id AS value FROM identifiers
-                WHERE entity_type IN ('manifestation', 'work', 'expression');
-                """
-            ).fetchall()
+            ident_stmt = select(
+                identifiers_table.c.entity_type,
+                identifiers_table.c.entity_id,
+                identifiers_table.c.source.label("scheme"),
+                identifiers_table.c.source_id.label("value"),
+            ).where(identifiers_table.c.entity_type.in_(("manifestation", "work", "expression")))
+            ident_rows = conn.execute(ident_stmt).fetchall()
 
         ident_by_entity: dict[tuple[str, int], dict[str, list[str]]] = {}
         for r in ident_rows:
@@ -720,9 +755,6 @@ class WEMIRepository:
         records: list[MatchRecord] = []
         for row in rows:
             keys = key_bags.get(row["manif_id"], {})
-            # A record's identifiers are those of its manifestation and of the
-            # work and expression above it: an ISBN sits on the manifestation, a
-            # DOI often on the work, and tier 1 has to see both.
             identifiers: dict[str, list[str]] = {}
             for et, eid in (
                 ("manifestation", row["manif_id"]),
@@ -737,8 +769,6 @@ class WEMIRepository:
                         if v not in bucket:
                             bucket.append(v)
 
-            # The control number is the manifestation's source_id; it is not
-            # stored as an identifier row, but tier 1 looks it up by scheme.
             if row["source_id"]:
                 bucket = identifiers.setdefault("control_number", [])
                 if row["source_id"] not in bucket:
@@ -752,9 +782,6 @@ class WEMIRepository:
                     work_type=row["work_type"] or "text",
                     title=title,
                     uniform_title=(keys.get("uniform_title") or [None])[0],
-                    # "und" is how the expression row spells "undetermined"; the
-                    # matcher treats a language of None as "do not filter", which
-                    # is the same intent, so it must not come back as a literal.
                     language=(
                         None if (row["language"] or "").lower() == "und" else row["language"]
                     ),
@@ -786,14 +813,13 @@ class WEMIRepository:
         self, key_type: str, key_value: str, entity_type: str = "manifestation"
     ) -> list[int]:
         """Return entity ids carrying a given key, for blocking lookups."""
+        stmt = select(entity_keys_table.c.entity_id).where(
+            entity_keys_table.c.entity_type == entity_type,
+            entity_keys_table.c.key_type == key_type,
+            entity_keys_table.c.key_value == key_value,
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT entity_id FROM entity_keys
-                WHERE entity_type = ? AND key_type = ? AND key_value = ?;
-                """,
-                (entity_type, key_type, key_value),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
         return [row["entity_id"] for row in rows]
 
     def insert_contributions_batch(self, contributions: list[ContributionEntity]) -> list[int]:
@@ -803,23 +829,20 @@ class WEMIRepository:
         c_ids: list[int] = []
         with self.get_connection() as conn:
             for c in contributions:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO contributions (
-                        entity_type, entity_id, agent_id, role, is_primary, field_tag
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    RETURNING id;
-                    """,
-                    (
-                        c.entity_type,
-                        c.entity_id,
-                        c.agent_id,
-                        c.role,
-                        bool(c.is_primary),
-                        c.field_tag,
-                    ),
+                stmt = (
+                    pg_insert(contributions_table)
+                    .values(
+                        entity_type=c.entity_type,
+                        entity_id=c.entity_id,
+                        agent_id=c.agent_id,
+                        role=c.role,
+                        is_primary=bool(c.is_primary),
+                        field_tag=c.field_tag,
+                    )
+                    .returning(contributions_table.c.id)
                 )
-                c_ids.append(cursor.fetchone()["id"])
+                res = conn.execute(stmt).fetchone()
+                c_ids.append(res["id"] if res else 0)
         return c_ids
 
     def insert_work_relationships_batch(self, rels: list[WorkRelationship]) -> list[int]:
@@ -829,47 +852,41 @@ class WEMIRepository:
         r_ids: list[int] = []
         with self.get_connection() as conn:
             for rel in rels:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO work_relationships (
-                        source_work_id, target_work_id, relationship_type
-                    ) VALUES (?, ?, ?)
-                    ON CONFLICT(source_work_id, target_work_id, relationship_type)
-                    DO UPDATE SET relationship_type = excluded.relationship_type
-                    RETURNING id;
-                    """,
-                    (
-                        rel.source_work_id,
-                        rel.target_work_id,
-                        rel.relationship_type,
-                    ),
+                stmt = pg_insert(work_relationships_table).values(
+                    source_work_id=rel.source_work_id,
+                    target_work_id=rel.target_work_id,
+                    relationship_type=rel.relationship_type,
                 )
-                r_ids.append(cursor.fetchone()["id"])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source_work_id", "target_work_id", "relationship_type"],
+                    set_={"relationship_type": stmt.excluded.relationship_type},
+                ).returning(work_relationships_table.c.id)
+                res = conn.execute(stmt).fetchone()
+                r_ids.append(res["id"] if res else 0)
         return r_ids
 
     def insert_medium_of_performance_batch(self, mops: list[MediumOfPerformance]) -> None:
         """Insert or replace MediumOfPerformance records in batch."""
         if not mops:
             return
-        rows = [
-            (
-                m.work_id,
-                m.medium_uri,
-                m.label,
-                m.player_count,
-                bool(m.is_soloist),
-            )
-            for m in mops
-        ]
         with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO work_medium_of_performance (
-                    work_id, medium_uri, label, player_count, is_soloist
-                ) VALUES (?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+            for m in mops:
+                stmt = pg_insert(work_medium_of_performance_table).values(
+                    work_id=m.work_id,
+                    medium_uri=m.medium_uri,
+                    label=m.label,
+                    player_count=m.player_count,
+                    is_soloist=bool(m.is_soloist),
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["work_id", "medium_uri"],
+                    set_={
+                        "label": stmt.excluded.label,
+                        "player_count": stmt.excluded.player_count,
+                        "is_soloist": stmt.excluded.is_soloist,
+                    },
+                )
+                conn.execute(stmt)
 
     def insert_entity_subjects_batch(self, subjects: list[EntitySubject]) -> list[int]:
         """Insert EntitySubject records in batch."""
@@ -878,29 +895,23 @@ class WEMIRepository:
         s_ids: list[int] = []
         with self.get_connection() as conn:
             for s in subjects:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO entity_subjects (
-                        entity_type, entity_id, source, source_record_id,
-                        relation_type, vocabulary, concept_id, raw_label,
-                        is_resolved, is_primary
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    RETURNING id;
-                    """,
-                    (
-                        s.entity_type,
-                        s.entity_id,
-                        s.source,
-                        s.source_record_id,
-                        s.relation_type,
-                        s.vocabulary,
-                        s.concept_id,
-                        s.raw_label,
-                        bool(s.is_resolved),
-                        bool(s.is_primary),
-                    ),
+                stmt = (
+                    pg_insert(entity_subjects_table)
+                    .values(
+                        entity_type=s.entity_type,
+                        entity_id=s.entity_id,
+                        source=s.source,
+                        source_record_id=s.source_record_id,
+                        relation_type=s.relation_type,
+                        vocabulary=s.vocabulary,
+                        concept_id=s.concept_id,
+                        raw_label=s.raw_label,
+                        is_resolved=bool(s.is_resolved),
+                        is_primary=bool(s.is_primary),
+                    )
+                    .returning(entity_subjects_table.c.id)
                 )
-                row = cursor.fetchone()
+                row = conn.execute(stmt).fetchone()
                 s_ids.append(row["id"] if row else 0)
         return s_ids
 
@@ -1258,15 +1269,16 @@ class WEMIRepository:
 
     def get_subjects_for_entity(self, entity_type: str, entity_id: int) -> list[EntitySubject]:
         """Fetch all EntitySubject records linked to a specific entity."""
+        stmt = (
+            select(entity_subjects_table)
+            .where(
+                entity_subjects_table.c.entity_type == entity_type,
+                entity_subjects_table.c.entity_id == entity_id,
+            )
+            .order_by(entity_subjects_table.c.is_primary.desc(), entity_subjects_table.c.id.asc())
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM entity_subjects
-                WHERE entity_type = ? AND entity_id = ?
-                ORDER BY is_primary DESC, id ASC;
-                """,
-                (entity_type, entity_id),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [EntitySubject.model_validate(dict(r)) for r in rows]
 
     def get_subjects_for_agent(self, agent_id: int) -> list[EntitySubject]:
@@ -1280,20 +1292,22 @@ class WEMIRepository:
         entity_type: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Fetch entity subject rows linked to a specific vocabulary concept."""
-        query = "SELECT * FROM entity_subjects WHERE vocabulary = ? AND concept_id = ?"
-        params: list[Any] = [vocabulary, concept_id]
+        stmt = select(entity_subjects_table).where(
+            entity_subjects_table.c.vocabulary == vocabulary,
+            entity_subjects_table.c.concept_id == concept_id,
+        )
         if entity_type:
-            query += " AND entity_type = ?"
-            params.append(entity_type)
-        query += " ORDER BY id ASC;"
+            stmt = stmt.where(entity_subjects_table.c.entity_type == entity_type)
+        stmt = stmt.order_by(entity_subjects_table.c.id.asc())
         with self.get_connection() as conn:
-            rows = conn.execute(query, params).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [dict(r) for r in rows]
 
     def get_agent(self, agent_id: int) -> Optional[AgentEntity]:
         """Fetch AgentEntity by ID."""
+        stmt = select(agents_table).where(agents_table.c.id == agent_id)
         with self.get_connection() as conn:
-            row = conn.execute("SELECT * FROM agents WHERE id = ?;", (agent_id,)).fetchone()
+            row = conn.execute(stmt).fetchone()
             return _row_to_agent(row) if row else None
 
     def get_agent_by_curie(self, curie_or_uri: str) -> Optional[AgentEntity]:
@@ -1302,14 +1316,17 @@ class WEMIRepository:
         if not source_id:
             return None
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM agents WHERE source = ? AND source_id = ?;", (source, source_id)
-            ).fetchone()
+            stmt = select(agents_table).where(
+                agents_table.c.source == source,
+                agents_table.c.source_id == source_id,
+            )
+            row = conn.execute(stmt).fetchone()
             if not row and source == "kanto":
-                row = conn.execute(
-                    "SELECT * FROM agents WHERE source IN ('kanto', 'finaf', 'asteri') AND source_id = ?;",
-                    (source_id,),
-                ).fetchone()
+                fallback_stmt = select(agents_table).where(
+                    agents_table.c.source.in_(("kanto", "finaf", "asteri")),
+                    agents_table.c.source_id == source_id,
+                )
+                row = conn.execute(fallback_stmt).fetchone()
             return _row_to_agent(row) if row else None
 
     def get_agent_by_uri(self, agent_uri: str) -> Optional[AgentEntity]:
@@ -1320,18 +1337,25 @@ class WEMIRepository:
         self, conn: Any, work: Optional[WorkEntity]
     ) -> Optional[WorkEntity]:
         if work and not work.wikidata_qid and work.id:
-            ident_row = conn.execute(
-                "SELECT source_id FROM identifiers WHERE entity_type = 'work' AND entity_id = ? AND LOWER(source) = 'wikidata' LIMIT 1;",
-                (work.id,),
-            ).fetchone()
+            stmt = (
+                select(identifiers_table.c.source_id)
+                .where(
+                    identifiers_table.c.entity_type == "work",
+                    identifiers_table.c.entity_id == work.id,
+                    func.lower(identifiers_table.c.source) == "wikidata",
+                )
+                .limit(1)
+            )
+            ident_row = conn.execute(stmt).fetchone()
             if ident_row:
                 work.wikidata_qid = ident_row["source_id"]
         return work
 
     def get_work(self, work_id: int) -> Optional[WorkEntity]:
         """Fetch WorkEntity by ID."""
+        stmt = select(works_table).where(works_table.c.id == work_id)
         with self.get_connection() as conn:
-            row = conn.execute("SELECT * FROM works WHERE id = ?;", (work_id,)).fetchone()
+            row = conn.execute(stmt).fetchone()
             return self._enrich_work_identifiers(conn, _row_to_work(row)) if row else None
 
     def get_work_by_curie(self, curie_or_uri: str) -> Optional[WorkEntity]:
@@ -1347,18 +1371,19 @@ class WEMIRepository:
 
     def get_work_by_source(self, source: str, source_id: str) -> Optional[WorkEntity]:
         """Fetch WorkEntity by source and source_id."""
+        stmt = select(works_table).where(
+            works_table.c.source == source,
+            works_table.c.source_id == source_id,
+        )
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM works WHERE source = ? AND source_id = ?;", (source, source_id)
-            ).fetchone()
+            row = conn.execute(stmt).fetchone()
             return self._enrich_work_identifiers(conn, _row_to_work(row)) if row else None
 
     def get_expression(self, expression_id: int) -> Optional[ExpressionEntity]:
         """Fetch ExpressionEntity by ID."""
+        stmt = select(expressions_table).where(expressions_table.c.id == expression_id)
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM expressions WHERE id = ?;", (expression_id,)
-            ).fetchone()
+            row = conn.execute(stmt).fetchone()
             return _row_to_expression(row) if row else None
 
     def get_expression_by_curie(self, curie_or_uri: str) -> Optional[ExpressionEntity]:
@@ -1367,10 +1392,11 @@ class WEMIRepository:
         if not source_id:
             return None
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM expressions WHERE source = ? AND source_id = ?;",
-                (source.lower(), source_id),
-            ).fetchone()
+            stmt = select(expressions_table).where(
+                expressions_table.c.source == source.lower(),
+                expressions_table.c.source_id == source_id,
+            )
+            row = conn.execute(stmt).fetchone()
             return _row_to_expression(row) if row else None
 
     def get_expression_by_uri(self, expression_uri: str) -> Optional[ExpressionEntity]:
@@ -1379,64 +1405,66 @@ class WEMIRepository:
 
     def get_manifestation(self, manifestation_id: int) -> Optional[ManifestationEntity]:
         """Fetch ManifestationEntity by ID."""
+        stmt = select(manifestations_table).where(manifestations_table.c.id == manifestation_id)
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM manifestations WHERE id = ?;", (manifestation_id,)
-            ).fetchone()
+            row = conn.execute(stmt).fetchone()
             return _row_to_manifestation(row) if row else None
 
     def get_manifestation_by_source(
         self, source: str, source_id: str
     ) -> Optional[ManifestationEntity]:
         """Fetch ManifestationEntity by source and source_id."""
+        stmt = select(manifestations_table).where(
+            manifestations_table.c.source == source,
+            manifestations_table.c.source_id == source_id,
+        )
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM manifestations WHERE source = ? AND source_id = ?;",
-                (source, source_id),
-            ).fetchone()
+            row = conn.execute(stmt).fetchone()
             return _row_to_manifestation(row) if row else None
 
     def get_expressions_for_work(
         self, work_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ExpressionEntity]:
         """Fetch all Expression entities linked to a given work_id, with optional record_origin filter."""
+        stmt = select(expressions_table).where(expressions_table.c.work_id == work_id)
+        if record_origin is not None:
+            stmt = stmt.where(expressions_table.c.record_origin == record_origin)
+        stmt = stmt.order_by(expressions_table.c.id)
         with self.get_connection() as conn:
-            if record_origin is not None:
-                rows = conn.execute(
-                    "SELECT * FROM expressions WHERE work_id = ? AND record_origin = ? ORDER BY id;",
-                    (work_id, record_origin),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM expressions WHERE work_id = ? ORDER BY id;", (work_id,)
-                ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_expression(r) for r in rows]
 
     def get_constituent_works(self, work_id: int) -> list[WorkEntity]:
-        """The works this one contains, by stored `has_constituent` edges.
-
-        One indexed lookup for a whole tracklist, in place of a title query per
-        constituent - which at 60,000 works cost 135 ms for a 20-track album
-        before the title lookup learned to use its index, and still costs a query
-        per title after.
-
-        Ordered by the junction's track number where the container's
-        manifestation records one, so a tracklist comes back as a tracklist.
-        """
+        """The works this one contains, by stored `has_constituent` edges."""
+        stmt = (
+            select(
+                works_table,
+                func.min(manifestation_expressions_table.c.disc_number).label("d"),
+                func.min(manifestation_expressions_table.c.track_number).label("t"),
+            )
+            .select_from(
+                work_relationships_table.join(
+                    works_table, works_table.c.id == work_relationships_table.c.target_work_id
+                )
+                .outerjoin(expressions_table, expressions_table.c.work_id == works_table.c.id)
+                .outerjoin(
+                    manifestation_expressions_table,
+                    manifestation_expressions_table.c.expression_id == expressions_table.c.id,
+                )
+            )
+            .where(
+                work_relationships_table.c.source_work_id == work_id,
+                work_relationships_table.c.relationship_type == "has_constituent",
+            )
+            .group_by(*works_table.c)
+            .order_by(
+                nulls_last(func.min(manifestation_expressions_table.c.disc_number)),
+                nulls_last(func.min(manifestation_expressions_table.c.track_number)),
+                works_table.c.id,
+            )
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT w.*, MIN(me.disc_number) AS d, MIN(me.track_number) AS t
-                FROM work_relationships r
-                JOIN works w ON w.id = r.target_work_id
-                LEFT JOIN expressions e ON e.work_id = w.id
-                LEFT JOIN manifestation_expressions me ON me.expression_id = e.id
-                WHERE r.source_work_id = ? AND r.relationship_type = 'has_constituent'
-                GROUP BY w.id
-                ORDER BY MIN(me.disc_number) NULLS LAST, MIN(me.track_number) NULLS LAST, w.id;
-                """,
-                (work_id,),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_work(r) for r in rows]
 
     def get_manifestation_by_curie(self, curie_or_uri: str) -> Optional[ManifestationEntity]:
@@ -1454,117 +1482,123 @@ class WEMIRepository:
         self, work_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ManifestationEntity]:
         """Fetch all Manifestation entities linked directly to a given work_id, with optional record_origin filter."""
+        stmt = select(manifestations_table).where(manifestations_table.c.work_id == work_id)
+        if record_origin is not None:
+            stmt = stmt.where(manifestations_table.c.record_origin == record_origin)
+        stmt = stmt.order_by(
+            manifestations_table.c.publication_year.asc(), manifestations_table.c.id.asc()
+        )
         with self.get_connection() as conn:
-            if record_origin is not None:
-                rows = conn.execute(
-                    "SELECT * FROM manifestations WHERE work_id = ? AND record_origin = ? ORDER BY publication_year ASC, id ASC;",
-                    (work_id, record_origin),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM manifestations WHERE work_id = ? ORDER BY publication_year ASC, id ASC;",
-                    (work_id,),
-                ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_manifestation(r) for r in rows]
 
     def get_expressions_for_manifestation(
         self, manifestation_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ExpressionEntity]:
         """Fetch Expression entities associated with a manifestation via manifestation_expressions."""
+        stmt = (
+            select(expressions_table)
+            .select_from(
+                manifestation_expressions_table.join(
+                    expressions_table,
+                    manifestation_expressions_table.c.expression_id == expressions_table.c.id,
+                )
+            )
+            .where(manifestation_expressions_table.c.manifestation_id == manifestation_id)
+        )
+        if record_origin is not None:
+            stmt = stmt.where(expressions_table.c.record_origin == record_origin)
+        stmt = stmt.order_by(
+            manifestation_expressions_table.c.disc_number.asc(),
+            manifestation_expressions_table.c.track_number.asc(),
+            expressions_table.c.id.asc(),
+        )
         with self.get_connection() as conn:
-            query = """
-                SELECT e.*
-                FROM manifestation_expressions me
-                JOIN expressions e ON me.expression_id = e.id
-                WHERE me.manifestation_id = ?
-            """
-            params: list[Any] = [manifestation_id]
-            if record_origin is not None:
-                query += " AND e.record_origin = ?"
-                params.append(record_origin)
-            query += " ORDER BY me.disc_number ASC, me.track_number ASC, e.id ASC;"
-            rows = conn.execute(query, params).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_expression(r) for r in rows]
 
     def get_manifestations_for_expression(
         self, expression_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ManifestationEntity]:
         """Fetch Manifestation entities associated with an expression via manifestation_expressions."""
+        stmt = (
+            select(manifestations_table)
+            .select_from(
+                manifestation_expressions_table.join(
+                    manifestations_table,
+                    manifestation_expressions_table.c.manifestation_id == manifestations_table.c.id,
+                )
+            )
+            .where(manifestation_expressions_table.c.expression_id == expression_id)
+        )
+        if record_origin is not None:
+            stmt = stmt.where(manifestations_table.c.record_origin == record_origin)
+        stmt = stmt.order_by(
+            manifestations_table.c.publication_year.asc(), manifestations_table.c.id.asc()
+        )
         with self.get_connection() as conn:
-            query = """
-                SELECT m.*
-                FROM manifestation_expressions me
-                JOIN manifestations m ON me.manifestation_id = m.id
-                WHERE me.expression_id = ?
-            """
-            params: list[Any] = [expression_id]
-            if record_origin is not None:
-                query += " AND m.record_origin = ?"
-                params.append(record_origin)
-            query += " ORDER BY m.publication_year ASC, m.id ASC;"
-            rows = conn.execute(query, params).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_manifestation(r) for r in rows]
 
     def get_items_for_manifestation(
         self, manifestation_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ItemEntity]:
         """Fetch all Item entities held under a given manifestation."""
+        stmt = select(items_table).where(items_table.c.manifestation_id == manifestation_id)
+        if record_origin is not None:
+            stmt = stmt.where(items_table.c.record_origin == record_origin)
+        stmt = stmt.order_by(items_table.c.id)
         with self.get_connection() as conn:
-            if record_origin is not None:
-                rows = conn.execute(
-                    "SELECT * FROM items WHERE manifestation_id = ? AND record_origin = ? ORDER BY id;",
-                    (manifestation_id, record_origin),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM items WHERE manifestation_id = ? ORDER BY id;",
-                    (manifestation_id,),
-                ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_item(r) for r in rows]
 
     def get_work_relationships(self, work_id: int) -> list[WorkRelationship]:
         """Fetch all relationships where work_id is either source or target."""
+        stmt = (
+            select(work_relationships_table)
+            .where(
+                or_(
+                    work_relationships_table.c.source_work_id == work_id,
+                    work_relationships_table.c.target_work_id == work_id,
+                )
+            )
+            .order_by(work_relationships_table.c.id)
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM work_relationships WHERE source_work_id = ? OR target_work_id = ? ORDER BY id;",
-                (work_id, work_id),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_work_relationship(r) for r in rows]
 
     def register_source(self, name: str, is_authoritative: bool = True) -> None:
-        """Record an ingest source and whether its records carry authority.
-
-        Called at ingest so the repository can answer "is this row authoritative?"
-        from the source registry rather than from a literal stored on every row.
-        """
+        """Record an ingest source and whether its records carry authority."""
+        stmt = pg_insert(sources_table).values(
+            name=name,
+            is_authoritative=bool(is_authoritative),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["name"],
+            set_={
+                "is_authoritative": stmt.excluded.is_authoritative,
+                "last_seen": func.current_timestamp(),
+            },
+        )
         with self.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO sources (name, is_authoritative) VALUES (?, ?)
-                ON CONFLICT(name) DO UPDATE SET
-                    is_authoritative = excluded.is_authoritative,
-                    last_seen = CURRENT_TIMESTAMP;
-                """,
-                (name, bool(is_authoritative)),
-            )
+            conn.execute(stmt)
 
     def get_sources(self) -> dict[str, bool]:
         """Map every known ingest source to whether it is authoritative."""
+        stmt = select(sources_table.c.name, sources_table.c.is_authoritative)
         with self.get_connection() as conn:
-            return {
-                r["name"]: bool(r["is_authoritative"])
-                for r in conn.execute("SELECT name, is_authoritative FROM sources;")
-            }
+            return {r["name"]: bool(r["is_authoritative"]) for r in conn.execute(stmt)}
 
     def authoritative_sources(self) -> list[str]:
         """Names of the sources whose records may be used as authority."""
+        stmt = (
+            select(sources_table.c.name)
+            .where(sources_table.c.is_authoritative == True)  # noqa: E712
+            .order_by(sources_table.c.name)
+        )
         with self.get_connection() as conn:
-            return [
-                r["name"]
-                for r in conn.execute(
-                    "SELECT name FROM sources WHERE is_authoritative = TRUE ORDER BY name;"
-                )
-            ]
+            return [r["name"] for r in conn.execute(stmt)]
 
     def non_authoritative_sources(self) -> list[str]:
         """Source names registered as non-authoritative, i.e. corpora to cluster."""
@@ -1573,19 +1607,11 @@ class WEMIRepository:
     def _origin_clause(
         self, column: str = "record_origin", authoritative_only: bool = True
     ) -> tuple[str, list[Any]]:
-        """SQL fragment restricting rows to authoritative sources.
-
-        Returns ("", []) when no restriction applies, so callers can splice it in
-        unconditionally. Filtering happens in the query rather than after it: a
-        post-filter over a fixed top_k silently returns fewer candidates than
-        asked for, or none at all.
-        """
+        """SQL fragment restricting rows to authoritative sources."""
         if not authoritative_only:
             return "", []
         names = self.authoritative_sources()
         if not names:
-            # Nothing registered yet: treat every row as usable rather than
-            # silently matching nothing.
             return "", []
         placeholders = ",".join("?" for _ in names)
         return f" AND {column} IN ({placeholders})", list(names)
@@ -1595,53 +1621,63 @@ class WEMIRepository:
         if not mapping:
             return
         with self.get_connection() as conn:
-            conn.executemany(
-                "UPDATE works SET canonical_work_id = ? WHERE id = ?;",
-                [(canonical, work_id) for work_id, canonical in mapping.items()],
-            )
+            for work_id, canonical in mapping.items():
+                stmt = (
+                    update(works_table)
+                    .where(works_table.c.id == work_id)
+                    .values(canonical_work_id=canonical)
+                )
+                conn.execute(stmt)
 
     def clear_canonical_works(self) -> None:
         """Undo consolidation, leaving every work its own canonical."""
         with self.get_connection() as conn:
-            conn.execute("UPDATE works SET canonical_work_id = NULL;")
-            conn.execute("DELETE FROM work_relationships WHERE relationship_type = 'same_work_as';")
+            conn.execute(update(works_table).values(canonical_work_id=None))
+            conn.execute(
+                delete(work_relationships_table).where(
+                    work_relationships_table.c.relationship_type == "same_work_as"
+                )
+            )
 
     def get_work_equivalence_map(self) -> dict[int, int]:
-        """Map each consolidated work id to its group's canonical work id.
-
-        Reads the election recorded by WorkConsolidator rather than recomputing
-        it, so every caller resolves identically regardless of configuration.
-        Works that are their own canonical are absent from the map.
-        """
+        """Map each consolidated work id to its group's canonical work id."""
+        stmt = select(works_table.c.id, works_table.c.canonical_work_id).where(
+            works_table.c.canonical_work_id.is_not(None),
+            works_table.c.canonical_work_id != works_table.c.id,
+        )
         with self.get_connection() as conn:
-            return {
-                r["id"]: r["canonical_work_id"]
-                for r in conn.execute(
-                    "SELECT id, canonical_work_id FROM works "
-                    "WHERE canonical_work_id IS NOT NULL AND canonical_work_id != id;"
-                )
-            }
+            return {r["id"]: r["canonical_work_id"] for r in conn.execute(stmt)}
 
     def get_identifiers_for_entity(
         self, entity_type: EntityType, entity_id: int
     ) -> list[IdentifierEntity]:
         """Fetch all polymorphic identifiers for a specific entity."""
+        stmt = (
+            select(identifiers_table)
+            .where(
+                identifiers_table.c.entity_type == entity_type,
+                identifiers_table.c.entity_id == entity_id,
+            )
+            .order_by(identifiers_table.c.id)
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM identifiers WHERE entity_type = ? AND entity_id = ? ORDER BY id;",
-                (entity_type, entity_id),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_identifier(r) for r in rows]
 
     def get_contributions_for_entity(
         self, entity_type: str, entity_id: int
     ) -> list[ContributionEntity]:
         """Fetch all contributions for a specific entity."""
+        stmt = (
+            select(contributions_table)
+            .where(
+                contributions_table.c.entity_type == entity_type,
+                contributions_table.c.entity_id == entity_id,
+            )
+            .order_by(contributions_table.c.is_primary.desc(), contributions_table.c.id.asc())
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM contributions WHERE entity_type = ? AND entity_id = ? ORDER BY is_primary DESC, id ASC;",
-                (entity_type, entity_id),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_contribution(r) for r in rows]
 
     def lookup_by_identifier(
@@ -1654,15 +1690,16 @@ class WEMIRepository:
         val_clean = value.strip()
         norm_val = val_clean.lower()
         alnum_val = re.sub(r"[^0-9a-zA-Z]", "", val_clean).lower()
+        stmt = select(identifiers_table.c.entity_type, identifiers_table.c.entity_id).where(
+            identifiers_table.c.source == src,
+            or_(
+                identifiers_table.c.source_id_normalized == norm_val,
+                identifiers_table.c.source_id_normalized == alnum_val,
+                identifiers_table.c.source_id == val_clean,
+            ),
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT entity_type, entity_id
-                FROM identifiers
-                WHERE source = ? AND (source_id_normalized = ? OR source_id_normalized = ? OR source_id = ?);
-                """,
-                (src, norm_val, alnum_val, val_clean),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             candidates = [(r["entity_type"], r["entity_id"]) for r in rows]
             if not authoritative_only:
                 return candidates
@@ -1671,22 +1708,35 @@ class WEMIRepository:
             if not allowed:
                 return candidates
 
+            table_map = {
+                "work": works_table,
+                "works": works_table,
+                "expression": expressions_table,
+                "expressions": expressions_table,
+                "manifestation": manifestations_table,
+                "manifestations": manifestations_table,
+                "item": items_table,
+                "items": items_table,
+                "agent": agents_table,
+                "agents": agents_table,
+            }
             filtered: list[tuple[EntityType, int]] = []
             for etype, eid in candidates:
-                tbl = etype if etype.endswith("s") else f"{etype}s"
-                row = conn.execute(
-                    f"SELECT record_origin FROM {tbl} WHERE id = ?;", (eid,)
-                ).fetchone()
-                if row and row["record_origin"] in allowed:
-                    filtered.append((etype, eid))
+                tbl = table_map.get(etype)
+                if tbl is not None:
+                    check_stmt = select(tbl.c.record_origin).where(tbl.c.id == eid)
+                    row = conn.execute(check_stmt).fetchone()
+                    if row and row["record_origin"] in allowed:
+                        filtered.append((etype, eid))
             return filtered
 
     def get_mediums_of_performance(self, work_id: int) -> list[MediumOfPerformance]:
         """Fetch MediumOfPerformance records for a given work."""
+        stmt = select(work_medium_of_performance_table).where(
+            work_medium_of_performance_table.c.work_id == work_id
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM work_medium_of_performance WHERE work_id = ?;", (work_id,)
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [
                 MediumOfPerformance(
                     work_id=r["work_id"],
@@ -1705,60 +1755,45 @@ class WEMIRepository:
         work_type: Optional[str] = None,
         authoritative_only: bool = True,
     ) -> list[WorkEntity]:
-        """Look up works by title stem and optional author key, from authoritative sources.
-
-        Three title predicates, tried in order, because the first two can use
-        `idx_works_title_norm` and the third cannot:
-
-        1. equality - both sides compute the stem with `compute_title_stem`, so
-           this is the case for almost every probe;
-        2. a prefix match, for a stored title that extends the probe;
-        3. a substring match, which is a full table scan of `works`.
-
-        Measured at 60,000 works, the substring form costs 6.4 ms per call and
-        `EXPLAIN QUERY PLAN` reports `SCAN w`; the equality form is under 10 µs
-        on `SEARCH w USING INDEX idx_works_title_norm`. This is the main
-        matching path, called at least once per target record, so the scan was
-        the dominant cost of tier 2 - and constituent works multiply the table it
-        scans. Keeping the scan as a last resort preserves recall exactly; it
-        just stops being what every lookup pays.
-        """
+        """Look up works by title stem and optional author key, from authoritative sources."""
         clean_title = title_stem.strip().lower()
         if not clean_title:
             return []
 
-        def attempt(title_clause: str, title_params: list[Any]) -> list[WorkEntity]:
+        auth_sources = self.authoritative_sources() if authoritative_only else []
+
+        def attempt(match_type: str, pattern: str) -> list[WorkEntity]:
             with self.get_connection() as conn:
-                query = f"""
-                    SELECT w.* FROM works w
-                    LEFT JOIN agents a ON w.primary_agent_id = a.id
-                    WHERE {title_clause}
-                """
-                params: list[Any] = list(title_params)
+                stmt = select(works_table).select_from(
+                    works_table.outerjoin(
+                        agents_table, works_table.c.primary_agent_id == agents_table.c.id
+                    )
+                )
+                if match_type == "eq":
+                    stmt = stmt.where(works_table.c.title_normalized == pattern)
+                elif match_type == "prefix":
+                    stmt = stmt.where(works_table.c.title_normalized.like(f"{pattern}%"))
+                else:
+                    stmt = stmt.where(works_table.c.title_normalized.like(f"%{pattern}%"))
+
                 if author_key:
                     clean_author = author_key.strip().lower()
-                    query += (
-                        " AND (w.primary_agent_id IS NULL OR a.surname LIKE ? "
-                        "OR a.name_normalized LIKE ?)"
+                    stmt = stmt.where(
+                        or_(
+                            works_table.c.primary_agent_id.is_(None),
+                            agents_table.c.surname.like(f"%{clean_author}%"),
+                            agents_table.c.name_normalized.like(f"%{clean_author}%"),
+                        )
                     )
-                    params.extend([f"%{clean_author}%", f"%{clean_author}%"])
                 if work_type:
-                    query += " AND w.work_type = ?"
-                    params.append(work_type)
-                origin_sql, origin_params = self._origin_clause(
-                    "w.record_origin", authoritative_only
-                )
-                query += origin_sql
-                params.extend(origin_params)
-                query += " LIMIT 20;"
-                return [_row_to_work(r) for r in conn.execute(query, params).fetchall()]
+                    stmt = stmt.where(works_table.c.work_type == work_type)
+                if authoritative_only and auth_sources:
+                    stmt = stmt.where(works_table.c.record_origin.in_(auth_sources))
+                stmt = stmt.limit(20)
+                return [_row_to_work(r) for r in conn.execute(stmt).fetchall()]
 
-        for clause, params in (
-            ("w.title_normalized = ?", [clean_title]),
-            ("w.title_normalized LIKE ?", [f"{clean_title}%"]),
-            ("w.title_normalized LIKE ?", [f"%{clean_title}%"]),
-        ):
-            found = attempt(clause, params)
+        for mtype in ("eq", "prefix", "substr"):
+            found = attempt(mtype, clean_title)
             if found:
                 return found
         return []
@@ -1770,23 +1805,22 @@ class WEMIRepository:
         authoritative_only: bool = True,
     ) -> list[WorkEntity]:
         """Fetch works of a given work_type from authoritative sources."""
+        auth_sources = self.authoritative_sources() if authoritative_only else []
+        stmt = select(works_table).where(works_table.c.work_type == work_type)
+        if authoritative_only and auth_sources:
+            stmt = stmt.where(works_table.c.record_origin.in_(auth_sources))
+        stmt = stmt.limit(limit)
         with self.get_connection() as conn:
-            query = "SELECT * FROM works WHERE work_type = ?"
-            params: list[Any] = [work_type]
-            origin_sql, origin_params = self._origin_clause("record_origin", authoritative_only)
-            query += origin_sql
-            params.extend(origin_params)
-            query += " LIMIT ?;"
-            params.append(limit)
-            rows = conn.execute(query, params).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [_row_to_work(r) for r in rows]
 
     def get_indexed_source_ids(self, source: str) -> set[str]:
         """Return set of manifestation source_ids stored and indexed for a given source."""
+        stmt = select(manifestations_table.c.source_id).where(
+            manifestations_table.c.source == source
+        )
         with self.get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT source_id FROM manifestations WHERE source = ?;", (source,)
-            )
+            cursor = conn.execute(stmt)
             return {row["source_id"] for row in cursor if row["source_id"]}
 
     # -----------------------------------------------------------------------
@@ -1889,33 +1923,29 @@ class WEMIRepository:
             else (self.fts_config.prefix_search if self.fts_config else True)
         )
 
+        ts_vector = func.to_tsvector(
+            "simple", func.unaccent(func.coalesce(works_table.c.serialized_text, ""))
+        )
+        ts_query = func.websearch_to_tsquery("simple", func.unaccent(clean_query))
+        rank_col = func.ts_rank_cd(ts_vector, ts_query).label("rank")
+
+        match_cond = ts_vector.op("@@")(ts_query)
+        if eff_prefix:
+            match_cond = or_(
+                match_cond,
+                works_table.c.title_normalized.op("%")(clean_query),
+            )
+
+        stmt = select(works_table, rank_col).where(match_cond)
+        if authoritative_only:
+            auth_sources = self.authoritative_sources()
+            if auth_sources:
+                stmt = stmt.where(works_table.c.record_origin.in_(auth_sources))
+
+        stmt = stmt.order_by(rank_col.desc()).limit(eff_limit)
+
         with self.get_connection() as conn:
-            if eff_prefix:
-                sql = f"""
-                    SELECT w.*,
-                           ts_rank_cd(to_tsvector('simple', unaccent(coalesce(w.serialized_text, ''))), websearch_to_tsquery('simple', unaccent(%s))) AS rank
-                    FROM works w
-                    WHERE (
-                        to_tsvector('simple', unaccent(coalesce(w.serialized_text, ''))) @@ websearch_to_tsquery('simple', unaccent(%s))
-                        OR w.title_normalized %% %s
-                    )
-                    {origin_clause}
-                    ORDER BY rank DESC
-                    LIMIT %s;
-                """
-                params = [clean_query, clean_query, clean_query, *origin_params, eff_limit]
-            else:
-                sql = f"""
-                    SELECT w.*,
-                           ts_rank_cd(to_tsvector('simple', unaccent(coalesce(w.serialized_text, ''))), websearch_to_tsquery('simple', unaccent(%s))) AS rank
-                    FROM works w
-                    WHERE to_tsvector('simple', unaccent(coalesce(w.serialized_text, ''))) @@ websearch_to_tsquery('simple', unaccent(%s))
-                    {origin_clause}
-                    ORDER BY rank DESC
-                    LIMIT %s;
-                """
-                params = [clean_query, clean_query, *origin_params, eff_limit]
-            cursor = conn.execute(sql, params)
+            cursor = conn.execute(stmt)
             return [
                 (_row_to_work(row), float(row["rank"]) if row["rank"] is not None else 0.0)
                 for row in cursor
@@ -1954,11 +1984,10 @@ class WEMIRepository:
 
         vector_to_work_id: dict[int, int] = {}
         with self.get_connection() as conn:
-            placeholders = ",".join("?" for _ in vector_indices)
-            rows = conn.execute(
-                f"SELECT vector_id, work_id FROM work_vectors WHERE vector_id IN ({placeholders});",
-                vector_indices,
-            ).fetchall()
+            stmt = select(work_vectors_table.c.vector_id, work_vectors_table.c.work_id).where(
+                work_vectors_table.c.vector_id.in_(vector_indices)
+            )
+            rows = conn.execute(stmt).fetchall()
             for r in rows:
                 vector_to_work_id[r["vector_id"]] = r["work_id"]
 
@@ -2005,11 +2034,11 @@ class WEMIRepository:
 
         vector_to_manif_id: dict[int, int] = {}
         with self.get_connection() as conn:
-            placeholders = ",".join("?" for _ in vector_indices)
-            rows = conn.execute(
-                f"SELECT vector_id, manifestation_id FROM manifestation_vectors WHERE vector_id IN ({placeholders});",
-                vector_indices,
-            ).fetchall()
+            stmt = select(
+                manifestation_vectors_table.c.vector_id,
+                manifestation_vectors_table.c.manifestation_id,
+            ).where(manifestation_vectors_table.c.vector_id.in_(vector_indices))
+            rows = conn.execute(stmt).fetchall()
             for r in rows:
                 vector_to_manif_id[r["vector_id"]] = r["manifestation_id"]
 
@@ -2029,14 +2058,21 @@ class WEMIRepository:
 
     def count_records_by_origin(self) -> dict[str, dict[str, int]]:
         """Return count breakdown of authority vs target records across WEMI tiers."""
-        tiers = ["works", "expressions", "manifestations", "items", "agents"]
+        tier_tables = {
+            "works": works_table,
+            "expressions": expressions_table,
+            "manifestations": manifestations_table,
+            "items": items_table,
+            "agents": agents_table,
+        }
         counts: dict[str, dict[str, int]] = {}
         with self.get_connection() as conn:
-            for tier in tiers:
+            for tier, tbl in tier_tables.items():
                 counts[tier] = {"authority": 0, "target": 0}
-                rows = conn.execute(
-                    f"SELECT record_origin, COUNT(*) as cnt FROM {tier} GROUP BY record_origin;"
-                ).fetchall()
+                stmt = select(tbl.c.record_origin, func.count().label("cnt")).group_by(
+                    tbl.c.record_origin
+                )
+                rows = conn.execute(stmt).fetchall()
                 for r in rows:
                     orig = r["record_origin"]
                     if orig in counts[tier]:
@@ -2049,49 +2085,48 @@ class WEMIRepository:
 
     def get_harvest_state(self, source_id: str) -> Optional[HarvestState]:
         """Fetch harvest checkpoint from harvest_state."""
+        stmt = select(harvest_state_table).where(harvest_state_table.c.source_id == source_id)
         with self.get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM harvest_state WHERE source_id = ?;", (source_id,)
-            ).fetchone()
+            row = conn.execute(stmt).fetchone()
             return _row_to_harvest_state(row) if row else None
 
     def save_harvest_state(self, state: HarvestState) -> None:
         """Upsert a harvest checkpoint in harvest_state."""
+        completed_slices_json = (
+            json.dumps([list(s) for s in state.completed_slices])
+            if state.completed_slices
+            else None
+        )
+        stmt = pg_insert(harvest_state_table).values(
+            source_id=state.source_id,
+            source_type=state.source_type,
+            metadata_prefix=state.metadata_prefix,
+            set_spec=state.set_spec,
+            last_harvest_from=state.last_harvest_from,
+            last_harvest_until=state.last_harvest_until,
+            resumption_token=state.resumption_token,
+            records_harvested=state.records_harvested,
+            status=state.status,
+            completed_slices=completed_slices_json,
+            updated_at=func.now(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[harvest_state_table.c.source_id],
+            set_={
+                "source_type": stmt.excluded.source_type,
+                "metadata_prefix": stmt.excluded.metadata_prefix,
+                "set_spec": stmt.excluded.set_spec,
+                "last_harvest_from": stmt.excluded.last_harvest_from,
+                "last_harvest_until": stmt.excluded.last_harvest_until,
+                "resumption_token": stmt.excluded.resumption_token,
+                "records_harvested": stmt.excluded.records_harvested,
+                "status": stmt.excluded.status,
+                "completed_slices": stmt.excluded.completed_slices,
+                "updated_at": func.now(),
+            },
+        )
         with self.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO harvest_state (
-                    source_id, source_type, metadata_prefix, set_spec,
-                    last_harvest_from, last_harvest_until, resumption_token,
-                    records_harvested, status, completed_slices, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(source_id) DO UPDATE SET
-                    source_type = excluded.source_type,
-                    metadata_prefix = excluded.metadata_prefix,
-                    set_spec = excluded.set_spec,
-                    last_harvest_from = excluded.last_harvest_from,
-                    last_harvest_until = excluded.last_harvest_until,
-                    resumption_token = excluded.resumption_token,
-                    records_harvested = excluded.records_harvested,
-                    status = excluded.status,
-                    completed_slices = excluded.completed_slices,
-                    updated_at = CURRENT_TIMESTAMP;
-                """,
-                (
-                    state.source_id,
-                    state.source_type,
-                    state.metadata_prefix,
-                    state.set_spec,
-                    state.last_harvest_from,
-                    state.last_harvest_until,
-                    state.resumption_token,
-                    state.records_harvested,
-                    state.status,
-                    json.dumps([list(s) for s in state.completed_slices])
-                    if state.completed_slices
-                    else None,
-                ),
-            )
+            conn.execute(stmt)
 
     def insert_wikidata_authors(self, authors: list[dict[str, Any]]) -> None:
         """Persist author entity metadata into agents table and identifiers table.
@@ -2120,48 +2155,53 @@ class WEMIRepository:
             metadata_json = json.dumps(existing_meta, ensure_ascii=False)
 
             agent_rows.append(
-                (
-                    "wikidata",
-                    a["qid"],
-                    "wikidata",
-                    a.get("name") or a["qid"],
-                    (a.get("name") or a["qid"]).strip().lower(),
-                    a.get("family_name"),
-                    a.get("birth_year"),
-                    a.get("death_year"),
-                    metadata_json,
-                    True,
-                )
+                {
+                    "source": "wikidata",
+                    "source_id": a["qid"],
+                    "record_origin": "wikidata",
+                    "name": a.get("name") or a["qid"],
+                    "name_normalized": (a.get("name") or a["qid"]).strip().lower(),
+                    "surname": a.get("family_name"),
+                    "birth_year": a.get("birth_year"),
+                    "death_year": a.get("death_year"),
+                    "metadata_json": metadata_json,
+                    "is_personal": True,
+                }
             )
         with self.get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT INTO agents (
-                    source, source_id, record_origin, name, name_normalized, surname,
-                    birth_year, death_year, metadata_json, is_personal
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(source, source_id) DO UPDATE SET
-                    name = excluded.name,
-                    name_normalized = excluded.name_normalized,
-                    surname = COALESCE(excluded.surname, agents.surname),
-                    birth_year = COALESCE(excluded.birth_year, agents.birth_year),
-                    death_year = COALESCE(excluded.death_year, agents.death_year),
-                    metadata_json = COALESCE(excluded.metadata_json, agents.metadata_json);
-                """,
-                agent_rows,
-            )
+            if agent_rows:
+                stmt = pg_insert(agents_table).values(agent_rows)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[agents_table.c.source, agents_table.c.source_id],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "name_normalized": stmt.excluded.name_normalized,
+                        "surname": func.coalesce(stmt.excluded.surname, agents_table.c.surname),
+                        "birth_year": func.coalesce(
+                            stmt.excluded.birth_year, agents_table.c.birth_year
+                        ),
+                        "death_year": func.coalesce(
+                            stmt.excluded.death_year, agents_table.c.death_year
+                        ),
+                        "metadata_json": func.coalesce(
+                            stmt.excluded.metadata_json, agents_table.c.metadata_json
+                        ),
+                    },
+                )
+                conn.execute(stmt)
 
             # Option 3: Persist relational author identifiers into identifiers table (entity_type = 'agent')
             qids_with_idents = [a["qid"] for a in authors if a.get("qid") and a.get("identifiers")]
             if qids_with_idents:
-                placeholders = ",".join("?" for _ in qids_with_idents)
                 agent_records = conn.execute(
-                    f"SELECT id, source_id FROM agents WHERE source = 'wikidata' AND source_id IN ({placeholders});",
-                    qids_with_idents,
+                    select(agents_table.c.id, agents_table.c.source_id).where(
+                        agents_table.c.source == "wikidata",
+                        agents_table.c.source_id.in_(qids_with_idents),
+                    )
                 ).fetchall()
                 qid_to_agent_id = {r["source_id"]: r["id"] for r in agent_records}
 
-                ident_params = []
+                ident_rows = []
                 for a in authors:
                     qid = a.get("qid")
                     if not qid or qid not in qid_to_agent_id:
@@ -2181,30 +2221,37 @@ class WEMIRepository:
                             norm_val = (
                                 re.sub(r"[^0-9a-zA-Z]", "", val_str).lower() or val_str.lower()
                             )
-                            ident_params.append(
-                                (
-                                    "agent",
-                                    agent_id,
-                                    src_name,
-                                    val_str,
-                                    norm_val,
-                                    agent_id,
-                                    src_name,
-                                    val_str,
-                                )
+                            ident_rows.append(
+                                {
+                                    "entity_type": "agent",
+                                    "entity_id": agent_id,
+                                    "source": src_name,
+                                    "source_id": val_str,
+                                    "source_id_normalized": norm_val,
+                                }
                             )
-                if ident_params:
-                    conn.executemany(
-                        """
-                        INSERT INTO identifiers (entity_type, entity_id, source, source_id, source_id_normalized)
-                        SELECT ?, ?, ?, ?, ?
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM identifiers
-                            WHERE entity_type = 'agent' AND entity_id = ? AND source = ? AND source_id = ?
-                        );
-                        """,
-                        ident_params,
+                if ident_rows:
+                    agent_id_list = list(qid_to_agent_id.values())
+                    existing_idents = set()
+                    chk_stmt = select(
+                        identifiers_table.c.entity_id,
+                        identifiers_table.c.source,
+                        identifiers_table.c.source_id,
+                    ).where(
+                        identifiers_table.c.entity_type == "agent",
+                        identifiers_table.c.entity_id.in_(agent_id_list),
                     )
+                    for r in conn.execute(chk_stmt):
+                        existing_idents.add((r["entity_id"], r["source"], r["source_id"]))
+
+                    to_insert = [
+                        row
+                        for row in ident_rows
+                        if (row["entity_id"], row["source"], row["source_id"])
+                        not in existing_idents
+                    ]
+                    if to_insert:
+                        conn.execute(pg_insert(identifiers_table).values(to_insert))
 
     def get_wikidata_authors_batch(self, qids: list[str]) -> dict[str, dict[str, Any]]:
         """Fetch cached author entities from agents + identifiers by QIDs.
@@ -2214,16 +2261,21 @@ class WEMIRepository:
         """
         if not qids:
             return {}
-        placeholders = ",".join("?" for _ in qids)
         with self.get_connection() as conn:
             # 1. Query agents table
-            rows = conn.execute(
-                f"""
-                SELECT id, source_id, name, surname, birth_year, death_year, metadata_json
-                FROM agents WHERE source = 'wikidata' AND source_id IN ({placeholders});
-                """,
-                qids,
-            ).fetchall()
+            stmt = select(
+                agents_table.c.id,
+                agents_table.c.source_id,
+                agents_table.c.name,
+                agents_table.c.surname,
+                agents_table.c.birth_year,
+                agents_table.c.death_year,
+                agents_table.c.metadata_json,
+            ).where(
+                agents_table.c.source == "wikidata",
+                agents_table.c.source_id.in_(qids),
+            )
+            rows = conn.execute(stmt).fetchall()
 
             results: dict[str, dict[str, Any]] = {}
             agent_id_map: dict[str, int] = {}
@@ -2248,12 +2300,20 @@ class WEMIRepository:
 
             # 2. Fetch identifiers for each agent
             if agent_id_map:
-                for qid, agent_id in agent_id_map.items():
-                    id_rows = conn.execute(
-                        "SELECT source, source_id FROM identifiers WHERE entity_type='agent' AND entity_id=?;",
-                        (agent_id,),
-                    ).fetchall()
-                    results[qid]["identifiers"] = {r["source"]: r["source_id"] for r in id_rows}
+                id_stmt = select(
+                    identifiers_table.c.entity_id,
+                    identifiers_table.c.source,
+                    identifiers_table.c.source_id,
+                ).where(
+                    identifiers_table.c.entity_type == "agent",
+                    identifiers_table.c.entity_id.in_(list(agent_id_map.values())),
+                )
+                id_rows = conn.execute(id_stmt).fetchall()
+                rev_map = {aid: qid for qid, aid in agent_id_map.items()}
+                for r in id_rows:
+                    qid = rev_map.get(r["entity_id"])
+                    if qid and qid in results:
+                        results[qid]["identifiers"][r["source"]] = r["source_id"]
 
             return results
 
@@ -2267,17 +2327,24 @@ class WEMIRepository:
         if not agent_ids:
             return {}
         results: dict[int, dict[str, Any]] = {}
-        placeholders = ",".join("?" for _ in agent_ids)
         with self.get_connection() as conn:
             try:
-                rows = conn.execute(
-                    f"""
-                    SELECT id, source, source_id, name, name_normalized, surname,
-                           qualifier, dates, birth_year, death_year, fuller_name, affiliation, metadata_json
-                    FROM agents WHERE id IN ({placeholders});
-                    """,
-                    agent_ids,
-                ).fetchall()
+                stmt = select(
+                    agents_table.c.id,
+                    agents_table.c.source,
+                    agents_table.c.source_id,
+                    agents_table.c.name,
+                    agents_table.c.name_normalized,
+                    agents_table.c.surname,
+                    agents_table.c.qualifier,
+                    agents_table.c.dates,
+                    agents_table.c.birth_year,
+                    agents_table.c.death_year,
+                    agents_table.c.fuller_name,
+                    agents_table.c.affiliation,
+                    agents_table.c.metadata_json,
+                ).where(agents_table.c.id.in_(agent_ids))
+                rows = conn.execute(stmt).fetchall()
                 for r in rows:
                     results[r["id"]] = _hydrate_agent_profile(dict(r))
             except Exception:
@@ -2304,17 +2371,12 @@ class WEMIRepository:
         findings: list[str] = []
         registered = self.get_sources()
         with self.get_connection() as conn:
-            origins = {
-                str(r[0])
-                for r in conn.execute(
-                    """
-                    SELECT DISTINCT record_origin FROM works
-                    UNION SELECT DISTINCT record_origin FROM manifestations
-                    UNION SELECT DISTINCT record_origin FROM agents;
-                    """
-                )
-                if r[0]
-            }
+            stmt = union(
+                select(distinct(works_table.c.record_origin)),
+                select(distinct(manifestations_table.c.record_origin)),
+                select(distinct(agents_table.c.record_origin)),
+            )
+            origins = {str(r[0]) for r in conn.execute(stmt) if r[0]}
 
         for name, is_authoritative in sorted(registered.items()):
             if is_authoritative and name not in origins:
@@ -2357,36 +2419,35 @@ class WEMIRepository:
         removed: dict[str, int] = {}
         with self.get_connection() as conn:
 
-            def ids_for(table: str) -> list[int]:
-                return [
-                    int(r[0])
-                    for r in conn.execute(
-                        f"SELECT id FROM {table} WHERE record_origin = ?;", (source_name,)
-                    )
-                ]
+            def ids_for(table_obj: Table) -> list[int]:
+                stmt = select(table_obj.c.id).where(table_obj.c.record_origin == source_name)
+                return [int(r[0]) for r in conn.execute(stmt)]
 
-            work_ids = ids_for("works")
-            expression_ids = ids_for("expressions")
-            manifestation_ids = ids_for("manifestations")
-            item_ids = ids_for("items")
-            agent_ids = ids_for("agents")
+            work_ids = ids_for(works_table)
+            expression_ids = ids_for(expressions_table)
+            manifestation_ids = ids_for(manifestations_table)
+            item_ids = ids_for(items_table)
+            agent_ids = ids_for(agents_table)
 
-            def delete_in(table: str, column: str, values: list[int]) -> int:
+            def delete_in(table_obj: Table, column_name: str, values: list[int]) -> int:
                 if not values:
                     return 0
                 total = 0
-                # Chunked to stay under SQLITE_MAX_VARIABLE_NUMBER on large sources.
+                # Chunked to stay under variable limits on large sources.
                 for start in range(0, len(values), 500):
                     chunk = values[start : start + 500]
-                    placeholders = ",".join("?" for _ in chunk)
-                    cur = conn.execute(
-                        f"DELETE FROM {table} WHERE {column} IN ({placeholders});", chunk
-                    )
+                    col = getattr(table_obj.c, column_name)
+                    stmt = delete(table_obj).where(col.in_(chunk))
+                    cur = conn.execute(stmt)
                     total += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
                 return total
 
             # Polymorphic children first, keyed by (entity_type, entity_id).
-            for table in ("identifiers", "entity_keys", "contributions"):
+            for table_name, table_obj in (
+                ("identifiers", identifiers_table),
+                ("entity_keys", entity_keys_table),
+                ("contributions", contributions_table),
+            ):
                 count = 0
                 for entity_type, entity_ids in (
                     ("work", work_ids),
@@ -2399,35 +2460,39 @@ class WEMIRepository:
                         continue
                     for start in range(0, len(entity_ids), 500):
                         chunk = entity_ids[start : start + 500]
-                        placeholders = ",".join("?" for _ in chunk)
-                        cur = conn.execute(
-                            f"""
-                            DELETE FROM {table}
-                            WHERE entity_type = ? AND entity_id IN ({placeholders});
-                            """,
-                            [entity_type, *chunk],
+                        stmt = delete(table_obj).where(
+                            table_obj.c.entity_type == entity_type,
+                            table_obj.c.entity_id.in_(chunk),
                         )
+                        cur = conn.execute(stmt)
                         count += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-                removed[table] = count
+                removed[table_name] = count
 
             # Contributions also reference agents by agent_id, not entity_id.
-            removed["contributions"] += delete_in("contributions", "agent_id", agent_ids)
+            removed["contributions"] += delete_in(contributions_table, "agent_id", agent_ids)
 
-            removed["work_vectors"] = delete_in("work_vectors", "work_id", work_ids)
+            removed["work_vectors"] = delete_in(work_vectors_table, "work_id", work_ids)
             removed["manifestation_vectors"] = delete_in(
-                "manifestation_vectors", "manifestation_id", manifestation_ids
+                manifestation_vectors_table, "manifestation_id", manifestation_ids
             )
             removed["manifestation_expressions"] = delete_in(
-                "manifestation_expressions", "manifestation_id", manifestation_ids
+                manifestation_expressions_table, "manifestation_id", manifestation_ids
             )
             removed["work_relationships"] = delete_in(
-                "work_relationships", "source_work_id", work_ids
-            ) + delete_in("work_relationships", "target_work_id", work_ids)
+                work_relationships_table, "source_work_id", work_ids
+            ) + delete_in(work_relationships_table, "target_work_id", work_ids)
 
             # Then the entities themselves, children before parents.
-            for table in ("items", "manifestations", "expressions", "works", "agents"):
-                cur = conn.execute(f"DELETE FROM {table} WHERE record_origin = ?;", (source_name,))
-                removed[table] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            for table_name, table_obj in (
+                ("items", items_table),
+                ("manifestations", manifestations_table),
+                ("expressions", expressions_table),
+                ("works", works_table),
+                ("agents", agents_table),
+            ):
+                stmt = delete(table_obj).where(table_obj.c.record_origin == source_name)
+                cur = conn.execute(stmt)
+                removed[table_name] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
         return removed
 
@@ -2476,39 +2541,41 @@ class WEMIRepository:
         """
         counts = {"works": 0, "manifestations": 0}
 
-        for kind, indexer, table, id_column, map_table in (
-            ("works", work_indexer, "works", "work_id", "work_vectors"),
+        for kind, indexer, table_obj, id_col_name, map_table_obj in (
+            ("works", work_indexer, works_table, "work_id", work_vectors_table),
             (
                 "manifestations",
                 manifestation_indexer,
-                "manifestations",
+                manifestations_table,
                 "manifestation_id",
-                "manifestation_vectors",
+                manifestation_vectors_table,
             ),
         ):
             if indexer is None:
                 continue
-            exclude_sql = ""
+
+            cond = and_(
+                table_obj.c.serialized_text.is_not(None),
+                func.trim(table_obj.c.serialized_text) != "",
+            )
             if kind == "works" and not include_constituent_works:
-                exclude_sql = """
-                    AND id NOT IN (
-                        SELECT r.target_work_id FROM work_relationships r
-                        WHERE r.relationship_type = 'has_constituent'
-                          AND NOT EXISTS (
-                              SELECT 1 FROM manifestations m
-                              WHERE m.work_id = r.target_work_id
-                          )
-                    )
-                """
-            with self.get_connection() as conn:
-                cur = conn.execute(
-                    f"""
-                    SELECT id, serialized_text FROM {table}
-                    WHERE serialized_text IS NOT NULL AND TRIM(serialized_text) != ''
-                    {exclude_sql}
-                    ORDER BY id;
-                    """
+                m_exists = select(1).where(
+                    manifestations_table.c.work_id == work_relationships_table.c.target_work_id
                 )
+                subq = select(work_relationships_table.c.target_work_id).where(
+                    work_relationships_table.c.relationship_type == "has_constituent",
+                    ~m_exists.exists(),
+                )
+                cond = and_(cond, table_obj.c.id.not_in(subq))
+
+            stmt = (
+                select(table_obj.c.id, table_obj.c.serialized_text)
+                .where(cond)
+                .order_by(table_obj.c.id)
+            )
+
+            with self.get_connection() as conn:
+                cur = conn.execute(stmt)
                 while True:
                     rows = cur.fetchmany(batch_size)
                     if not rows:
@@ -2518,10 +2585,16 @@ class WEMIRepository:
                     vectors = embedder.embed_texts(texts, batch_size=len(texts))
                     vector_ids = indexer.add_vectors(vectors, ids=ids)
                     with self.get_connection() as write_conn:
-                        write_conn.executemany(
-                            f"INSERT OR REPLACE INTO {map_table} (vector_id, {id_column}) VALUES (?, ?);",
-                            list(zip(vector_ids, ids)),
+                        values_to_insert = [
+                            {"vector_id": v_id, id_col_name: ent_id}
+                            for v_id, ent_id in zip(vector_ids, ids)
+                        ]
+                        map_stmt = pg_insert(map_table_obj).values(values_to_insert)
+                        map_stmt = map_stmt.on_conflict_do_update(
+                            index_elements=[map_table_obj.c.vector_id],
+                            set_={id_col_name: getattr(map_stmt.excluded, id_col_name)},
                         )
+                        write_conn.execute(map_stmt)
                     counts[kind] += len(ids)
             indexer.save()
 
@@ -2539,15 +2612,24 @@ class WEMIRepository:
 
         wemi_engine = WEMISerializationEngine(agent_template_path=template_path)
 
+        stmt = select(
+            agents_table.c.id,
+            agents_table.c.source,
+            agents_table.c.source_id,
+            agents_table.c.name,
+            agents_table.c.name_normalized,
+            agents_table.c.surname,
+            agents_table.c.qualifier,
+            agents_table.c.dates,
+            agents_table.c.birth_year,
+            agents_table.c.death_year,
+            agents_table.c.fuller_name,
+            agents_table.c.affiliation,
+            agents_table.c.metadata_json,
+        ).order_by(agents_table.c.id)
+
         with self.get_connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT id, source, source_id, name, name_normalized, surname,
-                       qualifier, dates, birth_year, death_year, fuller_name, affiliation, metadata_json
-                FROM agents
-                ORDER BY id;
-                """
-            )
+            cur = conn.execute(stmt)
 
             total_indexed = 0
             while True:
@@ -2610,10 +2692,11 @@ class WEMIRepository:
         with self.get_connection() as conn:
             for cid in candidate_agent_ids:
                 # Get contributions for this agent
-                contribs = conn.execute(
-                    "SELECT entity_type, entity_id FROM contributions WHERE agent_id = ?;",
-                    (cid,),
-                ).fetchall()
+                stmt = select(
+                    contributions_table.c.entity_type,
+                    contributions_table.c.entity_id,
+                ).where(contributions_table.c.agent_id == cid)
+                contribs = conn.execute(stmt).fetchall()
 
                 work_ids = [c["entity_id"] for c in contribs if c["entity_type"] == "work"]
                 manif_ids = [
@@ -2626,77 +2709,76 @@ class WEMIRepository:
                 # gathered: a work-level author still needs its manifestations'
                 # publishers, and a manifestation-level one still needs its work.
                 if work_ids:
-                    w_placeholders = ",".join("?" for _ in work_ids)
-                    for row in conn.execute(
-                        f"SELECT id FROM manifestations WHERE work_id IN ({w_placeholders});",
-                        work_ids,
-                    ):
+                    manif_stmt = select(manifestations_table.c.id).where(
+                        manifestations_table.c.work_id.in_(work_ids)
+                    )
+                    for row in conn.execute(manif_stmt):
                         if row["id"] not in manif_ids:
                             manif_ids.append(row["id"])
                 if manif_ids:
-                    m_placeholders = ",".join("?" for _ in manif_ids)
-                    for row in conn.execute(
-                        f"SELECT DISTINCT work_id FROM manifestations WHERE id IN ({m_placeholders}) AND work_id IS NOT NULL;",
-                        manif_ids,
-                    ):
+                    manif_work_stmt = select(distinct(manifestations_table.c.work_id)).where(
+                        manifestations_table.c.id.in_(manif_ids),
+                        manifestations_table.c.work_id.is_not(None),
+                    )
+                    for row in conn.execute(manif_work_stmt):
                         if row["work_id"] not in work_ids:
                             work_ids.append(row["work_id"])
                 if expr_ids:
-                    e_placeholders = ",".join("?" for _ in expr_ids)
-                    for row in conn.execute(
-                        f"SELECT DISTINCT work_id FROM expressions WHERE id IN ({e_placeholders}) AND work_id IS NOT NULL;",
-                        expr_ids,
-                    ):
+                    expr_work_stmt = select(distinct(expressions_table.c.work_id)).where(
+                        expressions_table.c.id.in_(expr_ids),
+                        expressions_table.c.work_id.is_not(None),
+                    )
+                    for row in conn.execute(expr_work_stmt):
                         if row["work_id"] not in work_ids:
                             work_ids.append(row["work_id"])
 
                 if norm_target_coauthors and (work_ids or manif_ids or expr_ids):
                     # Co-contributors are collected across every tier the candidate
                     # touches, since roles are split between work and expression.
-                    clauses: list[str] = []
-                    params: list[Any] = []
+                    conds = []
                     for entity_type, ids in (
                         ("work", work_ids),
                         ("expression", expr_ids),
                         ("manifestation", manif_ids),
                     ):
                         if ids:
-                            clauses.append(
-                                f"(c.entity_type = ? AND c.entity_id IN ({','.join('?' for _ in ids)}))"
+                            conds.append(
+                                and_(
+                                    contributions_table.c.entity_type == entity_type,
+                                    contributions_table.c.entity_id.in_(ids),
+                                )
                             )
-                            params.append(entity_type)
-                            params.extend(ids)
-                    co_agents = conn.execute(
-                        f"""
-                        SELECT DISTINCT a.name, a.name_normalized
-                        FROM contributions c
-                        JOIN agents a ON c.agent_id = a.id
-                        WHERE ({" OR ".join(clauses)}) AND c.agent_id != ?;
-                        """,
-                        params + [cid],
-                    ).fetchall()
-                    for co in co_agents:
-                        c_norm = fold_label(co["name_normalized"] or co["name"])
-                        for t_norm in norm_target_coauthors:
-                            if (
-                                t_norm in c_norm
-                                or c_norm in t_norm
-                                or fuzz.token_set_ratio(t_norm, c_norm) >= 85.0
-                            ):
-                                evidence[cid]["has_coauthor_match"] = True
-                                if co["name"] not in evidence[cid]["matched_coauthors"]:
-                                    evidence[cid]["matched_coauthors"].append(co["name"])
+                    if conds:
+                        co_stmt = (
+                            select(distinct(agents_table.c.name), agents_table.c.name_normalized)
+                            .select_from(
+                                contributions_table.join(
+                                    agents_table,
+                                    contributions_table.c.agent_id == agents_table.c.id,
+                                )
+                            )
+                            .where(or_(*conds), contributions_table.c.agent_id != cid)
+                        )
+                        co_agents = conn.execute(co_stmt).fetchall()
+                        for co in co_agents:
+                            c_norm = fold_label(co["name_normalized"] or co["name"])
+                            for t_norm in norm_target_coauthors:
+                                if (
+                                    t_norm in c_norm
+                                    or c_norm in t_norm
+                                    or fuzz.token_set_ratio(t_norm, c_norm) >= 85.0
+                                ):
+                                    evidence[cid]["has_coauthor_match"] = True
+                                    if co["name"] not in evidence[cid]["matched_coauthors"]:
+                                        evidence[cid]["matched_coauthors"].append(co["name"])
 
                 if manif_ids and norm_target_pub:
-                    m_placeholders = ",".join("?" for _ in manif_ids)
-                    pubs = conn.execute(
-                        f"""
-                        SELECT DISTINCT publisher
-                        FROM manifestations
-                        WHERE id IN ({m_placeholders}) AND publisher IS NOT NULL AND publisher != '';
-                        """,
-                        manif_ids,
-                    ).fetchall()
+                    pub_stmt = select(distinct(manifestations_table.c.publisher)).where(
+                        manifestations_table.c.id.in_(manif_ids),
+                        manifestations_table.c.publisher.is_not(None),
+                        manifestations_table.c.publisher != "",
+                    )
+                    pubs = conn.execute(pub_stmt).fetchall()
                     for pb in pubs:
                         p_norm = fold_label(pb["publisher"])
                         if p_norm and (
@@ -2709,15 +2791,12 @@ class WEMIRepository:
                                 evidence[cid]["matched_publishers"].append(pb["publisher"])
 
                 if work_ids and norm_target_classes:
-                    w_placeholders = ",".join("?" for _ in work_ids)
-                    classes = conn.execute(
-                        f"""
-                        SELECT DISTINCT ykl_class
-                        FROM works
-                        WHERE id IN ({w_placeholders}) AND ykl_class IS NOT NULL AND ykl_class != '';
-                        """,
-                        work_ids,
-                    ).fetchall()
+                    class_stmt = select(distinct(works_table.c.ykl_class)).where(
+                        works_table.c.id.in_(work_ids),
+                        works_table.c.ykl_class.is_not(None),
+                        works_table.c.ykl_class != "",
+                    )
+                    classes = conn.execute(class_stmt).fetchall()
                     for cl in classes:
                         code = str(cl["ykl_class"]).strip().lower()
                         for tc in norm_target_classes:
@@ -2730,14 +2809,11 @@ class WEMIRepository:
                                         evidence[cid]["matched_classifications"].append(matched_str)
 
                     # Also check subjects_json
-                    subjects = conn.execute(
-                        f"""
-                        SELECT DISTINCT subjects_json
-                        FROM works
-                        WHERE id IN ({w_placeholders}) AND subjects_json IS NOT NULL;
-                        """,
-                        work_ids,
-                    ).fetchall()
+                    subj_stmt = select(distinct(works_table.c.subjects_json)).where(
+                        works_table.c.id.in_(work_ids),
+                        works_table.c.subjects_json.is_not(None),
+                    )
+                    subjects = conn.execute(subj_stmt).fetchall()
                     for sj in subjects:
                         try:
                             subj_data = json.loads(sj["subjects_json"])
@@ -2783,243 +2859,297 @@ class WEMIRepository:
         if not clusters:
             return
         rows = [
-            (
-                c.cluster_id,
-                c.canonical_record_id,
-                c.publisher,
-                c.publication_year,
-                c.edition_statement,
-                c.extent,
-                c.carrier_type,
-                c.member_record_count,
-            )
+            {
+                "cluster_id": c.cluster_id,
+                "canonical_record_id": c.canonical_record_id,
+                "publisher": c.publisher,
+                "publication_year": c.publication_year,
+                "edition_statement": c.edition_statement,
+                "extent": c.extent,
+                "carrier_type": c.carrier_type,
+                "member_record_count": c.member_record_count,
+            }
             for c in clusters
         ]
+        stmt = pg_insert(corpus_manifestation_clusters_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[corpus_manifestation_clusters_table.c.cluster_id],
+            set_={
+                "canonical_record_id": stmt.excluded.canonical_record_id,
+                "publisher": stmt.excluded.publisher,
+                "publication_year": stmt.excluded.publication_year,
+                "edition_statement": stmt.excluded.edition_statement,
+                "extent": stmt.excluded.extent,
+                "carrier_type": stmt.excluded.carrier_type,
+                "member_record_count": stmt.excluded.member_record_count,
+            },
+        )
         with self.get_corpus_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO corpus_manifestation_clusters (
-                    cluster_id, canonical_record_id, publisher, publication_year,
-                    edition_statement, extent, carrier_type, member_record_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+            conn.execute(stmt)
 
     def insert_work_clusters_batch(self, clusters: list[WorkCluster]) -> None:
         """Batch insert or replace work family clusters."""
         if not clusters:
             return
         rows = [
-            (
-                c.cluster_id,
-                c.work_type,
-                c.canonical_work_source,
-                c.canonical_work_source_id,
-                c.canonical_title,
-                c.canonical_author,
-            )
+            {
+                "cluster_id": c.cluster_id,
+                "work_type": c.work_type,
+                "canonical_work_source": c.canonical_work_source,
+                "canonical_work_source_id": c.canonical_work_source_id,
+                "canonical_title": c.canonical_title,
+                "canonical_author": c.canonical_author,
+            }
             for c in clusters
         ]
+        stmt = pg_insert(corpus_work_clusters_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[corpus_work_clusters_table.c.cluster_id],
+            set_={
+                "work_type": stmt.excluded.work_type,
+                "canonical_work_source": stmt.excluded.canonical_work_source,
+                "canonical_work_source_id": stmt.excluded.canonical_work_source_id,
+                "canonical_title": stmt.excluded.canonical_title,
+                "canonical_author": stmt.excluded.canonical_author,
+            },
+        )
         with self.get_corpus_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO corpus_work_clusters (
-                    cluster_id, work_type, canonical_work_source,
-                    canonical_work_source_id, canonical_title, canonical_author
-                ) VALUES (?, ?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+            conn.execute(stmt)
 
     def insert_expression_clusters_batch(self, clusters: list[ExpressionCluster]) -> None:
         """Batch insert or replace expression realization clusters."""
         if not clusters:
             return
         rows = [
-            (
-                c.cluster_id,
-                c.work_cluster_id,
-                c.canonical_expression_source,
-                c.canonical_expression_source_id,
-                c.content_type,
-                c.language,
-                c.version_designation,
-                json.dumps(c.translators_json, ensure_ascii=False),
-                json.dumps(c.performers_json, ensure_ascii=False),
-            )
+            {
+                "cluster_id": c.cluster_id,
+                "work_cluster_id": c.work_cluster_id,
+                "canonical_expression_source": c.canonical_expression_source,
+                "canonical_expression_source_id": c.canonical_expression_source_id,
+                "content_type": c.content_type,
+                "language": c.language,
+                "version_designation": c.version_designation,
+                "translators_json": json.dumps(c.translators_json, ensure_ascii=False),
+                "performers_json": json.dumps(c.performers_json, ensure_ascii=False),
+            }
             for c in clusters
         ]
+        stmt = pg_insert(corpus_expression_clusters_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[corpus_expression_clusters_table.c.cluster_id],
+            set_={
+                "work_cluster_id": stmt.excluded.work_cluster_id,
+                "canonical_expression_source": stmt.excluded.canonical_expression_source,
+                "canonical_expression_source_id": stmt.excluded.canonical_expression_source_id,
+                "content_type": stmt.excluded.content_type,
+                "language": stmt.excluded.language,
+                "version_designation": stmt.excluded.version_designation,
+                "translators_json": stmt.excluded.translators_json,
+                "performers_json": stmt.excluded.performers_json,
+            },
+        )
         with self.get_corpus_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO corpus_expression_clusters (
-                    cluster_id, work_cluster_id, canonical_expression_source,
-                    canonical_expression_source_id, content_type, language,
-                    version_designation, translators_json, performers_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+            conn.execute(stmt)
 
     def insert_corpus_linkages_batch(self, linkages: list[CorpusLinkage]) -> None:
         """Batch insert or replace final record-to-cluster linkages."""
         if not linkages:
             return
         rows = [
-            (
-                lnk.record_id,
-                lnk.manifestation_cluster_id,
-                lnk.work_cluster_id,
-                lnk.expression_cluster_id,
-                lnk.final_work_source,
-                lnk.final_work_source_id,
-                lnk.final_expression_source,
-                lnk.final_expression_source_id,
-                lnk.sibling_manifestation_ids_json,
-            )
+            {
+                "record_id": lnk.record_id,
+                "manifestation_cluster_id": lnk.manifestation_cluster_id,
+                "work_cluster_id": lnk.work_cluster_id,
+                "expression_cluster_id": lnk.expression_cluster_id,
+                "final_work_source": lnk.final_work_source,
+                "final_work_source_id": lnk.final_work_source_id,
+                "final_expression_source": lnk.final_expression_source,
+                "final_expression_source_id": lnk.final_expression_source_id,
+                "sibling_manifestation_ids_json": lnk.sibling_manifestation_ids_json,
+            }
             for lnk in linkages
         ]
+        stmt = pg_insert(corpus_linkages_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[corpus_linkages_table.c.record_id],
+            set_={
+                "manifestation_cluster_id": stmt.excluded.manifestation_cluster_id,
+                "work_cluster_id": stmt.excluded.work_cluster_id,
+                "expression_cluster_id": stmt.excluded.expression_cluster_id,
+                "final_work_source": stmt.excluded.final_work_source,
+                "final_work_source_id": stmt.excluded.final_work_source_id,
+                "final_expression_source": stmt.excluded.final_expression_source,
+                "final_expression_source_id": stmt.excluded.final_expression_source_id,
+                "sibling_manifestation_ids_json": stmt.excluded.sibling_manifestation_ids_json,
+            },
+        )
         with self.get_corpus_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO corpus_linkages (
-                    record_id, manifestation_cluster_id, work_cluster_id,
-                    expression_cluster_id, final_work_source, final_work_source_id,
-                    final_expression_source, final_expression_source_id,
-                    sibling_manifestation_ids_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                rows,
-            )
+            conn.execute(stmt)
 
     def insert_sammelband_bindings_batch(self, bindings: list[SammelbandBinding]) -> None:
         """Batch insert or replace sammelband item-level composite bindings."""
         if not bindings:
             return
         rows = [
-            (
-                b.binding_id,
-                b.record_id,
-                b.sequence_in_binding,
-                b.binding_notes,
-            )
+            {
+                "binding_id": b.binding_id,
+                "record_id": b.record_id,
+                "sequence_in_binding": b.sequence_in_binding,
+                "binding_notes": b.binding_notes,
+            }
             for b in bindings
         ]
+        stmt = pg_insert(sammelband_bindings_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[
+                sammelband_bindings_table.c.binding_id,
+                sammelband_bindings_table.c.record_id,
+            ],
+            set_={
+                "sequence_in_binding": stmt.excluded.sequence_in_binding,
+                "binding_notes": stmt.excluded.binding_notes,
+            },
+        )
         with self.get_corpus_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO sammelband_bindings (
-                    binding_id, record_id, sequence_in_binding, binding_notes
-                ) VALUES (?, ?, ?, ?);
-                """,
-                rows,
-            )
+            conn.execute(stmt)
 
     def find_records_by_key(self, key_type: str, key_value: str) -> list[str]:
         """Find record ids (manifestation source_ids) carrying a key.
 
         Reads `entity_keys` rather than the removed `target_keys` staging table.
         """
+        stmt = (
+            select(manifestations_table.c.source_id)
+            .select_from(
+                entity_keys_table.join(
+                    manifestations_table,
+                    manifestations_table.c.id == entity_keys_table.c.entity_id,
+                )
+            )
+            .where(
+                entity_keys_table.c.entity_type == "manifestation",
+                entity_keys_table.c.key_type == key_type,
+                entity_keys_table.c.key_value == key_value,
+            )
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT m.source_id FROM entity_keys k
-                JOIN manifestations m ON m.id = k.entity_id
-                WHERE k.entity_type = 'manifestation'
-                  AND k.key_type = ? AND k.key_value = ?;
-                """,
-                (key_type, key_value),
-            ).fetchall()
-            return [r[0] for r in rows]
+            rows = conn.execute(stmt).fetchall()
+            return [str(r[0]) for r in rows if r[0] is not None]
 
     def get_blocking_groups(
         self, key_types: Optional[list[str]] = None
     ) -> dict[tuple[str, str], list[str]]:
         """Find blocking key collision groups in SQL, over `entity_keys`."""
-        clause, params = "", []
+        cond = entity_keys_table.c.entity_type == "manifestation"
         if key_types:
-            placeholders = ",".join("?" for _ in key_types)
-            clause = f" AND k.key_type IN ({placeholders})"
-            params = list(key_types)
+            cond = and_(cond, entity_keys_table.c.key_type.in_(key_types))
+
+        agg_col = func.string_agg(manifestations_table.c.source_id, ",").label("agg_ids")
+        stmt = (
+            select(
+                entity_keys_table.c.key_type,
+                entity_keys_table.c.key_value,
+                agg_col,
+            )
+            .select_from(
+                entity_keys_table.join(
+                    manifestations_table,
+                    manifestations_table.c.id == entity_keys_table.c.entity_id,
+                )
+            )
+            .where(cond)
+            .group_by(entity_keys_table.c.key_type, entity_keys_table.c.key_value)
+            .having(func.count() > 1)
+        )
         with self.get_connection() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT k.key_type, k.key_value, STRING_AGG(m.source_id, ',')
-                FROM entity_keys k
-                JOIN manifestations m ON m.id = k.entity_id
-                WHERE k.entity_type = 'manifestation'{clause}
-                GROUP BY k.key_type, k.key_value
-                HAVING COUNT(*) > 1;
-                """,
-                params,
-            ).fetchall()
-            return {(r[0], r[1]): r[2].split(",") for r in rows}
+            rows = conn.execute(stmt).fetchall()
+            return {(str(r[0]), str(r[1])): str(r[2]).split(",") for r in rows}
 
     def get_all_work_clusters(self) -> list[WorkCluster]:
         """Fetch all work clusters."""
+        stmt = select(corpus_work_clusters_table).order_by(corpus_work_clusters_table.c.cluster_id)
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM corpus_work_clusters ORDER BY cluster_id;"
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [WorkCluster.model_validate(dict(r)) for r in rows]
 
     def get_expression_clusters_for_work(self, work_cluster_id: str) -> list[ExpressionCluster]:
         """Fetch all expression clusters under a work cluster."""
+        stmt = (
+            select(corpus_expression_clusters_table)
+            .where(corpus_expression_clusters_table.c.work_cluster_id == work_cluster_id)
+            .order_by(corpus_expression_clusters_table.c.cluster_id)
+        )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM corpus_expression_clusters WHERE work_cluster_id = ? ORDER BY cluster_id;",
-                (work_cluster_id,),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             clusters = []
             for r in rows:
                 d = dict(r)
-                d["translators_json"] = json.loads(d.get("translators_json") or "[]")
-                d["performers_json"] = json.loads(d.get("performers_json") or "[]")
+                d["translators_json"] = (
+                    json.loads(d.get("translators_json") or "[]")
+                    if isinstance(d.get("translators_json"), str)
+                    else d.get("translators_json") or []
+                )
+                d["performers_json"] = (
+                    json.loads(d.get("performers_json") or "[]")
+                    if isinstance(d.get("performers_json"), str)
+                    else d.get("performers_json") or []
+                )
                 clusters.append(ExpressionCluster.model_validate(d))
             return clusters
 
     def get_all_expression_clusters(self) -> list[ExpressionCluster]:
         """Fetch all expression clusters."""
+        stmt = select(corpus_expression_clusters_table).order_by(
+            corpus_expression_clusters_table.c.cluster_id
+        )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM corpus_expression_clusters ORDER BY cluster_id;"
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             clusters = []
             for r in rows:
                 d = dict(r)
-                d["translators_json"] = json.loads(d.get("translators_json") or "[]")
-                d["performers_json"] = json.loads(d.get("performers_json") or "[]")
+                d["translators_json"] = (
+                    json.loads(d.get("translators_json") or "[]")
+                    if isinstance(d.get("translators_json"), str)
+                    else d.get("translators_json") or []
+                )
+                d["performers_json"] = (
+                    json.loads(d.get("performers_json") or "[]")
+                    if isinstance(d.get("performers_json"), str)
+                    else d.get("performers_json") or []
+                )
                 clusters.append(ExpressionCluster.model_validate(d))
             return clusters
 
     def get_all_manifestation_clusters(self) -> list[ManifestationCluster]:
         """Fetch all manifestation clusters."""
+        stmt = select(corpus_manifestation_clusters_table).order_by(
+            corpus_manifestation_clusters_table.c.cluster_id
+        )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM corpus_manifestation_clusters ORDER BY cluster_id;"
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [ManifestationCluster.model_validate(dict(r)) for r in rows]
 
     def get_corpus_linkage(self, record_id: str) -> Optional[CorpusLinkage]:
         """Fetch linkage record for a staged target record."""
+        stmt = select(corpus_linkages_table).where(corpus_linkages_table.c.record_id == record_id)
         with self.get_corpus_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM corpus_linkages WHERE record_id = ?;", (record_id,)
-            ).fetchone()
+            row = conn.execute(stmt).fetchone()
             return CorpusLinkage.model_validate(dict(row)) if row else None
 
     def get_all_corpus_linkages(self) -> list[CorpusLinkage]:
         """Fetch all corpus linkage records."""
+        stmt = select(corpus_linkages_table).order_by(corpus_linkages_table.c.record_id)
         with self.get_corpus_connection() as conn:
-            rows = conn.execute("SELECT * FROM corpus_linkages ORDER BY record_id;").fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [CorpusLinkage.model_validate(dict(r)) for r in rows]
 
     def get_sammelband_bindings(self, binding_id: str) -> list[SammelbandBinding]:
         """Fetch all constituent items in a composite binding."""
+        stmt = (
+            select(sammelband_bindings_table)
+            .where(sammelband_bindings_table.c.binding_id == binding_id)
+            .order_by(sammelband_bindings_table.c.sequence_in_binding)
+        )
         with self.get_corpus_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM sammelband_bindings WHERE binding_id = ? ORDER BY sequence_in_binding;",
-                (binding_id,),
-            ).fetchall()
+            rows = conn.execute(stmt).fetchall()
             return [SammelbandBinding.model_validate(dict(r)) for r in rows]
