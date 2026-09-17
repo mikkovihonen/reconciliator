@@ -118,6 +118,40 @@ class VocabStore:
         if not concepts:
             return
 
+        # Deduplicate concepts by (vocabulary, concept_id)
+        # PostgreSQL ON CONFLICT DO UPDATE cannot affect the same row twice in a single statement.
+        # Merge labels across duplicate concept entries so no multilingual labels are lost.
+        deduped: dict[tuple[str, str], VocabConcept] = {}
+        for c in concepts:
+            key = (c.vocabulary.strip().lower(), c.concept_id.strip())
+            if key in deduped:
+                existing = deduped[key]
+                for lang, lbl in c.pref_labels.items():
+                    if lbl and (lang not in existing.pref_labels or not existing.pref_labels[lang]):
+                        existing.pref_labels[lang] = lbl
+                for lang, alts in c.alt_labels.items():
+                    if lang not in existing.alt_labels:
+                        existing.alt_labels[lang] = []
+                    for alt in alts:
+                        if alt not in existing.alt_labels[lang]:
+                            existing.alt_labels[lang].append(alt)
+                if c.is_deprecated:
+                    existing.is_deprecated = True
+                if c.target_field and not existing.target_field:
+                    existing.target_field = c.target_field
+            else:
+                deduped[key] = VocabConcept(
+                    uri=c.uri,
+                    vocabulary=c.vocabulary.strip().lower(),
+                    concept_id=c.concept_id.strip(),
+                    pref_labels=dict(c.pref_labels),
+                    alt_labels={k: list(v) for k, v in c.alt_labels.items()},
+                    is_deprecated=bool(c.is_deprecated),
+                    target_field=c.target_field,
+                )
+
+        concepts = list(deduped.values())
+
         concept_rows = [
             {
                 "vocabulary": c.vocabulary,
@@ -128,36 +162,43 @@ class VocabStore:
             for c in concepts
         ]
 
-        with self.engine.begin() as conn:
-            stmt = pg_insert(concepts_table).values(concept_rows)
+        # PostgreSQL wire protocol restricts parameters to 65,535 per query.
+        # With 4 parameters per concept row, chunking by 5,000 keeps it at 20,000 parameters.
+        batch_size = 5000
 
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["vocabulary", "concept_id"],
-                set_={
-                    "is_deprecated": stmt.excluded.is_deprecated,
-                    "target_field": stmt.excluded.target_field,
-                },
-            )
-            conn.execute(stmt)
+        with self.engine.begin() as conn:
+            for i in range(0, len(concept_rows), batch_size):
+                chunk = concept_rows[i : i + batch_size]
+                stmt = pg_insert(concepts_table).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["vocabulary", "concept_id"],
+                    set_={
+                        "is_deprecated": stmt.excluded.is_deprecated,
+                        "target_field": stmt.excluded.target_field,
+                    },
+                )
+                conn.execute(stmt)
 
             # Query row IDs for the concepts to link labels
             keys = [(c.vocabulary, c.concept_id) for c in concepts]
             row_id_map: dict[tuple[str, str], int] = {}
             for chunk_start in range(0, len(keys), 500):
-                chunk = keys[chunk_start : chunk_start + 500]
+                chunk_keys = keys[chunk_start : chunk_start + 500]
                 q = select(
                     concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
-                ).where(tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk))
+                ).where(tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk_keys))
                 for r_id, voc, cid in conn.execute(q).fetchall():
                     row_id_map[(voc, cid)] = r_id
 
             row_ids = list(row_id_map.values())
             if row_ids:
-                conn.execute(
-                    delete(concept_labels_table).where(
-                        concept_labels_table.c.concept_row_id.in_(row_ids)
+                for chunk_start in range(0, len(row_ids), 1000):
+                    chunk_rids = row_ids[chunk_start : chunk_start + 1000]
+                    conn.execute(
+                        delete(concept_labels_table).where(
+                            concept_labels_table.c.concept_row_id.in_(chunk_rids)
+                        )
                     )
-                )
 
             label_rows: list[dict[str, Any]] = []
             for c in concepts:
@@ -189,7 +230,8 @@ class VocabStore:
                                 )
 
             if label_rows:
-                conn.execute(insert(concept_labels_table), label_rows)
+                for i in range(0, len(label_rows), batch_size):
+                    conn.execute(insert(concept_labels_table), label_rows[i : i + batch_size])
 
         self.clear_caches()
 
@@ -515,17 +557,20 @@ class VocabStore:
         unique_rows = list(seen.values())
 
         with self.engine.begin() as conn:
-            stmt = pg_insert(relator_terms_table).values(unique_rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["folded_term"],
-                set_={
-                    "raw_term": stmt.excluded.raw_term,
-                    "lang": stmt.excluded.lang,
-                    "code": stmt.excluded.code,
-                    "uri": stmt.excluded.uri,
-                },
-            )
-            conn.execute(stmt)
+            batch_size = 5000
+            for i in range(0, len(unique_rows), batch_size):
+                chunk = unique_rows[i : i + batch_size]
+                stmt = pg_insert(relator_terms_table).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["folded_term"],
+                    set_={
+                        "raw_term": stmt.excluded.raw_term,
+                        "lang": stmt.excluded.lang,
+                        "code": stmt.excluded.code,
+                        "uri": stmt.excluded.uri,
+                    },
+                )
+                conn.execute(stmt)
 
         self.clear_caches()
 
@@ -588,7 +633,9 @@ class VocabStore:
                 }
             )
         with self.engine.begin() as conn:
-            conn.execute(insert(concept_aliases_table), rows)
+            batch_size = 5000
+            for i in range(0, len(rows), batch_size):
+                conn.execute(insert(concept_aliases_table), rows[i : i + batch_size])
         self.clear_caches()
 
     @functools.lru_cache(maxsize=65536)

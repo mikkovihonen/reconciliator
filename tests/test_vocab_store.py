@@ -279,3 +279,56 @@ def test_find_concepts_by_uris_batch(vocab_store: VocabStore) -> None:
     assert "http://www.yso.fi/onto/yso/p1" in results
     assert "yso:p2" in results
     assert results["yso:p2"].uri == "http://www.yso.fi/onto/yso/p2"
+
+
+def test_insert_large_concepts_batch_exceeding_postgres_param_limit(vocab_store: VocabStore) -> None:
+    """Ensure insert_concepts_batch chunks large concept batches exceeding 65,535 query parameters."""
+    # 17,000 concepts * 4 parameters = 68,000 parameters (exceeding Postgres limit of 65,535)
+    concepts = [
+        VocabConcept(
+            uri=f"http://www.yso.fi/onto/yso/p{i}",
+            vocabulary="yso",
+            pref_labels={"fi": f"käsite_{i}"},
+            target_field="650",
+        )
+        for i in range(17000)
+    ]
+    vocab_store.insert_concepts_batch(concepts)
+
+    c_first = vocab_store.find_concept_by_id("yso", "p0")
+    assert c_first is not None
+    assert c_first.pref_labels["fi"] == "käsite_0"
+
+    c_last = vocab_store.find_concept_by_id("yso", "p16999")
+    assert c_last is not None
+    assert c_last.pref_labels["fi"] == "käsite_16999"
+
+
+def test_insert_concepts_batch_with_duplicates_and_label_merging(vocab_store: VocabStore) -> None:
+    """Ensure duplicate concepts within the same batch are merged and do not violate PostgreSQL ON CONFLICT cardinality."""
+    c1 = VocabConcept(
+        uri="http://www.yso.fi/onto/yso/p100",
+        vocabulary="yso",
+        pref_labels={"fi": "kirjat"},
+        alt_labels={"fi": ["opukset"]},
+        target_field="650",
+    )
+    c2 = VocabConcept(
+        uri="http://www.yso.fi/onto/yso/p100",
+        vocabulary="yso",
+        pref_labels={"sv": "böcker", "en": "books"},
+        alt_labels={"sv": ["volymer"]},
+        target_field="650",
+    )
+    # Both concepts have identical (vocabulary, concept_id) = ('yso', 'p100')
+    vocab_store.insert_concepts_batch([c1, c2])
+
+    res = vocab_store.find_concept_by_id("yso", "p100")
+    assert res is not None
+    assert res.pref_labels["fi"] == "kirjat"
+    assert res.pref_labels["sv"] == "böcker"
+    assert res.pref_labels["en"] == "books"
+    assert "opukset" in res.alt_labels["fi"]
+    assert "volymer" in res.alt_labels["sv"]
+
+
