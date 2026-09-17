@@ -244,15 +244,24 @@ def resolve_subject_concept_id(
     if not clean:
         return None
 
-    # 1. Preferred label lookup (try default/fi, record language, and sv)
+    # 1. Preferred label lookup across configured preferred languages
     if hasattr(vocab_store, "find_concept_by_label"):
-        c = vocab_store.find_concept_by_label(clean, vocabulary=vocab)
-        if not c and language and language.lower() not in ("fi", "und"):
-            c = vocab_store.find_concept_by_label(clean, vocabulary=vocab, lang=language.lower())
-        if not c:
-            c = vocab_store.find_concept_by_label(clean, vocabulary=vocab, lang="sv")
-        if c and getattr(c, "uri", None):
-            return extract_concept_id(c.uri)
+        langs_to_try: list[Optional[str]] = [None]
+        if language and language.lower() not in ("und", "unknown"):
+            langs_to_try.append(language.lower())
+        store_cfg = getattr(vocab_store, "config", None)
+        pref_langs = getattr(store_cfg, "preferred_label_languages", None) or get_bundled_vocab_defaults().get("preferred_label_languages", [])
+        for pl in pref_langs:
+            if pl and pl.lower() not in langs_to_try:
+                langs_to_try.append(pl.lower())
+
+        for l_try in langs_to_try:
+            try:
+                c = vocab_store.find_concept_by_label(clean, vocabulary=vocab, lang=l_try)
+            except TypeError:
+                c = vocab_store.find_concept_by_label(clean, vocabulary=vocab)
+            if c and getattr(c, "uri", None):
+                return extract_concept_id(c.uri)
 
     # 2. Normalized alias lookup (multilingual, alternate labels, folded forms)
     if hasattr(vocab_store, "find_concept_by_alias"):

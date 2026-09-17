@@ -141,7 +141,7 @@ def test_wemi_serialization_engine() -> None:
         original_language="fin",
         work_type="text",
         subjects_json=["muinainen egypti", "historia"],
-        ykl_class="84.2",
+        classification="84.2",
     )
     work_str = engine.render_work(
         work,

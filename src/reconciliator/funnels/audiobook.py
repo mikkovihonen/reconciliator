@@ -36,15 +36,22 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
         else None
     )
     if not expression:
+        from reconciliator.config import get_bundled_defaults
+
+        audio_defaults = get_bundled_defaults().get("funnels", {}).get("audiobook", {})
+        default_lang = ctx.spec.extra.get("default_language") or audio_defaults.get("default_language")
+        title_suffix = ctx.spec.extra.get("title_suffix") or audio_defaults.get("title_suffix") or ""
+        und_lang = audio_defaults.get("undefined_language") or ""
+
         expression = ExpressionEntity(
             id=0,
             work_id=work.id or 0,
-            expression_uri=f"{work.work_uri}#spoken_word_{record.language or 'und'}",
+            expression_uri=f"{work.work_uri}#spoken_word_{record.language or und_lang}",
             source=work.source,
             source_id=f"{work.source_id}_audio",
-            language=record.language or "fin",
+            language=record.language or default_lang,
             content_type="spoken_word",
-            title=f"{work.title} (äänikirja)",
+            title=f"{work.title}{title_suffix}",
         )
 
     return ctx.result_cls(

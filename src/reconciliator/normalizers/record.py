@@ -195,13 +195,17 @@ def extract_extent(extent_str: Optional[str]) -> Optional[int]:
 def normalize_classifications(
     raw_classifications: list[Any],
     priority: Optional[list[str]] = None,
-    default_scheme: str = "ykl",
+    default_scheme: Optional[str] = None,
 ) -> list[ClassificationItem]:
     """
     Normalize classifications and flag the primary classification based on scheme priority:
     Accepts tuples (code, scheme), dicts {'code': ..., 'scheme': ..., 'is_primary': ...},
     or ClassificationItem objects.
     """
+    if default_scheme is None:
+        from reconciliator.config import get_bundled_defaults
+
+        default_scheme = str(get_bundled_defaults().get("classification", {}).get("default_scheme") or "")
     items: list[tuple[str, str, bool]] = []
     has_explicit_primary = False
     priority_order = tuple(p.lower() for p in (priority or DEFAULT_CLASSIFICATION_PRIORITY))

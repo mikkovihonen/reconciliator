@@ -307,11 +307,12 @@ class VocabStore:
 
     @functools.lru_cache(maxsize=32768)
     def find_concept_by_label(
-        self, label: str, vocabulary: Optional[str] = None, lang: str = "fi"
+        self, label: str, vocabulary: Optional[str] = None, lang: Optional[str] = None
     ) -> Optional[VocabConcept]:
         """Look up concept by preferred label."""
+        effective_lang = lang or getattr(self.config, "default_language", None) or ""
         clean_lbl = label.strip().lower()
-        norm_l = self.config.language_code_map.get(lang.lower(), lang.lower())
+        norm_l = self.config.language_code_map.get(effective_lang.lower(), effective_lang.lower())
         with self.engine.connect() as conn:
             stmt = (
                 select(concepts_table.c.vocabulary, concepts_table.c.concept_id)
@@ -421,11 +422,12 @@ class VocabStore:
 
     @functools.lru_cache(maxsize=16384)
     def find_legacy_mapping_by_label(
-        self, label: str, legacy_vocab: Optional[str] = None, lang: str = "fi"
+        self, label: str, legacy_vocab: Optional[str] = None, lang: Optional[str] = None
     ) -> Optional[ConceptMapping]:
         """Look up migration mapping by legacy label."""
+        effective_lang = lang or getattr(self.config, "default_language", None) or ""
         clean_lbl = label.strip().lower()
-        norm_l = self.config.language_code_map.get(lang.lower(), lang.lower())
+        norm_l = self.config.language_code_map.get(effective_lang.lower(), effective_lang.lower())
         with self.engine.connect() as conn:
             stmt = (
                 select(concept_mappings_table.c.id)
@@ -475,23 +477,24 @@ class VocabStore:
         if not terms:
             return
         rows: list[dict[str, Any]] = []
+        default_lang = getattr(self.config, "default_language", "und")
         for t in terms:
             if isinstance(t, dict):
                 raw = str(t.get("raw_term", ""))
                 folded = str(t.get("folded_term") or fold_label(raw))
-                lang = str(t.get("lang", "fi"))
+                lang = str(t.get("lang", default_lang))
                 code = t.get("code")
                 uri = t.get("uri")
             elif isinstance(t, (tuple, list)):
                 raw = str(t[0])
                 folded = fold_label(raw)
-                lang = str(t[1]) if len(t) > 1 else "fi"
+                lang = str(t[1]) if len(t) > 1 else default_lang
                 code = t[2] if len(t) > 2 else None
                 uri = t[3] if len(t) > 3 else None
             else:
                 raw = str(t)
                 folded = fold_label(raw)
-                lang = "fi"
+                lang = default_lang
                 code = None
                 uri = None
             rows.append(

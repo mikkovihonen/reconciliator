@@ -2,43 +2,68 @@
 
 from __future__ import annotations
 
+import functools
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import unquote
 
-# Known authority prefix mappings for normalization from URIs to canonical CURIEs
-_URI_PREFIX_TO_SOURCE: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^https?://(?:www\.)?wikidata\.org/(?:wiki|entity)/", re.I), "wikidata"),
-    (re.compile(r"^https?://(?:www\.)?isni\.org/isni/", re.I), "isni"),
-    (re.compile(r"^https?://viaf\.org/viaf/", re.I), "viaf"),
-    (re.compile(r"^https?://orcid\.org/", re.I), "orcid"),
-    (re.compile(r"^https?://urn\.fi/URN:NBN:fi:au:pn:", re.I), "kanto"),
-    (re.compile(r"^https?://urn\.fi/URN:NBN:fi:au:cn:", re.I), "kanto"),
-    (re.compile(r"^https?://urn\.fi/URN:NBN:fi:au:slm:", re.I), "slm"),
-    (re.compile(r"^https?://urn\.fi/URN:NBN:fi:au:seko:", re.I), "seko"),
-    (re.compile(r"^https?://urn\.fi/URN:NBN:fi:au:mts:", re.I), "mts"),
-    (re.compile(r"^https?://urn\.fi/URN:NBN:fi:", re.I), "urn"),
-    (re.compile(r"^https?://finto\.fi/yso/[a-z]{2}/page/", re.I), "yso"),
-    (re.compile(r"^https?://finto\.fi/kauno/[a-z]{2}/page/", re.I), "kauno"),
-    (re.compile(r"^https?://finto\.fi/muso/[a-z]{2}/page/", re.I), "muso"),
-    (re.compile(r"^https?://finto\.fi/slm/[a-z]{2}/page/", re.I), "slm"),
-    (re.compile(r"^https?://finto\.fi/seko/[a-z]{2}/page/", re.I), "seko"),
-    (re.compile(r"^http://www\.yso\.fi/onto/yso/", re.I), "yso"),
-    (re.compile(r"^http://www\.yso\.fi/onto/kauno/", re.I), "kauno"),
-    (re.compile(r"^http://www\.yso\.fi/onto/muso/", re.I), "muso"),
-    (re.compile(r"^https?://(?:www\.)?yso\.fi/onto/ysa/", re.I), "ysa"),
-    (re.compile(r"^https?://(?:www\.)?yso\.fi/onto/allars/", re.I), "allars"),
-    (re.compile(r"^https?://(?:www\.)?yso\.fi/onto/kaunokki/", re.I), "kaunokki"),
-    (re.compile(r"^https?://(?:www\.)?yso\.fi/onto/bella/", re.I), "bella"),
-    (re.compile(r"^https?://(?:www\.)?yso\.fi/onto/musa/", re.I), "musa"),
-    (re.compile(r"^https?://(?:www\.)?yso\.fi/onto/cilla/", re.I), "cilla"),
-    (re.compile(r"^http://id\.loc\.gov/authorities/names/", re.I), "loc"),
-    (re.compile(r"^http://id\.loc\.gov/vocabulary/relators/", re.I), "marcrelator"),
-    (re.compile(r"^https?://data\.bnf\.fr/ark:/12148/cb", re.I), "bnf"),
-    (re.compile(r"^https?://d-nb\.info/gnd/", re.I), "gnd"),
-]
 
-_WIKIDATA_QID_PATTERN = re.compile(r"^Q\d+$", re.I)
+@functools.lru_cache(maxsize=1)
+def _get_sources_registry() -> dict[str, dict[str, Any]]:
+    from reconciliator.config import get_bundled_sources_defaults
+
+    return get_bundled_sources_defaults()
+
+
+@functools.lru_cache(maxsize=1)
+def _get_compiled_uri_rules() -> list[tuple[re.Pattern[str], str, bool]]:
+    registry = _get_sources_registry()
+    rules: list[tuple[re.Pattern[str], str, bool]] = []
+    for src_name, src_data in registry.items():
+        if not isinstance(src_data, dict):
+            continue
+        patterns = src_data.get("uri_patterns") or []
+        uppercase = bool(src_data.get("uppercase_identifier", False))
+        for pat in patterns:
+            rules.append((re.compile(pat, re.I), src_name, uppercase))
+    rules.sort(key=lambda r: len(r[0].pattern), reverse=True)
+    return rules
+
+
+@functools.lru_cache(maxsize=1)
+def _get_tag_prefix_rules() -> list[tuple[str, str]]:
+    registry = _get_sources_registry()
+    rules: list[tuple[str, str]] = []
+    for src_name, src_data in registry.items():
+        if not isinstance(src_data, dict):
+            continue
+        for prefix in src_data.get("tag_prefixes") or []:
+            clean_p = prefix.strip().lower()
+            if clean_p.startswith("(") and clean_p.endswith(")"):
+                clean_p = clean_p[1:-1]
+            rules.append((clean_p, src_name))
+    return rules
+
+
+@functools.lru_cache(maxsize=1)
+def _get_bare_identifier_patterns() -> list[tuple[re.Pattern[str], str, bool]]:
+    registry = _get_sources_registry()
+    patterns: list[tuple[re.Pattern[str], str, bool]] = []
+    for src_name, src_data in registry.items():
+        if not isinstance(src_data, dict):
+            continue
+        pat = src_data.get("identifier_pattern")
+        if pat:
+            uppercase = bool(src_data.get("uppercase_identifier", False))
+            patterns.append((re.compile(pat, re.I), src_name, uppercase))
+    return patterns
+
+
+def clear_curie_cache() -> None:
+    _get_sources_registry.cache_clear()
+    _get_compiled_uri_rules.cache_clear()
+    _get_tag_prefix_rules.cache_clear()
+    _get_bare_identifier_patterns.cache_clear()
 
 
 def to_curie(source: str, source_id: str) -> str:
@@ -67,28 +92,26 @@ def parse_curie(curie_or_uri: str, default_source: str = "") -> tuple[str, str]:
     if not raw:
         return (default_source.lower(), "")
 
-    # Bare Wikidata QID
-    if _WIKIDATA_QID_PATTERN.match(raw):
-        return ("wikidata", raw.upper())
+    # Configured bare identifier patterns (e.g. Q12344)
+    for pat, src, uppercase in _get_bare_identifier_patterns():
+        if pat.match(raw):
+            return (src, raw.upper() if uppercase else raw)
 
     # Parenthesized MARC prefix e.g. (FI-ASTERI-N)00012345 or (FI-MELINDA)00012345
     marc_match = re.match(r"^\(([A-Za-z0-9\-]+)\)(.+)$", raw)
     if marc_match:
         tag, val = marc_match.groups()
         tag_lower = tag.lower()
-        if "asteri" in tag_lower or "kanto" in tag_lower:
-            return ("kanto", val.strip())
-        if "melinda" in tag_lower:
-            return ("melinda", val.strip())
-        if "isni" in tag_lower:
-            return ("isni", val.strip())
+        for pfx, src in _get_tag_prefix_rules():
+            if pfx in tag_lower:
+                return (src, val.strip())
         return (tag_lower, val.strip())
 
     # Check URI patterns
-    for pat, src in _URI_PREFIX_TO_SOURCE:
+    for pat, src, uppercase in _get_compiled_uri_rules():
         if pat.search(raw):
             val = pat.sub("", raw).strip().rstrip("/#")
-            if src == "wikidata":
+            if uppercase:
                 val = val.split("/")[-1].upper()
             return (src, val)
 
@@ -121,21 +144,45 @@ def parse_curie(curie_or_uri: str, default_source: str = "") -> tuple[str, str]:
     return (default_source.lower() if default_source else "unknown", raw)
 
 
-def extract_wikidata_qid(curie_or_id: str) -> Optional[str]:
-    """Extract bare Wikidata QID (e.g. 'Q12344') from a CURIE, URI, or QID string."""
+def format_source_uri(source: str, identifier: str) -> str:
+    """Format source and identifier into canonical URI using configured templates."""
+    clean_src = str(source or "").strip().lower()
+    clean_id = str(identifier or "").strip()
+    registry = _get_sources_registry()
+    src_data = registry.get(clean_src)
+    if isinstance(src_data, dict):
+        template = src_data.get("canonical_uri_template")
+        if template:
+            if src_data.get("uppercase_identifier"):
+                clean_id = clean_id.upper()
+            return template.format(identifier=clean_id)
+    return to_curie(clean_src, clean_id)
+
+
+def extract_source_identifier(source: str, curie_or_id: str) -> Optional[str]:
+    """Extract bare identifier for a given source from a CURIE, URI, or identifier string."""
     if not curie_or_id:
         return None
-    source, source_id = parse_curie(curie_or_id)
-    if source == "wikidata" and _WIKIDATA_QID_PATTERN.match(source_id):
-        return source_id.upper()
-    if _WIKIDATA_QID_PATTERN.match(curie_or_id.strip()):
-        return curie_or_id.strip().upper()
+    target_src = source.strip().lower()
+    src, sid = parse_curie(curie_or_id)
+    if src == target_src and sid:
+        return sid
+    registry = _get_sources_registry()
+    src_data = registry.get(target_src)
+    if isinstance(src_data, dict):
+        pat_str = src_data.get("identifier_pattern")
+        if pat_str and re.match(pat_str, curie_or_id.strip(), re.I):
+            val = curie_or_id.strip()
+            return val.upper() if src_data.get("uppercase_identifier") else val
     return None
+
+
+def extract_wikidata_qid(curie_or_id: str) -> Optional[str]:
+    """Extract bare Wikidata QID (e.g. 'Q12344') from a CURIE, URI, or QID string."""
+    return extract_source_identifier("wikidata", curie_or_id)
 
 
 def format_wikidata_uri(curie_or_qid: str) -> str:
     """Format Wikidata QID or CURIE into canonical Wikidata URI."""
     qid = extract_wikidata_qid(curie_or_qid)
-    if qid:
-        return f"http://www.wikidata.org/entity/{qid}"
-    return f"http://www.wikidata.org/entity/{curie_or_qid.strip()}"
+    return format_source_uri("wikidata", qid or curie_or_qid.strip())

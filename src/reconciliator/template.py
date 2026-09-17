@@ -205,7 +205,11 @@ class WEMISerializationEngine:
                 "work_type": work.work_type,
                 "original_language": work.original_language or "",
                 "subjects": work.subjects_json,
-                "classifications": [{"code": work.ykl_class}] if work.ykl_class else [],
+                "classifications": (
+                    [{"code": work.classification, "scheme": work.classification_scheme}]
+                    if work.classification
+                    else []
+                ),
             }
         else:
             ctx = dict(work)

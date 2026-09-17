@@ -8,8 +8,10 @@ from typing import Any, Optional
 from lxml import etree
 
 from reconciliator.config import (
+    DEFAULT_LANGUAGE,
     DEFAULT_MARC_PREDICATE_PROFILES,
     EnrichmentTogglesConfig,
+    get_bundled_vocab_defaults,
     get_category_default_field_map,
     get_subject_field_category_map,
 )
@@ -32,6 +34,10 @@ from reconciliator.normalizers.agent import normalize_agent_name
 from reconciliator.vocab_folding import VocabFolder
 from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 
+_LANG_CODE_MAP: dict[str, str] = dict(
+    get_bundled_vocab_defaults().get("language_code_map") or {}
+)
+
 
 def _extract_record_language(record_elem: etree._Element) -> Optional[str]:
     """Extract 2-letter language code from 041 $a or 008 (bytes 35-37)."""
@@ -39,21 +45,17 @@ def _extract_record_language(record_elem: etree._Element) -> Optional[str]:
         a_vals = _get_subfields(f041, "a")
         if a_vals:
             code = a_vals[0].strip().lower()
-            if code in ("fin", "fi"):
-                return "fi"
-            if code in ("swe", "sv"):
-                return "sv"
-            if code in ("eng", "en"):
-                return "en"
+            mapped = _LANG_CODE_MAP.get(code)
+            if mapped:
+                return mapped
+            return code[:2]
     f008 = _get_controlfield(record_elem, "008")
     if f008 and len(f008) >= 38:
         code = f008[35:38].strip().lower()
-        if code in ("fin", "fi"):
-            return "fi"
-        if code in ("swe", "sv"):
-            return "sv"
-        if code in ("eng", "en"):
-            return "en"
+        mapped = _LANG_CODE_MAP.get(code)
+        if mapped:
+            return mapped
+        return code[:2]
     return None
 
 
@@ -82,7 +84,7 @@ class MARCXMLEnricher:
             return record_elem
 
         toggles = enrichment_config or EnrichmentTogglesConfig()
-        record_lang = _extract_record_language(record_elem) or toggles.language or "fi"
+        record_lang = _extract_record_language(record_elem) or toggles.language or DEFAULT_LANGUAGE
 
         # Determine XML namespace prefix if used
         if record_elem.tag.startswith("{"):

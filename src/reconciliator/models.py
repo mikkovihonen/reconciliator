@@ -151,13 +151,6 @@ class VocabConcept(BaseModel):
     is_deprecated: bool = False
     target_field: Optional[str] = None  # e.g. "650", "655", "651", "382"
 
-    # Typed legacy field parameters for backwards compatibility and static checkers
-    pref_label_fi: Optional[str] = Field(default=None, repr=False)
-    pref_label_sv: Optional[str] = Field(default=None, repr=False)
-    pref_label_en: Optional[str] = Field(default=None, repr=False)
-    alt_labels_fi: list[str] = Field(default_factory=list, repr=False)
-    alt_labels_sv: list[str] = Field(default_factory=list, repr=False)
-
     @model_validator(mode="before")
     @classmethod
     def _sync_concept_before(cls, data: Any) -> Any:
@@ -170,26 +163,6 @@ class VocabConcept(BaseModel):
                 data["concept_id"] = sid
         return data
 
-    @model_validator(mode="after")
-    def _sync_labels(self) -> VocabConcept:
-        for lang in ("fi", "sv", "en"):
-            attr_name = f"pref_label_{lang}"
-            val = getattr(self, attr_name, None)
-            if val is not None and lang not in self.pref_labels:
-                self.pref_labels[lang] = val
-            elif lang in self.pref_labels:
-                object.__setattr__(self, attr_name, self.pref_labels[lang])
-
-        for lang in ("fi", "sv"):
-            attr_name = f"alt_labels_{lang}"
-            alts = getattr(self, attr_name, None)
-            if alts and lang not in self.alt_labels:
-                self.alt_labels[lang] = list(alts)
-            elif lang in self.alt_labels:
-                object.__setattr__(self, attr_name, self.alt_labels[lang])
-
-        return self
-
     @property
     def curie(self) -> str:
         return to_curie(self.vocabulary, self.concept_id)
@@ -198,10 +171,15 @@ class VocabConcept(BaseModel):
     def uri(self) -> str:
         if self.concept_id and self.concept_id.startswith(("http://", "https://", "urn:")):
             return self.concept_id
+        from reconciliator.curie import format_source_uri
+
+        u = format_source_uri(self.vocabulary, self.concept_id)
+        if u and not u.startswith(f"{self.vocabulary}:"):
+            return u
         from reconciliator.vocabularies import concept_id_to_uri
 
-        u = concept_id_to_uri(self.curie)
-        return u if u else self.curie
+        u_legacy = concept_id_to_uri(self.curie)
+        return u_legacy if u_legacy else self.curie
 
 
 class ConceptMapping(BaseModel):
@@ -216,11 +194,6 @@ class ConceptMapping(BaseModel):
     mapping_type: str = "exact_match"  # e.g. "exact_match", "is_replaced_by"
     target_field: str = ""  # e.g. "650", "655", "651", "382"
     legacy_labels: dict[str, str] = Field(default_factory=dict)
-
-    # Typed legacy field parameters for backwards compatibility and static checkers
-    legacy_label_fi: Optional[str] = Field(default=None, repr=False)
-    legacy_label_sv: Optional[str] = Field(default=None, repr=False)
-    legacy_label_en: Optional[str] = Field(default=None, repr=False)
 
     @model_validator(mode="before")
     @classmethod
@@ -239,17 +212,6 @@ class ConceptMapping(BaseModel):
                     data["target_vocab"] = src
                 data["target_id"] = sid
         return data
-
-    @model_validator(mode="after")
-    def _sync_labels(self) -> ConceptMapping:
-        for lang in ("fi", "sv", "en"):
-            attr_name = f"legacy_label_{lang}"
-            val = getattr(self, attr_name, None)
-            if val is not None and lang not in self.legacy_labels:
-                self.legacy_labels[lang] = val
-            elif lang in self.legacy_labels:
-                object.__setattr__(self, attr_name, self.legacy_labels[lang])
-        return self
 
     @property
     def legacy_curie(self) -> str:
@@ -566,7 +528,8 @@ class WorkEntity(BaseModel):
     original_title: Optional[str] = None
     original_language: Optional[str] = None
     primary_agent_id: Optional[int] = None
-    ykl_class: Optional[str] = None
+    classification: Optional[str] = None
+    classification_scheme: Optional[str] = None
     work_type: WorkType = "text"
     #: Folded subjects, one dict each (see loaders/subjects.FoldedSubject).
     #: Was a list of bare heading strings, which neither consumer could use:

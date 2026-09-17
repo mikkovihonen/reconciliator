@@ -17,28 +17,25 @@ def populated_vocab_store(tmp_path: Path) -> VocabStore:
         VocabConcept(
             uri="http://www.yso.fi/onto/yso/p2591",
             vocabulary="yso",
-            pref_label_fi="lääkärit",
-            pref_label_sv="läkare",
+            pref_labels={"fi": "lääkärit", "sv": "läkare"},
             target_field="650",
         ),
         VocabConcept(
             uri="http://urn.fi/URN:NBN:fi:au:slm:s123",
             vocabulary="slm",
-            pref_label_fi="historialliset romaanit",
-            pref_label_sv="historiska romaner",
+            pref_labels={"fi": "historialliset romaanit", "sv": "historiska romaner"},
             target_field="655",
         ),
         VocabConcept(
             uri="http://urn.fi/URN:NBN:fi:au:seko:s789",
             vocabulary="seko",
-            pref_label_fi="viulu",
-            pref_label_sv="fiol",
+            pref_labels={"fi": "viulu", "sv": "fiol"},
             target_field="382",
         ),
         VocabConcept(
             uri="http://www.yso.fi/onto/kauno/k123",
             vocabulary="kauno",
-            pref_label_fi="satuhahmot",
+            pref_labels={"fi": "satuhahmot"},
             target_field="650",
         ),
     ]
@@ -48,8 +45,7 @@ def populated_vocab_store(tmp_path: Path) -> VocabStore:
         ConceptMapping(
             legacy_uri="http://www.yso.fi/onto/ysa/Y1002",
             legacy_vocab="ysa",
-            legacy_label_fi="lääkärit",
-            legacy_label_sv=None,
+            legacy_labels={"fi": "lääkärit"},
             target_uri="http://www.yso.fi/onto/yso/p2591",
             target_vocab="yso",
             mapping_type="exact_match",
@@ -58,8 +54,7 @@ def populated_vocab_store(tmp_path: Path) -> VocabStore:
         ConceptMapping(
             legacy_uri="http://urn.fi/URN:NBN:fi:au:kaunokki:k99",
             legacy_vocab="kaunokki",
-            legacy_label_fi="historialliset romaanit",
-            legacy_label_sv=None,
+            legacy_labels={"fi": "historialliset romaanit"},
             target_uri="http://urn.fi/URN:NBN:fi:au:slm:s123",
             target_vocab="slm",
             mapping_type="exact_match",
@@ -205,13 +200,13 @@ def test_vocab_folding_fully_custom_configuration(tmp_path: Path) -> None:
         VocabConcept(
             uri="http://example.org/new/1",
             vocabulary="new_ont",
-            pref_label_fi="Mukautettu käsite",
+            pref_labels={"fi": "Mukautettu käsite"},
             target_field="650",
         ),
         VocabConcept(
             uri="http://example.org/genre/2",
             vocabulary="genre_ont",
-            pref_label_fi="Mukautettu lajityyppi",
+            pref_labels={"fi": "Mukautettu lajityyppi"},
             target_field=None,  # No explicit target_field, should be inferred from vocab_target_fields
         ),
     ]
@@ -221,8 +216,7 @@ def test_vocab_folding_fully_custom_configuration(tmp_path: Path) -> None:
         ConceptMapping(
             legacy_uri="http://example.org/old/1",
             legacy_vocab="old_thes",
-            legacy_label_fi="Mukautettu käsite",
-            legacy_label_sv=None,
+            legacy_labels={"fi": "Mukautettu käsite"},
             target_uri="http://example.org/new/1",
             target_vocab="new_ont",
             mapping_type="exact_match",
@@ -283,12 +277,12 @@ def test_vocab_store_rebuild_aliases_dynamic_legacy(tmp_path: Path) -> None:
         VocabConcept(
             uri="http://example.org/dyn_legacy/1",
             vocabulary="dyn_legacy",
-            pref_label_fi="Vanha termi",
+            pref_labels={"fi": "Vanha termi"},
         ),
         VocabConcept(
             uri="http://example.org/dyn_modern/1",
             vocabulary="dyn_modern",
-            pref_label_fi="Uusi termi",
+            pref_labels={"fi": "Uusi termi"},
         ),
     ]
     store.insert_concepts(concepts)
@@ -326,9 +320,7 @@ def test_concept_preferred_label_selection_multilingual(tmp_path: Path) -> None:
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p2591",
         vocabulary="yso",
-        pref_label_fi="lääkärit",
-        pref_label_sv="läkare",
-        pref_label_en="physicians",
+        pref_labels={"fi": "lääkärit", "sv": "läkare", "en": "physicians"},
         target_field="650",
     )
     store.insert_concepts([concept])
@@ -372,9 +364,7 @@ def test_preferred_label_languages_custom_fallback(tmp_path: Path) -> None:
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p999",
         vocabulary="yso",
-        pref_label_fi="kirjat",
-        pref_label_sv="böcker",
-        pref_label_en=None,
+        pref_labels={"fi": "kirjat", "sv": "böcker"},
         target_field="650",
     )
     store.insert_concepts([concept])
@@ -410,9 +400,7 @@ def test_vocab_store_3_letter_language_codes(tmp_path: Path) -> None:
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p2591",
         vocabulary="yso",
-        pref_label_fi="lääkärit",
-        pref_label_sv="läkare",
-        pref_label_en="physicians",
+        pref_labels={"fi": "lääkärit", "sv": "läkare", "en": "physicians"},
     )
     store.insert_concepts([concept])
 

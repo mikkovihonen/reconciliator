@@ -1086,15 +1086,13 @@ class WorkMatcher:
             c_src = best_cand.get("source")
             c_sid = best_cand.get("source_id")
             if c_src and c_sid and not str(c_src).startswith(("urn", "unknown")):
-                is_wd = str(c_src).lower() == "wikidata"
-                if str(c_src).lower() == "kanto":
-                    _accept(f"http://urn.fi/URN:NBN:fi:au:pn:{c_sid}", "0", "KANTO")
-                elif str(c_src).lower() == "isni":
-                    _accept(f"https://isni.org/isni/{c_sid}", "0", "ISNI")
-                elif is_wd:
-                    _accept(format_wikidata_uri(str(c_sid)), "1", "WIKIDATA")
-                else:
-                    _accept(f"{c_src}:{c_sid}", "1" if is_wd else "0", str(c_src).upper())
+                c_src_l = str(c_src).lower()
+                from reconciliator.curie import _get_sources_registry, format_source_uri
+
+                formatted_uri = format_source_uri(c_src_l, str(c_sid))
+                src_info = _get_sources_registry().get(c_src_l, {})
+                subf = str(src_info.get("subfield", "1" if c_src_l == "wikidata" else "0"))
+                _accept(formatted_uri, subf, str(c_src).upper())
 
             if best_cand.get("agent_uri"):
                 a_uri = str(best_cand["agent_uri"])
@@ -1117,10 +1115,10 @@ class WorkMatcher:
                     if item:
                         _accept(str(item), subfield, default_vocab)
 
-            if best_cand.get("source") == "wikidata" and best_cand.get("source_id"):
-                _accept(format_wikidata_uri(str(best_cand["source_id"])), "1", "WIKIDATA")
-            elif best_cand.get("wikidata_qid"):
-                _accept(format_wikidata_uri(str(best_cand["wikidata_qid"])), "1", "WIKIDATA")
+            if best_cand.get("wikidata_qid"):
+                from reconciliator.curie import format_source_uri
+
+                _accept(format_source_uri("wikidata", str(best_cand["wikidata_qid"])), "1", "WIKIDATA")
 
             cand_rec_id = str(
                 best_cand.get("curie")

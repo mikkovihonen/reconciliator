@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from rapidfuzz import fuzz
 
+from reconciliator.curie import parse_curie
 from reconciliator.models import Agent, AgentURI, BibliographicRecord
 from reconciliator.vocabularies import detect_vocabulary, extract_concept_id
 
@@ -68,7 +69,8 @@ class AgentAligner:
                         for u1 in cand_agent.uri_subfield_1:
                             if u1 and u1 not in seen_uris:
                                 seen_uris.add(u1)
-                                vocab = detect_vocabulary(u1) or "WIKIDATA"
+                                parsed_src, _ = parse_curie(u1)
+                                vocab = detect_vocabulary(u1) or (parsed_src.upper() if parsed_src and parsed_src != "unknown" else "OTHER")
                                 discovered[idx].append(
                                     AgentURI(
                                         uri=u1,
@@ -302,18 +304,28 @@ def verify_subjects(
 
     # 3. Check normalized concept mapping in vocab_store
     if vocab_store is not None and hasattr(vocab_store, "find_legacy_mapping_by_uri"):
+        from reconciliator.curie import format_source_uri
+
         for k in target_subjects:
             v_prefix, _, cid = k.partition(":")
-            uri = f"http://www.yso.fi/onto/{v_prefix}/{cid}" if cid else k
-            m = vocab_store.find_legacy_mapping_by_uri(uri)
+            m = None
+            if cid and hasattr(vocab_store, "find_legacy_mapping"):
+                m = vocab_store.find_legacy_mapping(v_prefix, cid)
+            if not m:
+                uri = format_source_uri(v_prefix, cid) if cid else k
+                m = vocab_store.find_legacy_mapping_by_uri(uri)
             if m:
                 m_cid = extract_concept_id(getattr(m, "target_uri", ""))
                 if m_cid and m_cid.lower() in cand_ids:
                     return True, "subject_matched"
         for k in candidate_subjects:
             v_prefix, _, cid = k.partition(":")
-            uri = f"http://www.yso.fi/onto/{v_prefix}/{cid}" if cid else k
-            m = vocab_store.find_legacy_mapping_by_uri(uri)
+            m = None
+            if cid and hasattr(vocab_store, "find_legacy_mapping"):
+                m = vocab_store.find_legacy_mapping(v_prefix, cid)
+            if not m:
+                uri = format_source_uri(v_prefix, cid) if cid else k
+                m = vocab_store.find_legacy_mapping_by_uri(uri)
             if m:
                 m_cid = extract_concept_id(getattr(m, "target_uri", ""))
                 if m_cid and m_cid.lower() in target_ids:

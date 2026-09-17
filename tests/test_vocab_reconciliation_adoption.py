@@ -212,8 +212,7 @@ def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso-paikat/p105994",
         vocabulary="yso-paikat",
-        pref_label_fi="Maalahti",
-        pref_label_sv="Malax",
+        pref_labels={"fi": "Maalahti", "sv": "Malax"},
         target_field="651",
     )
     store.insert_concepts([concept])
@@ -223,8 +222,8 @@ def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
     found, qid = store.find_concept_by_alias("malax", target_field="651")
     assert found is not None
     assert found.uri == "http://www.yso.fi/onto/yso-paikat/p105994"
-    assert found.pref_label_fi == "Maalahti"
-    assert found.pref_label_sv == "Malax"
+    assert found.pref_labels.get("fi") == "Maalahti"
+    assert found.pref_labels.get("sv") == "Malax"
 
     folder = VocabFolder(store)
     t_field, t_vocab, t_uri, t_label, m_type, _ = folder.fold_subject_heading(
@@ -284,9 +283,7 @@ def test_wikidata_p2347_alias_extraction_and_dual_enrichment(tmp_path: Path) -> 
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p105436",
         vocabulary="yso",
-        pref_label_fi="Suomi",
-        pref_label_sv="Finland",
-        pref_label_en="Finland",
+        pref_labels={"fi": "Suomi", "sv": "Finland", "en": "Finland"},
         target_field="651",
     )
     store.insert_concepts([concept])

@@ -60,39 +60,14 @@ def parse_turtle_simple(
 
             # Detect vocabulary from URI
             def _detect_vocab(u: str) -> str:
-                lu = u.lower()
-                if "/yso-paikat/" in lu or ":yso-paikat:" in lu:
-                    return "yso-paikat"
-                if "/yso-aika/" in lu or ":yso-aika:" in lu:
-                    return "yso-aika"
-                if "/kauno/" in lu or ":kauno:" in lu:
-                    return "kauno"
-                if "/kaunokki/" in lu or ":kaunokki:" in lu:
-                    return "kaunokki"
-                if "/muso/" in lu or ":muso:" in lu:
-                    return "muso"
-                if "/musa/" in lu or ":musa:" in lu:
-                    return "musa"
-                if "/slm/" in lu or ":slm:" in lu:
-                    return "slm"
-                if "/seko/" in lu or ":seko:" in lu:
-                    return "seko"
-                if "/ysa/" in lu or ":ysa:" in lu:
-                    return "ysa"
-                if "/allars/" in lu or ":allars:" in lu:
-                    return "allars"
-                if "/cilla/" in lu or ":cilla:" in lu:
-                    return "cilla"
-                if "/bella/" in lu or ":bella:" in lu:
-                    return "bella"
-                if "/mts/" in lu or ":mts:" in lu or "metatietosanasto" in lu:
-                    return "mts"
-                if "/yso/" in lu or ":yso:" in lu:
-                    return "yso"
-                # If custom or unknown, extract namespace segment
+                from reconciliator.curie import parse_curie
+
+                src, _ = parse_curie(u)
+                if src and src != "unknown":
+                    return src.lower()
                 for seg in reversed(u.rstrip("/").split("/")):
                     clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
-                    if clean_seg and not clean_seg.isdigit() and len(clean_seg) > 2:
+                    if clean_seg and not re.match(r"^p?\d+$", clean_seg, re.I) and len(clean_seg) > 2:
                         return clean_seg.lower()
                 return "vocab"
 
@@ -171,6 +146,11 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
     cat_defaults = get_category_default_field_map()
     geo_field = cat_defaults["geographic"]
     topical_field = cat_defaults["topical"]
+    vocab_defs = get_bundled_vocab_defaults()
+    default_topical_vocab = (
+        vocab_defs.get("subject_categories", {}).get(topical_field, {}).get("default_vocab") or ""
+    )
+    pref_langs = vocab_defs.get("preferred_label_languages") or []
 
     for bf in bridge_files:
         stem = bf.stem.replace(".ttl", "")
@@ -183,20 +163,15 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
         for b in bridges:
             source_uri = b["source_uri"]
             target_uri = b["target_uri"]
-            pref_fi = b.get("pref_label_fi")
-            pref_sv = b.get("pref_label_sv")
-            pref_en = b.get("pref_label_en")
-            notation = b.get("notation")
+            from reconciliator.curie import parse_curie
 
-            target_v = "mts" if "mts:" in target_uri or "/mts/" in target_uri else "yso"
+            t_src, _ = parse_curie(target_uri)
+            target_v = t_src if t_src and t_src != "unknown" else default_topical_vocab
 
-            legacy_labels: dict[str, str] = {}
-            if pref_fi:
-                legacy_labels["fi"] = pref_fi
-            if pref_sv:
-                legacy_labels["sv"] = pref_sv
-            if pref_en:
-                legacy_labels["en"] = pref_en
+            legacy_labels: dict[str, str] = dict(b.get("pref_labels") or {})
+            for lang_key in pref_langs:
+                if b.get(f"pref_label_{lang_key}") and lang_key not in legacy_labels:
+                    legacy_labels[lang_key] = b[f"pref_label_{lang_key}"]
 
             total_bridge_mappings.append(
                 ConceptMapping(
@@ -209,6 +184,7 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
                     target_field=target_field,
                 )
             )
+            notation = b.get("notation")
             if "relators" in stem:
                 total_bridge_mappings.append(
                     ConceptMapping(
@@ -221,7 +197,7 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
                         target_field=target_field,
                     )
                 )
-                for label, lang in ((pref_fi, "fi"), (pref_sv, "sv"), (pref_en, "en")):
+                for lang, label in legacy_labels.items():
                     if label:
                         folded = fold_label(label)
                         if folded:
@@ -245,7 +221,7 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
                         }
                     )
 
-            for label, lang in ((pref_fi, "fi"), (pref_sv, "sv"), (pref_en, "en")):
+            for lang, label in legacy_labels.items():
                 if label:
                     folded = fold_label(label)
                     if folded:

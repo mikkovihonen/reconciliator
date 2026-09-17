@@ -19,7 +19,7 @@ def test_ingest_vocab_file(tmp_path: Path) -> None:
     c = store.find_concept_by_label("lääkärit", vocabulary="yso")
     assert c is not None
     assert c.uri == "http://www.yso.fi/onto/yso/p2591"
-    assert c.pref_label_sv == "läkare"
+    assert c.pref_labels.get("sv") == "läkare"
     assert not c.is_deprecated
 
     # Check deprecated concept lookup

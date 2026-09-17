@@ -88,17 +88,17 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
             }
             m_not = re.search(r'skos:notation\s+"([^"]+)"', body)
 
-            bridges.append(
-                {
-                    "source_uri": subj_uri,
-                    "target_uri": target_uri,
-                    "bridge_vocab": bridge_vocab,
-                    "notation": m_not.group(1) if m_not else None,
-                    "pref_label_fi": labels.get("fi"),
-                    "pref_label_sv": labels.get("sv"),
-                    "pref_label_en": labels.get("en"),
-                }
-            )
+            item: dict[str, Any] = {
+                "source_uri": subj_uri,
+                "target_uri": target_uri,
+                "bridge_vocab": bridge_vocab,
+                "notation": m_not.group(1) if m_not else None,
+                "pref_labels": labels,
+            }
+            for lang, val in labels.items():
+                item[f"pref_label_{lang}"] = val
+
+            bridges.append(item)
 
     return bridges
 

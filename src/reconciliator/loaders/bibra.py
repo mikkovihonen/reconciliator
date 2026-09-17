@@ -9,6 +9,7 @@ from typing import Any, Iterator, Optional
 from lxml import etree
 from pydantic import BaseModel, ConfigDict, Field
 
+from reconciliator.curie import parse_curie
 from reconciliator.matcher import ReconciliationResult
 from reconciliator.models import BibliographicRecord
 
@@ -407,34 +408,21 @@ def enrich_bibra_json(
         selected = result.selected_agent_uris.get(idx, [])
         discovered = {u.uri: u for u in result.discovered_agent_uris.get(idx, [])}
 
-        kanto_uri: Optional[str] = None
-        wikidata_uri: Optional[str] = None
-        isni_uri: Optional[str] = None
-        viaf_uri: Optional[str] = None
-
+        source_uris: dict[str, str] = {}
         for u in selected:
-            u_lower = u.lower()
-            if "urn.fi/urn:nbn:fi:au:pn:" in u_lower or "kanto" in u_lower:
-                kanto_uri = u
-            elif "wikidata.org" in u_lower:
-                wikidata_uri = u
-            elif "isni.org" in u_lower:
-                isni_uri = u
-            elif "viaf.org" in u_lower:
-                viaf_uri = u
+            src, _ = parse_curie(u)
+            if src and src != "unknown":
+                source_uris[f"{src}_uri"] = u
 
-        authorities.append(
-            {
-                "name": agent.name,
-                "role": next(iter(agent.role_counts.keys())) if agent.role_counts else "aut",
-                "selected_uris": selected,
-                "kanto_uri": kanto_uri,
-                "wikidata_uri": wikidata_uri,
-                "isni_uri": isni_uri,
-                "viaf_uri": viaf_uri,
-                "candidates_count": len(discovered),
-            }
-        )
+        author_entry = {
+            "name": agent.name,
+            "role": next(iter(agent.role_counts.keys())) if agent.role_counts else "aut",
+            "selected_uris": selected,
+            "source_uris": source_uris,
+            "candidates_count": len(discovered),
+        }
+        author_entry.update(source_uris)
+        authorities.append(author_entry)
 
     enriched["reconciliation"] = {
         "status": "matched" if result.accepted_candidates else "unmatched",

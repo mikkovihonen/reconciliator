@@ -1471,7 +1471,7 @@ def reconcile_cmd(
                         source_heading=s_heading,
                         source_vocab=s_vocab,
                         source_uri=s_uri,
-                        language=target_record.language or "fi",
+                        language=target_record.language or cfg.linguistic.default_language,
                         target_field_tag=t_tag,
                         target_vocab=t_vocab,
                         target_uri=t_uri,

@@ -109,6 +109,9 @@ class FunnelSpec(BaseModel):
     # A built-in handler name, or a path to a .py file. See funnels/__init__.py.
     handler: Optional[str] = None
 
+    # Optional extra configuration parameters for handlers
+    extra: dict[str, Any] = Field(default_factory=dict)
+
     # Exactly one spec carries this; it claims whatever no earlier spec did.
     default: bool = False
 

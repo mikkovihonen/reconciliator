@@ -35,6 +35,11 @@ def get_bundled_linguistic_defaults() -> dict[str, Any]:
     return dict(get_bundled_defaults().get("linguistic") or {})
 
 
+def get_bundled_sources_defaults() -> dict[str, Any]:
+    """Get bundled default source definitions dictionary."""
+    return dict(get_bundled_defaults().get("sources") or {})
+
+
 def get_bundled_vocabularies_defaults() -> dict[str, Any]:
     """Get bundled default vocabulary definitions dictionary with derived mappings."""
     raw = dict(get_bundled_defaults().get("vocabularies") or {})
@@ -54,11 +59,11 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
     if "subject_field_category_map" not in raw:
         raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
     if "default_vocab_target_field" not in raw:
-        raw["default_vocab_target_field"] = "650"
+        raw["default_vocab_target_field"] = str(raw.get("default_vocab_target_field") or "")
     if "default_target_field" not in raw:
-        raw["default_target_field"] = "650"
+        raw["default_target_field"] = str(raw.get("default_target_field") or raw.get("default_vocab_target_field") or "")
     if "default_subject_field" not in raw:
-        raw["default_subject_field"] = "650"
+        raw["default_subject_field"] = str(raw.get("default_subject_field") or raw.get("default_vocab_target_field") or "")
     if "supported_subject_vocabularies" not in raw:
         raw["supported_subject_vocabularies"] = list(raw.get("supported_subjects", []))
     if "vocabularies" not in raw:
@@ -73,7 +78,7 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
         raw["vocabularies"] = vocabs
     ling = get_bundled_linguistic_defaults()
     if "preserved_diacritics" not in raw:
-        raw["preserved_diacritics"] = ling.get("preserved_diacritics", "åäöÅÄÖ")
+        raw["preserved_diacritics"] = str(ling.get("preserved_diacritics") or "")
     b_dates = ling.get("biographical_dates", {})
     if "biographical_date_prefixes" not in raw:
         raw["biographical_date_prefixes"] = list(b_dates.get("prefixes", []))
@@ -86,7 +91,7 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
     if "biographical_date_pattern" not in raw:
         raw["biographical_date_pattern"] = b_dates.get("pattern")
     if "default_language" not in raw:
-        raw["default_language"] = ling.get("default_language", "fi")
+        raw["default_language"] = str(raw.get("default_language") or ling.get("default_language") or "")
     return raw
 
 
@@ -112,7 +117,7 @@ def get_bundled_record_defaults() -> dict[str, Any]:
 
     ling = get_bundled_linguistic_defaults()
     if "preserved_diacritics" not in raw:
-        raw["preserved_diacritics"] = ling.get("preserved_diacritics", "åäöÅÄÖ")
+        raw["preserved_diacritics"] = str(ling.get("preserved_diacritics") or "")
     b_dates = ling.get("biographical_dates", {})
     if "biographical_date_prefixes" not in raw:
         raw["biographical_date_prefixes"] = list(b_dates.get("prefixes", []))
@@ -125,20 +130,25 @@ def get_bundled_record_defaults() -> dict[str, Any]:
     if "biographical_date_pattern" not in raw:
         raw["biographical_date_pattern"] = b_dates.get("pattern")
     if "default_language" not in raw:
-        raw["default_language"] = ling.get("default_language", "fi")
+        raw["default_language"] = str(ling.get("default_language") or "")
 
     vocab = dict(data.get("vocabularies") or {})
     sf = vocab.get("subject_fields") or {}
     if "subject_field_category_map" not in raw:
         raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
     if "default_subject_field" not in raw:
-        raw["default_subject_field"] = "650"
+        raw["default_subject_field"] = str(vocab.get("default_subject_field") or vocab.get("default_vocab_target_field") or "")
     return raw
 
 
 def get_bundled_enrichment_defaults() -> dict[str, Any]:
     """Get bundled default enrichment settings dictionary."""
     return dict(get_bundled_defaults().get("enrichment") or {})
+
+
+def get_bundled_section_defaults(section: str) -> dict[str, Any]:
+    """Get bundled default settings dictionary for a top-level section."""
+    return dict(get_bundled_defaults().get(section) or {})
 
 
 # Backward-compatible accessors
@@ -150,34 +160,43 @@ _LING_DEFAULTS = get_bundled_linguistic_defaults()
 _VOCAB_DEFAULTS = get_bundled_vocabularies_defaults()
 _REC_DEFAULTS = get_bundled_record_defaults()
 _ENRICH_DEFAULTS = get_bundled_enrichment_defaults()
+_COMPUTE_DEFAULTS = get_bundled_section_defaults("compute")
+_STORAGE_DEFAULTS = get_bundled_section_defaults("storage")
+_EMBED_DEFAULTS = get_bundled_section_defaults("embedding")
+_RECONCILE_DEFAULTS = get_bundled_section_defaults("reconcile")
+_CONSOLIDATION_DEFAULTS = get_bundled_section_defaults("consolidation")
+_TELEMETRY_DEFAULTS = get_bundled_section_defaults("telemetry")
+_LOGGING_DEFAULTS = get_bundled_section_defaults("logging")
+_CONSTITUENTS_DEFAULTS = get_bundled_section_defaults("constituents")
+_FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
 
-DEFAULT_LANGUAGE: str = _LING_DEFAULTS.get("default_language", "fi")
-DEFAULT_PRESERVED_DIACRITICS: str = _LING_DEFAULTS.get("preserved_diacritics", "åäöÅÄÖ")
-DEFAULT_BIOGRAPHICAL_DATES: dict[str, Any] = _LING_DEFAULTS.get("biographical_dates", {})
-DEFAULT_BIOGRAPHICAL_DATE_PREFIXES: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("prefixes", []))
-DEFAULT_BIOGRAPHICAL_ERA_BC: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("era_bc", []))
-DEFAULT_BIOGRAPHICAL_ERA_AD: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("era_ad", []))
+DEFAULT_LANGUAGE: str = str(_LING_DEFAULTS.get("default_language") or "")
+DEFAULT_PRESERVED_DIACRITICS: str = str(_LING_DEFAULTS.get("preserved_diacritics") or "")
+DEFAULT_BIOGRAPHICAL_DATES: dict[str, Any] = dict(_LING_DEFAULTS.get("biographical_dates") or {})
+DEFAULT_BIOGRAPHICAL_DATE_PREFIXES: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("prefixes") or [])
+DEFAULT_BIOGRAPHICAL_ERA_BC: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("era_bc") or [])
+DEFAULT_BIOGRAPHICAL_ERA_AD: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("era_ad") or [])
 DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES: list[str] = list(
-    DEFAULT_BIOGRAPHICAL_DATES.get("century_suffixes", [])
+    DEFAULT_BIOGRAPHICAL_DATES.get("century_suffixes") or []
 )
 
 DEFAULT_NON_FILING_ARTICLES: dict[str, list[str]] = dict(
-    _REC_DEFAULTS.get("non_filing_articles", {})
+    _REC_DEFAULTS.get("non_filing_articles") or {}
 )
-DEFAULT_PUBLISHER_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("publisher_suffixes", []))
-DEFAULT_VOLUME_PREFIXES: list[str] = list(_REC_DEFAULTS.get("volume_prefixes", []))
-DEFAULT_VOLUME_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("volume_suffixes", []))
-DEFAULT_VOLUME_FORMAT_TEMPLATE: str = str(_REC_DEFAULTS.get("volume_format_template", "osa {num}"))
-DEFAULT_ROMAN_NUMERALS: dict[str, int] = dict(_REC_DEFAULTS.get("roman_numerals", {}))
-DEFAULT_FICTIONAL_QUALIFIERS: list[str] = list(_REC_DEFAULTS.get("fictional_qualifiers", []))
-DEFAULT_RESPONSIBILITY_PREFIXES: list[str] = list(_REC_DEFAULTS.get("responsibility_prefixes", []))
+DEFAULT_PUBLISHER_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("publisher_suffixes") or [])
+DEFAULT_VOLUME_PREFIXES: list[str] = list(_REC_DEFAULTS.get("volume_prefixes") or [])
+DEFAULT_VOLUME_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("volume_suffixes") or [])
+DEFAULT_VOLUME_FORMAT_TEMPLATE: str = str(_REC_DEFAULTS.get("volume_format_template") or "")
+DEFAULT_ROMAN_NUMERALS: dict[str, int] = dict(_REC_DEFAULTS.get("roman_numerals") or {})
+DEFAULT_FICTIONAL_QUALIFIERS: list[str] = list(_REC_DEFAULTS.get("fictional_qualifiers") or [])
+DEFAULT_RESPONSIBILITY_PREFIXES: list[str] = list(_REC_DEFAULTS.get("responsibility_prefixes") or [])
 DEFAULT_RESPONSIBILITY_CONJUNCTIONS: list[str] = list(
-    _REC_DEFAULTS.get("responsibility_conjunctions", [])
+    _REC_DEFAULTS.get("responsibility_conjunctions") or []
 )
-DEFAULT_CLASSIFICATION_PRIORITY: list[str] = list(_REC_DEFAULTS.get("classification_priority", []))
-DEFAULT_RELATOR_MAPPINGS: dict[str, str] = dict(_REC_DEFAULTS.get("relator_mappings", {}))
+DEFAULT_CLASSIFICATION_PRIORITY: list[str] = list(_REC_DEFAULTS.get("classification_priority") or [])
+DEFAULT_RELATOR_MAPPINGS: dict[str, str] = dict(_REC_DEFAULTS.get("relator_mappings") or {})
 
-DEFAULT_SUBJECT_FIELDS: dict[str, dict[str, Any]] = dict(_VOCAB_DEFAULTS.get("subject_fields", {}))
+DEFAULT_SUBJECT_FIELDS: dict[str, dict[str, Any]] = dict(_VOCAB_DEFAULTS.get("subject_fields") or {})
 DEFAULT_SUBJECT_FIELD_CATEGORY_MAP: dict[str, str] = {
     tag: str(data.get("category", "")) for tag, data in DEFAULT_SUBJECT_FIELDS.items()
 }
@@ -455,6 +474,18 @@ class SchemeDefinition(BaseModel):
         return self
 
 
+class SourceConfig(BaseModel):
+    """Configuration for an authority or bibliographic source identifier / URI scheme."""
+
+    uri_patterns: list[str] = Field(default_factory=list)
+    canonical_uri_template: Optional[str] = None
+    tag_prefixes: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    identifier_pattern: Optional[str] = None
+    uppercase_identifier: bool = False
+    subfield: str = "0"
+
+
 class VocabulariesConfig(BaseModel):
     """Centralized controlled vocabulary definitions, priorities, and matching policies."""
 
@@ -500,7 +531,16 @@ class VocabulariesConfig(BaseModel):
     preserve_original_heading: bool = False
     original_heading_subfield: str = "9"
     preferred_label_languages: list[str] = Field(
-        default_factory=lambda: list(_VOCAB_DEFAULTS.get("preferred_label_languages", []))
+        default_factory=lambda: list(_VOCAB_DEFAULTS.get("preferred_label_languages") or [])
+    )
+    default_language: str = Field(
+        default_factory=lambda: str(_VOCAB_DEFAULTS.get("default_language") or _LING_DEFAULTS.get("default_language") or "")
+    )
+    default_classification_scheme: str = Field(
+        default_factory=lambda: str(get_bundled_defaults().get("classification", {}).get("default_scheme") or "")
+    )
+    digital_repository_patterns: list[str] = Field(
+        default_factory=lambda: list(get_bundled_defaults().get("digital_repositories", {}).get("uri_patterns") or [])
     )
     language_code_map: dict[str, str] = Field(
         default_factory=lambda: dict(_VOCAB_DEFAULTS.get("language_code_map", {}))
@@ -527,7 +567,9 @@ class VocabulariesConfig(BaseModel):
         default_factory=lambda: dict(_VOCAB_DEFAULTS.get("wikidata_author_properties", {}))
     )
 
-    default_vocab_target_field: str = "650"
+    default_vocab_target_field: str = Field(
+        default_factory=lambda: str(_VOCAB_DEFAULTS.get("default_vocab_target_field") or "")
+    )
     field_to_vocabularies: dict[str, list[str]] = Field(default_factory=dict)
     default_field_vocabularies: dict[str, str] = Field(default_factory=dict)
     vocab_target_fields: dict[str, str] = Field(default_factory=dict)
@@ -605,9 +647,6 @@ class VocabulariesConfig(BaseModel):
     def biographical_date_pattern(self) -> Optional[str]:
         return None
 
-    @property
-    def default_language(self) -> str:
-        return DEFAULT_LANGUAGE
 
 
 # Alias for backward compatibility
@@ -629,10 +668,14 @@ class RecordNormalizationConfig(BaseModel):
     # Stripping is the default because the punctuation is presentational. It does
     # not move any blocking key - compute_author_key and compute_title_stem
     # already discard punctuation - so it governs the stored and exported form.
-    strip_isbd_punctuation: bool = True
+    strip_isbd_punctuation: bool = Field(
+        default_factory=lambda: bool(_REC_DEFAULTS.get("strip_isbd_punctuation", True))
+    )
     # Characters treated as ISBD punctuation when stripping. Not just the comma:
     # "." and "/" are equally presentational in a MARC $a.
-    isbd_punctuation: str = " ./,;:"
+    isbd_punctuation: str = Field(
+        default_factory=lambda: str(_REC_DEFAULTS.get("isbd_punctuation") or "")
+    )
 
     non_filing_articles: dict[str, list[str]] = Field(
         default_factory=lambda: {k: list(v) for k, v in DEFAULT_NON_FILING_ARTICLES.items()}
@@ -654,12 +697,16 @@ class RecordNormalizationConfig(BaseModel):
     classification_priority: list[str] = Field(
         default_factory=lambda: list(DEFAULT_CLASSIFICATION_PRIORITY)
     )
-    default_classification_scheme: str = "ykl"
+    default_classification_scheme: str = Field(
+        default_factory=lambda: str(_REC_DEFAULTS.get("default_classification_scheme") or "")
+    )
     control_number_prefix: Optional[str] = None
     control_number_pattern: Optional[str] = None
     control_number_padding_digits: Optional[int] = None
     control_number_strip_prefixes: Optional[list[str]] = None
-    urn_pattern: str = r"(urn:nbn:[^\s]+)"
+    urn_pattern: str = Field(
+        default_factory=lambda: str(_REC_DEFAULTS.get("urn_pattern") or "")
+    )
     source_identifier_templates: dict[str, str] = Field(
         default_factory=lambda: dict(_REC_DEFAULTS.get("source_identifier_templates", {}))
     )
@@ -690,7 +737,9 @@ class RecordNormalizationConfig(BaseModel):
     subject_field_category_map: dict[str, str] = Field(
         default_factory=lambda: dict(DEFAULT_SUBJECT_FIELD_CATEGORY_MAP)
     )
-    default_subject_field: str = "650"
+    default_subject_field: str = Field(
+        default_factory=lambda: str(_VOCAB_DEFAULTS.get("default_subject_field") or _VOCAB_DEFAULTS.get("default_vocab_target_field") or "")
+    )
 
 
 class NormalizationContainer(BaseModel):
@@ -847,8 +896,8 @@ class EnrichmentConfig(BaseModel):
 
     def get_relationship_label(self, rel: str, lang: Optional[str] = None) -> str:
         """Resolve relationship display label for $i in the specified language."""
-        target_lang = (lang or self.language or "fi").strip().lower()
-        lang_dict = self.linking_labels.get(target_lang) or self.linking_labels.get("fi", {})
+        target_lang = (lang or self.language or DEFAULT_LANGUAGE).strip().lower()
+        lang_dict = self.linking_labels.get(target_lang) or self.linking_labels.get(DEFAULT_LANGUAGE, {})
         return lang_dict.get(rel, "")
 
     def get_scheme(self, domain: str) -> SchemeDefinition:
@@ -865,10 +914,10 @@ class EnrichmentConfig(BaseModel):
 
     def get_accessibility(self, profile: str, lang: Optional[str] = None) -> dict[str, str]:
         """Resolve accessibility fields (content_summary, mode, note) for a profile."""
-        target_lang = (lang or self.language or "fi").strip().lower()
+        target_lang = (lang or self.language or DEFAULT_LANGUAGE).strip().lower()
         prof_data = self.accessibility.get(profile, {})
         notes = prof_data.get("notes", {})
-        note_str = notes.get(target_lang) or notes.get("fi", "")
+        note_str = notes.get(target_lang) or notes.get(DEFAULT_LANGUAGE, "")
         return {
             "content_summary": str(prof_data.get("content_summary", "")),
             "mode": str(prof_data.get("mode", "")),
@@ -1017,6 +1066,12 @@ class WikidataIngestConfig(BaseModel):
             "P906",
             "P496",
         ]
+    )
+    languages: dict[str, str] = Field(
+        default_factory=lambda: dict(get_bundled_defaults().get("wikidata", {}).get("languages", {}))
+    )
+    subject_mappings: dict[str, str] = Field(
+        default_factory=lambda: dict(get_bundled_defaults().get("wikidata", {}).get("subject_mappings", {}))
     )
 
 
@@ -1365,15 +1420,21 @@ class ConstituentsConfig(BaseModel):
 class AppConfig(BaseModel):
     """Root configuration object combining all subsystems."""
 
-    compute: ComputeConfig = Field(default_factory=ComputeConfig)
-    storage: StorageConfig = Field(default_factory=StorageConfig)
-    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    compute: ComputeConfig = Field(default_factory=lambda: ComputeConfig(**_COMPUTE_DEFAULTS))
+    storage: StorageConfig = Field(default_factory=lambda: StorageConfig(**_STORAGE_DEFAULTS))
+    embedding: EmbeddingConfig = Field(default_factory=lambda: EmbeddingConfig(**_EMBED_DEFAULTS))
     linguistic: LinguisticConfig = Field(default_factory=LinguisticConfig)
     vocabularies: VocabulariesConfig = Field(default_factory=VocabulariesConfig)
+    sources: dict[str, SourceConfig] = Field(
+        default_factory=lambda: {
+            k: SourceConfig(**v) if isinstance(v, dict) else v
+            for k, v in get_bundled_sources_defaults().items()
+        }
+    )
     record_normalization: RecordNormalizationConfig = Field(
         default_factory=RecordNormalizationConfig
     )
-    constituents: ConstituentsConfig = Field(default_factory=ConstituentsConfig)
+    constituents: ConstituentsConfig = Field(default_factory=lambda: ConstituentsConfig(**_CONSTITUENTS_DEFAULTS))
     #: Set by `load_config`; anchors every relative path in configuration that
     #: names code or a profile.
     config_dir: Optional[Path] = None
@@ -1381,10 +1442,10 @@ class AppConfig(BaseModel):
     ingest_vocab: Optional[VocabIngestConfig] = None
     ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
     ingest_wikidata: Optional[WikidataIngestConfig] = None
-    consolidation: WorkConsolidationConfig = Field(default_factory=WorkConsolidationConfig)
+    consolidation: WorkConsolidationConfig = Field(default_factory=lambda: WorkConsolidationConfig(**_CONSOLIDATION_DEFAULTS))
     reconcile: Optional[ReconcileConfig] = None
-    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig(**_TELEMETRY_DEFAULTS))
+    logging: LoggingConfig = Field(default_factory=lambda: LoggingConfig(**_LOGGING_DEFAULTS))
 
     @property
     def normalization(self) -> NormalizationContainer:
@@ -1442,6 +1503,20 @@ class AppConfig(BaseModel):
                 )
 
         return self
+
+
+def get_source_aliases(source: str, app_config: Optional[AppConfig] = None) -> list[str]:
+    """Return configured aliases for a given source name."""
+    s_norm = (source or "").strip().lower()
+    if app_config and app_config.sources:
+        cfg = app_config.sources.get(s_norm)
+        if cfg:
+            return list(cfg.aliases)
+    defaults = get_bundled_sources_defaults()
+    src_data = defaults.get(s_norm)
+    if isinstance(src_data, dict):
+        return list(src_data.get("aliases") or [])
+    return []
 
 
 # ---------------------------------------------------------------------------

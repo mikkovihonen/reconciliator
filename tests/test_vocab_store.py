@@ -18,11 +18,8 @@ def test_insert_and_query_concepts(vocab_store: VocabStore) -> None:
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p2591",
         vocabulary="yso",
-        pref_label_fi="lääkärit",
-        pref_label_sv="läkare",
-        pref_label_en="physicians",
-        alt_labels_fi=["tohtorit"],
-        alt_labels_sv=["doktorer"],
+        pref_labels={"fi": "lääkärit", "sv": "läkare", "en": "physicians"},
+        alt_labels={"fi": ["tohtorit"], "sv": ["doktorer"]},
         target_field="650",
     )
     vocab_store.insert_concepts([concept])
@@ -30,9 +27,9 @@ def test_insert_and_query_concepts(vocab_store: VocabStore) -> None:
     # Query by URI
     res = vocab_store.find_concept_by_uri("http://www.yso.fi/onto/yso/p2591")
     assert res is not None
-    assert res.pref_label_fi == "lääkärit"
-    assert res.pref_label_sv == "läkare"
-    assert "tohtorit" in res.alt_labels_fi
+    assert res.pref_labels["fi"] == "lääkärit"
+    assert res.pref_labels["sv"] == "läkare"
+    assert "tohtorit" in res.alt_labels["fi"]
 
     # Query by Finnish label (case-insensitive)
     by_fi = vocab_store.find_concept_by_label("Lääkärit", vocabulary="yso", lang="fi")
@@ -49,8 +46,7 @@ def test_insert_and_query_mappings(vocab_store: VocabStore) -> None:
     mapping = ConceptMapping(
         legacy_uri="http://www.yso.fi/onto/ysa/Y1002",
         legacy_vocab="ysa",
-        legacy_label_fi="lääkärit",
-        legacy_label_sv=None,
+        legacy_labels={"fi": "lääkärit"},
         target_uri="http://www.yso.fi/onto/yso/p2591",
         target_vocab="yso",
         mapping_type="exact_match",
@@ -76,11 +72,8 @@ def test_vocab_store_caching_and_connection_reuse(vocab_store: VocabStore) -> No
     concept = VocabConcept(
         uri="http://www.yso.fi/onto/yso/p1234",
         vocabulary="yso",
-        pref_label_fi="testi",
-        pref_label_sv="test",
-        pref_label_en="test",
-        alt_labels_fi=[],
-        alt_labels_sv=[],
+        pref_labels={"fi": "testi", "sv": "test", "en": "test"},
+        alt_labels={},
         target_field="650",
     )
     vocab_store.insert_concepts([concept])
@@ -179,126 +172,6 @@ def test_language_filtering_on_insert(tmp_path: Path) -> None:
     assert "en" not in res.pref_labels
     assert "de" not in res.pref_labels
     assert "sv" not in res.alt_labels
-
-
-@pytest.mark.skip(
-    reason="Legacy SQLite flat migration deprecated, reconciliator uses PostgreSQL exclusively"
-)
-def test_legacy_flat_db_migration(tmp_path: Path) -> None:
-    """Test automatic seamless migration from legacy flat tables to normalized 1-to-many schema."""
-    import sqlite3
-
-    db_path = tmp_path / "legacy_flat.db"
-    # 1. Create flat schema manually simulating older version of reconciliator
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    with conn:
-        conn.execute("""
-            CREATE TABLE concepts (
-                uri TEXT PRIMARY KEY,
-                vocabulary TEXT NOT NULL,
-                pref_label_fi TEXT,
-                pref_label_sv TEXT,
-                pref_label_en TEXT,
-                alt_labels_fi TEXT,
-                alt_labels_sv TEXT,
-                is_deprecated INTEGER DEFAULT 0,
-                target_field TEXT
-            );
-        """)
-        conn.execute("""
-            INSERT INTO concepts VALUES (
-                'http://www.yso.fi/onto/yso/p111',
-                'yso',
-                'kirjat',
-                'böcker',
-                'books',
-                '["opus", "teos"]',
-                '["volym"]',
-                0,
-                '650'
-            );
-        """)
-        conn.execute("""
-            CREATE TABLE concept_mappings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                legacy_uri TEXT,
-                legacy_vocab TEXT NOT NULL,
-                legacy_label_fi TEXT,
-                legacy_label_sv TEXT,
-                target_uri TEXT NOT NULL,
-                target_vocab TEXT NOT NULL,
-                mapping_type TEXT NOT NULL,
-                target_field TEXT NOT NULL
-            );
-        """)
-        conn.execute("""
-            INSERT INTO concept_mappings VALUES (
-                1,
-                'http://www.yso.fi/onto/ysa/Y999',
-                'ysa',
-                'kirjat',
-                'böcker',
-                'http://www.yso.fi/onto/yso/p111',
-                'yso',
-                'exact_match',
-                '650'
-            );
-        """)
-    conn.close()
-
-    # 2. Open with modern VocabStore - should auto-migrate
-    store = VocabStore(db_path)
-
-    # 3. Verify concept was migrated
-    c = store.find_concept_by_uri("http://www.yso.fi/onto/yso/p111")
-    assert c is not None
-    assert c.pref_label_fi == "kirjat"
-    assert c.pref_label_sv == "böcker"
-    assert c.pref_label_en == "books"
-    assert "opus" in c.alt_labels_fi
-    assert "volym" in c.alt_labels_sv
-
-    # 4. Verify lookup by label works
-    by_fi = store.find_concept_by_label("Kirjat", vocabulary="yso", lang="fi")
-    assert by_fi is not None
-    assert by_fi.uri == c.uri
-
-    # 5. Verify mapping was migrated
-    m = store.find_legacy_mapping_by_uri("http://www.yso.fi/onto/ysa/Y999")
-    assert m is not None
-    assert m.legacy_label_fi == "kirjat"
-    assert m.legacy_label_sv == "böcker"
-    assert m.target_uri == "http://www.yso.fi/onto/yso/p111"
-
-    # 6. Verify table columns are now normalized
-    with store.get_connection() as c_conn:
-        cols = {row["name"] for row in c_conn.execute("PRAGMA table_info(concepts);").fetchall()}
-        assert "pref_label_fi" not in cols
-        assert "pref_labels" not in cols
-        assert "vocabulary" in cols
-        assert "concept_id" in cols
-        assert "uri" not in cols
-
-        # Check concept_labels has entries and uses concept_row_id
-        l_cols = {
-            row["name"] for row in c_conn.execute("PRAGMA table_info(concept_labels);").fetchall()
-        }
-        assert "concept_row_id" in l_cols
-        assert "concept_uri" not in l_cols
-        label_count = c_conn.execute("SELECT COUNT(*) FROM concept_labels;").fetchone()[0]
-        assert label_count >= 5  # fi, sv, en pref labels + 2 fi alt + 1 sv alt
-
-        # Check concept_mappings has decomposed identifiers
-        m_cols = {
-            row["name"] for row in c_conn.execute("PRAGMA table_info(concept_mappings);").fetchall()
-        }
-        assert "legacy_id" in m_cols
-        assert "target_id" in m_cols
-        assert "legacy_uri" not in m_cols
-        assert "target_uri" not in m_cols
-
-    store.close()
 
 
 def test_rebuild_aliases_multilingual(vocab_store: VocabStore) -> None:

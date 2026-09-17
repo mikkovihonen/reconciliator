@@ -218,14 +218,14 @@ def test_parse_turtle_prefixed_and_yso_paikat() -> None:
     c0 = concepts[0]
     assert c0.uri == "http://www.yso.fi/onto/yso/p123"
     assert c0.vocabulary == "yso"
-    assert c0.pref_label_fi == "lääkärit"
+    assert c0.pref_labels.get("fi") == "lääkärit"
     assert c0.target_field == "650"
 
     # yso-paikat concept (geographic name -> 651)
     c1 = concepts[1]
     assert c1.uri == "http://www.yso.fi/onto/yso-paikat/p999"
     assert c1.vocabulary == "yso-paikat"
-    assert c1.pref_label_fi == "Helsinki"
+    assert c1.pref_labels.get("fi") == "Helsinki"
     assert c1.target_field == "651"
 
 

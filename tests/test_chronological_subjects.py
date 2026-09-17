@@ -104,14 +104,13 @@ def test_record_normalizer_folds_and_retags_chronological(tmp_path: Path) -> Non
             VocabConcept(
                 uri="http://www.yso.fi/onto/yso-aika/p1800",
                 vocabulary="yso-aika",
-                pref_label_fi="1800-luku",
-                pref_label_sv="1800-talet",
+                pref_labels={"fi": "1800-luku", "sv": "1800-talet"},
                 target_field="648",
             ),
             VocabConcept(
                 uri="http://www.yso.fi/onto/yso/p456",
                 vocabulary="yso",
-                pref_label_fi="historia",
+                pref_labels={"fi": "historia"},
                 target_field="650",
             ),
         ]
@@ -122,7 +121,7 @@ def test_record_normalizer_folds_and_retags_chronological(tmp_path: Path) -> Non
             ConceptMapping(
                 legacy_uri="http://www.yso.fi/onto/ysa/Y9999",
                 legacy_vocab="ysa",
-                legacy_label_fi="1800-luku",
+                legacy_labels={"fi": "1800-luku"},
                 target_uri="http://www.yso.fi/onto/yso-aika/p1800",
                 target_vocab="yso-aika",
                 mapping_type="exact_match",
@@ -185,7 +184,7 @@ def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
             VocabConcept(
                 uri="http://www.yso.fi/onto/yso-aika/p1800",
                 vocabulary="yso-aika",
-                pref_label_fi="1800-luku",
+                pref_labels={"fi": "1800-luku"},
                 target_field="648",
             )
         ]
@@ -195,7 +194,7 @@ def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
             ConceptMapping(
                 legacy_uri="http://www.yso.fi/onto/ysa/Y1800",
                 legacy_vocab="ysa",
-                legacy_label_fi="1800-luku",
+                legacy_labels={"fi": "1800-luku"},
                 target_uri="http://www.yso.fi/onto/yso-aika/p1800",
                 target_vocab="yso-aika",
                 mapping_type="exact_match",

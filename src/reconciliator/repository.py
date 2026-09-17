@@ -350,7 +350,8 @@ class WEMIRepository:
                     title_normalized=work.title_normalized,
                     original_language=work.original_language,
                     primary_agent_id=work.primary_agent_id,
-                    ykl_class=work.ykl_class,
+                    classification=work.classification,
+                    classification_scheme=work.classification_scheme,
                     work_type=work.work_type,
                     subjects_json=json.dumps(work.subjects_json, ensure_ascii=False),
                     serialized_text=work.serialized_text,
@@ -367,8 +368,11 @@ class WEMIRepository:
                         "primary_agent_id": func.coalesce(
                             stmt.excluded.primary_agent_id, works_table.c.primary_agent_id
                         ),
-                        "ykl_class": func.coalesce(
-                            stmt.excluded.ykl_class, works_table.c.ykl_class
+                        "classification": func.coalesce(
+                            stmt.excluded.classification, works_table.c.classification
+                        ),
+                        "classification_scheme": func.coalesce(
+                            stmt.excluded.classification_scheme, works_table.c.classification_scheme
                         ),
                         "work_type": stmt.excluded.work_type,
                         "subjects_json": stmt.excluded.subjects_json,
@@ -1336,12 +1340,16 @@ class WEMIRepository:
                 agents_table.c.source_id == source_id,
             )
             row = conn.execute(stmt).fetchone()
-            if not row and source == "kanto":
-                fallback_stmt = select(agents_table).where(
-                    agents_table.c.source.in_(("kanto", "finaf", "asteri")),
-                    agents_table.c.source_id == source_id,
-                )
-                row = conn.execute(fallback_stmt).fetchone()
+            if not row:
+                from reconciliator.config import get_source_aliases
+
+                aliases = get_source_aliases(source)
+                if aliases:
+                    fallback_stmt = select(agents_table).where(
+                        agents_table.c.source.in_([source, *aliases]),
+                        agents_table.c.source_id == source_id,
+                    )
+                    row = conn.execute(fallback_stmt).fetchone()
             return _row_to_agent(row) if row else None
 
     def get_agent_by_uri(self, agent_uri: str) -> Optional[AgentEntity]:
@@ -2775,20 +2783,24 @@ class WEMIRepository:
                                 evidence[cid]["matched_publishers"].append(pb)
 
                 if work_ids and norm_target_classes:
-                    class_stmt = select(distinct(works_table.c.ykl_class)).where(
+                    class_stmt = select(
+                        distinct(works_table.c.classification), works_table.c.classification_scheme
+                    ).where(
                         works_table.c.id.in_(work_ids),
-                        works_table.c.ykl_class.is_not(None),
-                        works_table.c.ykl_class != "",
+                        works_table.c.classification.is_not(None),
+                        works_table.c.classification != "",
                     )
-                    classes = conn.execute(class_stmt).scalars().all()
-                    for cl in classes:
+                    classes = conn.execute(class_stmt).all()
+                    for cl, cl_scheme in classes:
                         code = str(cl).strip().lower()
+                        cl_scheme_norm = (cl_scheme or "").strip().lower()
                         for tc in norm_target_classes:
                             t_scheme, _, t_code = tc.partition(":")
-                            if t_scheme in ("ykl", ""):
+                            t_scheme_norm = t_scheme.strip().lower()
+                            if not t_scheme_norm or not cl_scheme_norm or t_scheme_norm == cl_scheme_norm:
                                 if code.startswith(t_code) or t_code.startswith(code):
                                     evidence[cid]["has_classification_match"] = True
-                                    matched_str = f"ykl:{code}"
+                                    matched_str = f"{cl_scheme_norm or t_scheme_norm}:{code}"
                                     if matched_str not in evidence[cid]["matched_classifications"]:
                                         evidence[cid]["matched_classifications"].append(matched_str)
 

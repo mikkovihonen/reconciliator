@@ -95,7 +95,8 @@ works_table = Table(
     Column(
         "primary_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     ),
-    Column("ykl_class", String, nullable=True),
+    Column("classification", String, nullable=True),
+    Column("classification_scheme", String, nullable=True),
     Column("work_type", String, nullable=False, default="text", server_default="text"),
     Column("subjects_json", Text, nullable=False, default="[]", server_default="[]"),
     Column("serialized_text", Text, nullable=True),

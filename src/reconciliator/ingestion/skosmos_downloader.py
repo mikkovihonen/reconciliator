@@ -27,21 +27,25 @@ class SkosmosDownloader:
         self.user_agent = user_agent if user_agent is not None else get_default_user_agent()
         self.dump_urls = dump_urls or {}
 
-    def list_vocabularies(self, lang: str = "fi") -> list[dict[str, Any]]:
+    def list_vocabularies(self, lang: Optional[str] = None) -> list[dict[str, Any]]:
         """
         Query Skosmos REST API to list all available vocabularies.
 
         Returns a list of vocabulary metadata dictionaries (e.g., id, title, uri, languages).
         """
+        from reconciliator.config import get_bundled_linguistic_defaults
+
+        target_lang = lang or str(get_bundled_linguistic_defaults().get("default_language") or "")
         url = f"{self.api_url}/vocabularies"
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
         }
+        params = {"lang": target_lang} if target_lang else {}
         with httpx2.Client(
             timeout=self.timeout_seconds, headers=headers, follow_redirects=True
         ) as client:
-            resp = client.get(url, params={"lang": lang})
+            resp = client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, dict):

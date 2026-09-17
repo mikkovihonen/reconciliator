@@ -122,6 +122,11 @@ vocabularies:
     en: "en"
     eng: "en"
 
+  default_vocab_target_field: "650"
+  default_target_field: "650"
+  default_subject_field: "650"
+  default_language: "fi"
+
   ingest_pref_label_languages: null
   ingest_alt_label_languages: null
 
@@ -225,6 +230,15 @@ vocabularies:
         - '(?i)(?:^|:)yso-aika:(p\d+)'
         - '^(p\d+)$'
       canonical_id_case: "lower"
+    YSO-PAIKAT:
+      prefix: "yso-paikat"
+      uri_template: "http://www.yso.fi/onto/yso-paikat/{id}"
+      id_patterns:
+        - '(?i)onto/yso-paikat/(p\d+)'
+        - '(?i)\(fi-yso-paikat\)(p\d+)'
+        - '(?i)(?:^|:)yso-paikat:(p\d+)'
+        - '^(p\d+)$'
+      canonical_id_case: "lower"
     MUSO:
       prefix: "muso"
       uri_template: "http://www.yso.fi/onto/muso/{id}"
@@ -323,6 +337,9 @@ vocabularies:
     orcid: "P496"
 
 record_normalization:
+  strip_isbd_punctuation: true
+  isbd_punctuation: " ./,;:"
+
   non_filing_articles:
     fi: ["yksi ", "eräs "]
     sv: ["en ", "ett ", "den ", "det ", "de "]
@@ -662,4 +679,341 @@ enrichment:
       other_manifestation: "Other edition"
       reproduction: "Preservation copy or digital surrogate"
       bound_with: "Bound with"
+
+sources:
+  wikidata:
+    uri_patterns:
+      - "^https?://(?:www\\.)?wikidata\\.org/(?:wiki|entity)/"
+    canonical_uri_template: "http://www.wikidata.org/entity/{identifier}"
+    tag_prefixes: []
+    aliases: []
+    identifier_pattern: "^Q\\d+$"
+    uppercase_identifier: true
+    subfield: "1"
+  isni:
+    uri_patterns:
+      - "^https?://(?:www\\.)?isni\\.org/isni/"
+    canonical_uri_template: "https://isni.org/isni/{identifier}"
+    tag_prefixes: ["isni"]
+    aliases: []
+    subfield: "0"
+  viaf:
+    uri_patterns:
+      - "^https?://viaf\\.org/viaf/"
+    canonical_uri_template: "https://viaf.org/viaf/{identifier}"
+    tag_prefixes: ["viaf"]
+    aliases: []
+    subfield: "0"
+  orcid:
+    uri_patterns:
+      - "^https?://orcid\\.org/"
+    canonical_uri_template: "https://orcid.org/{identifier}"
+    tag_prefixes: ["orcid"]
+    aliases: []
+    subfield: "0"
+  kanto:
+    uri_patterns:
+      - "^https?://urn\\.fi/URN:NBN:fi:au:pn:"
+      - "^https?://urn\\.fi/URN:NBN:fi:au:cn:"
+    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:pn:{identifier}"
+    tag_prefixes: ["(fi-asteri-n)", "asteri", "kanto"]
+    aliases: ["finaf", "asteri"]
+    subfield: "0"
+  melinda:
+    uri_patterns: []
+    canonical_uri_template: null
+    tag_prefixes: ["(fin11)", "melinda"]
+    aliases: []
+    subfield: "0"
+  slm:
+    uri_patterns:
+      - "^https?://urn\\.fi/URN:NBN:fi:au:slm:"
+      - "^https?://finto\\.fi/slm/[a-z]{2}/page/"
+    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:slm:{identifier}"
+    tag_prefixes: ["slm"]
+  seko:
+    uri_patterns:
+      - "^https?://urn\\.fi/URN:NBN:fi:au:seko:"
+      - "^https?://finto\\.fi/seko/[a-z]{2}/page/"
+    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:seko:{identifier}"
+    tag_prefixes: ["seko"]
+  mts:
+    uri_patterns:
+      - "^https?://urn\\.fi/URN:NBN:fi:au:mts:"
+    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:mts:{identifier}"
+    tag_prefixes: ["mts"]
+  urn:
+    uri_patterns:
+      - "^https?://urn\\.fi/URN:NBN:fi:"
+    canonical_uri_template: "urn:nbn:fi:{identifier}"
+    tag_prefixes: []
+  yso:
+    uri_patterns:
+      - "^https?://finto\\.fi/yso/[a-z]{2}/page/"
+      - "^http://www\\.yso\\.fi/onto/yso/"
+    canonical_uri_template: "http://www.yso.fi/onto/yso/{identifier}"
+    tag_prefixes: ["yso"]
+  yso-aika:
+    uri_patterns:
+      - "^https?://finto\\.fi/yso-aika/[a-z]{2}/page/"
+      - "^http://www\\.yso\\.fi/onto/yso-aika/"
+    canonical_uri_template: "http://www.yso.fi/onto/yso-aika/{identifier}"
+    tag_prefixes: ["yso-aika", "(fi-yso-aika)"]
+  yso-paikat:
+    uri_patterns:
+      - "^https?://finto\\.fi/yso-paikat/[a-z]{2}/page/"
+      - "^http://www\\.yso\\.fi/onto/yso-paikat/"
+    canonical_uri_template: "http://www.yso.fi/onto/yso-paikat/{identifier}"
+    tag_prefixes: ["yso-paikat", "(fi-yso-paikat)", "ysop"]
+  kauno:
+    uri_patterns:
+      - "^https?://finto\\.fi/kauno/[a-z]{2}/page/"
+      - "^http://www\\.yso\\.fi/onto/kauno/"
+    canonical_uri_template: "http://www.yso.fi/onto/kauno/{identifier}"
+    tag_prefixes: ["kauno"]
+  muso:
+    uri_patterns:
+      - "^https?://finto\\.fi/muso/[a-z]{2}/page/"
+      - "^http://www\\.yso\\.fi/onto/muso/"
+    canonical_uri_template: "http://www.yso.fi/onto/muso/{identifier}"
+    tag_prefixes: ["muso"]
+  ysa:
+    uri_patterns:
+      - "^https?://(?:www\\.)?yso\\.fi/onto/ysa/"
+    canonical_uri_template: "http://www.yso.fi/onto/ysa/{identifier}"
+    tag_prefixes: ["ysa"]
+  allars:
+    uri_patterns:
+      - "^https?://(?:www\\.)?yso\\.fi/onto/allars/"
+    canonical_uri_template: "http://www.yso.fi/onto/allars/{identifier}"
+    tag_prefixes: ["allars"]
+  kaunokki:
+    uri_patterns:
+      - "^https?://(?:www\\.)?yso\\.fi/onto/kaunokki/"
+      - "^https?://urn\\.fi/URN:NBN:fi:au:kaunokki:"
+    canonical_uri_template: "http://www.yso.fi/onto/kaunokki/{identifier}"
+    tag_prefixes: ["kaunokki"]
+  bella:
+    uri_patterns:
+      - "^https?://(?:www\\.)?yso\\.fi/onto/bella/"
+      - "^https?://urn\\.fi/URN:NBN:fi:au:bella:"
+    canonical_uri_template: "http://www.yso.fi/onto/bella/{identifier}"
+    tag_prefixes: ["bella"]
+  musa:
+    uri_patterns:
+      - "^https?://(?:www\\.)?yso\\.fi/onto/musa/"
+      - "^https?://urn\\.fi/URN:NBN:fi:au:musa:"
+    canonical_uri_template: "http://www.yso.fi/onto/musa/{identifier}"
+    tag_prefixes: ["musa"]
+  cilla:
+    uri_patterns:
+      - "^https?://(?:www\\.)?yso\\.fi/onto/cilla/"
+      - "^https?://urn\\.fi/URN:NBN:fi:au:cilla:"
+    canonical_uri_template: "http://www.yso.fi/onto/cilla/{identifier}"
+    tag_prefixes: ["cilla"]
+  loc:
+    uri_patterns:
+      - "^http://id\\.loc\\.gov/authorities/names/"
+    canonical_uri_template: "http://id.loc.gov/authorities/names/{identifier}"
+    tag_prefixes: ["loc"]
+  marcrelator:
+    uri_patterns:
+      - "^http://id\\.loc\\.gov/vocabulary/relators/"
+    canonical_uri_template: "http://id.loc.gov/vocabulary/relators/{identifier}"
+    tag_prefixes: ["relator", "marcrelator"]
+  bnf:
+    uri_patterns:
+      - "^https?://data\\.bnf\\.fr/ark:/12148/cb"
+    canonical_uri_template: "https://data.bnf.fr/ark:/12148/cb{identifier}"
+    tag_prefixes: ["bnf"]
+  gnd:
+    uri_patterns:
+      - "^https?://d-nb\\.info/gnd/"
+    canonical_uri_template: "https://d-nb.info/gnd/{identifier}"
+    tag_prefixes: ["gnd"]
+
+classification:
+  default_scheme: "ykl"
+
+digital_repositories:
+  uri_patterns:
+    - "^https?://urn\\.fi/"
+
+wikidata:
+  languages:
+    Q1412: "fin"
+    Q9027: "swe"
+    Q1860: "eng"
+    Q188: "ger"
+    Q150: "fre"
+    Q7737: "rus"
+    Q25167: "sme"
+    Q33454: "smn"
+    Q33987: "sms"
+    Q9056: "est"
+    Q25258: "dan"
+    Q9043: "nor"
+  subject_mappings:
+    topical: "yso"
+    genre_form: "slm"
+    geographic: "yso"
+    medium_of_performance: "seko"
+
+compute:
+  device: "auto"
+  threads: null
+
+storage:
+  data_dir: "data"
+  postgres:
+    host: "localhost"
+    port: 5432
+    database: "reconciliator"
+    user: "postgres"
+    password: "postgres"
+    database_url: null
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30.0
+    pool_recycle: 1800
+    pool_pre_ping: true
+    shared_buffers: "1GB"
+    work_mem: "64MB"
+    maintenance_work_mem: "256MB"
+    effective_cache_size: "3GB"
+    random_page_cost: 1.1
+    synchronous_commit: "off"
+    container_name: "reconciliator-pg"
+    container_image: "docker.io/library/postgres:16-alpine"
+    auto_start_container: true
+  vector_engine:
+    backend: "auto"
+    device: "auto"
+    mode: "embedded"
+    threads: null
+    torch:
+      dtype: "float32"
+      mmap: false
+      chunk_size: 50000
+      initial_capacity: 10000
+    faiss:
+      index_type: "flat"
+      mmap: false
+      nprobe: 16
+      nlist: 2048
+    usearch:
+      metric: "cos"
+      dtype: "f16"
+      connectivity: 16
+      expansion_add: 128
+      expansion_search: 64
+      mmap: true
+    daemon:
+      enabled: true
+      socket_path: null
+      auto_start: true
+      idle_timeout_seconds: 1800
+      auto_save_interval_seconds: 60
+      heartbeat_interval_seconds: 2.0
+      max_batch_bytes: 67108864
+  fts:
+    ranking_function: "bm25"
+    column_weights: null
+    default_limit: 20
+    prefix_search: false
+
+embedding:
+  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
+  template_path: "reconciliator/templates/default_serialization.j2"
+  device: "auto"
+  batch_size: 64
+  vector_dim: null
+  force_template: false
+  max_seq_length: null
+
+reconcile:
+  threshold: 0.85
+  format: "marcxml"
+  enrich: true
+  fold_legacy: true
+  link_policy: "priority_fallback"
+  rerank:
+    enabled: false
+    engine: "bm25"
+    dense_weight: 0.5
+    rerank_weight: 0.5
+    top_k: 20
+    short_circuit:
+      enabled: false
+      threshold: 0.98
+    require_volume_match: true
+    require_surname_match: true
+    max_year_difference: 5
+    year_penalty_threshold: 1
+    device: "auto"
+    batch_size: 16
+  cluster:
+    enabled: false
+    similarity_threshold: 0.85
+    multiplex: false
+    multiplex_layers:
+      - "primary_author_title"
+      - "isbn"
+      - "issn"
+      - "ismn"
+      - "isrc"
+      - "ean"
+      - "doi"
+      - "urn"
+      - "record_id"
+      - "work_key"
+      - "music_work_key"
+      - "standard_key"
+    message_passing: true
+    reconcile_items: false
+  fts_fallback:
+    enabled: false
+    threshold: 0.70
+    min_word_len: 3
+
+consolidation:
+  enabled: true
+  use_wikidata_qid: true
+  use_shared_identifiers: true
+  use_metadata: true
+  strong_identifier_schemes:
+    - "isbn"
+    - "issn"
+    - "ismn"
+    - "isrc"
+    - "ean"
+    - "doi"
+    - "urn"
+    - "asteri"
+  metadata_threshold: 0.93
+  include_same_source: false
+  canonical_source_priority: []
+
+telemetry:
+  heartbeat_interval_seconds: 60.0
+  watch_interval_seconds: 5.0
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  log_file: null
+  capture_warnings: false
+
+constituents:
+  profile: null
+  mode: "keys_only"
+  index_works: false
+
+funnels:
+  audiobook:
+    default_language: "fin"
+    title_suffix: " (äänikirja)"
+    undefined_language: "und"
+
 

@@ -47,20 +47,14 @@ from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 
 logger = logging.getLogger(__name__)
 
-WIKIDATA_LANG_MAP = {
-    "Q1412": "fin",
-    "Q9027": "swe",
-    "Q1860": "eng",
-    "Q188": "ger",
-    "Q150": "fre",
-    "Q7737": "rus",
-    "Q25167": "sme",
-    "Q33454": "smn",
-    "Q33987": "sms",
-    "Q9056": "est",
-    "Q25258": "dan",
-    "Q9043": "nor",
-}
+from reconciliator.config import get_bundled_defaults
+
+WIKIDATA_LANG_MAP = dict(
+    get_bundled_defaults().get("wikidata", {}).get("languages") or {}
+)
+WIKIDATA_PREF_LANGS: list[str] = list(
+    get_bundled_defaults().get("vocabularies", {}).get("preferred_label_languages") or []
+)
 
 BIB_INDICATORS = (
     b'"P212"',
@@ -187,7 +181,7 @@ def _extract_author_data(
         return None
 
     name_val = ""
-    for lang in ("fi", "sv", "en"):
+    for lang in WIKIDATA_PREF_LANGS:
         if lang in labels:
             name_val = labels[lang].get("value", "")
             if name_val:
@@ -236,7 +230,7 @@ def _extract_author_data(
     aliases_list: list[str] = []
     aliases_dict = entity.get("aliases", {})
     if isinstance(aliases_dict, dict):
-        for lang in ("fi", "sv", "en"):
+        for lang in WIKIDATA_PREF_LANGS:
             if lang in aliases_dict:
                 for a_item in aliases_dict[lang]:
                     val = a_item.get("value") if isinstance(a_item, dict) else None
@@ -247,7 +241,7 @@ def _extract_author_data(
     desc_val: Optional[str] = None
     descriptions = entity.get("descriptions", {})
     if isinstance(descriptions, dict):
-        for lang in ("fi", "sv", "en"):
+        for lang in WIKIDATA_PREF_LANGS:
             if lang in descriptions:
                 d_item = descriptions[lang]
                 if isinstance(d_item, dict) and d_item.get("value"):
@@ -367,7 +361,7 @@ def parse_wikidata_entity(
         title = p1476_val
 
     if not title:
-        for lang in ("fi", "sv", "en"):
+        for lang in WIKIDATA_PREF_LANGS:
             if lang in labels:
                 title = labels[lang].get("value", "")
                 if title:
@@ -399,7 +393,7 @@ def parse_wikidata_entity(
     # Variant Titles from aliases
     variant_titles: list[str] = []
     aliases = entity.get("aliases", {})
-    for lang in ("fi", "sv", "en"):
+    for lang in WIKIDATA_PREF_LANGS:
         for alias_item in aliases.get(lang, []):
             val = alias_item.get("value")
             if val and val not in variant_titles and val != title:
@@ -598,25 +592,35 @@ def parse_wikidata_entity(
     geo_field = cat_defaults["geographic"]
     mop_field = cat_defaults["medium_of_performance"]
 
+    subj_mappings = dict(
+        get_bundled_defaults().get("wikidata", {}).get("subject_mappings")
+        or {
+            "topical": "yso",
+            "genre_form": "slm",
+            "geographic": "yso",
+            "medium_of_performance": "seko",
+        }
+    )
+
     for s_qid in get_claim_qids(claims, "P921"):
         s_heading = _lookup_entity_name(s_qid, store) or s_qid
         subjects["topical"].append(
-            {"heading": s_heading, "field": topical_field, "vocabulary": "yso", "uri": None}
+            {"heading": s_heading, "field": topical_field, "vocabulary": subj_mappings.get("topical", "yso"), "uri": None}
         )
     for g_qid in get_claim_qids(claims, "P136"):
         g_heading = _lookup_entity_name(g_qid, store) or g_qid
         subjects["genre_form"].append(
-            {"heading": g_heading, "field": genre_field, "vocabulary": "slm", "uri": None}
+            {"heading": g_heading, "field": genre_field, "vocabulary": subj_mappings.get("genre_form", "slm"), "uri": None}
         )
     for geo_qid in get_claim_qids(claims, "P840"):
         geo_heading = _lookup_entity_name(geo_qid, store) or geo_qid
         subjects["geographic"].append(
-            {"heading": geo_heading, "field": geo_field, "vocabulary": "yso", "uri": None}
+            {"heading": geo_heading, "field": geo_field, "vocabulary": subj_mappings.get("geographic", "yso"), "uri": None}
         )
     for mus_qid in get_claim_qids(claims, "P870"):
         mus_heading = _lookup_entity_name(mus_qid, store) or mus_qid
         subjects["medium_of_performance"].append(
-            {"heading": mus_heading, "field": mop_field, "vocabulary": "seko", "uri": None}
+            {"heading": mus_heading, "field": mop_field, "vocabulary": subj_mappings.get("medium_of_performance", "seko"), "uri": None}
         )
 
     return {
@@ -847,7 +851,7 @@ def decompose_wikidata_entity(
         title = p1476_val
 
     if not title:
-        for lang_code in ("fi", "sv", "en"):
+        for lang_code in WIKIDATA_PREF_LANGS:
             if lang_code in labels:
                 title = labels[lang_code].get("value", "")
                 if title:

@@ -70,30 +70,22 @@ class FoldedSubject:
         }
 
 
-#: Finto URI shapes that name their vocabulary in a path segment:
-#: `http://www.yso.fi/onto/<vocab>/<id>` and
-#: `http://urn.fi/URN:NBN:fi:au:<vocab>:<id>`.
-_FINTO_ONTO_RE = re.compile(r"/onto/([a-z0-9-]+)/", re.IGNORECASE)
-_FINTO_URN_RE = re.compile(r"urn:nbn:fi:au:([a-z0-9-]+):", re.IGNORECASE)
-
-
 def vocabulary_hint_from_uri(uri: Optional[str]) -> Optional[str]:
-    """The vocabulary a Finto URI names in its own path.
-
-    `detect_vocabulary` recognises only the vocabularies in the URI pattern
-    table, and that table lists the *modern* ones - there is no pattern for ysa,
-    allars, musa or kaunokki, because a record referring to those declares them
-    in MARC `$2`. A BIBFRAME subject has no `$2`: it is a URI and nothing else,
-    so a legacy heading arrived with no vocabulary at all and was dropped from
-    the footprint. Reading the segment lets `legacy_to_modern` do its job on
-    either format.
-    """
+    """The vocabulary a URI names in its own path or CURIE prefix."""
     if not uri:
         return None
-    for pattern in (_FINTO_ONTO_RE, _FINTO_URN_RE):
-        match = pattern.search(uri)
-        if match:
-            return match.group(1).lower()
+    from reconciliator.curie import parse_curie
+
+    src, _ = parse_curie(uri)
+    if src and src != "unknown":
+        return src.lower()
+
+    onto_m = re.search(r"/(?:onto|vocabulary|vocab|concept)/([a-z0-9-]+)/", uri, re.IGNORECASE)
+    if onto_m:
+        return onto_m.group(1).lower()
+    urn_m = re.search(r"urn:[a-z0-9-]+(?::[a-z0-9-]+)*:([a-z0-9-]+):", uri, re.IGNORECASE)
+    if urn_m:
+        return urn_m.group(1).lower()
     return None
 
 

@@ -421,10 +421,15 @@ def parse_marc_record_elem(
                 series_numbering = _get_subfield(sf, "v")
 
     # Classifications
+    from reconciliator.config import get_bundled_defaults
+
     classifications: list[tuple[str, str]] = []
+    default_scheme = str(
+        get_bundled_defaults().get("classification", {}).get("default_scheme") or ""
+    )
     for f in _get_datafields(record_elem, "084"):
         code = _get_subfield(f, "a")
-        scheme = _get_subfield(f, "2") or "ykl"
+        scheme = _get_subfield(f, "2") or default_scheme
         if code:
             classifications.append((code, scheme))
 
@@ -503,9 +508,16 @@ def parse_marc_record_elem(
         else:
             other_ids.append(val_024)
 
+    repo_patterns = [
+        re.compile(p, re.I)
+        for p in get_bundled_defaults()
+        .get("digital_repositories", {})
+        .get("uri_patterns")
+        or []
+    ]
     for f in _get_datafields(record_elem, "856"):
         u = _get_subfield(f, "u")
-        if u and "urn.fi" in u.lower():
+        if u and any(p.search(u) for p in repo_patterns):
             urns.append(u)
 
     for f in _get_datafields(record_elem, "035"):
@@ -1799,16 +1811,18 @@ def decompose_marc_wemi(
             flat_subjects.append({"heading": vt, "pref_label": vt, "kind": "variant_title"})
 
     # Primary classification
-    ykl_class = None
+    classification = None
+    classification_scheme = None
     for c in parsed["classifications"]:
         if isinstance(c, tuple) and len(c) >= 2:
-            code, scheme = c[0], c[1]
-            if scheme.lower() == "ykl":
-                ykl_class = code
-                break
+            classification, classification_scheme = c[0], c[1]
+            break
         elif isinstance(c, dict):
-            if c.get("is_primary") or c.get("scheme", "").lower() == "ykl":
-                ykl_class = c.get("code")
+            classification = c.get("code")
+            classification_scheme = c.get("scheme")
+            if c.get("is_primary"):
+                break
+            if classification:
                 break
 
     # 1. Work Entity
@@ -1827,7 +1841,8 @@ def decompose_marc_wemi(
         original_language=orig_lang,
         work_type=work_type,
         subjects_json=flat_subjects,
-        ykl_class=ykl_class,
+        classification=classification,
+        classification_scheme=classification_scheme,
     )
 
     # 2. Expression Entity
