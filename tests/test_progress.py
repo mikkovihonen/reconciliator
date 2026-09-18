@@ -515,3 +515,45 @@ def test_render_vector_daemon_panel_unsaved_rendering() -> None:
     text = console.export_text()
     assert "*UNSAVED" in text
     assert "[bold red]" not in text
+
+
+def test_telemetry_slices_display(progress_db: Path) -> None:
+    from rich.console import Console
+
+    tracker = ProgressTracker(
+        db_path=progress_db,
+        task_id="oai-ingest-partition-test",
+        task_type="oai_pmh_harvest",
+    )
+    tracker.start_task(
+        stage="harvest_and_index",
+        metadata={"harvested": 0, "indexed": 0, "skipped": 0, "slices_done": 0, "slices_total": 10},
+    )
+    tracker.update_progress(
+        stage="harvest_and_index",
+        items_processed=197,
+        percentage=25.0,
+        metadata={"harvested": 197, "indexed": 197, "skipped": 0, "slices_done": 5, "slices_total": 20},
+        force=True,
+    )
+
+    tasks = list_tasks(progress_db)
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.percentage == 25.0
+    assert task.items_processed == 197
+
+    console = Console(record=True, width=200)
+    table = format_task_table(tasks)
+    console.print(table)
+    table_text = console.export_text()
+    assert "197 indexed, 0 skipped (197 fetched) [5/20 slices]" in table_text
+    assert "25.0%" in table_text
+
+    tui = render_telemetry_tui(tasks, db_path=progress_db)
+    console = Console(record=True, width=200)
+    console.print(tui)
+    tui_text = console.export_text()
+    assert "197 indexed, 0 skipped (197 fetched) [5/20 slices]" in tui_text
+    assert "25.0%" in tui_text
+

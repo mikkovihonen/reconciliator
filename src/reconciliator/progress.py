@@ -27,7 +27,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.db import get_engine, task_progress_table
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
-from reconciliator.utils.durations import parse_duration_seconds
+from reconciliator.utils.durations import parse_duration_seconds as parse_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class ProgressTracker:
         self,
         db_path: Path | str | None = None,
         task_id: str = "",
-        task_type: TaskType = "reconcile",
+        task_type: TaskType = "reconciliation",
         heartbeat_interval: float = 1.0,
         engine: Optional[Engine] = None,
     ) -> None:
@@ -71,6 +71,7 @@ class ProgressTracker:
         self._items_total: Optional[int] = None
         self._bytes_processed = 0
         self._bytes_total: Optional[int] = None
+        self._percentage: Optional[float] = None
         self._current_stage = "pending"
         self._status: TaskStatus = "running"
         self._metadata: dict[str, Any] = {}
@@ -145,6 +146,7 @@ class ProgressTracker:
         items_total: Optional[int] = None,
         bytes_processed: Optional[int] = None,
         bytes_total: Optional[int] = None,
+        percentage: Optional[float] = None,
         metadata: Optional[dict[str, Any]] = None,
         force: bool = False,
     ) -> None:
@@ -164,6 +166,9 @@ class ProgressTracker:
             if bytes_processed is not None:
                 self._bytes_processed = bytes_processed
 
+            if percentage is not None:
+                self._percentage = percentage
+
             if metadata:
                 self._metadata.update(metadata)
 
@@ -175,7 +180,7 @@ class ProgressTracker:
         elapsed = max(now_sec - self._start_time_sec, 0.001)
         rate = self._items_processed / elapsed
 
-        percentage = 0.0
+        percentage = self._percentage or 0.0
         if self._items_total and self._items_total > 0:
             percentage = min(100.0, (self._items_processed / self._items_total) * 100.0)
         elif self._bytes_total and self._bytes_total > 0:
@@ -207,6 +212,7 @@ class ProgressTracker:
         with self._lock:
             self._status = "completed"
             self._current_stage = "completed"
+            self._percentage = 100.0
             if self._items_total and self._items_processed < self._items_total:
                 self._items_processed = self._items_total
             if metadata:
@@ -371,10 +377,16 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
                 count_str = f"{meta['indexed']:,} indexed, {meta['skipped']:,} skipped ({meta['harvested']:,} fetched)"
             else:
                 count_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
+            if meta.get("slices_total"):
+                count_str += f" [{meta.get('slices_done', 0)}/{meta['slices_total']} slices]"
         else:
             total_str = f"{t.items_total:,}" if t.items_total is not None else "?"
             count_str = f"{t.items_processed:,} / {total_str}"
-        pct_str = f"{t.percentage:.1f}%"
+
+        pct_val = t.percentage
+        if pct_val <= 0 and meta.get("slices_total"):
+            pct_val = min(100.0, (meta.get("slices_done", 0) / meta["slices_total"]) * 100.0)
+        pct_str = f"{pct_val:.1f}%"
         rate_str = f"{t.rate_per_sec:.1f}/s"
 
         table.add_row(
@@ -563,8 +575,6 @@ def render_telemetry_tui(
             else:
                 status_badge = f"[dim]{t.status.upper()}[/]"
 
-            pct_str = f"[bold green]{t.percentage:.1f}%[/]" if t.percentage > 0 else "0.0%"
-
             meta: dict[str, Any] = {}
             if t.metadata_json:
                 try:
@@ -572,11 +582,18 @@ def render_telemetry_tui(
                 except Exception:
                     pass
 
+            pct_val = t.percentage
+            if pct_val <= 0 and meta.get("slices_total"):
+                pct_val = min(100.0, (meta.get("slices_done", 0) / meta["slices_total"]) * 100.0)
+            pct_str = f"[bold green]{pct_val:.1f}%[/]" if pct_val > 0 else "0.0%"
+
             if meta.get("harvested") is not None and meta.get("indexed") is not None:
                 if "skipped" in meta:
                     counts_str = f"{meta['indexed']:,} indexed, {meta['skipped']:,} skipped ({meta['harvested']:,} fetched)"
                 else:
                     counts_str = f"{meta['indexed']:,} indexed ({meta['harvested']:,} fetched)"
+                if meta.get("slices_total"):
+                    counts_str += f" [{meta.get('slices_done', 0)}/{meta['slices_total']} slices]"
             elif t.items_total is not None or t.items_processed > 0:
                 tot_str = f"{t.items_total:,}" if t.items_total is not None else "?"
                 counts_str = f"{t.items_processed:,} / {tot_str}"

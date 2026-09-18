@@ -258,8 +258,9 @@ class WEMIRepository:
         if not agents:
             return []
 
-        rows: list[dict[str, Any]] = []
+        deduped_rows: dict[tuple[str, str], dict[str, Any]] = {}
         for agent in agents:
+            key = (agent.source, agent.source_id)
             agent_meta: dict[str, Any] = {}
             if agent.metadata_json:
                 try:
@@ -282,7 +283,7 @@ class WEMIRepository:
                 agent_meta["variant_names"] = agent.variant_names
             meta_str = json.dumps(agent_meta, ensure_ascii=False) if agent_meta else None
 
-            rows.append({
+            row = {
                 "source": agent.source,
                 "source_id": agent.source_id,
                 "record_origin": agent.record_origin,
@@ -298,8 +299,16 @@ class WEMIRepository:
                 "metadata_json": meta_str,
                 "is_personal": bool(agent.is_personal),
                 "is_fictional": bool(agent.is_fictional),
-            })
+            }
+            if key in deduped_rows:
+                existing = deduped_rows[key]
+                for field, val in row.items():
+                    if val is not None:
+                        existing[field] = val
+            else:
+                deduped_rows[key] = row
 
+        rows = list(deduped_rows.values())
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
@@ -359,9 +368,10 @@ class WEMIRepository:
         if not works:
             return []
 
-        rows: list[dict[str, Any]] = []
+        deduped_rows: dict[tuple[str, str], dict[str, Any]] = {}
         for work in works:
-            rows.append({
+            key = (work.source, work.source_id)
+            row = {
                 "source": work.source,
                 "source_id": work.source_id,
                 "record_origin": work.record_origin,
@@ -374,8 +384,16 @@ class WEMIRepository:
                 "work_type": work.work_type,
                 "subjects_json": json.dumps(work.subjects_json, ensure_ascii=False),
                 "serialized_text": work.serialized_text,
-            })
+            }
+            if key in deduped_rows:
+                existing = deduped_rows[key]
+                for field, val in row.items():
+                    if val is not None:
+                        existing[field] = val
+            else:
+                deduped_rows[key] = row
 
+        rows = list(deduped_rows.values())
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
@@ -464,9 +482,10 @@ class WEMIRepository:
         if not expressions:
             return []
 
-        rows: list[dict[str, Any]] = []
+        deduped_rows: dict[tuple[str, str], dict[str, Any]] = {}
         for exp in expressions:
-            rows.append({
+            key = (exp.source, exp.source_id)
+            row = {
                 "work_id": exp.work_id,
                 "source": exp.source,
                 "source_id": exp.source_id,
@@ -478,8 +497,16 @@ class WEMIRepository:
                 "arrangement_note": exp.arrangement_note,
                 "medium_of_performance": exp.medium_of_performance,
                 "serialized_text": exp.serialized_text,
-            })
+            }
+            if key in deduped_rows:
+                existing = deduped_rows[key]
+                for field, val in row.items():
+                    if val is not None:
+                        existing[field] = val
+            else:
+                deduped_rows[key] = row
 
+        rows = list(deduped_rows.values())
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
@@ -523,9 +550,10 @@ class WEMIRepository:
         if not manifestations:
             return []
 
-        rows: list[dict[str, Any]] = []
+        deduped_rows: dict[tuple[str, str], dict[str, Any]] = {}
         for manif in manifestations:
-            rows.append({
+            key = (manif.source, manif.source_id)
+            row = {
                 "work_id": manif.work_id,
                 "container_id": manif.container_id,
                 "is_component": bool(manif.is_component),
@@ -550,8 +578,16 @@ class WEMIRepository:
                 "carrier_type": manif.carrier_type,
                 "host_title": manif.host_title,
                 "serialized_text": manif.serialized_text,
-            })
+            }
+            if key in deduped_rows:
+                existing = deduped_rows[key]
+                for field, val in row.items():
+                    if val is not None:
+                        existing[field] = val
+            else:
+                deduped_rows[key] = row
 
+        rows = list(deduped_rows.values())
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
@@ -639,8 +675,10 @@ class WEMIRepository:
         """Insert or replace junction associations between Manifestations and Expressions."""
         if not assocs:
             return
-        rows = [
-            {
+        deduped_rows: dict[tuple[int, int], dict[str, Any]] = {}
+        for a in assocs:
+            key = (a.manifestation_id, a.expression_id)
+            row = {
                 "manifestation_id": a.manifestation_id,
                 "expression_id": a.expression_id,
                 "track_number": a.track_number,
@@ -648,8 +686,14 @@ class WEMIRepository:
                 "duration": a.duration,
                 "is_primary": bool(a.is_primary),
             }
-            for a in assocs
-        ]
+            if key in deduped_rows:
+                existing = deduped_rows[key]
+                for field, val in row.items():
+                    if val is not None:
+                        existing[field] = val
+            else:
+                deduped_rows[key] = row
+        rows = list(deduped_rows.values())
 
         def _exec(c: Any) -> None:
             for i in range(0, len(rows), chunk_size):
@@ -770,15 +814,16 @@ class WEMIRepository:
         """
         if not keys:
             return
-        rows = [
-            {
+        deduped = {
+            (k.entity_type, k.entity_id, k.key_type, k.key_value): {
                 "entity_type": k.entity_type,
                 "entity_id": k.entity_id,
                 "key_type": k.key_type,
                 "key_value": k.key_value,
             }
             for k in keys
-        ]
+        }
+        rows = list(deduped.values())
 
         def _exec(c: Any) -> None:
             for i in range(0, len(rows), chunk_size):
@@ -984,15 +1029,16 @@ class WEMIRepository:
         """Insert WorkRelationship records in batch."""
         if not rels:
             return []
-        rows = [
-            {
+        deduped = {
+            (rel.source_work_id, rel.target_work_id, rel.relationship_type): {
                 "source_work_id": rel.source_work_id,
                 "target_work_id": rel.target_work_id,
                 "relationship_type": rel.relationship_type,
             }
             for rel in rels
-        ]
-        r_ids: list[int] = []
+        }
+        rows = list(deduped.values())
+        id_map: dict[tuple[int, int, str], int] = {}
 
         def _exec(c: Any) -> None:
             for i in range(0, len(rows), chunk_size):
@@ -1001,16 +1047,22 @@ class WEMIRepository:
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source_work_id", "target_work_id", "relationship_type"],
                     set_={"relationship_type": stmt.excluded.relationship_type},
-                ).returning(work_relationships_table.c.id)
+                ).returning(
+                    work_relationships_table.c.id,
+                    work_relationships_table.c.source_work_id,
+                    work_relationships_table.c.target_work_id,
+                    work_relationships_table.c.relationship_type,
+                )
                 res = c.execute(stmt).fetchall()
-                r_ids.extend(r[0] for r in res)
+                for r in res:
+                    id_map[(r[1], r[2], r[3])] = r[0]
 
         if conn is not None:
             _exec(conn)
         else:
             with self.get_connection() as c:
                 _exec(c)
-        return r_ids
+        return [id_map.get((r.source_work_id, r.target_work_id, r.relationship_type), 0) for r in rels]
 
     def insert_medium_of_performance_batch(
         self,
@@ -2299,7 +2351,7 @@ class WEMIRepository:
         """
         if not authors:
             return
-        agent_rows = []
+        deduped_agent_rows: dict[tuple[str, str], dict[str, Any]] = {}
         for a in authors:
             if not a.get("qid"):
                 continue
@@ -2317,20 +2369,28 @@ class WEMIRepository:
                 existing_meta["family_name"] = a["family_name"]
             metadata_json = json.dumps(existing_meta, ensure_ascii=False)
 
-            agent_rows.append(
-                {
-                    "source": "wikidata",
-                    "source_id": a["qid"],
-                    "record_origin": "wikidata",
-                    "name": a.get("name") or a["qid"],
-                    "name_normalized": (a.get("name") or a["qid"]).strip().lower(),
-                    "surname": a.get("family_name"),
-                    "birth_year": a.get("birth_year"),
-                    "death_year": a.get("death_year"),
-                    "metadata_json": metadata_json,
-                    "is_personal": True,
-                }
-            )
+            key = ("wikidata", a["qid"])
+            row = {
+                "source": "wikidata",
+                "source_id": a["qid"],
+                "record_origin": "wikidata",
+                "name": a.get("name") or a["qid"],
+                "name_normalized": (a.get("name") or a["qid"]).strip().lower(),
+                "surname": a.get("family_name"),
+                "birth_year": a.get("birth_year"),
+                "death_year": a.get("death_year"),
+                "metadata_json": metadata_json,
+                "is_personal": True,
+            }
+            if key in deduped_agent_rows:
+                existing = deduped_agent_rows[key]
+                for field, val in row.items():
+                    if val is not None:
+                        existing[field] = val
+            else:
+                deduped_agent_rows[key] = row
+
+        agent_rows = list(deduped_agent_rows.values())
         with self.get_connection() as conn:
             if agent_rows:
                 stmt = pg_insert(agents_table).values(agent_rows)
@@ -3018,8 +3078,8 @@ class WEMIRepository:
         """Batch insert or replace carrier duplicate clusters."""
         if not clusters:
             return
-        rows = [
-            {
+        deduped = {
+            c.cluster_id: {
                 "cluster_id": c.cluster_id,
                 "canonical_record_id": c.canonical_record_id,
                 "publisher": c.publisher,
@@ -3030,7 +3090,8 @@ class WEMIRepository:
                 "member_record_count": c.member_record_count,
             }
             for c in clusters
-        ]
+        }
+        rows = list(deduped.values())
         batch_size = 5000
         with self.get_corpus_connection() as conn:
             for i in range(0, len(rows), batch_size):
@@ -3054,8 +3115,8 @@ class WEMIRepository:
         """Batch insert or replace work family clusters."""
         if not clusters:
             return
-        rows = [
-            {
+        deduped = {
+            c.cluster_id: {
                 "cluster_id": c.cluster_id,
                 "work_type": c.work_type,
                 "canonical_work_source": c.canonical_work_source,
@@ -3064,7 +3125,8 @@ class WEMIRepository:
                 "canonical_author": c.canonical_author,
             }
             for c in clusters
-        ]
+        }
+        rows = list(deduped.values())
         batch_size = 5000
         with self.get_corpus_connection() as conn:
             for i in range(0, len(rows), batch_size):
@@ -3086,8 +3148,8 @@ class WEMIRepository:
         """Batch insert or replace expression realization clusters."""
         if not clusters:
             return
-        rows = [
-            {
+        deduped = {
+            c.cluster_id: {
                 "cluster_id": c.cluster_id,
                 "work_cluster_id": c.work_cluster_id,
                 "canonical_expression_source": c.canonical_expression_source,
@@ -3099,7 +3161,8 @@ class WEMIRepository:
                 "performers_json": json.dumps(c.performers_json, ensure_ascii=False),
             }
             for c in clusters
-        ]
+        }
+        rows = list(deduped.values())
         batch_size = 5000
         with self.get_corpus_connection() as conn:
             for i in range(0, len(rows), batch_size):
@@ -3124,8 +3187,8 @@ class WEMIRepository:
         """Batch insert or replace final record-to-cluster linkages."""
         if not linkages:
             return
-        rows = [
-            {
+        deduped = {
+            lnk.record_id: {
                 "record_id": lnk.record_id,
                 "manifestation_cluster_id": lnk.manifestation_cluster_id,
                 "work_cluster_id": lnk.work_cluster_id,
@@ -3137,7 +3200,8 @@ class WEMIRepository:
                 "sibling_manifestation_ids_json": lnk.sibling_manifestation_ids_json,
             }
             for lnk in linkages
-        ]
+        }
+        rows = list(deduped.values())
         batch_size = 5000
         with self.get_corpus_connection() as conn:
             for i in range(0, len(rows), batch_size):
@@ -3162,15 +3226,16 @@ class WEMIRepository:
         """Batch insert or replace sammelband item-level composite bindings."""
         if not bindings:
             return
-        rows = [
-            {
+        deduped = {
+            (b.binding_id, b.record_id): {
                 "binding_id": b.binding_id,
                 "record_id": b.record_id,
                 "sequence_in_binding": b.sequence_in_binding,
                 "binding_notes": b.binding_notes,
             }
             for b in bindings
-        ]
+        }
+        rows = list(deduped.values())
         batch_size = 5000
         with self.get_corpus_connection() as conn:
             for i in range(0, len(rows), batch_size):

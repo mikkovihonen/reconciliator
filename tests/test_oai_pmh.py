@@ -532,3 +532,47 @@ def test_ingest_oai_pipeline_preserves_skipped_in_telemetry() -> None:
     meta = tracker.complete_task.call_args.kwargs.get("metadata", {})
     assert meta.get("skipped") == 2
     assert meta.get("indexed") == 2
+
+
+def test_ingest_oai_partitioned_telemetry_with_tracker() -> None:
+    from reconciliator.config import OAIIngestConfig
+    from reconciliator.ingestion.oai import ingest_oai_pipeline
+
+    config = OAIIngestConfig(
+        source_type="oai",
+        oai_url="https://example.com/oai",
+        from_date="2021-01-01",
+        until_date="2021-01-10",
+        slice_days=2,
+    )
+    store = MagicMock()
+    store.get_harvest_state.return_value = None
+    store.get_indexed_source_ids.return_value = set()
+    tracker = MagicMock()
+    tracker.heartbeat_interval = 0.05
+
+    async def mock_harvest_partition(*args: Any, **kwargs: Any) -> Any:
+        if False:
+            yield b"", None
+
+    with patch("reconciliator.ingestion.oai.OAIPMHHarvester") as mock_harv_cls:
+        mock_harv_cls.return_value.harvest_partition = mock_harvest_partition
+        total = asyncio.run(
+            ingest_oai_pipeline(
+                "melinda",
+                config,
+                store,
+                tracker=tracker,
+            )
+        )
+
+    assert total == 0
+    tracker.start_task.assert_called_once()
+    assert tracker.update_progress.call_count >= 1
+    last_update_call = tracker.update_progress.call_args_list[-1]
+    assert last_update_call.kwargs.get("percentage") == 100.0
+    meta = last_update_call.kwargs.get("metadata", {})
+    assert meta.get("slices_total") == 3
+    assert meta.get("slices_done") == 3
+    tracker.complete_task.assert_called_once()
+

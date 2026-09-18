@@ -269,7 +269,9 @@ def write_wemi_batch(
 
     works = payload.get("works") or []
     agents = payload.get("agents") or []
-    if not (works or agents):
+    manifestations = payload.get("manifestations") or []
+    expressions = payload.get("expressions") or []
+    if not (works or agents or manifestations or expressions):
         return 0
     repo.insert_wemi_batch(
         works=works,
@@ -501,12 +503,21 @@ async def ingest_oai_pipeline(
     delivered = 0
 
     def _telemetry() -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "harvested": harvested_count,
             "indexed": total_ingested,
             "skipped": skipped_count,
             "source": source_name,
         }
+        if partitioned:
+            data["slices_done"] = len(finished_slices)
+            data["slices_total"] = len(slices)
+        return data
+
+    def _current_pct() -> Optional[float]:
+        if partitioned and slices:
+            return round((len(finished_slices) / len(slices)) * 100.0, 1)
+        return None
 
     def _save_state(
         status: str,
@@ -577,6 +588,13 @@ async def ingest_oai_pipeline(
                 if "slice_done" in payload:
                     finished_slices.append(payload["slice_done"])
                     _maybe_checkpoint(force=True)
+                    if tracker:
+                        tracker.update_progress(
+                            stage=stage_name,
+                            items_processed=total_ingested,
+                            percentage=_current_pct(),
+                            metadata=_telemetry(),
+                        )
                 elif "batch" in payload:
                     written = await loop.run_in_executor(
                         None,
@@ -592,12 +610,48 @@ async def ingest_oai_pipeline(
                         tracker.update_progress(
                             stage=stage_name,
                             items_processed=snapshot["indexed"],
+                            percentage=_current_pct(),
                             metadata=snapshot if is_oai else None,
+                            force=True,
                         )
             finally:
                 batch_queue.task_done()
 
     writer_task = asyncio.create_task(db_writer())
+
+    async def enqueue_batch(payload: Any) -> None:
+        while True:
+            if writer_task.done():
+                exc = writer_task.exception()
+                if exc:
+                    raise exc
+                raise RuntimeError("db_writer task finished unexpectedly")
+            try:
+                await asyncio.wait_for(batch_queue.put(payload), timeout=1.0)
+                break
+            except asyncio.TimeoutError:
+                continue
+
+    heartbeat_task: Optional[asyncio.Task[None]] = None
+    if tracker:
+        interval = getattr(tracker, "heartbeat_interval", 1.0)
+        if not isinstance(interval, (int, float)) or interval <= 0:
+            interval = 1.0
+
+        async def _heartbeat_runner() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(interval)
+                    tracker.update_progress(
+                        stage=stage_name,
+                        items_processed=total_ingested,
+                        percentage=_current_pct(),
+                        metadata=_telemetry(),
+                    )
+            except asyncio.CancelledError:
+                pass
+
+        heartbeat_task = asyncio.create_task(_heartbeat_runner())
 
     try:
         if not is_oai:
@@ -621,9 +675,9 @@ async def ingest_oai_pipeline(
                         continue
                 acc.add(item)
                 if acc.pending >= effective_config.batch_size:
-                    await batch_queue.put({"batch": acc.take()})
+                    await enqueue_batch({"batch": acc.take()})
             if acc.pending:
-                await batch_queue.put({"batch": acc.take()})
+                await enqueue_batch({"batch": acc.take()})
         else:
             # OAI-PMH harvest with ProcessPoolExecutor and AsyncIO
             process_pool = ProcessPoolExecutor(max_workers=effective_config.workers)
@@ -672,13 +726,21 @@ async def ingest_oai_pipeline(
                     if not partitioned:
                         pending_tokens.append((delivered, next_token))
 
-                    if batch_payload.get("works") or batch_payload.get("agents"):
-                        await batch_queue.put({"batch": batch_payload})
+                    if batch_payload.get("record_count", 0) > 0 or any(
+                        batch_payload.get(k)
+                        for k in ("works", "agents", "expressions", "manifestations")
+                    ):
+                        await enqueue_batch({"batch": batch_payload})
 
-                    if tracker and (harvested_count % 200 == 0):
-                        tracker.update_progress(stage=stage_name, metadata=_telemetry())
+                    if tracker:
+                        tracker.update_progress(
+                            stage=stage_name,
+                            items_processed=total_ingested,
+                            percentage=_current_pct(),
+                            metadata=_telemetry(),
+                        )
 
-                await batch_queue.put({"slice_done": (slice_from, slice_until)})
+                await enqueue_batch({"slice_done": (slice_from, slice_until)})
 
             try:
                 if pending_slices:
@@ -693,7 +755,7 @@ async def ingest_oai_pipeline(
             finally:
                 process_pool.shutdown(wait=False)
 
-        await batch_queue.put(sentinel)
+        await enqueue_batch(sentinel)
         await writer_task
 
         _maybe_checkpoint(force=True)
@@ -702,14 +764,22 @@ async def ingest_oai_pipeline(
 
     except Exception as exc:
         try:
-            await batch_queue.put(sentinel)
-            await writer_task
+            if not writer_task.done():
+                await batch_queue.put(sentinel)
+                await writer_task
         except Exception:
             pass
         _maybe_checkpoint(force=True)
         if tracker:
             tracker.fail_task(error_message=str(exc))
         raise
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
     if skipped_count > 0:
         logger.info(

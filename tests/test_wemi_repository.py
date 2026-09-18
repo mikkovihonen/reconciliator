@@ -1,6 +1,7 @@
 """Unit tests for WEMIRepository batch operations, navigation, FTS, and vector search."""
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -9,6 +10,7 @@ from reconciliator.indexer import TorchVectorEngine
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
+    EntityKey,
     ExpressionEntity,
     HarvestState,
     IdentifierEntity,
@@ -615,3 +617,77 @@ def test_wemi_repository_dynamic_author_identifiers_option3(repo: WEMIRepository
 # The AuthorityStore source_identifier_templates variant expansion is gone by
 # design: WEMI stores canonical source_ids, so get_indexed_source_ids returns
 # them as-is. Covered by test_wemi_repository_get_indexed_source_ids_variants.
+
+
+def test_wemi_repository_intra_batch_duplicates_postgres(tmp_storage: Any) -> None:
+    """Verify that batch inserts with duplicate keys in the same batch do not trigger
+    psycopg.errors.CardinalityViolation on PostgreSQL ON CONFLICT DO UPDATE.
+    """
+    repo = WEMIRepository(
+        db_path=tmp_storage.database_url,
+        dimension=4,
+    )
+    # Duplicate agents in the same batch
+    agent1 = AgentEntity(
+        source="melinda",
+        source_id="dup1",
+        name="Author One",
+        name_normalized="author one",
+        surname="One",
+    )
+    agent2 = AgentEntity(
+        source="melinda",
+        source_id="dup1",
+        name="Author One Updated",
+        name_normalized="author one updated",
+        surname="One",
+    )
+    ids = repo.insert_agents_batch([agent1, agent2])
+    assert len(ids) == 2
+    assert ids[0] == ids[1]
+    assert ids[0] > 0
+    fetched = repo.get_agent(ids[0])
+    assert fetched is not None
+    assert fetched.name == "Author One Updated"
+
+    # Duplicate works in the same batch
+    work1 = WorkEntity(source="melinda", source_id="w1", title="Title A", title_normalized="title a")
+    work2 = WorkEntity(source="melinda", source_id="w1", title="Title A Updated", title_normalized="title a updated")
+    w_ids = repo.insert_works_batch([work1, work2])
+    assert len(w_ids) == 2
+    assert w_ids[0] == w_ids[1]
+
+    # Duplicate manifestations in the same batch
+    manif1 = ManifestationEntity(source="melinda", source_id="m1", title="Title M", title_normalized="title m")
+    manif2 = ManifestationEntity(source="melinda", source_id="m1", title="Title M Updated", title_normalized="title m updated")
+    m_ids = repo.insert_manifestations_batch([manif1, manif2])
+    assert len(m_ids) == 2
+    assert m_ids[0] == m_ids[1]
+
+    # Duplicate expressions
+    expr1 = ExpressionEntity(source="melinda", source_id="e1", work_id=w_ids[0], language="fin")
+    expr2 = ExpressionEntity(source="melinda", source_id="e1", work_id=w_ids[0], language="fin")
+    e_ids = repo.insert_expressions_batch([expr1, expr2])
+    assert len(e_ids) == 2
+    assert e_ids[0] == e_ids[1]
+
+    # Duplicate manifestation-expression links
+    assoc1 = ManifestationExpressionAssociation(manifestation_id=m_ids[0], expression_id=e_ids[0])
+    assoc2 = ManifestationExpressionAssociation(manifestation_id=m_ids[0], expression_id=e_ids[0])
+    repo.insert_manifestation_expressions_batch([assoc1, assoc2])
+
+    # Duplicate entity keys
+    ek1 = EntityKey(entity_type="work", entity_id=w_ids[0], key_type="norm_title", key_value="KEY1")
+    ek2 = EntityKey(entity_type="work", entity_id=w_ids[0], key_type="norm_title", key_value="KEY1")
+    repo.insert_entity_keys_batch([ek1, ek2])
+
+    # Duplicate wikidata authors
+    repo.insert_wikidata_authors(
+        [
+            {"qid": "Q999", "name": "Wikidata Dup"},
+            {"qid": "Q999", "name": "Wikidata Dup Updated"},
+        ]
+    )
+    wa = repo.get_wikidata_author("Q999")
+    assert wa is not None
+    assert wa["name"] == "Wikidata Dup Updated"
