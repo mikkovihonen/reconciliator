@@ -308,7 +308,7 @@ def enrich_bibframe_jsonld(
             agent_reports.append(
                 {
                     "name": agent.name,
-                    "role": next(iter(agent.role_counts.keys())) if agent.role_counts else None,
+                    "role": getattr(agent, "role", None),
                     "selected_uris": result.selected_agent_uris.get(idx, []),
                 }
             )

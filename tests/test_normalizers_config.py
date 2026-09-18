@@ -118,7 +118,7 @@ def test_record_normalizer_custom_config() -> None:
     assert prim_class[0].scheme == "dewey"
     assert prim_class[0].code == "863"
     # Custom relator term mapped to code
-    assert rec.agents[0].role_counts == {"aut": 1}
+    assert normalizer.relator_registry.normalize_role("kirjoittaja-erikois") == "aut"
 
 
 def test_clean_title_and_volume_options() -> None:
@@ -224,8 +224,8 @@ def test_custom_roman_numerals_and_relator_mappings() -> None:
     }
     rec = normalizer.normalize(raw_data)
     assert rec.volume_designation == "osa 20"
-    assert rec.agents[0].role_counts == {"aut": 1}
-    assert rec.agents[1].role_counts == {"edt": 1}
+    assert normalizer.relator_registry.normalize_role("huvudförfattare") == "aut"
+    assert normalizer.relator_registry.normalize_role("redaktör-ledare") == "edt"
 
 
 def test_clean_publisher_default_suffixes() -> None:

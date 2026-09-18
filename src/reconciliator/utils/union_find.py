@@ -41,4 +41,3 @@ class UnionFind(Generic[T]):
         return dict(components)
 
     groups = get_components
-

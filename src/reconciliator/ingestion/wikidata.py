@@ -7,7 +7,6 @@ Pass 2: Stream bibliographic entities, hydrating authors from SQLite for true O(
 from __future__ import annotations
 
 import gzip
-import json
 import logging
 import os
 import re
@@ -18,6 +17,7 @@ import orjson
 
 from reconciliator.config import (
     WikidataIngestConfig,
+    get_bundled_defaults,
     get_bundled_record_defaults,
     get_category_default_field_map,
     get_subject_field_category_map,
@@ -47,11 +47,7 @@ from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 
 logger = logging.getLogger(__name__)
 
-from reconciliator.config import get_bundled_defaults
-
-WIKIDATA_LANG_MAP = dict(
-    get_bundled_defaults().get("wikidata", {}).get("languages") or {}
-)
+WIKIDATA_LANG_MAP = dict(get_bundled_defaults().get("wikidata", {}).get("languages") or {})
 WIKIDATA_PREF_LANGS: list[str] = list(
     get_bundled_defaults().get("vocabularies", {}).get("preferred_label_languages") or []
 )
@@ -248,48 +244,10 @@ def _extract_author_data(
                     desc_val = d_item["value"]
                     break
 
-    # Extract languages (P1412)
-    language_counts: dict[str, int] = {}
-    for l_qid in get_claim_qids(claims, "P1412"):
-        mapped_lang = WIKIDATA_LANG_MAP.get(l_qid, l_qid.lower())
-        language_counts[mapped_lang] = language_counts.get(mapped_lang, 0) + 1
-
-    # Extract ORCID
-    orcid: Optional[str] = identifiers.get("orcid")
-
-    # Build count distributions
-    qualifier_counts: dict[str, int] = {}
+    # Extract qualifiers: descriptions
+    qualifiers: list[str] = []
     if desc_val:
-        qualifier_counts[desc_val] = 1
-    for occ in occupations:
-        qualifier_counts[occ] = qualifier_counts.get(occ, 0) + 1
-
-    affiliation_counts: dict[str, int] = {}
-    for aff in affiliations:
-        affiliation_counts[aff] = affiliation_counts.get(aff, 0) + 1
-
-    meta_dict: dict[str, Any] = {}
-    if aliases_list:
-        meta_dict["aliases"] = aliases_list
-        meta_dict["variant_names"] = aliases_list
-    if desc_val:
-        meta_dict["description"] = desc_val
-    if qualifier_counts:
-        meta_dict["qualifier_counts"] = qualifier_counts
-    if affiliation_counts:
-        meta_dict["affiliation_counts"] = affiliation_counts
-    if language_counts:
-        meta_dict["language_counts"] = language_counts
-    if orcid:
-        meta_dict["orcid"] = orcid
-
-    main_subjects = get_claim_qids(claims, "P921")
-    subject_counts: dict[str, int] = {}
-    for fow in fields_of_work + main_subjects:
-        subj_key = f"wikidata:{fow}"
-        subject_counts[subj_key] = subject_counts.get(subj_key, 0) + 1
-    if subject_counts:
-        meta_dict["subject_counts"] = subject_counts
+        qualifiers.append(desc_val)
 
     if name_val or has_auth_ids or identifiers:
         return {
@@ -299,12 +257,11 @@ def _extract_author_data(
             "identifiers": identifiers,
             "birth_year": birth_year,
             "death_year": death_year,
-            "occupations": json.dumps(occupations, ensure_ascii=False) if occupations else None,
-            "fields_of_work": json.dumps(fields_of_work, ensure_ascii=False)
-            if fields_of_work
-            else None,
-            "affiliations": json.dumps(affiliations, ensure_ascii=False) if affiliations else None,
-            "metadata_json": json.dumps(meta_dict, ensure_ascii=False) if meta_dict else None,
+            "occupations": occupations,
+            "fields_of_work": fields_of_work,
+            "affiliations": affiliations,
+            "qualifiers": qualifiers,
+            "variant_names": aliases_list,
         }
     return None
 
@@ -605,22 +562,42 @@ def parse_wikidata_entity(
     for s_qid in get_claim_qids(claims, "P921"):
         s_heading = _lookup_entity_name(s_qid, store) or s_qid
         subjects["topical"].append(
-            {"heading": s_heading, "field": topical_field, "vocabulary": subj_mappings.get("topical", "yso"), "uri": None}
+            {
+                "heading": s_heading,
+                "field": topical_field,
+                "vocabulary": subj_mappings.get("topical", "yso"),
+                "uri": None,
+            }
         )
     for g_qid in get_claim_qids(claims, "P136"):
         g_heading = _lookup_entity_name(g_qid, store) or g_qid
         subjects["genre_form"].append(
-            {"heading": g_heading, "field": genre_field, "vocabulary": subj_mappings.get("genre_form", "slm"), "uri": None}
+            {
+                "heading": g_heading,
+                "field": genre_field,
+                "vocabulary": subj_mappings.get("genre_form", "slm"),
+                "uri": None,
+            }
         )
     for geo_qid in get_claim_qids(claims, "P840"):
         geo_heading = _lookup_entity_name(geo_qid, store) or geo_qid
         subjects["geographic"].append(
-            {"heading": geo_heading, "field": geo_field, "vocabulary": subj_mappings.get("geographic", "yso"), "uri": None}
+            {
+                "heading": geo_heading,
+                "field": geo_field,
+                "vocabulary": subj_mappings.get("geographic", "yso"),
+                "uri": None,
+            }
         )
     for mus_qid in get_claim_qids(claims, "P870"):
         mus_heading = _lookup_entity_name(mus_qid, store) or mus_qid
         subjects["medium_of_performance"].append(
-            {"heading": mus_heading, "field": mop_field, "vocabulary": subj_mappings.get("medium_of_performance", "seko"), "uri": None}
+            {
+                "heading": mus_heading,
+                "field": mop_field,
+                "vocabulary": subj_mappings.get("medium_of_performance", "seko"),
+                "uri": None,
+            }
         )
 
     return {
@@ -986,12 +963,27 @@ def decompose_wikidata_entity(
             if not primary_creator_name and not re.match(r"^Q\d+$", c_name):
                 primary_creator_name = c_name
             author_data = store.get_wikidata_author(c_qid) if store else None
-            c_meta: dict[str, Any] = {}
-            if author_data and author_data.get("metadata_json"):
-                try:
-                    c_meta = json.loads(author_data["metadata_json"])
-                except Exception:
-                    c_meta = {}
+            author_idents: list[IdentifierEntity] = []
+            if author_data and author_data.get("identifiers"):
+                for s_name, s_val in author_data["identifiers"].items():
+                    author_idents.append(
+                        IdentifierEntity(
+                            entity_type="agent",
+                            entity_id=0,
+                            source=s_name,
+                            source_id=s_val,
+                            source_id_normalized=s_val.strip().lower(),
+                        )
+                    )
+            author_affils = (
+                {aff: 1 for aff in (author_data.get("affiliations") or [])} if author_data else {}
+            )
+            author_quals: dict[str, int] = {}
+            if author_data:
+                for q in author_data.get("qualifiers") or []:
+                    author_quals[q] = author_quals.get(q, 0) + 1
+                for occ in author_data.get("occupations") or []:
+                    author_quals[occ] = author_quals.get(occ, 0) + 1
             agent = AgentEntity(
                 name=c_name,
                 name_normalized=c_name.strip().lower(),
@@ -1000,13 +992,10 @@ def decompose_wikidata_entity(
                 death_year=author_data.get("death_year") if author_data else None,
                 source="wikidata",
                 source_id=c_qid,
-                orcid=c_meta.get("orcid"),
-                variant_names=c_meta.get("variant_names", []),
-                qualifier_counts=c_meta.get("qualifier_counts", {}),
-                affiliation_counts=c_meta.get("affiliation_counts", {}),
-                language_counts=c_meta.get("language_counts", {}),
-                subject_counts=c_meta.get("subject_counts", {}),
-                metadata_json=author_data.get("metadata_json") if author_data else None,
+                variant_names=author_data.get("variant_names", []) if author_data else [],
+                qualifiers=author_quals,
+                affiliations=author_affils,
+                identifiers=author_idents,
             )
             agents_map[c_qid] = agent
             contributions.append(
@@ -1025,12 +1014,27 @@ def decompose_wikidata_entity(
         for r_qid in get_claim_qids(claims, prop):
             r_name = _lookup_entity_name(r_qid, store) or r_qid
             author_data = store.get_wikidata_author(r_qid) if store else None
-            r_meta: dict[str, Any] = {}
-            if author_data and author_data.get("metadata_json"):
-                try:
-                    r_meta = json.loads(author_data["metadata_json"])
-                except Exception:
-                    r_meta = {}
+            author_idents = []
+            if author_data and author_data.get("identifiers"):
+                for s_name, s_val in author_data["identifiers"].items():
+                    author_idents.append(
+                        IdentifierEntity(
+                            entity_type="agent",
+                            entity_id=0,
+                            source=s_name,
+                            source_id=s_val,
+                            source_id_normalized=s_val.strip().lower(),
+                        )
+                    )
+            author_affils = (
+                {aff: 1 for aff in (author_data.get("affiliations") or [])} if author_data else {}
+            )
+            author_quals = {}
+            if author_data:
+                for q in author_data.get("qualifiers") or []:
+                    author_quals[q] = author_quals.get(q, 0) + 1
+                for occ in author_data.get("occupations") or []:
+                    author_quals[occ] = author_quals.get(occ, 0) + 1
             agent = AgentEntity(
                 name=r_name,
                 name_normalized=r_name.strip().lower(),
@@ -1039,13 +1043,10 @@ def decompose_wikidata_entity(
                 death_year=author_data.get("death_year") if author_data else None,
                 source="wikidata",
                 source_id=r_qid,
-                orcid=r_meta.get("orcid"),
-                variant_names=r_meta.get("variant_names", []),
-                qualifier_counts=r_meta.get("qualifier_counts", {}),
-                affiliation_counts=r_meta.get("affiliation_counts", {}),
-                language_counts=r_meta.get("language_counts", {}),
-                subject_counts=r_meta.get("subject_counts", {}),
-                metadata_json=author_data.get("metadata_json") if author_data else None,
+                variant_names=author_data.get("variant_names", []) if author_data else [],
+                qualifiers=author_quals,
+                affiliations=author_affils,
+                identifiers=author_idents,
             )
             agents_map[r_qid] = agent
             contributions.append(

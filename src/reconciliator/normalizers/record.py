@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from typing import Any, Optional
 
 from reconciliator.config import (
@@ -19,6 +18,7 @@ from reconciliator.models import (
     Agent,
     BibliographicRecord,
     ClassificationItem,
+    IdentifierEntity,
     RecordIdentifiers,
     SubjectItem,
     SubjectsContainer,
@@ -205,7 +205,9 @@ def normalize_classifications(
     if default_scheme is None:
         from reconciliator.config import get_bundled_defaults
 
-        default_scheme = str(get_bundled_defaults().get("classification", {}).get("default_scheme") or "")
+        default_scheme = str(
+            get_bundled_defaults().get("classification", {}).get("default_scheme") or ""
+        )
     items: list[tuple[str, str, bool]] = []
     has_explicit_primary = False
     priority_order = tuple(p.lower() for p in (priority or DEFAULT_CLASSIFICATION_PRIORITY))
@@ -492,13 +494,26 @@ class RecordNormalizer:
                     norm_r = self.relator_registry.normalize_role(r_key) or r_key
                     role_counts[norm_r] = role_counts.get(norm_r, 0) + r_cnt
 
-                qual_counts = dict(raw_agent.get("qualifier_counts", {}))
+                qual_counts = dict(raw_agent.get("qualifiers", {}))
                 if not qual_counts and raw_agent.get("qualifier"):
                     qual_counts[str(raw_agent["qualifier"]).strip()] = 1
 
-                affil_counts = dict(raw_agent.get("affiliation_counts", {}))
+                affil_counts = dict(raw_agent.get("affiliations", {}))
                 if not affil_counts and raw_agent.get("affiliation"):
                     affil_counts[str(raw_agent["affiliation"]).strip()] = 1
+
+                # Build identifiers from agent dict
+                idents = []
+                for ident_data in raw_agent.get("identifiers", []):
+                    idents.append(
+                        IdentifierEntity(
+                            entity_type="agent",
+                            entity_id=0,
+                            source=ident_data.get("source", "uri"),
+                            source_id=ident_data.get("source_id", ""),
+                            source_id_normalized=ident_data.get("source_id_normalized", ""),
+                        )
+                    )
 
                 agents.append(
                     Agent(
@@ -513,13 +528,10 @@ class RecordNormalizer:
                         is_fictional=is_fictional,
                         uri_subfield_0=list(raw_agent.get("uri_subfield_0", [])),
                         uri_subfield_1=list(raw_agent.get("uri_subfield_1", [])),
-                        orcid=raw_agent.get("orcid"),
                         variant_names=list(raw_agent.get("variant_names", [])),
-                        qualifier_counts=qual_counts,
-                        affiliation_counts=affil_counts,
-                        role_counts=role_counts,
-                        language_counts=dict(raw_agent.get("language_counts", {})),
-                        subject_counts=dict(raw_agent.get("subject_counts", {})),
+                        qualifiers=qual_counts,
+                        affiliations=affil_counts,
+                        identifiers=idents,
                     )
                 )
 
@@ -540,7 +552,6 @@ class RecordNormalizer:
                     Agent(
                         name=n,
                         surname=s_name,
-                        role_counts={"aut": 1},
                         field_tag="245",
                         is_fictional=fict,
                     )
@@ -608,11 +619,7 @@ class RecordNormalizer:
                 if cid:
                     resolved_subject_keys.append(f"{norm_v}:{cid.lower()}")
 
-        if resolved_subject_keys:
-            resolved_counts = dict(Counter(resolved_subject_keys))
-            for a in agents:
-                for k, v in resolved_counts.items():
-                    a.subject_counts[k] = max(a.subject_counts.get(k, 0), v)
+        # subject_counts is no longer on Agent model
 
         record = BibliographicRecord(
             source_id=source_id,

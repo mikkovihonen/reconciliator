@@ -309,13 +309,13 @@ def bibra_to_marcxml_elem(
         sub_a.set("code", "a")
         sub_a.text = agent.name
 
-        role_val = next(iter(agent.role_counts.keys())) if agent.role_counts else None
+        role_val = "aut"  # Default role for bibliographic MARC author fields
         if role_val:
             sub_e = etree.SubElement(df, f"{{{ns}}}subfield")
             sub_e.set("code", "e")
             sub_e.text = "author" if role_val == "aut" else role_val
 
-        for q_val in agent.qualifier_counts:
+        for q_val in agent.qualifiers:
             sub_c = etree.SubElement(df, f"{{{ns}}}subfield")
             sub_c.set("code", "c")
             sub_c.text = q_val
@@ -416,7 +416,7 @@ def enrich_bibra_json(
 
         author_entry = {
             "name": agent.name,
-            "role": next(iter(agent.role_counts.keys())) if agent.role_counts else "aut",
+            "role": "aut",
             "selected_uris": selected,
             "source_uris": source_uris,
             "candidates_count": len(discovered),

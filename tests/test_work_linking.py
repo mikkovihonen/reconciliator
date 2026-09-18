@@ -13,12 +13,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from lxml import etree
+from sqlalchemy import func, select
 
 from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.config import load_config
 from reconciliator.db import work_relationships_table, works_table
 from reconciliator.repository import WEMIRepository
-from sqlalchemy import func, select
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC = "{http://www.loc.gov/MARC21/slim}"

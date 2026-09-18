@@ -1,8 +1,9 @@
 """Integration tests for multi-source OAI-PMH harvesting, ingestion, and CLI commands."""
 
+import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 from sqlalchemy import select
@@ -116,7 +117,7 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
             batch_size=10,
         )
 
-        def mock_get(url: str, params: dict[str, str], **kwargs: Any) -> MagicMock:
+        async def mock_get(url: str, params: dict[str, str], **kwargs: Any) -> MagicMock:
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
             if "source-a" in url:
@@ -125,20 +126,24 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
                 resp.content = SAMPLE_OAI_SOURCE_B
             return resp
 
-        with patch("httpx2.Client.get", side_effect=mock_get):
+        with patch("httpx2.AsyncClient.get", side_effect=mock_get):
             # Ingest source A
-            ingested_a = ingest_oai_pipeline(
-                source_name="catalog_a",
-                config=cfg_a,
-                store=store,
+            ingested_a = asyncio.run(
+                ingest_oai_pipeline(
+                    source_name="catalog_a",
+                    config=cfg_a,
+                    store=store,
+                )
             )
             assert ingested_a == 1
 
             # Ingest source B
-            ingested_b = ingest_oai_pipeline(
-                source_name="catalog_b",
-                config=cfg_b,
-                store=store,
+            ingested_b = asyncio.run(
+                ingest_oai_pipeline(
+                    source_name="catalog_b",
+                    config=cfg_b,
+                    store=store,
+                )
             )
             assert ingested_b == 1
 
@@ -218,7 +223,8 @@ ingest_oai:
     mock_resp.raise_for_status = MagicMock()
 
     with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
-        with patch("httpx2.Client.get", return_value=mock_resp):
+        with patch("httpx2.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_resp
             # Test specifying unknown source raises error
             res = runner.invoke(
                 app, ["ingest-oai", "--config", str(cfg_file), "--source", "non_existent"]

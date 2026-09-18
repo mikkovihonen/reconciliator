@@ -68,19 +68,29 @@ agents_table = Table(
     Column("name", String, nullable=False),
     Column("name_normalized", String, nullable=False),
     Column("surname", String, nullable=True),
-    Column("qualifier", String, nullable=True),
     Column("dates", String, nullable=True),
     Column("birth_year", Integer, nullable=True),
     Column("death_year", Integer, nullable=True),
     Column("fuller_name", String, nullable=True),
-    Column("affiliation", String, nullable=True),
-    Column("metadata_json", Text, nullable=True),
     Column("is_personal", Boolean, nullable=False, default=True, server_default="1"),
     Column("is_fictional", Boolean, nullable=False, default=False, server_default="0"),
     UniqueConstraint("source", "source_id", name="uq_agents_source_source_id"),
     Index("idx_agents_source_id", "source", "source_id"),
     Index("idx_agents_name_norm", "name_normalized"),
     Index("idx_agents_surname", "surname"),
+)
+
+agent_attributes_table = Table(
+    "agent_attributes",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("agent_id", Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False),
+    Column("attribute_type", String, nullable=False),
+    Column("value", String, nullable=False),
+    Column("count", Integer, nullable=False, default=1, server_default="1"),
+    UniqueConstraint("agent_id", "attribute_type", "value", name="uq_agent_attributes"),
+    Index("idx_agent_attr_agent", "agent_id", "attribute_type"),
+    Index("idx_agent_attr_lookup", "attribute_type", "value"),
 )
 
 works_table = Table(
@@ -616,9 +626,13 @@ def get_engine(
                 p = Path(target_str)
                 schema_path_obj = p.parent.resolve() if p.suffix == ".db" else p.resolve()
                 is_default_data = (
-                    schema_path_obj.name == "data"
-                    and schema_path_obj == (Path.cwd() / "data").resolve()
-                ) or p == Path("data") or (p.parent == Path("data"))
+                    (
+                        schema_path_obj.name == "data"
+                        and schema_path_obj == (Path.cwd() / "data").resolve()
+                    )
+                    or p == Path("data")
+                    or (p.parent == Path("data"))
+                )
                 if not is_default_data:
                     schema_path = str(schema_path_obj)
                     schema = f"test_{hashlib.md5(schema_path.encode()).hexdigest()[:10]}"

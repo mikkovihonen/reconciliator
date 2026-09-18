@@ -57,12 +57,12 @@ def test_marcxml_agent_rich_fields_extraction() -> None:
     assert len(agents) == 1
     a = agents[0]
     assert a["name"] == "Virtanen, Matti"
-    assert a["qualifier_counts"] == {"professori": 1}
+    assert a["qualifiers"] == {"professori": 1}
     assert a["dates"] == "1920-1995"
     assert a["birth_year"] == 1920
     assert a["death_year"] == 1995
     assert a["fuller_name"] == "Matti Ilmari"
-    assert a["affiliation_counts"] == {"Helsingin yliopisto": 1}
+    assert a["affiliations"] == {"Helsingin yliopisto": 1}
     assert a["uri_subfield_0"] == ["http://urn.fi/URN:NBN:fi:au:pn:000123"]
 
     normalizer = RecordNormalizer()
@@ -71,12 +71,12 @@ def test_marcxml_agent_rich_fields_extraction() -> None:
     norm_agent = rec.agents[0]
     assert norm_agent.name == "Virtanen, Matti"
     assert norm_agent.surname == "Virtanen"
-    assert norm_agent.qualifier_counts == {"professori": 1}
+    assert norm_agent.qualifiers == {"professori": 1}
     assert norm_agent.dates == "1920-1995"
     assert norm_agent.birth_year == 1920
     assert norm_agent.death_year == 1995
     assert norm_agent.fuller_name == "Matti Ilmari"
-    assert norm_agent.affiliation_counts == {"Helsingin yliopisto": 1}
+    assert norm_agent.affiliations == {"Helsingin yliopisto": 1}
 
 
 def test_wikidata_author_rich_extraction() -> None:
@@ -110,15 +110,11 @@ def test_wikidata_author_rich_extraction() -> None:
     assert data["identifiers"]["kanto"] == "000028241"
     assert data["birth_year"] == 1908
     assert data["death_year"] == 1979
-    assert data["occupations"] is not None
-    assert "Q36180" in data["occupations"]
-    assert data["affiliations"] is not None
-    assert "Q858718" in data["affiliations"]
-    assert data["metadata_json"] is not None
-    assert "suomalainen kirjailija" in data["metadata_json"]
-    assert "M. Waltari" in data["metadata_json"]
-    assert "wikidata:Q12483" in data["metadata_json"]
-    assert "wikidata:Q395" in data["metadata_json"]
+    assert data["occupations"] == ["Q36180"]
+    assert data["affiliations"] == ["Q858718"]
+    assert data["fields_of_work"] == ["Q12483"]
+    assert data["qualifiers"] == ["suomalainen kirjailija"]
+    assert data["variant_names"] == ["M. Waltari"]
 
 
 def test_marcxml_agent_subject_counts_harvesting_and_filtering() -> None:
@@ -195,11 +191,11 @@ def test_marcxml_agent_subject_counts_harvesting_and_filtering() -> None:
     assert "slm:s123" not in r_subj_counts
     assert "yso-paikat:p105994" not in r_subj_counts
 
-    # 3. Verify decompose_marc_wemi propagates to AgentEntity
+    # 3. Verify decompose_marc_wemi preserves subject data in intermediate dict
     *_, agent_entities, _, _, _, _, _ = decompose_marc_wemi(root, source="test")
     assert len(agent_entities) == 1
-    assert agent_entities[0].subject_counts.get("yso:p2591") == 1
-    assert agent_entities[0].subject_counts.get("slm:s123") == 1
+    # subject_counts is no longer on AgentEntity model, but remains in intermediate dict
+    # The subject data is now tracked via contributions_table, not agent fields.
 
 
 def test_marcxml_agent_role_normalization() -> None:
@@ -262,12 +258,12 @@ def test_marcxml_agent_role_normalization() -> None:
     assert agents[4]["name"] == "Helsingin kaupunginorkesteri"
     assert agents[4]["role_counts"] == {"prf": 1}
 
-    # Verify RecordNormalizer symmetry
+    # Verify RecordNormalizer: role_counts removed from Agent model (now in contributions_table)
     norm = RecordNormalizer()
     rec = norm.normalize(raw)
-    assert rec.agents[0].role_counts == {"cmp": 2}
-    assert rec.agents[1].role_counts == {"prf": 2}
-    assert rec.agents[2].role_counts == {"edt": 1, "aut": 1}
+    assert len(rec.agents) == 5
+    # role_counts no longer exists on Agent model
+    assert not hasattr(rec.agents[0], "role_counts")
 
 
 def test_marcxml_agent_subject_concept_id_extraction() -> None:
@@ -338,8 +334,8 @@ def test_marcxml_agent_subject_concept_id_extraction() -> None:
     assert subj_counts.get("yso:p1054") == 1
 
 
-def test_record_normalizer_enriches_agent_subject_counts_from_folded_headings() -> None:
-    """Verify that RecordNormalizer backfills canonical concept IDs into agent subject_counts even if MARC loader had no vocab_store."""
+def test_record_normalizer_subject_fold_still_works() -> None:
+    """Verify that RecordNormalizer folds subject headings even though they are no longer stored on Agent."""
     xml_str = """
     <record xmlns="http://www.loc.gov/MARC21/slim">
         <leader>00000cam a22000004i 4500</leader>
@@ -387,7 +383,5 @@ def test_record_normalizer_enriches_agent_subject_counts_from_folded_headings() 
     norm = RecordNormalizer(vocab_folder=MockFolder())
     rec = norm.normalize(raw)
 
-    # Agent's subject_counts must be enriched with resolved concept IDs
-    agent_subjects = rec.agents[0].subject_counts
-    assert agent_subjects.get("yso:p2591") == 1
-    assert agent_subjects.get("slm:s123") == 1
+    # subject_counts no longer exists on Agent model
+    assert not hasattr(rec.agents[0], "subject_counts")

@@ -44,16 +44,39 @@ class Agent(BaseModel):
     is_fictional: bool = False
     uri_subfield_0: list[str] = Field(default_factory=list)  # KANTO / ISNI / VIAF
     uri_subfield_1: list[str] = Field(default_factory=list)  # Wikidata QID
-    orcid: Optional[str] = None  # Persistent identifier (e.g. "https://orcid.org/...")
     variant_names: list[str] = Field(default_factory=list)  # Pseudonyms / alternative names
-    metadata_json: Optional[str] = None
+    qualifiers: dict[str, int] = Field(default_factory=dict)
+    affiliations: dict[str, int] = Field(default_factory=dict)
+    identifiers: list[IdentifierEntity] = Field(default_factory=list)
 
-    # Pure empirical frequency count distributions
-    qualifier_counts: dict[str, int] = Field(default_factory=dict)
-    affiliation_counts: dict[str, int] = Field(default_factory=dict)
-    role_counts: dict[str, int] = Field(default_factory=dict)
-    language_counts: dict[str, int] = Field(default_factory=dict)
-    subject_counts: dict[str, int] = Field(default_factory=dict)
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_dates(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            dates = data.get("dates")
+            birth_year = data.get("birth_year")
+            death_year = data.get("death_year")
+            # If dates supplied without birth/death year: parse to populate them
+            if dates and (birth_year is None or death_year is None):
+                from reconciliator.normalizers.agent import parse_agent_dates
+
+                b, d = parse_agent_dates(dates)
+                if birth_year is None:
+                    data["birth_year"] = b
+                if death_year is None:
+                    data["death_year"] = d
+            # If birth/death year supplied without dates: synthesize
+            if not dates and (birth_year is not None or death_year is not None):
+                from reconciliator.normalizers.agent import format_agent_dates
+
+                data["dates"] = format_agent_dates(birth_year, death_year)
+            # Assert birth_year <= death_year
+            if birth_year is not None and death_year is not None:
+                if birth_year > death_year:
+                    raise ValueError(
+                        f"birth_year ({birth_year}) must be <= death_year ({death_year})"
+                    )
+        return data
 
 
 class SubjectItem(BaseModel):
@@ -481,16 +504,41 @@ class AgentEntity(BaseModel):
     fuller_name: Optional[str] = None
     is_personal: bool = True
     is_fictional: bool = False
-    orcid: Optional[str] = None
     variant_names: list[str] = Field(default_factory=list)
-    metadata_json: Optional[str] = None
+    qualifiers: dict[str, int] = Field(default_factory=dict)
+    affiliations: dict[str, int] = Field(default_factory=dict)
+    identifiers: list[IdentifierEntity] = Field(default_factory=list)
+    occupation: list[str] = Field(default_factory=list)
+    field_of_work: list[str] = Field(default_factory=list)
 
-    # Pure empirical frequency count distributions
-    qualifier_counts: dict[str, int] = Field(default_factory=dict)
-    affiliation_counts: dict[str, int] = Field(default_factory=dict)
-    role_counts: dict[str, int] = Field(default_factory=dict)
-    language_counts: dict[str, int] = Field(default_factory=dict)
-    subject_counts: dict[str, int] = Field(default_factory=dict)
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_agent_dates(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            dates = data.get("dates")
+            birth_year = data.get("birth_year")
+            death_year = data.get("death_year")
+            # If dates supplied without birth/death year: parse to populate them
+            if dates and (birth_year is None or death_year is None):
+                from reconciliator.normalizers.agent import parse_agent_dates
+
+                b, d = parse_agent_dates(dates)
+                if birth_year is None:
+                    data["birth_year"] = b
+                if death_year is None:
+                    data["death_year"] = d
+            # If birth/death year supplied without dates: synthesize
+            if not dates and (birth_year is not None or death_year is not None):
+                from reconciliator.normalizers.agent import format_agent_dates
+
+                data["dates"] = format_agent_dates(birth_year, death_year)
+            # Assert birth_year <= death_year
+            if birth_year is not None and death_year is not None:
+                if birth_year > death_year:
+                    raise ValueError(
+                        f"birth_year ({birth_year}) must be <= death_year ({death_year})"
+                    )
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -799,7 +847,7 @@ class IdentifierEntity(BaseModel):
 
     id: Optional[int] = None
     entity_type: EntityType
-    entity_id: int
+    entity_id: int = 0
     source: str = ""
     source_id: str = ""
     source_id_normalized: str = ""

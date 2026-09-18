@@ -14,7 +14,6 @@ unreachable outside tests, and this docstring says so rather than advertising it
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -43,14 +42,10 @@ from reconciliator.models import (
     WorkRelationship,
 )
 from reconciliator.normalizers.blocking import compute_author_key
-from reconciliator.normalizers.identifiers import classify_identifier_scheme
 from reconciliator.repository import WEMIRepository
 from reconciliator.rerank import CandidateEvaluator
 from reconciliator.utils import (
-    compute_jaccard_overlap,
     extract_identifiers_from_target,
-    extract_target_analytics,
-    extract_target_track_titles,
 )
 from reconciliator.vocabularies import (
     VocabularyManager,
@@ -609,16 +604,17 @@ class WorkMatcher:
             if uri not in u0 and uri not in u1:
                 bucket.append(uri)
 
-        if agent.id:
-            for ident in self.repo.get_identifiers_for_entity("agent", agent.id):
-                src = (ident.source or "").lower()
-                if src == "wikidata":
-                    _add(format_wikidata_uri(ident.source_id), "1")
-                else:
-                    _add(ident.curie or f"{src}:{ident.source_id}", "0")
+        idents = agent.identifiers
+        if not idents and agent.id:
+            idents = self.repo.get_identifiers_for_entity("agent", agent.id)
+        for ident in idents:
+            src = (ident.source or "").lower()
+            if src == "wikidata":
+                _add(format_wikidata_uri(ident.source_id), "1")
+            else:
+                _add(ident.curie or f"{src}:{ident.source_id}", "0")
 
         _add(agent.curie)
-        _add(agent.orcid)
         if agent.source.lower() == "wikidata" and agent.source_id:
             _add(format_wikidata_uri(agent.source_id), "1")
 
@@ -810,11 +806,9 @@ class WorkMatcher:
                     is_fictional=entity.is_fictional,
                     uri_subfield_0=u0,
                     uri_subfield_1=u1,
-                    orcid=entity.orcid,
                     variant_names=list(entity.variant_names),
-                    metadata_json=entity.metadata_json,
-                    role_counts=dict(entity.role_counts),
-                    subject_counts=dict(entity.subject_counts),
+                    qualifiers=dict(entity.qualifiers),
+                    affiliations=dict(entity.affiliations),
                 )
             )
 
@@ -910,8 +904,8 @@ class WorkMatcher:
 
             target_coauthors = [a.name for a in target_record.agents if a is not target_agent]
             target_classifications = [(c.code, c.scheme) for c in target_record.classifications]
-            target_subjects = dict(target_agent.subject_counts)
-            if not target_subjects and target_record.subjects:
+            target_subjects: dict[str, int] = {}
+            if target_record.subjects:
                 for cat in target_record.subjects.all_subjects():
                     if cat.vocabulary and cat.pref_label:
                         norm_v = normalize_subject_vocabulary(
@@ -1006,7 +1000,9 @@ class WorkMatcher:
             if best_cand.get("wikidata_qid"):
                 from reconciliator.curie import format_source_uri
 
-                _accept(format_source_uri("wikidata", str(best_cand["wikidata_qid"])), "1", "WIKIDATA")
+                _accept(
+                    format_source_uri("wikidata", str(best_cand["wikidata_qid"])), "1", "WIKIDATA"
+                )
 
             cand_rec_id = str(
                 best_cand.get("curie")

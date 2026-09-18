@@ -28,13 +28,10 @@ def write_tsv_file(file_path: Path, columns: list[str], rows: Iterable[Any]) -> 
             f.write("\t".join(vals) + "\n")
 
 
-def write_summary_tsv(
-    file_path: Path, columns: list[str], rows: Iterable[tuple[Any, ...]]
-) -> None:
+def write_summary_tsv(file_path: Path, columns: list[str], rows: Iterable[tuple[Any, ...]]) -> None:
     """Write tabular summary rows to a TSV file."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("w", encoding="utf-8", newline="\n") as f:
         f.write("\t".join(columns) + "\n")
         for row in rows:
             f.write("\t".join(str(cell) for cell in row) + "\n")
-

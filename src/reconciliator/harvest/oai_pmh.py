@@ -196,11 +196,7 @@ class OAIPMHHarvester:
         ) as client:
 
             async def _fetch(tok: Optional[str]) -> bytes:
-                req_params = (
-                    {"verb": "ListRecords", "resumptionToken": tok}
-                    if tok
-                    else params
-                )
+                req_params = {"verb": "ListRecords", "resumptionToken": tok} if tok else params
                 if semaphore:
                     async with semaphore:
                         resp = await self._request_with_retry(client, req_params)

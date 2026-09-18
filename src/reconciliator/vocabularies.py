@@ -250,7 +250,9 @@ def resolve_subject_concept_id(
         if language and language.lower() not in ("und", "unknown"):
             langs_to_try.append(language.lower())
         store_cfg = getattr(vocab_store, "config", None)
-        pref_langs = getattr(store_cfg, "preferred_label_languages", None) or get_bundled_vocab_defaults().get("preferred_label_languages", [])
+        pref_langs = getattr(
+            store_cfg, "preferred_label_languages", None
+        ) or get_bundled_vocab_defaults().get("preferred_label_languages", [])
         for pl in pref_langs:
             if pl and pl.lower() not in langs_to_try:
                 langs_to_try.append(pl.lower())

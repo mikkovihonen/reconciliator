@@ -186,7 +186,9 @@ class VocabStore:
                 chunk_keys = keys[chunk_start : chunk_start + 500]
                 q = select(
                     concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
-                ).where(tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk_keys))
+                ).where(
+                    tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk_keys)
+                )
                 for r_id, voc, cid in conn.execute(q).fetchall():
                     row_id_map[(voc, cid)] = r_id
 

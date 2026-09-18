@@ -281,7 +281,9 @@ def test_find_concepts_by_uris_batch(vocab_store: VocabStore) -> None:
     assert results["yso:p2"].uri == "http://www.yso.fi/onto/yso/p2"
 
 
-def test_insert_large_concepts_batch_exceeding_postgres_param_limit(vocab_store: VocabStore) -> None:
+def test_insert_large_concepts_batch_exceeding_postgres_param_limit(
+    vocab_store: VocabStore,
+) -> None:
     """Ensure insert_concepts_batch chunks large concept batches exceeding 65,535 query parameters."""
     # 17,000 concepts * 4 parameters = 68,000 parameters (exceeding Postgres limit of 65,535)
     concepts = [
@@ -330,5 +332,3 @@ def test_insert_concepts_batch_with_duplicates_and_label_merging(vocab_store: Vo
     assert res.pref_labels["en"] == "books"
     assert "opukset" in res.alt_labels["fi"]
     assert "volymer" in res.alt_labels["sv"]
-
-

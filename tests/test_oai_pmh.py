@@ -575,4 +575,3 @@ def test_ingest_oai_partitioned_telemetry_with_tracker() -> None:
     assert meta.get("slices_total") == 3
     assert meta.get("slices_done") == 3
     tracker.complete_task.assert_called_once()
-

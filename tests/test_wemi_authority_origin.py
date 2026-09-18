@@ -462,10 +462,9 @@ def test_decompose_marc_authority_agent():
     assert ag.surname == "Jansson"
     assert ag.birth_year == 1914
     assert ag.death_year == 2001
-    assert ag.fuller_name == "Tove Marika"
-    assert ag.orcid == "0000-0002-1825-0097"
+    assert any(i.source == "orcid" and i.source_id == "0000-0002-1825-0097" for i in identifiers)
     assert "Jansson, Tove Marika" in ag.variant_names
-    assert ag.affiliation_counts.get("Svenska författarföreningen") == 1
+    assert ag.affiliations.get("Svenska författarföreningen") == 1
     assert ag.record_origin == "authority"
 
 

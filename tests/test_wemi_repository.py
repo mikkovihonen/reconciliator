@@ -651,15 +651,29 @@ def test_wemi_repository_intra_batch_duplicates_postgres(tmp_storage: Any) -> No
     assert fetched.name == "Author One Updated"
 
     # Duplicate works in the same batch
-    work1 = WorkEntity(source="melinda", source_id="w1", title="Title A", title_normalized="title a")
-    work2 = WorkEntity(source="melinda", source_id="w1", title="Title A Updated", title_normalized="title a updated")
+    work1 = WorkEntity(
+        source="melinda", source_id="w1", title="Title A", title_normalized="title a"
+    )
+    work2 = WorkEntity(
+        source="melinda",
+        source_id="w1",
+        title="Title A Updated",
+        title_normalized="title a updated",
+    )
     w_ids = repo.insert_works_batch([work1, work2])
     assert len(w_ids) == 2
     assert w_ids[0] == w_ids[1]
 
     # Duplicate manifestations in the same batch
-    manif1 = ManifestationEntity(source="melinda", source_id="m1", title="Title M", title_normalized="title m")
-    manif2 = ManifestationEntity(source="melinda", source_id="m1", title="Title M Updated", title_normalized="title m updated")
+    manif1 = ManifestationEntity(
+        source="melinda", source_id="m1", title="Title M", title_normalized="title m"
+    )
+    manif2 = ManifestationEntity(
+        source="melinda",
+        source_id="m1",
+        title="Title M Updated",
+        title_normalized="title m updated",
+    )
     m_ids = repo.insert_manifestations_batch([manif1, manif2])
     assert len(m_ids) == 2
     assert m_ids[0] == m_ids[1]
@@ -691,3 +705,95 @@ def test_wemi_repository_intra_batch_duplicates_postgres(tmp_storage: Any) -> No
     wa = repo.get_wikidata_author("Q999")
     assert wa is not None
     assert wa["name"] == "Wikidata Dup Updated"
+
+
+def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage: Any) -> None:
+    """Verify that agent attributes (qualifiers, affiliations, variant names) are stored relationally
+    with additive count merging across batches, and identifiers are stored in identifiers_table.
+    """
+    from reconciliator.models import IdentifierEntity
+    from reconciliator.repository import WEMIRepository
+
+    repo = WEMIRepository(
+        db_path=tmp_storage.database_url,
+        dimension=4,
+    )
+
+    # Batch 1: Insert agent with initial qualifier, affiliation, variant name, and ISNI identifier
+    agent1 = AgentEntity(
+        source="asteri",
+        source_id="12345",
+        name="Waltari, Mika",
+        name_normalized="waltari, mika",
+        surname="Waltari",
+        dates="1908-1979",
+        qualifiers={"kirjailija": 1},
+        affiliations={"Helsinki": 1},
+        variant_names=["Waltari, M."],
+        identifiers=[
+            IdentifierEntity(
+                entity_type="agent",
+                entity_id=0,
+                source="isni",
+                source_id="0000 0001 2148 7654",
+                source_id_normalized="0000000121487654",
+            )
+        ],
+    )
+    ids1 = repo.insert_agents_batch([agent1])
+    assert len(ids1) == 1
+    aid1 = ids1[0]
+    assert aid1 > 0
+
+    fetched1 = repo.get_agent(aid1)
+    assert fetched1 is not None
+    assert fetched1.qualifiers == {"kirjailija": 1}
+    assert fetched1.affiliations == {"Helsinki": 1}
+    assert "Waltari, M." in fetched1.variant_names
+    assert len(fetched1.identifiers) == 1
+    assert fetched1.identifiers[0].source == "isni"
+
+    # Batch 2: Re-insert same agent with additional qualifier counts, a new qualifier, and a new variant name
+    agent2 = AgentEntity(
+        source="asteri",
+        source_id="12345",
+        name="Waltari, Mika",
+        name_normalized="waltari, mika",
+        surname="Waltari",
+        dates="1908-1979",
+        qualifiers={"kirjailija": 3, "toimittaja": 2},
+        affiliations={"Helsinki": 2},
+        variant_names=["Mika Toimi Waltari"],
+        identifiers=[
+            IdentifierEntity(
+                entity_type="agent",
+                entity_id=0,
+                source="viaf",
+                source_id="113230702",
+                source_id_normalized="113230702",
+            )
+        ],
+    )
+    ids2 = repo.insert_agents_batch([agent2])
+    assert ids2[0] == aid1
+
+    fetched2 = repo.get_agent(aid1)
+    assert fetched2 is not None
+    # Additive merging across batches:
+    # "kirjailija": 1 + 3 = 4
+    # "toimittaja": 2
+    # "Helsinki": 1 + 2 = 3
+    assert fetched2.qualifiers["kirjailija"] == 4
+    assert fetched2.qualifiers["toimittaja"] == 2
+    assert fetched2.affiliations["Helsinki"] == 3
+    assert "Waltari, M." in fetched2.variant_names
+    assert "Mika Toimi Waltari" in fetched2.variant_names
+    # Both identifiers should be linked
+    ident_sources = {i.source: i.source_id for i in fetched2.identifiers}
+    assert "isni" in ident_sources
+    assert "viaf" in ident_sources
+
+    # Test lookup via identifiers table
+    matches = repo.lookup_by_identifier("isni", "0000000121487654")
+    assert len(matches) == 1
+    assert matches[0] == ("agent", aid1)

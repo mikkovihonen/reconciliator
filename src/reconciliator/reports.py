@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from reconciliator.config import AppConfig, ReconcileConfig, VocabIngestConfig
-from reconciliator.utils.tsv import sanitize_tsv_cell, write_summary_tsv, write_tsv_file
+from reconciliator.utils.tsv import sanitize_tsv_cell as sanitize_tsv_cell, write_summary_tsv, write_tsv_file
 from reconciliator.vocabularies import strip_vocabulary_subcode
 
 
@@ -995,7 +995,9 @@ class ReportGenerator:
             (
                 "execution",
                 "database_url",
-                str(self.config.storage.database_url if self.config and self.config.storage else ""),
+                str(
+                    self.config.storage.database_url if self.config and self.config.storage else ""
+                ),
                 "",
                 "PostgreSQL database connection URL",
             ),

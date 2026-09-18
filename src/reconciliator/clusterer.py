@@ -10,7 +10,6 @@ import json
 import re
 import time
 from collections import defaultdict
-from collections.abc import Iterable
 from typing import Optional
 
 from rapidfuzz import fuzz

@@ -67,7 +67,11 @@ def parse_turtle_simple(
                     return src.lower()
                 for seg in reversed(u.rstrip("/").split("/")):
                     clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
-                    if clean_seg and not re.match(r"^p?\d+$", clean_seg, re.I) and len(clean_seg) > 2:
+                    if (
+                        clean_seg
+                        and not re.match(r"^p?\d+$", clean_seg, re.I)
+                        and len(clean_seg) > 2
+                    ):
                         return clean_seg.lower()
                 return "vocab"
 

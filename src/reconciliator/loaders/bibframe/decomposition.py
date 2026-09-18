@@ -34,7 +34,6 @@ from reconciliator.loaders.bibframe.profiles import (
 )
 from reconciliator.loaders.subjects import (
     fold_subjects,
-    subject_footprint,
     vocabulary_hint_from_uri,
 )
 from reconciliator.models import (
@@ -965,11 +964,8 @@ def decompose_bibframe_work(
             if existing is not None:
                 agent_ent = existing
             all_agents_map[agent_ent.agent_uri] = agent_ent
-            # The MARC path stores a role histogram per agent and the enricher
-            # reads it (`next(iter(agent.role_counts))` for the export role), so
-            # leaving it empty here made every BibFrame agent roleless in the
-            # output while the same agent from Melinda carried {"aut": 1}.
-            agent_ent.role_counts[role] = agent_ent.role_counts.get(role, 0) + 1
+            # Role tracking is handled through contributions_table, not agent fields.
+            # The role histogram is no longer stored on AgentEntity.
             extracted_agents_with_role.append((agent_ent, role))
             # Determine target entity partition: Work vs Expression
             target_ent = (
@@ -1104,10 +1100,6 @@ def decompose_bibframe_work(
         vocab_store=vocab_store,
         language=work_lang,
     )
-    record_subject_counts = subject_footprint(folded_subjects)
-    for agent_ent in all_agents_map.values():
-        agent_ent.subject_counts = dict(record_subject_counts)
-
     # Build WEMI entities with serialization
     authors_list = [{"name": primary_creator_name}] if primary_creator_name else []
     work = WorkEntity(
@@ -1529,13 +1521,6 @@ def derive_bibframe_keys(
     # impossible here because roles were not normalised, so no BibFrame agent
     # ever carried "trl"; now that they do, the key that funnel HH dispatches on
     # and the clusterer scores with is derivable from BIBFRAME too.
-    translator_names = [a.name for a in agents if "trl" in (a.role_counts or {})]
-    if translator_names:
-        _add(
-            "translators_signature",
-            " ".join(sorted(compute_author_key(n, None) for n in translator_names if n)).strip(),
-        )
-
     return keys
 
 

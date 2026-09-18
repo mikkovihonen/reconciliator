@@ -6,9 +6,9 @@ from reconciliator.agent_transfer import (
     AgentFallbackResolver,
     check_homonym_ambiguity,
     verify_affiliations,
+    verify_agent_identifiers,
     verify_languages,
     verify_life_dates,
-    verify_orcid,
     verify_publication_chronology,
     verify_qualifier,
     verify_qualifiers,
@@ -152,10 +152,10 @@ def test_check_homonym_ambiguity() -> None:
     assert ok is True
     assert reason == "ambiguity_resolved_by_dates"
 
-    # Resolved by qualifier counts
+    # Resolved by qualifiers
     cands_with_qualifier = [
-        {"name": "Matti Virtanen", "score": 0.95, "qualifier_counts": {"lääkäri": 1}},
-        {"name": "Matti Virtanen", "score": 0.94, "qualifier_counts": {"kuvataiteilija": 1}},
+        {"name": "Matti Virtanen", "score": 0.95, "qualifiers": {"lääkäri": 1}},
+        {"name": "Matti Virtanen", "score": 0.94, "qualifiers": {"kuvataiteilija": 1}},
     ]
     ok, reason = check_homonym_ambiguity(
         cands_with_qualifier, score_margin=0.03, target_qualifiers={"lääkäri": 1}
@@ -163,10 +163,10 @@ def test_check_homonym_ambiguity() -> None:
     assert ok is True
     assert reason == "ambiguity_resolved_by_qualifier"
 
-    # Resolved by affiliation counts
+    # Resolved by affiliations
     cands_with_affil = [
-        {"name": "Matti Virtanen", "score": 0.95, "affiliation_counts": {"Helsingin yliopisto": 5}},
-        {"name": "Matti Virtanen", "score": 0.94, "affiliation_counts": {"Turun yliopisto": 3}},
+        {"name": "Matti Virtanen", "score": 0.95, "affiliations": {"Helsingin yliopisto": 5}},
+        {"name": "Matti Virtanen", "score": 0.94, "affiliations": {"Turun yliopisto": 3}},
     ]
     ok, reason = check_homonym_ambiguity(
         cands_with_affil, score_margin=0.03, target_affiliations={"Helsingin yliopisto": 1}
@@ -200,16 +200,26 @@ def test_check_homonym_ambiguity() -> None:
     assert ok is True
     assert reason == "ambiguity_resolved_by_subjects"
 
-    # Resolved by ORCID
-    cands_with_orcid = [
-        {"name": "Matti Virtanen", "score": 0.95, "orcid": "0000-0002-1825-0097"},
-        {"name": "Matti Virtanen", "score": 0.94, "orcid": "0000-0001-5109-3700"},
+    # Resolved by identifier
+    cands_with_ids = [
+        {
+            "name": "Matti Virtanen",
+            "score": 0.95,
+            "identifiers": [{"source": "orcid", "source_id": "0000-0002-1825-0097"}],
+        },
+        {
+            "name": "Matti Virtanen",
+            "score": 0.94,
+            "identifiers": [{"source": "orcid", "source_id": "0000-0001-5109-3700"}],
+        },
     ]
     ok, reason = check_homonym_ambiguity(
-        cands_with_orcid, score_margin=0.03, target_orcid="https://orcid.org/0000-0002-1825-0097"
+        cands_with_ids,
+        score_margin=0.03,
+        target_identifiers=[{"source": "orcid", "source_id": "0000-0002-1825-0097"}],
     )
     assert ok is True
-    assert reason == "ambiguity_resolved_by_orcid"
+    assert reason == "ambiguity_resolved_by_identifier"
 
     # Resolved by Tier 2 Relational Deep Disambiguation
     class MockAuthorityStore:
@@ -255,7 +265,7 @@ def test_agent_fallback_resolver_e2e() -> None:
         surname="Virtanen",
         birth_year=1920,
         death_year=1995,
-        qualifier_counts={"professori": 1},
+        qualifiers={"professori": 1},
     )
 
     # 1. Candidate with matching dates accepted
@@ -265,7 +275,7 @@ def test_agent_fallback_resolver_e2e() -> None:
             "surname": "Virtanen",
             "birth_year": 1920,
             "death_year": 1995,
-            "qualifier_counts": {"professori": 1},
+            "qualifiers": {"professori": 1},
             "score": 0.96,
             "agent_uri": "http://urn.fi/URN:NBN:fi:au:pn:0001",
         }
@@ -310,18 +320,29 @@ def test_agent_fallback_resolver_e2e() -> None:
     assert reason == "all_candidates_rejected_by_guards"
 
 
-def test_verify_orcid() -> None:
-    ok, reason = verify_orcid("https://orcid.org/0000-0002-1825-0097", "0000-0002-1825-0097")
+def test_verify_agent_identifiers() -> None:
+    # Matching ORCID (normalized)
+    ok, reason = verify_agent_identifiers(
+        [{"source": "orcid", "source_id": "0000-0002-1825-0097"}],
+        [{"source": "orcid", "source_id": "0000-0002-1825-0097"}],
+    )
     assert ok is True
-    assert reason == "orcid_confirmed"
+    assert reason == "identifier_matched"
 
-    ok, reason = verify_orcid("0000-0002-1825-0097", "0000-0001-5109-3700")
-    assert ok is False
-    assert "orcid_mismatch" in reason
+    # Mismatched ORCID
+    ok, reason = verify_agent_identifiers(
+        [{"source": "orcid", "source_id": "0000-0002-1825-0097"}],
+        [{"source": "orcid", "source_id": "0000-0001-5109-3700"}],
+    )
+    assert ok is False  # Returns False when both have identifiers but none match
+    assert reason == "no_matching_identifiers"
 
-    ok, reason = verify_orcid(None, "0000-0002-1825-0097")
+    # Empty identifiers
+    ok, reason = verify_agent_identifiers(
+        [], [{"source": "orcid", "source_id": "0000-0002-1825-0097"}]
+    )
     assert ok is True
-    assert reason == "neutral_no_orcid"
+    assert reason == "neutral_no_identifiers"
 
 
 def test_verify_qualifiers_distribution() -> None:

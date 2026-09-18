@@ -34,9 +34,7 @@ from reconciliator.normalizers.agent import normalize_agent_name
 from reconciliator.vocab_folding import VocabFolder
 from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
 
-_LANG_CODE_MAP: dict[str, str] = dict(
-    get_bundled_vocab_defaults().get("language_code_map") or {}
-)
+_LANG_CODE_MAP: dict[str, str] = dict(get_bundled_vocab_defaults().get("language_code_map") or {})
 
 
 def _extract_record_language(record_elem: etree._Element) -> Optional[str]:

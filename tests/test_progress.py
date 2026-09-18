@@ -533,7 +533,13 @@ def test_telemetry_slices_display(progress_db: Path) -> None:
         stage="harvest_and_index",
         items_processed=197,
         percentage=25.0,
-        metadata={"harvested": 197, "indexed": 197, "skipped": 0, "slices_done": 5, "slices_total": 20},
+        metadata={
+            "harvested": 197,
+            "indexed": 197,
+            "skipped": 0,
+            "slices_done": 5,
+            "slices_total": 20,
+        },
         force=True,
     )
 
@@ -556,4 +562,3 @@ def test_telemetry_slices_display(progress_db: Path) -> None:
     tui_text = console.export_text()
     assert "197 indexed, 0 skipped (197 fetched) [5/20 slices]" in tui_text
     assert "25.0%" in tui_text
-

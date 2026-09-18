@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.curie import parse_curie, to_curie
 from reconciliator.db import (
+    agent_attributes_table,
     agents_table,
     contributions_table,
     corpus_expression_clusters_table,
@@ -87,33 +88,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _hydrate_agent_profile(row_dict: dict[str, Any]) -> dict[str, Any]:
-    """Hydrate intrinsic count distributions, orcid, and variant names from metadata_json."""
-    meta: dict[str, Any] = {}
-    if row_dict.get("metadata_json"):
-        try:
-            meta = json.loads(row_dict["metadata_json"])
-        except Exception:
-            meta = {}
-    row_dict["qualifier_counts"] = meta.get("qualifier_counts", {})
-    row_dict["affiliation_counts"] = meta.get("affiliation_counts", {})
-    row_dict["role_counts"] = meta.get("role_counts", {})
-    row_dict["language_counts"] = meta.get("language_counts", {})
-    row_dict["subject_counts"] = meta.get("subject_counts", {})
-    row_dict["orcid"] = meta.get("orcid") or row_dict.get("orcid")
-    row_dict["variant_names"] = meta.get("variant_names") or row_dict.get("variant_names") or []
-
-    # Fallback to legacy columns if count dicts are empty
-    if not row_dict["qualifier_counts"] and row_dict.get("qualifier"):
-        row_dict["qualifier_counts"] = {str(row_dict["qualifier"]): 1}
-    if not row_dict["affiliation_counts"] and row_dict.get("affiliation"):
-        row_dict["affiliation_counts"] = {str(row_dict["affiliation"]): 1}
-    if not row_dict["role_counts"] and row_dict.get("role"):
-        row_dict["role_counts"] = {str(row_dict["role"]): 1}
-
-    return row_dict
-
-
 # ---------------------------------------------------------------------------
 # WEMI Entity Core Repository Helpers
 # ---------------------------------------------------------------------------
@@ -133,7 +107,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 
 
 def _row_to_agent(row: Any) -> AgentEntity:
-    return AgentEntity.model_validate(_hydrate_agent_profile(_row_to_dict(row)))
+    return AgentEntity.model_validate(_row_to_dict(row))
 
 
 def _row_to_work(row: Any) -> WorkEntity:
@@ -254,35 +228,21 @@ class WEMIRepository:
         conn: Optional[Any] = None,
         chunk_size: int = 1000,
     ) -> list[int]:
-        """Insert or update AgentEntity records in batch."""
+        """Insert or update AgentEntity records in batch with relational attribute upserts."""
         if not agents:
             return []
 
+        # In-memory deduplication by (source, source_id)
         deduped_rows: dict[tuple[str, str], dict[str, Any]] = {}
+        # Attribute accumulation: ((source, source_id), type, value) -> count
+        attr_accum: dict[tuple[tuple[str, str], str, str], int] = {}
+        # Variant names per agent: (source, source_id) -> set[str]
+        variant_accum: dict[tuple[str, str], set[str]] = {}
+        # Identifiers per agent: (source, source_id) -> list[IdentifierEntity]
+        ident_accum: dict[tuple[str, str], list[IdentifierEntity]] = {}
+
         for agent in agents:
             key = (agent.source, agent.source_id)
-            agent_meta: dict[str, Any] = {}
-            if agent.metadata_json:
-                try:
-                    agent_meta = json.loads(agent.metadata_json)
-                except Exception:
-                    agent_meta = {}
-            if agent.qualifier_counts:
-                agent_meta["qualifier_counts"] = agent.qualifier_counts
-            if agent.affiliation_counts:
-                agent_meta["affiliation_counts"] = agent.affiliation_counts
-            if agent.role_counts:
-                agent_meta["role_counts"] = agent.role_counts
-            if agent.language_counts:
-                agent_meta["language_counts"] = agent.language_counts
-            if agent.subject_counts:
-                agent_meta["subject_counts"] = agent.subject_counts
-            if agent.orcid:
-                agent_meta["orcid"] = agent.orcid
-            if agent.variant_names:
-                agent_meta["variant_names"] = agent.variant_names
-            meta_str = json.dumps(agent_meta, ensure_ascii=False) if agent_meta else None
-
             row = {
                 "source": agent.source,
                 "source_id": agent.source_id,
@@ -290,13 +250,10 @@ class WEMIRepository:
                 "name": agent.name,
                 "name_normalized": agent.name_normalized,
                 "surname": agent.surname,
-                "qualifier": None,
                 "dates": agent.dates,
                 "birth_year": agent.birth_year,
                 "death_year": agent.death_year,
                 "fuller_name": agent.fuller_name,
-                "affiliation": None,
-                "metadata_json": meta_str,
                 "is_personal": bool(agent.is_personal),
                 "is_fictional": bool(agent.is_fictional),
             }
@@ -308,10 +265,37 @@ class WEMIRepository:
             else:
                 deduped_rows[key] = row
 
+            # Accumulate qualifiers additively
+            for attr_val, count in (agent.qualifiers or {}).items():
+                attr_accum[(key, "qualifier", attr_val)] = (
+                    attr_accum.get((key, "qualifier", attr_val), 0) + count
+                )
+            # Accumulate affiliations additively
+            for attr_val, count in (agent.affiliations or {}).items():
+                attr_accum[(key, "affiliation", attr_val)] = (
+                    attr_accum.get((key, "affiliation", attr_val), 0) + count
+                )
+            # Accumulate variant names
+            if agent.variant_names:
+                variant_accum.setdefault(key, set()).update(agent.variant_names)
+            # Accumulate identifiers
+            if agent.identifiers:
+                ident_accum.setdefault(key, []).extend(agent.identifiers)
+            # Accumulate occupation and field_of_work
+            for occ in agent.occupation or []:
+                attr_accum[(key, "occupation", occ)] = (
+                    attr_accum.get((key, "occupation", occ), 0) + 1
+                )
+            for fow in agent.field_of_work or []:
+                attr_accum[(key, "field_of_work", fow)] = (
+                    attr_accum.get((key, "field_of_work", fow), 0) + 1
+                )
+
         rows = list(deduped_rows.values())
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
+            # 1. Batch UPSERT into agents_table
             for i in range(0, len(rows), chunk_size):
                 chunk = rows[i : i + chunk_size]
                 stmt = pg_insert(agents_table).values(chunk)
@@ -322,9 +306,6 @@ class WEMIRepository:
                         "name": stmt.excluded.name,
                         "name_normalized": stmt.excluded.name_normalized,
                         "surname": func.coalesce(stmt.excluded.surname, agents_table.c.surname),
-                        "qualifier": func.coalesce(
-                            stmt.excluded.qualifier, agents_table.c.qualifier
-                        ),
                         "dates": func.coalesce(stmt.excluded.dates, agents_table.c.dates),
                         "birth_year": func.coalesce(
                             stmt.excluded.birth_year, agents_table.c.birth_year
@@ -335,12 +316,6 @@ class WEMIRepository:
                         "fuller_name": func.coalesce(
                             stmt.excluded.fuller_name, agents_table.c.fuller_name
                         ),
-                        "affiliation": func.coalesce(
-                            stmt.excluded.affiliation, agents_table.c.affiliation
-                        ),
-                        "metadata_json": func.coalesce(
-                            stmt.excluded.metadata_json, agents_table.c.metadata_json
-                        ),
                         "is_personal": stmt.excluded.is_personal,
                         "is_fictional": stmt.excluded.is_fictional,
                     },
@@ -349,13 +324,109 @@ class WEMIRepository:
                 for r in res:
                     id_map[(r[1], r[2])] = r[0]
 
+            # 2. Batch additive UPSERT into agent_attributes_table
+            attr_dict: dict[tuple[int, str, str], int] = {}
+            for (key, attr_type, value), count in attr_accum.items():
+                agent_id = id_map.get(key)
+                if agent_id:
+                    attr_dict[(agent_id, attr_type, value)] = (
+                        attr_dict.get((agent_id, attr_type, value), 0) + count
+                    )
+            for key, variants in variant_accum.items():
+                agent_id = id_map.get(key)
+                if agent_id:
+                    for v in variants:
+                        attr_dict[(agent_id, "variant_name", v)] = (
+                            attr_dict.get((agent_id, "variant_name", v), 0) + 1
+                        )
+
+            if attr_dict:
+                attr_rows = [
+                    {
+                        "agent_id": aid,
+                        "attribute_type": atype,
+                        "value": val,
+                        "count": cnt,
+                    }
+                    for (aid, atype, val), cnt in attr_dict.items()
+                ]
+                for i in range(0, len(attr_rows), chunk_size):
+                    chunk = attr_rows[i : i + chunk_size]
+                    stmt = pg_insert(agent_attributes_table).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["agent_id", "attribute_type", "value"],
+                        set_={
+                            "count": agent_attributes_table.c.count + stmt.excluded.count,
+                        },
+                    )
+                    c.execute(stmt)
+
+            # 3. Batch insert identifiers
+            to_insert_idents: list[IdentifierEntity] = []
+            for key, idents in ident_accum.items():
+                agent_id = id_map.get(key)
+                if agent_id:
+                    for ident in idents:
+                        ident_copy = ident.model_copy() if hasattr(ident, "model_copy") else ident
+                        ident_copy.entity_id = agent_id
+                        ident_copy.entity_type = "agent"
+                        to_insert_idents.append(ident_copy)
+            if to_insert_idents:
+                self.insert_identifiers_batch(to_insert_idents, conn=c, chunk_size=chunk_size)
+
         if conn is not None:
             _exec(conn)
         else:
             with self.get_connection() as c:
                 _exec(c)
 
+        # Resolve IDs for return
         return [id_map.get((a.source, a.source_id), 0) for a in agents]
+
+    def insert_agent_attributes_batch(
+        self,
+        agent_id: int,
+        attributes: list[tuple[str, str, int]],
+        conn: Optional[Any] = None,
+    ) -> None:
+        """Batch upsert agent attributes with additive count merging.
+
+        Args:
+            agent_id: The agent row ID.
+            attributes: List of (attribute_type, value, count) tuples.
+        """
+        if not attributes:
+            return
+        rows = [
+            {"agent_id": agent_id, "attribute_type": t, "value": v, "count": c}
+            for t, v, c in attributes
+        ]
+        stmt = pg_insert(agent_attributes_table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["agent_id", "attribute_type", "value"],
+            set_={"count": agent_attributes_table.c.count + stmt.excluded.count},
+        )
+        if conn is not None:
+            conn.execute(stmt)
+        else:
+            with self.get_connection() as c:
+                c.execute(stmt)
+
+    def insert_agent_identifiers_batch(
+        self,
+        agent_id: int,
+        identifiers: list[IdentifierEntity],
+        conn: Optional[Any] = None,
+    ) -> None:
+        """Batch insert identifiers for an agent."""
+        if not identifiers:
+            return
+        bound: list[IdentifierEntity] = []
+        for ident in identifiers:
+            ident.entity_id = agent_id
+            ident.entity_type = "agent"
+            bound.append(ident)
+        self.insert_identifiers_batch(bound, conn=conn)
 
     def insert_works_batch(
         self,
@@ -437,7 +508,9 @@ class WEMIRepository:
 
         if vectors is not None and self.work_indexer is not None and len(vectors) == len(works):
             vector_ids = self.work_indexer.add_vectors(vectors, ids=work_ids)
-            vec_rows = [{"vector_id": v_id, "work_id": w_id} for v_id, w_id in zip(vector_ids, work_ids)]
+            vec_rows = [
+                {"vector_id": v_id, "work_id": w_id} for v_id, w_id in zip(vector_ids, work_ids)
+            ]
 
             def _exec_vec(c: Any) -> None:
                 for i in range(0, len(vec_rows), chunk_size):
@@ -526,7 +599,11 @@ class WEMIRepository:
                         "medium_of_performance": stmt.excluded.medium_of_performance,
                         "serialized_text": stmt.excluded.serialized_text,
                     },
-                ).returning(expressions_table.c.id, expressions_table.c.source, expressions_table.c.source_id)
+                ).returning(
+                    expressions_table.c.id,
+                    expressions_table.c.source,
+                    expressions_table.c.source_id,
+                )
                 res = c.execute(stmt).fetchall()
                 for r in res:
                     id_map[(r[1], r[2])] = r[0]
@@ -624,7 +701,11 @@ class WEMIRepository:
                         "host_title": stmt.excluded.host_title,
                         "serialized_text": stmt.excluded.serialized_text,
                     },
-                ).returning(manifestations_table.c.id, manifestations_table.c.source, manifestations_table.c.source_id)
+                ).returning(
+                    manifestations_table.c.id,
+                    manifestations_table.c.source,
+                    manifestations_table.c.source_id,
+                )
                 res = c.execute(stmt).fetchall()
                 for r in res:
                     id_map[(r[1], r[2])] = r[0]
@@ -799,7 +880,9 @@ class WEMIRepository:
         chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert polymorphic IdentifierEntity records in batch."""
-        return self._insert_simple_batch(identifiers_table, identifiers, conn=conn, chunk_size=chunk_size)
+        return self._insert_simple_batch(
+            identifiers_table, identifiers, conn=conn, chunk_size=chunk_size
+        )
 
     def insert_entity_keys_batch(
         self,
@@ -1018,7 +1101,9 @@ class WEMIRepository:
         chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert ContributionEntity records in batch."""
-        return self._insert_simple_batch(contributions_table, contributions, conn=conn, chunk_size=chunk_size)
+        return self._insert_simple_batch(
+            contributions_table, contributions, conn=conn, chunk_size=chunk_size
+        )
 
     def insert_work_relationships_batch(
         self,
@@ -1062,7 +1147,9 @@ class WEMIRepository:
         else:
             with self.get_connection() as c:
                 _exec(c)
-        return [id_map.get((r.source_work_id, r.target_work_id, r.relationship_type), 0) for r in rels]
+        return [
+            id_map.get((r.source_work_id, r.target_work_id, r.relationship_type), 0) for r in rels
+        ]
 
     def insert_medium_of_performance_batch(
         self,
@@ -1131,7 +1218,9 @@ class WEMIRepository:
         chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert polymorphic EntitySubject records in batch."""
-        return self._insert_simple_batch(entity_subjects_table, subjects, conn=conn, chunk_size=chunk_size)
+        return self._insert_simple_batch(
+            entity_subjects_table, subjects, conn=conn, chunk_size=chunk_size
+        )
 
     def insert_wemi_batch(
         self,
@@ -1218,7 +1307,9 @@ class WEMIRepository:
             # 2. Works
             work_key_to_id: dict[Any, int] = {}
             if works:
-                w_ids = self.insert_works_batch(works, vectors=work_vectors, conn=c, chunk_size=chunk_size)
+                w_ids = self.insert_works_batch(
+                    works, vectors=work_vectors, conn=c, chunk_size=chunk_size
+                )
                 for w, wid in zip(works, w_ids):
                     w.id = wid
                     work_key_to_id[w.curie] = wid
@@ -1267,7 +1358,9 @@ class WEMIRepository:
                         if manifestation_vectors is not None
                         else None
                     )
-                    ids = self.insert_manifestations_batch(rows, vectors=vectors, conn=c, chunk_size=chunk_size)
+                    ids = self.insert_manifestations_batch(
+                        rows, vectors=vectors, conn=c, chunk_size=chunk_size
+                    )
                     for row, row_id in zip(rows, ids):
                         row.id = row_id
                         manif_key_to_id[row.curie] = row_id
@@ -1278,8 +1371,12 @@ class WEMIRepository:
                 if not component_idx:
                     _insert_manifestations(manifestations, list(range(len(manifestations))))
                 else:
-                    container_idx = [i for i, m in enumerate(manifestations) if not m.container_curie]
-                    _insert_manifestations([manifestations[i] for i in container_idx], container_idx)
+                    container_idx = [
+                        i for i, m in enumerate(manifestations) if not m.container_curie
+                    ]
+                    _insert_manifestations(
+                        [manifestations[i] for i in container_idx], container_idx
+                    )
                     for i in component_idx:
                         component = manifestations[i]
                         resolved = _resolve(manif_key_to_id, component.container_curie)
@@ -1296,7 +1393,9 @@ class WEMIRepository:
                                 component.source_id,
                                 component.container_curie,
                             )
-                    _insert_manifestations([manifestations[i] for i in component_idx], component_idx)
+                    _insert_manifestations(
+                        [manifestations[i] for i in component_idx], component_idx
+                    )
 
             # 5. Manifestation-Expression Associations
             if manifestation_expressions:
@@ -1308,13 +1407,17 @@ class WEMIRepository:
                         assoc.manifestation_id = (
                             _resolve(manif_key_to_id, assoc.manifestation_curie) or 0
                         )
-                    if (not assoc.expression_id or assoc.expression_id <= 0) and assoc.expression_curie:
+                    if (
+                        not assoc.expression_id or assoc.expression_id <= 0
+                    ) and assoc.expression_curie:
                         assoc.expression_id = _resolve(expr_key_to_id, assoc.expression_curie) or 0
                     if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and len(
                         manifestations
                     ) == 1:
                         assoc.manifestation_id = manifestations[0].id or 0
-                    if (not assoc.expression_id or assoc.expression_id <= 0) and len(expressions) == 1:
+                    if (not assoc.expression_id or assoc.expression_id <= 0) and len(
+                        expressions
+                    ) == 1:
                         assoc.expression_id = expressions[0].id or 0
                     if assoc.manifestation_id > 0 and assoc.expression_id > 0:
                         bound_assocs.append(assoc)
@@ -1326,7 +1429,9 @@ class WEMIRepository:
                             assoc.expression_curie,
                         )
                 if bound_assocs:
-                    self.insert_manifestation_expressions_batch(bound_assocs, conn=c, chunk_size=chunk_size)
+                    self.insert_manifestation_expressions_batch(
+                        bound_assocs, conn=c, chunk_size=chunk_size
+                    )
 
             # 6. Items
             if items:
@@ -1375,9 +1480,13 @@ class WEMIRepository:
             if relationships:
                 bound_rels: list[WorkRelationship] = []
                 for rel in relationships:
-                    if (not rel.source_work_id or rel.source_work_id <= 0) and rel.source_work_curie:
+                    if (
+                        not rel.source_work_id or rel.source_work_id <= 0
+                    ) and rel.source_work_curie:
                         rel.source_work_id = _resolve(work_key_to_id, rel.source_work_curie) or 0
-                    if (not rel.target_work_id or rel.target_work_id <= 0) and rel.target_work_curie:
+                    if (
+                        not rel.target_work_id or rel.target_work_id <= 0
+                    ) and rel.target_work_curie:
                         rel.target_work_id = _resolve(work_key_to_id, rel.target_work_curie) or 0
                     if (not rel.source_work_id or rel.source_work_id <= 0) and works:
                         rel.source_work_id = works[0].id or 0
@@ -1413,7 +1522,9 @@ class WEMIRepository:
                             mop.label,
                         )
                 if bound_mops:
-                    self.insert_medium_of_performance_batch(bound_mops, conn=c, chunk_size=chunk_size)
+                    self.insert_medium_of_performance_batch(
+                        bound_mops, conn=c, chunk_size=chunk_size
+                    )
 
             # 10. Contributions
             if contributions:
@@ -1438,7 +1549,12 @@ class WEMIRepository:
                     if not c_item.agent_id or c_item.agent_id <= 0:
                         if agents:
                             c_item.agent_id = agents[0].id
-                    if c_item.agent_id and c_item.agent_id > 0 and c_item.entity_id and c_item.entity_id > 0:
+                    if (
+                        c_item.agent_id
+                        and c_item.agent_id > 0
+                        and c_item.entity_id
+                        and c_item.entity_id > 0
+                    ):
                         valid_contribs.append(c_item)
                 if valid_contribs:
                     self.insert_contributions_batch(valid_contribs, conn=c, chunk_size=chunk_size)
@@ -1572,16 +1688,75 @@ class WEMIRepository:
             return row_converter(row) if row else None
 
     def get_agent(self, agent_id: int) -> Optional[AgentEntity]:
-        """Fetch AgentEntity by ID."""
-        return self._get_entity_by_id(agents_table, _row_to_agent, agent_id)
+        """Fetch AgentEntity by ID with relational attributes and identifiers."""
+        agents = self.get_agents_by_ids([agent_id])
+        if agent_id in agents:
+            return AgentEntity.model_validate(agents[agent_id])
+        return None
+
+    def get_agents_by_ids(self, agent_ids: list[int]) -> dict[int, dict[str, Any]]:
+        """Fetch agent profiles with relational attributes for a list of IDs."""
+        if not agent_ids:
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        with self.get_connection() as conn:
+            # 1. Fetch agents
+            agents_stmt = select(agents_table).where(agents_table.c.id.in_(agent_ids))
+            agent_rows = conn.execute(agents_stmt).mappings().fetchall()
+            for row in agent_rows:
+                agent_id = row["id"]
+                agent_dict = dict(row)
+                agent_dict["qualifiers"] = {}
+                agent_dict["affiliations"] = {}
+                agent_dict["variant_names"] = []
+                agent_dict["occupation"] = []
+                agent_dict["field_of_work"] = []
+                agent_dict["identifiers"] = []
+                result[agent_id] = agent_dict
+
+            # 2. Batch fetch attributes in a single query
+            attr_stmt = select(
+                agent_attributes_table.c.agent_id,
+                agent_attributes_table.c.attribute_type,
+                agent_attributes_table.c.value,
+                agent_attributes_table.c.count,
+            ).where(agent_attributes_table.c.agent_id.in_(agent_ids))
+            for r in conn.execute(attr_stmt):
+                aid = r[0]
+                atype = r[1]
+                val = r[2]
+                cnt = r[3]
+                if aid in result:
+                    if atype == "qualifier":
+                        result[aid]["qualifiers"][val] = cnt
+                    elif atype == "affiliation":
+                        result[aid]["affiliations"][val] = cnt
+                    elif atype == "variant_name":
+                        result[aid]["variant_names"].append(val)
+                    elif atype == "occupation":
+                        result[aid]["occupation"].append(val)
+                    elif atype == "field_of_work":
+                        result[aid]["field_of_work"].append(val)
+
+            # 3. Batch fetch identifiers in a single query
+            ident_stmt = select(identifiers_table).where(
+                identifiers_table.c.entity_type == "agent",
+                identifiers_table.c.entity_id.in_(agent_ids),
+            )
+            for r in conn.execute(ident_stmt):
+                aid = r.entity_id if hasattr(r, "entity_id") else r[2]
+                if aid in result:
+                    result[aid]["identifiers"].append(_row_to_identifier(r))
+
+        return result
 
     def get_agent_by_curie(self, curie_or_uri: str) -> Optional[AgentEntity]:
-        """Fetch AgentEntity by CURIE or URI."""
+        """Fetch AgentEntity by CURIE or URI with relational attributes and identifiers."""
         source, source_id = parse_curie(curie_or_uri)
         if not source_id:
             return None
         with self.get_connection() as conn:
-            stmt = select(agents_table).where(
+            stmt = select(agents_table.c.id).where(
                 agents_table.c.source == source,
                 agents_table.c.source_id == source_id,
             )
@@ -1591,12 +1766,14 @@ class WEMIRepository:
 
                 aliases = get_source_aliases(source)
                 if aliases:
-                    fallback_stmt = select(agents_table).where(
+                    fallback_stmt = select(agents_table.c.id).where(
                         agents_table.c.source.in_([source, *aliases]),
                         agents_table.c.source_id == source_id,
                     )
                     row = conn.execute(fallback_stmt).fetchone()
-            return _row_to_agent(row) if row else None
+        if row:
+            return self.get_agent(row[0])
+        return None
 
     def _enrich_work_identifiers(
         self, conn: Any, work: Optional[WorkEntity]
@@ -2344,42 +2521,32 @@ class WEMIRepository:
             conn.execute(stmt)
 
     def insert_wikidata_authors(self, authors: list[dict[str, Any]]) -> None:
-        """Persist author entity metadata into agents table and identifiers table.
+        """Persist author entity metadata into agents table with relational attributes.
 
-        Wikidata-specific fields (occupations, fields_of_work, affiliations, family_name)
-        are stored inside agents.metadata_json.
+        Wikidata-specific fields (occupations, fields_of_work, affiliations) are
+        stored in agent_attributes_table. Identifiers go into identifiers_table.
         """
         if not authors:
             return
         deduped_agent_rows: dict[tuple[str, str], dict[str, Any]] = {}
-        for a in authors:
-            if not a.get("qid"):
-                continue
-            # Merge wikidata-specific fields into metadata_json
-            existing_meta = (
-                json.loads(a.get("metadata_json") or "{}") if a.get("metadata_json") else {}
-            )
-            if a.get("occupations"):
-                existing_meta["occupations"] = a["occupations"]
-            if a.get("fields_of_work"):
-                existing_meta["fields_of_work"] = a["fields_of_work"]
-            if a.get("affiliations"):
-                existing_meta["affiliations"] = a["affiliations"]
-            if a.get("family_name"):
-                existing_meta["family_name"] = a["family_name"]
-            metadata_json = json.dumps(existing_meta, ensure_ascii=False)
+        # Accumulate attributes: (qid, type, value) -> count
+        attr_accum: dict[tuple[str, str, str], int] = {}
 
-            key = ("wikidata", a["qid"])
+        for a in authors:
+            qid = a.get("qid")
+            if not qid:
+                continue
+
+            key = ("wikidata", qid)
             row = {
                 "source": "wikidata",
-                "source_id": a["qid"],
+                "source_id": qid,
                 "record_origin": "wikidata",
-                "name": a.get("name") or a["qid"],
-                "name_normalized": (a.get("name") or a["qid"]).strip().lower(),
+                "name": a.get("name") or qid,
+                "name_normalized": (a.get("name") or qid).strip().lower(),
                 "surname": a.get("family_name"),
                 "birth_year": a.get("birth_year"),
                 "death_year": a.get("death_year"),
-                "metadata_json": metadata_json,
                 "is_personal": True,
             }
             if key in deduped_agent_rows:
@@ -2389,6 +2556,30 @@ class WEMIRepository:
                         existing[field] = val
             else:
                 deduped_agent_rows[key] = row
+
+            # Accumulate occupation attributes
+            for occ in a.get("occupations") or []:
+                attr_accum[(qid, "occupation", occ)] = (
+                    attr_accum.get((qid, "occupation", occ), 0) + 1
+                )
+            # Accumulate field_of_work attributes
+            for fow in a.get("fields_of_work") or []:
+                attr_accum[(qid, "field_of_work", fow)] = (
+                    attr_accum.get((qid, "field_of_work", fow), 0) + 1
+                )
+            # Accumulate affiliation attributes
+            for aff in a.get("affiliations") or []:
+                attr_accum[(qid, "affiliation", aff)] = (
+                    attr_accum.get((qid, "affiliation", aff), 0) + 1
+                )
+            # Accumulate qualifier attributes
+            for q in a.get("qualifiers") or []:
+                attr_accum[(qid, "qualifier", q)] = attr_accum.get((qid, "qualifier", q), 0) + 1
+            # Accumulate variant_name attributes
+            for vn in a.get("variant_names") or []:
+                attr_accum[(qid, "variant_name", vn)] = (
+                    attr_accum.get((qid, "variant_name", vn), 0) + 1
+                )
 
         agent_rows = list(deduped_agent_rows.values())
         with self.get_connection() as conn:
@@ -2406,14 +2597,47 @@ class WEMIRepository:
                         "death_year": func.coalesce(
                             stmt.excluded.death_year, agents_table.c.death_year
                         ),
-                        "metadata_json": func.coalesce(
-                            stmt.excluded.metadata_json, agents_table.c.metadata_json
-                        ),
                     },
                 )
                 conn.execute(stmt)
 
-            # Option 3: Persist relational author identifiers into identifiers table (entity_type = 'agent')
+            # Get agent IDs after insertion
+            qids_with_attrs = [qid for (qid, _, _) in attr_accum.keys()]
+            if qids_with_attrs and attr_accum:
+                agent_records = conn.execute(
+                    select(agents_table.c.id, agents_table.c.source_id).where(
+                        agents_table.c.source == "wikidata",
+                        agents_table.c.source_id.in_(qids_with_attrs),
+                    )
+                ).fetchall()
+                qid_to_agent_id = {r[1]: r[0] for r in agent_records}
+
+                attr_dict: dict[tuple[int, str, str], int] = {}
+                for (qid, attr_type, value), count in attr_accum.items():
+                    aid = qid_to_agent_id.get(qid)
+                    if aid:
+                        attr_dict[(aid, attr_type, value)] = (
+                            attr_dict.get((aid, attr_type, value), 0) + count
+                        )
+
+                if attr_dict:
+                    attr_rows = [
+                        {
+                            "agent_id": aid,
+                            "attribute_type": atype,
+                            "value": val,
+                            "count": cnt,
+                        }
+                        for (aid, atype, val), cnt in attr_dict.items()
+                    ]
+                    stmt = pg_insert(agent_attributes_table).values(attr_rows)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["agent_id", "attribute_type", "value"],
+                        set_={"count": agent_attributes_table.c.count + stmt.excluded.count},
+                    )
+                    conn.execute(stmt)
+
+            # Persist relational author identifiers into identifiers table
             qids_with_idents = [a["qid"] for a in authors if a.get("qid") and a.get("identifiers")]
             if qids_with_idents:
                 agent_records = conn.execute(
@@ -2477,11 +2701,7 @@ class WEMIRepository:
                         conn.execute(pg_insert(identifiers_table).values(to_insert))
 
     def get_wikidata_authors_batch(self, qids: list[str]) -> dict[str, dict[str, Any]]:
-        """Fetch cached author entities from agents + identifiers by QIDs.
-
-        Reconstructs the same dict shape that was previously returned from
-        the wikidata_authors table so that all existing callers continue to work.
-        """
+        """Fetch cached author entities from agents + identifiers + agent_attributes by QIDs."""
         if not qids:
             return {}
         with self.get_connection() as conn:
@@ -2493,7 +2713,6 @@ class WEMIRepository:
                 agents_table.c.surname,
                 agents_table.c.birth_year,
                 agents_table.c.death_year,
-                agents_table.c.metadata_json,
             ).where(
                 agents_table.c.source == "wikidata",
                 agents_table.c.source_id.in_(qids),
@@ -2506,22 +2725,49 @@ class WEMIRepository:
             for row in rows:
                 qid = row["source_id"]
                 agent_id_map[qid] = row["id"]
-                meta = json.loads(row["metadata_json"] or "{}") if row["metadata_json"] else {}
-
                 results[qid] = {
                     "qid": qid,
                     "name": row["name"],
-                    "family_name": meta.get("family_name") or row["surname"],
-                    "identifiers": {},  # populated below
+                    "family_name": row["surname"],
+                    "identifiers": {},
                     "birth_year": row["birth_year"],
                     "death_year": row["death_year"],
-                    "occupations": meta.get("occupations"),
-                    "fields_of_work": meta.get("fields_of_work"),
-                    "affiliations": meta.get("affiliations"),
-                    "metadata_json": row["metadata_json"],
+                    "occupations": [],
+                    "fields_of_work": [],
+                    "affiliations": [],
+                    "qualifiers": [],
+                    "variant_names": [],
                 }
 
-            # 2. Fetch identifiers for each agent
+            # 2. Fetch agent_attributes for occupations, fields_of_work, affiliations, qualifiers, variant_names
+            if agent_id_map:
+                attr_stmt = select(
+                    agent_attributes_table.c.agent_id,
+                    agent_attributes_table.c.attribute_type,
+                    agent_attributes_table.c.value,
+                ).where(agent_attributes_table.c.agent_id.in_(list(agent_id_map.values())))
+                attr_rows = conn.execute(attr_stmt).fetchall()
+                rev_map = {aid: qid for qid, aid in agent_id_map.items()}
+                for r in attr_rows:
+                    qid = rev_map.get(r[0])
+                    if qid and qid in results:
+                        if r["attribute_type"] == "occupation":
+                            if r["value"] not in results[qid]["occupations"]:
+                                results[qid]["occupations"].append(r["value"])
+                        elif r["attribute_type"] == "field_of_work":
+                            if r["value"] not in results[qid]["fields_of_work"]:
+                                results[qid]["fields_of_work"].append(r["value"])
+                        elif r["attribute_type"] == "affiliation":
+                            if r["value"] not in results[qid]["affiliations"]:
+                                results[qid]["affiliations"].append(r["value"])
+                        elif r["attribute_type"] == "qualifier":
+                            if r["value"] not in results[qid]["qualifiers"]:
+                                results[qid]["qualifiers"].append(r["value"])
+                        elif r["attribute_type"] == "variant_name":
+                            if r["value"] not in results[qid]["variant_names"]:
+                                results[qid]["variant_names"].append(r["value"])
+
+            # 3. Fetch identifiers for each agent
             if agent_id_map:
                 id_stmt = select(
                     identifiers_table.c.entity_id,
@@ -2544,35 +2790,6 @@ class WEMIRepository:
         """Fetch a single cached author entity from agents + identifiers by QID."""
         result = self.get_wikidata_authors_batch([qid])
         return result.get(qid)
-
-    def get_agents_by_ids(self, agent_ids: list[int]) -> dict[int, dict[str, Any]]:
-        """Fetch rich agent profiles by IDs from the agents table."""
-        if not agent_ids:
-            return {}
-        results: dict[int, dict[str, Any]] = {}
-        with self.get_connection() as conn:
-            try:
-                stmt = select(
-                    agents_table.c.id,
-                    agents_table.c.source,
-                    agents_table.c.source_id,
-                    agents_table.c.name,
-                    agents_table.c.name_normalized,
-                    agents_table.c.surname,
-                    agents_table.c.qualifier,
-                    agents_table.c.dates,
-                    agents_table.c.birth_year,
-                    agents_table.c.death_year,
-                    agents_table.c.fuller_name,
-                    agents_table.c.affiliation,
-                    agents_table.c.metadata_json,
-                ).where(agents_table.c.id.in_(agent_ids))
-                rows = conn.execute(stmt).mappings().fetchall()
-                for r in rows:
-                    results[r["id"]] = _hydrate_agent_profile(dict(r))
-            except Exception:
-                pass
-        return results
 
     def check_source_registry(self) -> list[str]:
         """Report mismatches between the `sources` registry and the stored rows.
@@ -2839,13 +3056,10 @@ class WEMIRepository:
             agents_table.c.name,
             agents_table.c.name_normalized,
             agents_table.c.surname,
-            agents_table.c.qualifier,
             agents_table.c.dates,
             agents_table.c.birth_year,
             agents_table.c.death_year,
             agents_table.c.fuller_name,
-            agents_table.c.affiliation,
-            agents_table.c.metadata_json,
         ).order_by(agents_table.c.id)
 
         with self.get_connection() as conn:
@@ -3021,7 +3235,11 @@ class WEMIRepository:
                         for tc in norm_target_classes:
                             t_scheme, _, t_code = tc.partition(":")
                             t_scheme_norm = t_scheme.strip().lower()
-                            if not t_scheme_norm or not cl_scheme_norm or t_scheme_norm == cl_scheme_norm:
+                            if (
+                                not t_scheme_norm
+                                or not cl_scheme_norm
+                                or t_scheme_norm == cl_scheme_norm
+                            ):
                                 if code.startswith(t_code) or t_code.startswith(code):
                                     evidence[cid]["has_classification_match"] = True
                                     matched_str = f"{cl_scheme_norm or t_scheme_norm}:{code}"

@@ -401,15 +401,7 @@ class RecordLoader(ABC):
                 # its label put rdflib's parse label in the role column.
                 return bool(role) and (normalize_role(role) != role or _looks_like_blank_node(role))
 
-            raw_roles = sorted(
-                {
-                    role
-                    for entity in record.agents
-                    for role in (entity.role_counts or {})
-                    if unnormalised(role)
-                }
-                | {c.role for c in record.contributions if unnormalised(c.role)}
-            )
+            raw_roles = sorted({c.role for c in record.contributions if unnormalised(c.role)})
             if raw_roles:
                 findings.append(
                     f"{caps.name} claims normalises_relators but stored roles the "

@@ -26,7 +26,9 @@ def classify_identifier_scheme(val: str, hint: Optional[str] = None) -> tuple[st
 
     if v_clean.startswith(("978", "979")) or len(v_clean) in (10, 13):
         return ("isbn", v)
-    if ("-" in v and len(v) == 9) or (len(v_clean) == 8 and (v_clean.isdigit() or v_clean[:-1].isdigit())):
+    if ("-" in v and len(v) == 9) or (
+        len(v_clean) == 8 and (v_clean.isdigit() or v_clean[:-1].isdigit())
+    ):
         return ("issn", v)
     if v_lower.startswith("10.") or "doi.org/" in v_lower:
         return ("doi", v)

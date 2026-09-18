@@ -12,6 +12,69 @@ from reconciliator.config import (
 from reconciliator.normalizers.linguistic import fold_diacritics, strip_biographical_dates
 from reconciliator.normalizers.relators import RelatorRegistry, get_default_relator_registry
 
+_YEAR_RANGE_RE = re.compile(
+    r"(?:ca\.?|noin|n\.?)?\s*(\d{4})\s*[-–—]\s*(?:ca\.?|noin|n\.?)?\s*(\d{4})"
+)
+_BIRTH_ONLY_RE = re.compile(r"(?:ca\.?|noin|n\.?)?\s*(\d{4})\s*[-–—]\s*$")
+_DEATH_ONLY_RE = re.compile(r"^[-–—]\s*(?:ca\.?|noin|n\.?)?\s*(\d{4})")
+_PREFIX_BIRTH_RE = re.compile(r"(?:s\.|f\.|b\.|synt\.)\s*(\d{4})", re.IGNORECASE)
+_PREFIX_DEATH_RE = re.compile(r"(?:k\.|d\.|kuol\.)\s*(\d{4})", re.IGNORECASE)
+
+
+def parse_agent_dates(dates_str: Optional[str]) -> tuple[Optional[int], Optional[int]]:
+    """Extract 4-digit birth and death years from agent date string (e.g. MARC $d)."""
+    if not dates_str:
+        return None, None
+    clean = dates_str.strip().rstrip(".,;")
+    # 1. Full range: e.g. "1908-1979", "1850?-1910?" or "ca. 1850 - 1910"
+    m = _YEAR_RANGE_RE.search(clean)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    # 2. Birth with hyphen: "1948-"
+    m = _BIRTH_ONLY_RE.search(clean)
+    if m:
+        return int(m.group(1)), None
+    # 3. Death with hyphen: "-1920"
+    m = _DEATH_ONLY_RE.search(clean)
+    if m:
+        return None, int(m.group(1))
+    # 4. Prefix birth: "s. 1950"
+    m = _PREFIX_BIRTH_RE.search(clean)
+    if m:
+        return int(m.group(1)), None
+    # 5. Prefix death: "k. 2012"
+    m = _PREFIX_DEATH_RE.search(clean)
+    if m:
+        return None, int(m.group(1))
+    # 6. Fallback finding 4-digit years
+    if not any(w in clean.lower() for w in ("luku", "century", "tal")):
+        years = re.findall(r"\b(\d{4})\b", clean)
+        if len(years) >= 2:
+            return int(years[0]), int(years[1])
+        elif len(years) == 1 and any(sep in clean for sep in ("-", "–", "—")):
+            y = int(years[0])
+            hyphen_idx = min(
+                (clean.find(sep) for sep in ("-", "–", "—") if sep in clean),
+                default=-1,
+            )
+            idx = clean.find(years[0])
+            if idx < hyphen_idx:
+                return y, None
+            else:
+                return None, y
+    return None, None
+
+
+def format_agent_dates(birth_year: Optional[int], death_year: Optional[int]) -> Optional[str]:
+    """Format birth and death years into a standardized date range string."""
+    if birth_year is not None and death_year is not None:
+        return f"{birth_year}-{death_year}"
+    if birth_year is not None:
+        return f"{birth_year}-"
+    if death_year is not None:
+        return f"-{death_year}"
+    return None
+
 
 def strip_agent_dates(name: str, date_pattern: Optional[re.Pattern[str]] = None) -> str:
     """Remove birth/death years and biographical lifespans from name string."""

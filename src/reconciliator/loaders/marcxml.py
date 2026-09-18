@@ -512,10 +512,7 @@ def parse_marc_record_elem(
 
     repo_patterns = [
         re.compile(p, re.I)
-        for p in get_bundled_defaults()
-        .get("digital_repositories", {})
-        .get("uri_patterns")
-        or []
+        for p in get_bundled_defaults().get("digital_repositories", {}).get("uri_patterns") or []
     ]
     for f in _get_datafields(record_elem, "856"):
         u = _get_subfield(f, "u")
@@ -612,10 +609,26 @@ def parse_marc_record_elem(
                     norm_roles = [IMPLIED_MAIN_ENTRY_ROLE]
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
-                orcid_val: Optional[str] = None
+                # Convert ORCID from $0/$1 into an IdentifierEntity
+                agent_identifiers: list[dict[str, Any]] = []
                 for u in u1 + u0:
                     if "orcid.org" in u.lower():
-                        orcid_val = u
+                        orcid_id = (
+                            u.replace("https://orcid.org/", "")
+                            .replace("http://orcid.org/", "")
+                            .strip()
+                        )
+                        if orcid_id:
+                            agent_identifiers.append(
+                                {
+                                    "entity_type": "agent",
+                                    "source": "orcid",
+                                    "source_id": orcid_id,
+                                    "source_id_normalized": orcid_id.replace("-", "")
+                                    .strip()
+                                    .lower(),
+                                }
+                            )
                         break
                 agents.append(
                     {
@@ -629,9 +642,9 @@ def parse_marc_record_elem(
                         "is_fictional": is_fictional,
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
-                        "orcid": orcid_val,
-                        "qualifier_counts": dict(Counter(sub_cs)),
-                        "affiliation_counts": dict(Counter(sub_us)),
+                        "identifiers": agent_identifiers,
+                        "qualifiers": dict(Counter(sub_cs)),
+                        "affiliations": dict(Counter(sub_us)),
                         "role_counts": dict(Counter(norm_roles)),
                         "language_counts": dict(rec_languages),
                         "subject_counts": {},
@@ -664,10 +677,26 @@ def parse_marc_record_elem(
                     norm_roles = [IMPLIED_MAIN_ENTRY_ROLE]
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
-                orcid_val = None
+                # Convert ORCID from $0/$1 into an IdentifierEntity
+                agent_identifiers: list[dict[str, Any]] = []
                 for u in u1 + u0:
                     if "orcid.org" in u.lower():
-                        orcid_val = u
+                        orcid_id = (
+                            u.replace("https://orcid.org/", "")
+                            .replace("http://orcid.org/", "")
+                            .strip()
+                        )
+                        if orcid_id:
+                            agent_identifiers.append(
+                                {
+                                    "entity_type": "agent",
+                                    "source": "orcid",
+                                    "source_id": orcid_id,
+                                    "source_id_normalized": orcid_id.replace("-", "")
+                                    .strip()
+                                    .lower(),
+                                }
+                            )
                         break
                 agents.append(
                     {
@@ -681,9 +710,9 @@ def parse_marc_record_elem(
                         "is_fictional": is_fictional,
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
-                        "orcid": orcid_val,
-                        "qualifier_counts": dict(Counter(sub_cs)),
-                        "affiliation_counts": dict(Counter(sub_us)),
+                        "identifiers": agent_identifiers,
+                        "qualifiers": dict(Counter(sub_cs)),
+                        "affiliations": dict(Counter(sub_us)),
                         "role_counts": dict(Counter(norm_roles)),
                         "language_counts": dict(rec_languages),
                         "subject_counts": {},
@@ -1593,12 +1622,9 @@ def decompose_marc_authority(
 
         # Identifiers & Agent URI
         agent_uri: Optional[str] = None
-        orcid: Optional[str] = None
         identifiers: list[IdentifierEntity] = []
         for scheme, val in raw_identifiers:
             norm = val.replace("-", "").strip().lower()
-            if scheme == "orcid" or "orcid.org" in val:
-                orcid = val
             if not agent_uri and (
                 scheme in ("isni", "viaf", "uri", "urn", "asteri")
                 or val.startswith(("http://", "https://", "urn:"))
@@ -1658,9 +1684,9 @@ def decompose_marc_authority(
             death_year=death_yr,
             fuller_name=_get_subfield(agent_field, "q"),
             is_personal=bool(f100),
-            orcid=orcid,
             variant_names=variant_names,
-            affiliation_counts=affiliations,
+            affiliations=affiliations,
+            identifiers=identifiers,
         )
 
         if subject_sink is not None:
@@ -2159,13 +2185,9 @@ def decompose_marc_wemi(
                 fuller_name=a.get("fuller_name"),
                 is_personal=a.get("is_personal", True),
                 is_fictional=a.get("is_fictional", False),
-                orcid=a.get("orcid"),
                 variant_names=list(a.get("variant_names", [])),
-                qualifier_counts=dict(a.get("qualifier_counts", {})),
-                affiliation_counts=dict(a.get("affiliation_counts", {})),
-                role_counts=dict(a.get("role_counts", {})),
-                language_counts=dict(a.get("language_counts", {})),
-                subject_counts=dict(a.get("subject_counts", {})),
+                qualifiers=dict(a.get("qualifiers", {})),
+                affiliations=dict(a.get("affiliations", {})),
             )
         )
 
@@ -2194,38 +2216,39 @@ def decompose_marc_wemi(
             )
         )
 
-        # Persist every authority URI carried on the agent. a_uri only holds the
-        # first one, so without these rows the remaining $0/$1 links are lost at
-        # ingest and can never be transferred during reconciliation.
-        for sub_code, uri_list in (("0", u0), ("1", u1)):
-            for uri in uri_list:
-                if not uri:
-                    continue
-                scheme = (
-                    detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")
-                ).lower()
+        # Persist every authority URI carried on the agent.
+        # Use identifiers from the agent dict if available, else fall back to u0/u1.
+        agent_idents = a.get("identifiers", [])
+        if agent_idents:
+            for ident_data in agent_idents:
                 identifiers.append(
                     IdentifierEntity(
                         entity_type="agent",
                         entity_id=0,
                         entity_uri=a_uri,
-                        scheme=scheme,
-                        value=uri,
-                        value_normalized=uri.replace("-", "").strip().lower(),
+                        source=ident_data.get("source", "uri"),
+                        source_id=ident_data.get("source_id", ""),
+                        source_id_normalized=ident_data.get("source_id_normalized", ""),
                     )
                 )
-        if a.get("orcid"):
-            orcid_val = str(a["orcid"])
-            identifiers.append(
-                IdentifierEntity(
-                    entity_type="agent",
-                    entity_id=0,
-                    entity_uri=a_uri,
-                    scheme="orcid",
-                    value=orcid_val,
-                    value_normalized=orcid_val.replace("-", "").strip().lower(),
-                )
-            )
+        else:
+            for sub_code, uri_list in (("0", u0), ("1", u1)):
+                for uri in uri_list:
+                    if not uri:
+                        continue
+                    scheme = (
+                        detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")
+                    ).lower()
+                    identifiers.append(
+                        IdentifierEntity(
+                            entity_type="agent",
+                            entity_id=0,
+                            entity_uri=a_uri,
+                            scheme=scheme,
+                            value=uri,
+                            value_normalized=uri.replace("-", "").strip().lower(),
+                        )
+                    )
 
     # Bind non-agent identifiers to their owning entity by URI so that a batch
     # holding several records does not attribute them all to the first one.
@@ -2250,9 +2273,7 @@ def decompose_marc_wemi(
         key_sink.extend(
             to_manifestation_entity_keys(
                 manifestation.manifestation_uri,
-                derive_domain_keys(
-                    record_elem, parsed, work_type, _author_key, _title_stem
-                ),
+                derive_domain_keys(record_elem, parsed, work_type, _author_key, _title_stem),
             )
         )
 

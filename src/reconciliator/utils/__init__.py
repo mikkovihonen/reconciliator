@@ -27,4 +27,3 @@ __all__ = [
     "write_summary_tsv",
     "write_tsv_file",
 ]
-

@@ -61,9 +61,13 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
     if "default_vocab_target_field" not in raw:
         raw["default_vocab_target_field"] = str(raw.get("default_vocab_target_field") or "")
     if "default_target_field" not in raw:
-        raw["default_target_field"] = str(raw.get("default_target_field") or raw.get("default_vocab_target_field") or "")
+        raw["default_target_field"] = str(
+            raw.get("default_target_field") or raw.get("default_vocab_target_field") or ""
+        )
     if "default_subject_field" not in raw:
-        raw["default_subject_field"] = str(raw.get("default_subject_field") or raw.get("default_vocab_target_field") or "")
+        raw["default_subject_field"] = str(
+            raw.get("default_subject_field") or raw.get("default_vocab_target_field") or ""
+        )
     if "supported_subject_vocabularies" not in raw:
         raw["supported_subject_vocabularies"] = list(raw.get("supported_subjects", []))
     if "vocabularies" not in raw:
@@ -91,7 +95,9 @@ def get_bundled_vocabularies_defaults() -> dict[str, Any]:
     if "biographical_date_pattern" not in raw:
         raw["biographical_date_pattern"] = b_dates.get("pattern")
     if "default_language" not in raw:
-        raw["default_language"] = str(raw.get("default_language") or ling.get("default_language") or "")
+        raw["default_language"] = str(
+            raw.get("default_language") or ling.get("default_language") or ""
+        )
     return raw
 
 
@@ -137,7 +143,9 @@ def get_bundled_record_defaults() -> dict[str, Any]:
     if "subject_field_category_map" not in raw:
         raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
     if "default_subject_field" not in raw:
-        raw["default_subject_field"] = str(vocab.get("default_subject_field") or vocab.get("default_vocab_target_field") or "")
+        raw["default_subject_field"] = str(
+            vocab.get("default_subject_field") or vocab.get("default_vocab_target_field") or ""
+        )
     return raw
 
 
@@ -173,7 +181,9 @@ _FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
 DEFAULT_LANGUAGE: str = str(_LING_DEFAULTS.get("default_language") or "")
 DEFAULT_PRESERVED_DIACRITICS: str = str(_LING_DEFAULTS.get("preserved_diacritics") or "")
 DEFAULT_BIOGRAPHICAL_DATES: dict[str, Any] = dict(_LING_DEFAULTS.get("biographical_dates") or {})
-DEFAULT_BIOGRAPHICAL_DATE_PREFIXES: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("prefixes") or [])
+DEFAULT_BIOGRAPHICAL_DATE_PREFIXES: list[str] = list(
+    DEFAULT_BIOGRAPHICAL_DATES.get("prefixes") or []
+)
 DEFAULT_BIOGRAPHICAL_ERA_BC: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("era_bc") or [])
 DEFAULT_BIOGRAPHICAL_ERA_AD: list[str] = list(DEFAULT_BIOGRAPHICAL_DATES.get("era_ad") or [])
 DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES: list[str] = list(
@@ -189,14 +199,20 @@ DEFAULT_VOLUME_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("volume_suffixes") o
 DEFAULT_VOLUME_FORMAT_TEMPLATE: str = str(_REC_DEFAULTS.get("volume_format_template") or "")
 DEFAULT_ROMAN_NUMERALS: dict[str, int] = dict(_REC_DEFAULTS.get("roman_numerals") or {})
 DEFAULT_FICTIONAL_QUALIFIERS: list[str] = list(_REC_DEFAULTS.get("fictional_qualifiers") or [])
-DEFAULT_RESPONSIBILITY_PREFIXES: list[str] = list(_REC_DEFAULTS.get("responsibility_prefixes") or [])
+DEFAULT_RESPONSIBILITY_PREFIXES: list[str] = list(
+    _REC_DEFAULTS.get("responsibility_prefixes") or []
+)
 DEFAULT_RESPONSIBILITY_CONJUNCTIONS: list[str] = list(
     _REC_DEFAULTS.get("responsibility_conjunctions") or []
 )
-DEFAULT_CLASSIFICATION_PRIORITY: list[str] = list(_REC_DEFAULTS.get("classification_priority") or [])
+DEFAULT_CLASSIFICATION_PRIORITY: list[str] = list(
+    _REC_DEFAULTS.get("classification_priority") or []
+)
 DEFAULT_RELATOR_MAPPINGS: dict[str, str] = dict(_REC_DEFAULTS.get("relator_mappings") or {})
 
-DEFAULT_SUBJECT_FIELDS: dict[str, dict[str, Any]] = dict(_VOCAB_DEFAULTS.get("subject_fields") or {})
+DEFAULT_SUBJECT_FIELDS: dict[str, dict[str, Any]] = dict(
+    _VOCAB_DEFAULTS.get("subject_fields") or {}
+)
 DEFAULT_SUBJECT_FIELD_CATEGORY_MAP: dict[str, str] = {
     tag: str(data.get("category", "")) for tag, data in DEFAULT_SUBJECT_FIELDS.items()
 }
@@ -357,9 +373,8 @@ class StorageConfig(BaseModel):
             base_url = (
                 os.environ.get("RECONCILIATOR_DATABASE_URL") or self.postgres.get_database_url()
             )
-            is_default_data = (
-                d == Path("data")
-                or (d.name == "data" and d.resolve() == (Path.cwd() / "data").resolve())
+            is_default_data = d == Path("data") or (
+                d.name == "data" and d.resolve() == (Path.cwd() / "data").resolve()
             )
             if not is_default_data and "?" not in base_url:
                 import hashlib
@@ -529,13 +544,19 @@ class VocabulariesConfig(BaseModel):
         default_factory=lambda: list(_VOCAB_DEFAULTS.get("preferred_label_languages") or [])
     )
     default_language: str = Field(
-        default_factory=lambda: str(_VOCAB_DEFAULTS.get("default_language") or _LING_DEFAULTS.get("default_language") or "")
+        default_factory=lambda: str(
+            _VOCAB_DEFAULTS.get("default_language") or _LING_DEFAULTS.get("default_language") or ""
+        )
     )
     default_classification_scheme: str = Field(
-        default_factory=lambda: str(get_bundled_defaults().get("classification", {}).get("default_scheme") or "")
+        default_factory=lambda: str(
+            get_bundled_defaults().get("classification", {}).get("default_scheme") or ""
+        )
     )
     digital_repository_patterns: list[str] = Field(
-        default_factory=lambda: list(get_bundled_defaults().get("digital_repositories", {}).get("uri_patterns") or [])
+        default_factory=lambda: list(
+            get_bundled_defaults().get("digital_repositories", {}).get("uri_patterns") or []
+        )
     )
     language_code_map: dict[str, str] = Field(
         default_factory=lambda: dict(_VOCAB_DEFAULTS.get("language_code_map", {}))
@@ -643,7 +664,6 @@ class VocabulariesConfig(BaseModel):
         return None
 
 
-
 # Alias for backward compatibility
 VocabNormalizationConfig = VocabulariesConfig
 
@@ -699,9 +719,7 @@ class RecordNormalizationConfig(BaseModel):
     control_number_pattern: Optional[str] = None
     control_number_padding_digits: Optional[int] = None
     control_number_strip_prefixes: Optional[list[str]] = None
-    urn_pattern: str = Field(
-        default_factory=lambda: str(_REC_DEFAULTS.get("urn_pattern") or "")
-    )
+    urn_pattern: str = Field(default_factory=lambda: str(_REC_DEFAULTS.get("urn_pattern") or ""))
     source_identifier_templates: dict[str, str] = Field(
         default_factory=lambda: dict(_REC_DEFAULTS.get("source_identifier_templates", {}))
     )
@@ -733,7 +751,11 @@ class RecordNormalizationConfig(BaseModel):
         default_factory=lambda: dict(DEFAULT_SUBJECT_FIELD_CATEGORY_MAP)
     )
     default_subject_field: str = Field(
-        default_factory=lambda: str(_VOCAB_DEFAULTS.get("default_subject_field") or _VOCAB_DEFAULTS.get("default_vocab_target_field") or "")
+        default_factory=lambda: str(
+            _VOCAB_DEFAULTS.get("default_subject_field")
+            or _VOCAB_DEFAULTS.get("default_vocab_target_field")
+            or ""
+        )
     )
 
 
@@ -892,7 +914,9 @@ class EnrichmentConfig(BaseModel):
     def get_relationship_label(self, rel: str, lang: Optional[str] = None) -> str:
         """Resolve relationship display label for $i in the specified language."""
         target_lang = (lang or self.language or DEFAULT_LANGUAGE).strip().lower()
-        lang_dict = self.linking_labels.get(target_lang) or self.linking_labels.get(DEFAULT_LANGUAGE, {})
+        lang_dict = self.linking_labels.get(target_lang) or self.linking_labels.get(
+            DEFAULT_LANGUAGE, {}
+        )
         return lang_dict.get(rel, "")
 
     def get_scheme(self, domain: str) -> SchemeDefinition:
@@ -1042,7 +1066,9 @@ class OAIIngestConfig(BaseModel):
         if self.workers < 1:
             raise ValueError(f"workers must be at least 1, got {self.workers}")
         if self.max_concurrent_requests < 1:
-            raise ValueError(f"max_concurrent_requests must be at least 1, got {self.max_concurrent_requests}")
+            raise ValueError(
+                f"max_concurrent_requests must be at least 1, got {self.max_concurrent_requests}"
+            )
         if self.batch_queue_size < 1:
             raise ValueError(f"batch_queue_size must be at least 1, got {self.batch_queue_size}")
         if self.slice_days < 1:
@@ -1050,15 +1076,21 @@ class OAIIngestConfig(BaseModel):
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be at least 1, got {self.batch_size}")
         if self.db_batch_chunk_size < 1:
-            raise ValueError(f"db_batch_chunk_size must be at least 1, got {self.db_batch_chunk_size}")
+            raise ValueError(
+                f"db_batch_chunk_size must be at least 1, got {self.db_batch_chunk_size}"
+            )
         if self.max_retries < 0:
             raise ValueError(f"max_retries cannot be negative, got {self.max_retries}")
         if self.base_delay < 0:
             raise ValueError(f"base_delay cannot be negative, got {self.base_delay}")
         if self.checkpoint_interval_records < 1:
-            raise ValueError(f"checkpoint_interval_records must be at least 1, got {self.checkpoint_interval_records}")
+            raise ValueError(
+                f"checkpoint_interval_records must be at least 1, got {self.checkpoint_interval_records}"
+            )
         if self.checkpoint_interval_seconds <= 0:
-            raise ValueError(f"checkpoint_interval_seconds must be positive, got {self.checkpoint_interval_seconds}")
+            raise ValueError(
+                f"checkpoint_interval_seconds must be positive, got {self.checkpoint_interval_seconds}"
+            )
         return self
 
 
@@ -1083,10 +1115,14 @@ class WikidataIngestConfig(BaseModel):
         ]
     )
     languages: dict[str, str] = Field(
-        default_factory=lambda: dict(get_bundled_defaults().get("wikidata", {}).get("languages", {}))
+        default_factory=lambda: dict(
+            get_bundled_defaults().get("wikidata", {}).get("languages", {})
+        )
     )
     subject_mappings: dict[str, str] = Field(
-        default_factory=lambda: dict(get_bundled_defaults().get("wikidata", {}).get("subject_mappings", {}))
+        default_factory=lambda: dict(
+            get_bundled_defaults().get("wikidata", {}).get("subject_mappings", {})
+        )
     )
 
 
@@ -1449,7 +1485,9 @@ class AppConfig(BaseModel):
     record_normalization: RecordNormalizationConfig = Field(
         default_factory=RecordNormalizationConfig
     )
-    constituents: ConstituentsConfig = Field(default_factory=lambda: ConstituentsConfig(**_CONSTITUENTS_DEFAULTS))
+    constituents: ConstituentsConfig = Field(
+        default_factory=lambda: ConstituentsConfig(**_CONSTITUENTS_DEFAULTS)
+    )
     #: Set by `load_config`; anchors every relative path in configuration that
     #: names code or a profile.
     config_dir: Optional[Path] = None
@@ -1457,9 +1495,13 @@ class AppConfig(BaseModel):
     ingest_vocab: Optional[VocabIngestConfig] = None
     ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
     ingest_wikidata: Optional[WikidataIngestConfig] = None
-    consolidation: WorkConsolidationConfig = Field(default_factory=lambda: WorkConsolidationConfig(**_CONSOLIDATION_DEFAULTS))
+    consolidation: WorkConsolidationConfig = Field(
+        default_factory=lambda: WorkConsolidationConfig(**_CONSOLIDATION_DEFAULTS)
+    )
     reconcile: Optional[ReconcileConfig] = None
-    telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig(**_TELEMETRY_DEFAULTS))
+    telemetry: TelemetryConfig = Field(
+        default_factory=lambda: TelemetryConfig(**_TELEMETRY_DEFAULTS)
+    )
     logging: LoggingConfig = Field(default_factory=lambda: LoggingConfig(**_LOGGING_DEFAULTS))
 
     @property

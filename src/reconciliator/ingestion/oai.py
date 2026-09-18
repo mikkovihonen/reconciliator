@@ -494,9 +494,7 @@ async def ingest_oai_pipeline(
     skipped_count = 0
     total_ingested = 0
     finished_slices: list[tuple[Optional[str], Optional[str]]] = [
-        (s[0], s[1])
-        for s in slices
-        if tuple(s) in done_slices
+        (s[0], s[1]) for s in slices if tuple(s) in done_slices
     ]
     safe_token: Optional[str] = initial_token
     pending_tokens: list[tuple[int, Optional[str]]] = []

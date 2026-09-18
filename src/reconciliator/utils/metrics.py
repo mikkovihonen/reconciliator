@@ -18,4 +18,3 @@ def compute_jaccard_overlap(set1: set[str], set2: set[str]) -> float:
     intersection = len(norm1 & norm2)
     union = len(norm1 | norm2)
     return intersection / union if union > 0 else 0.0
-

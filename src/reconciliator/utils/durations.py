@@ -23,4 +23,3 @@ def parse_duration_seconds(duration_str: str) -> float:
     else:
         # Default numeric strings without unit to days
         return float(s) * 86400.0
-

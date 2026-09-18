@@ -39,8 +39,12 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
         from reconciliator.config import get_bundled_defaults
 
         audio_defaults = get_bundled_defaults().get("funnels", {}).get("audiobook", {})
-        default_lang = ctx.spec.extra.get("default_language") or audio_defaults.get("default_language")
-        title_suffix = ctx.spec.extra.get("title_suffix") or audio_defaults.get("title_suffix") or ""
+        default_lang = ctx.spec.extra.get("default_language") or audio_defaults.get(
+            "default_language"
+        )
+        title_suffix = (
+            ctx.spec.extra.get("title_suffix") or audio_defaults.get("title_suffix") or ""
+        )
         und_lang = audio_defaults.get("undefined_language") or ""
 
         expression = ExpressionEntity(

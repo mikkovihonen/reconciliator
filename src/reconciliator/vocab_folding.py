@@ -41,7 +41,9 @@ def format_target_vocab(
         if suffix:
             return f"{base_vocab}/{suffix}"
 
-    default_subcode = cfg.language_subcode_vocabularies.get(base_vocab, getattr(cfg, "default_language", "fin"))
+    default_subcode = cfg.language_subcode_vocabularies.get(
+        base_vocab, getattr(cfg, "default_language", "fin")
+    )
 
     # 2. Known legacy sources from configuration
     thes_langs = cfg.thesaurus_languages

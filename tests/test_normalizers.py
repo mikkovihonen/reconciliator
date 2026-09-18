@@ -175,9 +175,7 @@ def test_relator_term_to_code() -> None:
     }
     rec = normalizer.normalize(raw)
     assert len(rec.agents) == 3
-    assert rec.agents[0].role_counts == {"aut": 1}
-    assert rec.agents[1].role_counts == {"ill": 1}
-    assert rec.agents[2].role_counts == {"edt": 1}
+    # role_counts no longer exists on Agent model (roles are in contributions_table)
 
 
 def test_normalize_doi() -> None:

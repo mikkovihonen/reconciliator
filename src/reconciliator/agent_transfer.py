@@ -7,7 +7,7 @@ from typing import Any, Optional
 from rapidfuzz import fuzz
 
 from reconciliator.curie import parse_curie
-from reconciliator.models import Agent, AgentURI, BibliographicRecord
+from reconciliator.models import Agent, AgentURI, BibliographicRecord, IdentifierEntity
 from reconciliator.vocabularies import detect_vocabulary, extract_concept_id
 
 
@@ -70,7 +70,11 @@ class AgentAligner:
                             if u1 and u1 not in seen_uris:
                                 seen_uris.add(u1)
                                 parsed_src, _ = parse_curie(u1)
-                                vocab = detect_vocabulary(u1) or (parsed_src.upper() if parsed_src and parsed_src != "unknown" else "OTHER")
+                                vocab = detect_vocabulary(u1) or (
+                                    parsed_src.upper()
+                                    if parsed_src and parsed_src != "unknown"
+                                    else "OTHER"
+                                )
                                 discovered[idx].append(
                                     AgentURI(
                                         uri=u1,
@@ -186,28 +190,50 @@ def verify_qualifier(
     return False, "qualifier_mismatch"
 
 
-def verify_orcid(
-    target_orcid: Optional[str],
-    candidate_orcid: Optional[str],
+def verify_agent_identifiers(
+    target_identifiers: list[dict[str, Any]] | list[IdentifierEntity],
+    candidate_identifiers: list[dict[str, Any]] | list[IdentifierEntity],
 ) -> tuple[bool, str]:
-    """Verify persistent academic ORCID identifier.
+    """Verify matching identifiers between target and candidate agents.
 
-    Returns (passed, reason).
+    Checks any common identifier source (ORCID, ISNI, VIAF, Wikidata QID, etc).
+    Returns (passed, reason). When both have identifiers but none match, returns False.
     """
-    if not target_orcid or not candidate_orcid:
-        return True, "neutral_no_orcid"
+    if not target_identifiers or not candidate_identifiers:
+        return True, "neutral_no_identifiers"
 
-    def _clean_orcid(raw: str) -> str:
-        s = raw.strip().lower()
-        s = s.replace("https://orcid.org/", "").replace("http://orcid.org/", "")
-        return s.strip("/")
+    # Normalize target identifiers to (source, value_normalized) pairs
+    target_map: dict[str, set[str]] = {}
+    for ident in target_identifiers:
+        if isinstance(ident, dict):
+            src = str(ident.get("source", "")).lower()
+            val = str(ident.get("source_id", "")).replace("-", "").strip().lower()
+        else:
+            src = str(getattr(ident, "source", "")).lower()
+            val = str(getattr(ident, "source_id", "")).replace("-", "").strip().lower()
+        if src and val:
+            target_map.setdefault(src, set()).add(val)
 
-    t_clean = _clean_orcid(target_orcid)
-    c_clean = _clean_orcid(candidate_orcid)
+    # Normalize candidate identifiers
+    cand_map: dict[str, set[str]] = {}
+    for ident in candidate_identifiers:
+        if isinstance(ident, dict):
+            src = str(ident.get("source", "")).lower()
+            val = str(ident.get("source_id", "")).replace("-", "").strip().lower()
+        else:
+            src = str(getattr(ident, "source", "")).lower()
+            val = str(getattr(ident, "source_id", "")).replace("-", "").strip().lower()
+        if src and val:
+            cand_map.setdefault(src, set()).add(val)
 
-    if t_clean == c_clean:
-        return True, "orcid_confirmed"
-    return False, f"orcid_mismatch: target {target_orcid} vs candidate {candidate_orcid}"
+    # Find matching identifiers
+    for src in target_map:
+        if src in cand_map:
+            common = target_map[src] & cand_map[src]
+            if common:
+                return True, "identifier_matched"
+
+    return False, "no_matching_identifiers"
 
 
 def _verify_distribution_match(
@@ -289,8 +315,16 @@ def verify_subjects(
         return True, "subject_matched"
 
     # 2. Concept ID match across vocabularies (e.g. 'p2591' in 'yso:p2591' and 'kauno:p2591')
-    target_ids = {extract_concept_id(k).lower() for k in target_subjects if extract_concept_id(k)}
-    cand_ids = {extract_concept_id(k).lower() for k in candidate_subjects if extract_concept_id(k)}
+    target_ids = {
+        cid.lower()
+        for k in target_subjects
+        if (cid := extract_concept_id(k)) is not None
+    }
+    cand_ids = {
+        cid.lower()
+        for k in candidate_subjects
+        if (cid := extract_concept_id(k)) is not None
+    }
     if target_ids & cand_ids:
         return True, "subject_matched"
 
@@ -336,7 +370,7 @@ def check_homonym_ambiguity(
     target_affiliations: Optional[dict[str, int]] = None,
     target_languages: Optional[dict[str, int]] = None,
     target_subjects: Optional[dict[str, int]] = None,
-    target_orcid: Optional[str] = None,
+    target_identifiers: Optional[list[dict[str, Any]] | list[IdentifierEntity]] = None,
     authority_store: Optional[Any] = None,
     target_coauthors: Optional[list[str]] = None,
     target_publisher: Optional[str] = None,
@@ -373,15 +407,16 @@ def check_homonym_ambiguity(
         effective_qualifiers[target_qualifier] = 1
 
     # --- Tier 1 In-Memory Disambiguation ---
-    # 1. ORCID check
-    if target_orcid:
-        matching_orcid_cands = [
+    # 1. Identifier check
+    if target_identifiers:
+        matching_ident_cands = [
             c
             for c in close_candidates
-            if c.get("orcid") and verify_orcid(target_orcid, c.get("orcid"))[0]
+            if c.get("identifiers")
+            and verify_agent_identifiers(target_identifiers, c.get("identifiers", []))[0]
         ]
-        if len(matching_orcid_cands) == 1:
-            return True, "ambiguity_resolved_by_orcid"
+        if len(matching_ident_cands) == 1:
+            return True, "ambiguity_resolved_by_identifier"
 
     # 2. Distinguishing dates check
     if target_birth is not None or target_death is not None:
@@ -399,9 +434,7 @@ def check_homonym_ambiguity(
     if effective_qualifiers:
         matching_q_cands = []
         for c in close_candidates:
-            c_q_dict = c.get("qualifier_counts") or {}
-            if not c_q_dict and c.get("qualifier"):
-                c_q_dict = {str(c["qualifier"]): 1}
+            c_q_dict = c.get("qualifiers") or {}
             if c_q_dict and verify_qualifiers(effective_qualifiers, c_q_dict)[0]:
                 matching_q_cands.append(c)
         if len(matching_q_cands) == 1:
@@ -411,9 +444,7 @@ def check_homonym_ambiguity(
     if target_affiliations:
         matching_a_cands = []
         for c in close_candidates:
-            c_a_dict = c.get("affiliation_counts") or {}
-            if not c_a_dict and c.get("affiliation"):
-                c_a_dict = {str(c["affiliation"]): 1}
+            c_a_dict = c.get("affiliations") or {}
             if c_a_dict and verify_affiliations(target_affiliations, c_a_dict)[0]:
                 matching_a_cands.append(c)
         if len(matching_a_cands) == 1:
@@ -527,11 +558,9 @@ class AgentFallbackResolver:
                 viable,
                 target_birth=target_agent.birth_year,
                 target_death=target_agent.death_year,
-                target_orcid=target_agent.orcid,
-                target_qualifiers=target_agent.qualifier_counts,
-                target_affiliations=target_agent.affiliation_counts,
-                target_languages=target_agent.language_counts,
-                target_subjects=target_subjects or target_agent.subject_counts,
+                target_identifiers=target_agent.identifiers,
+                target_qualifiers=target_agent.qualifiers,
+                target_affiliations=target_agent.affiliations,
                 authority_store=authority_store,
                 target_coauthors=target_coauthors,
                 target_publisher=target_publisher,
@@ -543,10 +572,12 @@ class AgentFallbackResolver:
 
         # 3. Evaluate each viable candidate with dynamic guards
         for cand in viable:
-            # ORCID guard: if both have ORCID, verify exact match
-            if target_agent.orcid and cand.get("orcid"):
-                orcid_ok, orcid_reason = verify_orcid(target_agent.orcid, str(cand["orcid"]))
-                if not orcid_ok:
+            # Identifier guard: if both have identifiers, verify at least one matches
+            if target_agent.identifiers and cand.get("identifiers"):
+                ident_ok, ident_reason = verify_agent_identifiers(
+                    target_agent.identifiers, cand.get("identifiers", [])
+                )
+                if not ident_ok:
                     continue
 
             # Life dates guard
@@ -581,20 +612,16 @@ class AgentFallbackResolver:
                     continue
 
             # Qualifier distribution guard
-            cand_q = cand.get("qualifier_counts") or {}
-            if not cand_q and cand.get("qualifier"):
-                cand_q = {str(cand["qualifier"]): 1}
-            if target_agent.qualifier_counts and cand_q:
-                q_ok, _ = verify_qualifiers(target_agent.qualifier_counts, cand_q)
+            cand_q = cand.get("qualifiers") or {}
+            if target_agent.qualifiers and cand_q:
+                q_ok, _ = verify_qualifiers(target_agent.qualifiers, cand_q)
                 if not q_ok:
                     continue
 
             # Affiliation distribution guard
-            cand_a = cand.get("affiliation_counts") or {}
-            if not cand_a and cand.get("affiliation"):
-                cand_a = {str(cand["affiliation"]): 1}
-            if target_agent.affiliation_counts and cand_a:
-                a_ok, _ = verify_affiliations(target_agent.affiliation_counts, cand_a)
+            cand_a = cand.get("affiliations") or {}
+            if target_agent.affiliations and cand_a:
+                a_ok, _ = verify_affiliations(target_agent.affiliations, cand_a)
                 if not a_ok:
                     continue
 
