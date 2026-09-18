@@ -331,7 +331,7 @@ class VectorDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
             now = time.monotonic()
             idle_duration = now - self.last_request_time
 
-            # Update progress.db heartbeat if progress_db exists
+            # Update task progress heartbeat
             self._write_progress_heartbeat(idle_duration)
 
             if (
@@ -348,9 +348,9 @@ class VectorDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
                 break
 
     def _write_progress_heartbeat(self, idle_duration: float) -> None:
-        """Emit telemetry status record to progress.db if initialized."""
+        """Emit telemetry status record to task progress table if initialized."""
         try:
-            target = self.config.storage.database_url or self.config.storage.progress_db
+            target = self.config.storage.database_url
             if not target:
                 return
             from sqlalchemy.dialects.postgresql import insert as pg_insert

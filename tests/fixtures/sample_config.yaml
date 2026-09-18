@@ -1,9 +1,7 @@
 # Test configuration fixture
 storage:
-  authority_db: "test_authority.db"
-  vocab_db: "test_vocab.db"
-  progress_db: "test_progress.db"
-  index_path: "test_authority.faiss"
+  data_dir: "data"
+  work_index: "test_authority.faiss"
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"

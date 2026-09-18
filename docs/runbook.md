@@ -258,17 +258,19 @@ To operate the solution, the following data inputs can be provided or downloaded
 
 ### Storage Section (`storage`)
 
-Defines file paths for persistent SQLite databases and the vector indexing engine.
+Defines storage settings for PostgreSQL and the vector indexing engine.
 
 ```yaml
 storage:
-  authority_db: "data/authority.db"          # Authority records and 4-tier WEMI repository
-  vocab_db: "data/vocab.db"                  # Value vocabulary concepts, migration tables, and aliases
-  progress_db: "data/progress.db"            # Real-time task progress and telemetry
-  corpus_db: "data/reconcile_corpus.db"      # Staging database for target records and intra-corpus clusters
-  index_path: "data/authority.index"         # Primary authority vector index path (.index or .faiss)
+  data_dir: "data"                           # Base directory for vector index files
+  database_url: null                         # Explicit PostgreSQL URL (defaults to postgres config)
+  postgres:
+    host: "localhost"
+    port: 5432
+    database: "reconciliator"
+    user: "postgres"
+    password: "password"
   work_index: "data/work.index"              # Work-level vector index path
-  expression_index: "data/expression.index"  # Expression-level vector index path
   manifestation_index: "data/manifestation.index" # Manifestation-level vector index path
   agent_index: "data/agent.index"            # Standalone agent vector index path (Tier 3 fallback)
   vector_engine:
@@ -303,15 +305,10 @@ storage:
       nlist: 2048                            # Number of Voronoi partitions (for IVF indexes)
 ```
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `authority_db` | `Path` | `data/authority.db` | Path to SQLite authority and WEMI database. |
-| `vocab_db` | `Path` | `data/vocab.db` | Path to dedicated value vocabularies database. |
-| `progress_db` | `Path` | `data/progress.db` | Path to progress and heartbeat tracking database. |
-| `corpus_db` | `Path` | `data/reconcile_corpus.db` | Path to corpus staging and clustering database. |
-| `index_path` | `Path` | `data/authority.index` | Path to primary authority vector index. |
+| `data_dir` | `Path` | `data` | Base directory for vector index files and daemon sockets. |
+| `database_url` | `Optional[str]` | `None` | PostgreSQL database connection URL. |
+| `postgres` | `PostgresConfig` | default | PostgreSQL connection settings (host, port, dbname, user, password). |
 | `work_index` | `Path` | `data/work.index` | Path to Work-level dense vector index. |
-| `expression_index` | `Path` | `data/expression.index` | Path to Expression-level dense vector index. |
 | `manifestation_index`| `Path` | `data/manifestation.index` | Path to Manifestation-level dense vector index. |
 | `agent_index` | `Path` | `data/agent.index` | Path to standalone Agent vector index (Tier 3 fallback). |
 | `vector_engine.mode` | `Literal` | `daemon` | Execution mode: `daemon` (concurrent-safe singleton via IPC socket) or `embedded` (direct in-process). |
@@ -1000,13 +997,9 @@ Each source file can contain source-specific configurations and its own localize
 
 ```yaml
 storage:
-  authority_db: "/var/data/reconciliator/authority.db"
-  vocab_db: "/var/data/reconciliator/vocab.db"
-  progress_db: "/var/data/reconciliator/progress.db"
-  corpus_db: "/var/data/reconciliator/reconcile_corpus.db"
-  index_path: "/var/data/reconciliator/authority.index"
+  data_dir: "/var/data/reconciliator"
+  database_url: "postgresql+psycopg://postgres:secret@postgres.internal:5432/reconciliator"
   work_index: "/var/data/reconciliator/work.index"
-  expression_index: "/var/data/reconciliator/expression.index"
   manifestation_index: "/var/data/reconciliator/manifestation.index"
   agent_index: "/var/data/reconciliator/agent.index"
 

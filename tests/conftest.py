@@ -40,9 +40,6 @@ def ensure_postgres_container():
 def init_test_storage(
     base_dir: Path | str,
     *,
-    authority_db: Path | str | None = None,
-    vocab_db: Path | str | None = None,
-    progress_db: Path | str | None = None,
     work_index: Path | str | None = None,
     reset: bool = True,
     schema: str | None = None,

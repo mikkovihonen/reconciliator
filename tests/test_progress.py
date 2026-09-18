@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from reconciliator.config import load_config
 from reconciliator.progress import (
     ProgressTracker,
     format_task_table,
@@ -138,16 +139,16 @@ def test_cli_status_watch_tui(tmp_path: Path) -> None:
         f"""
 storage:
   data_dir: "{tmp_path}"
-  progress_db: "{tmp_path}/prog.db"
 telemetry:
   watch_interval_seconds: 0.1
 """,
         encoding="utf-8",
     )
+    conf = load_config(cfg_file)
 
     # Initialize a completed task so watch terminates
     tracker = ProgressTracker(
-        db_path=tmp_path / "prog.db",
+        db_path=conf.storage.database_url,
         task_id="task-cli-watch",
         task_type="reconciliation",
     )
@@ -173,15 +174,15 @@ def test_cli_status_watch_alias(tmp_path: Path) -> None:
         f"""
 storage:
   data_dir: "{tmp_path}"
-  progress_db: "{tmp_path}/prog.db"
 telemetry:
   watch_interval_seconds: 0.1
 """,
         encoding="utf-8",
     )
+    conf = load_config(cfg_file)
 
     tracker = ProgressTracker(
-        db_path=tmp_path / "prog.db",
+        db_path=conf.storage.database_url,
         task_id="task-cli-watch-alias",
         task_type="reconciliation",
     )
@@ -205,15 +206,15 @@ def test_cli_status_watch_json(tmp_path: Path) -> None:
         f"""
 storage:
   data_dir: "{tmp_path}"
-  progress_db: "{tmp_path}/prog.db"
 telemetry:
   watch_interval_seconds: 0.1
 """,
         encoding="utf-8",
     )
+    conf = load_config(cfg_file)
 
     tracker = ProgressTracker(
-        db_path=tmp_path / "prog.db",
+        db_path=conf.storage.database_url,
         task_id="task-cli-json",
         task_type="reconciliation",
     )
@@ -358,15 +359,15 @@ def test_cli_prune_commands(tmp_path: Path) -> None:
     from reconciliator.cli import app
 
     cfg_file = tmp_path / "config.yaml"
-    prog_db = tmp_path / "prog.db"
     cfg_file.write_text(
         f"""
 storage:
   data_dir: "{tmp_path}"
-  progress_db: "{prog_db}"
 """,
         encoding="utf-8",
     )
+    conf = load_config(cfg_file)
+    db_target = conf.storage.database_url
 
     runner = CliRunner()
 
@@ -387,7 +388,7 @@ storage:
     assert res.exit_code != 0
 
     # 4. Confirmation aborted
-    t_comp = ProgressTracker(prog_db, task_id="comp-cli", task_type="reconciliation")
+    t_comp = ProgressTracker(db_target, task_id="comp-cli", task_type="reconciliation")
     t_comp.start_task()
     t_comp.complete_task()
     res = runner.invoke(app, ["prune", "--config", str(cfg_file), "--completed"], input="n\n")
@@ -400,7 +401,7 @@ storage:
     assert "Successfully pruned 1 task(s)" in res.output
 
     # 6. Test status --prune
-    t_comp = ProgressTracker(prog_db, task_id="comp-status", task_type="reconciliation")
+    t_comp = ProgressTracker(db_target, task_id="comp-status", task_type="reconciliation")
     t_comp.start_task()
     t_comp.complete_task()
     res = runner.invoke(app, ["status", "--config", str(cfg_file), "--prune"])

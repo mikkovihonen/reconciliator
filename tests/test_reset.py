@@ -12,15 +12,11 @@ from reconciliator.db import get_db_connection, init_authority_db, reset_all_sto
 def test_reset_all_storage(tmp_path: Path) -> None:
     storage = StorageConfig(
         data_dir=tmp_path,
-        authority_db=tmp_path / "auth.db",
-        vocab_db=tmp_path / "vocab.db",
-        progress_db=tmp_path / "prog.db",
-        corpus_db=tmp_path / "corpus.db",
         work_index=tmp_path / "auth.faiss",
     )
 
     # Initialize and populate a test row
-    with get_db_connection(storage.authority_db) as conn:
+    with get_db_connection(storage.database_url) as conn:
         init_authority_db(conn)
         conn.exec_driver_sql("INSERT INTO db_metadata (key, value) VALUES ('test', '123');")
 
@@ -46,10 +42,6 @@ def test_reset_all_storage(tmp_path: Path) -> None:
 def test_reset_all_storage_daemon_shutdown(tmp_path: Path, monkeypatch) -> None:
     storage = StorageConfig(
         data_dir=tmp_path,
-        authority_db=tmp_path / "auth.db",
-        vocab_db=tmp_path / "vocab.db",
-        progress_db=tmp_path / "prog.db",
-        corpus_db=tmp_path / "corpus.db",
         work_index=tmp_path / "auth.faiss",
     )
 
@@ -79,17 +71,11 @@ def test_cli_reset_clears_every_store(tmp_path: Path) -> None:
         f"""
 storage:
   data_dir: "{tmp_path}"
-  authority_db: "{tmp_path}/cli_auth.db"
-  vocab_db: "{tmp_path}/cli_vocab.db"
-  progress_db: "{tmp_path}/cli_prog.db"
   work_index: "{tmp_path}/cli_auth.faiss"
 """,
         encoding="utf-8",
     )
 
-    # Seed every store with content that must not survive.
-    for name in ("cli_auth.db", "cli_vocab.db", "cli_prog.db"):
-        (tmp_path / name).write_bytes(b"stale")
     (tmp_path / "cli_auth.faiss").write_bytes(b"stale index")
 
     runner = CliRunner()
@@ -112,6 +98,13 @@ storage:
     # ...and the stale vector index is gone rather than left pointing at deleted rows.
     assert not (tmp_path / "cli_auth.faiss").exists()
 
+    # And status reports an empty telemetry table
+    status_result = runner.invoke(app, ["status", "--config", str(cfg_file)])
+    assert status_result.exit_code == 0
+    assert "Reconciliator Task Telemetry" in status_result.output
+    assert "running" not in status_result.output.lower()
+    assert "completed" not in status_result.output.lower()
+
 
 def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
     """One database, so reset cannot clear a corpus the repository is not using.
@@ -127,7 +120,6 @@ def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
 
     storage = StorageConfig(data_dir=tmp_path)
     repo = WEMIRepository(storage.database_url)
-    assert repo.corpus_db_path == repo.db_path
 
     # Corpus and WEMI tables are reachable over the same connection, so a cluster
     # can be joined to the works it resolves to.

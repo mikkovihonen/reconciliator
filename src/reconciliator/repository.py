@@ -182,7 +182,6 @@ class WEMIRepository:
         fts_config: Optional["RepositoryFTSConfig"] = None,
         work_indexer: Optional[VectorIndex] = None,
         manifestation_indexer: Optional[VectorIndex] = None,
-        corpus_db_path: Optional[Path | str] = None,
         engine: Optional[Engine] = None,
     ) -> None:
         if engine is not None:
@@ -191,9 +190,6 @@ class WEMIRepository:
         else:
             self.engine = get_engine(db_path)
             self.db_path = self.engine.url.render_as_string(hide_password=False)
-        # Corpus staging lives in the authority database; this attribute survives
-        # only so callers that still ask can see there is no separate file.
-        self.corpus_db_path = self.db_path
         self.dimension = dimension
         self.vector_engine_config = vector_engine_config
         if fts_config is not None:

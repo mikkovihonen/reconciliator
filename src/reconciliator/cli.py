@@ -206,13 +206,7 @@ def reset_cmd(
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
-    """Reset all storage: authority.db, vocab.db, progress.db, the corpus database,
-    every vector index, and the vector daemon.
-
-    Partial resets left the stores inconsistent with each other - an authority.db
-    rebuilt without its corpus database, or indices outliving the rows they point
-    at - so reset is all or nothing.
-    """
+    """Reset all storage: PostgreSQL database tables, vector indices, and the vector daemon."""
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
@@ -251,11 +245,11 @@ def status_cmd(
         help="Automatically exit watch monitor once all active tasks complete",
     ),
 ) -> None:
-    """Query real-time task progress and telemetry from progress.db."""
+    """Query real-time task progress and telemetry from PostgreSQL."""
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
-    progress_db = cfg.storage.progress_db
+    db_target = cfg.storage.database_url
     poll_interval = interval if interval is not None else cfg.telemetry.watch_interval_seconds
     is_watch = watch or (action is not None and action.lower() == "watch")
 
@@ -270,9 +264,9 @@ def status_cmd(
 
     def fetch_tasks() -> list[TaskProgress]:
         if task_id:
-            t = get_task_progress(progress_db, task_id)
+            t = get_task_progress(db_target, task_id)
             return [t] if t else []
-        return list_tasks(progress_db)
+        return list_tasks(db_target)
 
     if is_watch:
         if json_output:
@@ -293,7 +287,7 @@ def status_cmd(
         else:
             run_telemetry_tui(
                 fetch_tasks=fetch_tasks,
-                db_path=progress_db,
+                db_path=db_target,
                 interval=poll_interval,
                 console=console,
                 show_vector_daemon=cfg.telemetry.show_vector_daemon,
@@ -311,8 +305,8 @@ def status_cmd(
             console.print(table)
 
         if prune_completed:
-            deleted = prune_tasks(progress_db, status="completed")
-            console.print(f"[green]Pruned {deleted} completed task(s) from progress.db.[/green]")
+            deleted = prune_tasks(db_target, status="completed")
+            console.print(f"[green]Pruned {deleted} completed task(s).[/green]")
 
 
 daemon_app = typer.Typer(name="daemon", help="Manage singleton vector index service.")
@@ -424,10 +418,10 @@ def prune_cmd(
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
-    """Prune telemetry tasks and monitoring records from progress.db."""
-    cfg = load_config(config)
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
-    progress_db = cfg.storage.progress_db
+    db_target = cfg.storage.database_url
 
     if completed and failed:
         console.print(
@@ -466,21 +460,21 @@ def prune_cmd(
 
     if not yes:
         confirm = typer.confirm(
-            "Are you sure you want to prune records from progress.db matching the criteria?"
+            "Are you sure you want to prune task telemetry records matching the criteria?"
         )
         if not confirm:
             console.print("[yellow]Prune aborted.[/yellow]")
             raise typer.Abort()
 
     deleted = prune_tasks(
-        db_path=progress_db,
+        db_path=db_target,
         task_id=task_id,
         status=status,
         older_than_seconds=older_than_seconds,
         keep_last=keep_last,
         include_running=include_running,
     )
-    console.print(f"[green]Successfully pruned {deleted} task(s) from progress.db.[/green]")
+    console.print(f"[green]Successfully pruned {deleted} task(s).[/green]")
 
 
 def _download_single_skosmos_source(
@@ -520,7 +514,7 @@ def _download_single_skosmos_source(
         return
 
     tracker = ProgressTracker(
-        db_path=cfg.storage.progress_db,
+        db_path=cfg.storage.database_url,
         task_id=f"skosmos-download-{src_name}-{int(time.time())}",
         task_type="vocab_ingest",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
@@ -547,18 +541,18 @@ def _download_single_skosmos_source(
 
     if ingest:
         console.print(
-            f"[cyan][{src_name}] Ingesting downloaded vocabularies into vocab.db ({cfg.storage.vocab_db})...[/cyan]"
+            f"[cyan][{src_name}] Ingesting downloaded vocabularies into PostgreSQL database...[/cyan]"
         )
-        vocab_store = VocabStore(cfg.storage.vocab_db)
+        vocab_store = VocabStore(cfg.storage.database_url)
         ingest_tracker = ProgressTracker(
-            db_path=cfg.storage.progress_db,
+            db_path=cfg.storage.database_url,
             task_id=f"vocab-ingest-{src_name}-{int(time.time())}",
             task_type="vocab_ingest",
             heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
         )
         c_count, m_count = ingest_vocab_file(target_dir, vocab_store, tracker=ingest_tracker)
         console.print(
-            f"[green][{src_name}] Successfully ingested {c_count} concepts and {m_count} mappings into {cfg.storage.vocab_db}.[/green]"
+            f"[green][{src_name}] Successfully ingested {c_count} concepts and {m_count} mappings into database.[/green]"
         )
 
 
@@ -710,9 +704,9 @@ def ingest_vocab_cmd(
         console.print("[red]No ingest_vocab section found in configuration.[/red]")
         raise typer.Exit(code=1)
 
-    vocab_store = VocabStore(cfg.storage.vocab_db)
+    vocab_store = VocabStore(cfg.storage.database_url)
     tracker = ProgressTracker(
-        db_path=cfg.storage.progress_db,
+        db_path=cfg.storage.database_url,
         task_id=f"vocab-ingest-{int(time.time())}",
         task_type="vocab_ingest",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
@@ -801,7 +795,7 @@ def ingest_oai_cmd(
 
     # Decomposition folds legacy subject headings and normalizes relator codes, so
     # ingest needs the same vocabulary store and relator mappings reconcile uses.
-    vocab_store = VocabStore(cfg.storage.vocab_db)
+    vocab_store = VocabStore(cfg.storage.database_url)
     relator_mappings = getattr(cfg.normalization.record, "relator_mappings", None)
     for src_name, src_cfg in targets.items():
         if isinstance(from_date, str):
@@ -814,7 +808,7 @@ def ingest_oai_cmd(
             src_cfg.slice_days = slice_days
 
         tracker = ProgressTracker(
-            db_path=cfg.storage.progress_db,
+            db_path=cfg.storage.database_url,
             task_id=f"oai-ingest-{src_name}-{int(time.time())}",
             task_type="oai_pmh_harvest",
             heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
@@ -857,7 +851,7 @@ def ingest_wikidata_cmd(
         raise typer.Exit(code=1)
 
     tracker = ProgressTracker(
-        db_path=cfg.storage.progress_db,
+        db_path=cfg.storage.database_url,
         task_id=f"wikidata-ingest-{int(time.time())}",
         task_type="wikidata_ingest",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
@@ -1154,7 +1148,7 @@ def reconcile_cmd(
         console.print(f"[red]Target MARCXML file not found: {r_cfg.target_file}[/red]")
         raise typer.Exit(code=1)
 
-    vocab_store = VocabStore(cfg.storage.vocab_db)
+    vocab_store = VocabStore(cfg.storage.database_url)
     vocab_cfg = (
         cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
     ) or cfg.normalization.vocab
@@ -1206,7 +1200,7 @@ def reconcile_cmd(
     reporter = ReportGenerator(config=cfg)
 
     tracker = ProgressTracker(
-        db_path=cfg.storage.progress_db,
+        db_path=cfg.storage.database_url,
         task_id=f"reconciliation-{int(time.time())}",
         task_type="reconciliation",
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,

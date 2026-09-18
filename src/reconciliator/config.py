@@ -343,9 +343,6 @@ class StorageConfig(BaseModel):
     data_dir: Path = Path("data")
     database_url: Optional[str] = None
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
-    authority_db: Optional[Path] = None
-    vocab_db: Optional[Path] = None
-    progress_db: Optional[Path] = None
     concept_index: Optional[Path] = None
     work_index: Optional[Path] = None
     manifestation_index: Optional[Path] = None
@@ -360,7 +357,11 @@ class StorageConfig(BaseModel):
             base_url = (
                 os.environ.get("RECONCILIATOR_DATABASE_URL") or self.postgres.get_database_url()
             )
-            if d != Path("data") and "?" not in base_url:
+            is_default_data = (
+                d == Path("data")
+                or (d.name == "data" and d.resolve() == (Path.cwd() / "data").resolve())
+            )
+            if not is_default_data and "?" not in base_url:
                 import hashlib
 
                 import psycopg
@@ -378,12 +379,6 @@ class StorageConfig(BaseModel):
                 self.database_url = f"{base_url}?options=-csearch_path%3D{schema},public"
             else:
                 self.database_url = base_url
-        if self.authority_db is None:
-            self.authority_db = d / "authority.db"
-        if self.vocab_db is None:
-            self.vocab_db = d / "vocab.db"
-        if self.progress_db is None:
-            self.progress_db = d / "progress.db"
         if self.concept_index is None:
             self.concept_index = d / "concept.index"
         if self.work_index is None:
@@ -1665,9 +1660,6 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
 
     # Storage paths
     config.storage.data_dir = resolve_p(config.storage.data_dir)  # type: ignore[assignment]
-    config.storage.authority_db = resolve_p(config.storage.authority_db)
-    config.storage.vocab_db = resolve_p(config.storage.vocab_db)
-    config.storage.progress_db = resolve_p(config.storage.progress_db)
     config.storage.work_index = resolve_p(config.storage.work_index)
     config.storage.manifestation_index = resolve_p(config.storage.manifestation_index)
     config.storage.agent_index = resolve_p(config.storage.agent_index)

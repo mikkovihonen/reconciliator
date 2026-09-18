@@ -21,13 +21,11 @@ compute:
 # 2. Storage & Persistence File Paths
 # ==============================================================================
 storage:
-  # Base directory for all SQLite databases and vector index files.
-  # All standard storage paths (authority_db, vocab_db, progress_db, work_index,
-  # manifestation_index, agent_index) automatically derive from this directory
-  # unless individually overridden. Clustering and linkage live inside
-  # authority_db rather than in a database of their own, and a corpus being
-  # reconciled is stored there too, as ordinary WEMI rows under its own
-  # record_origin.
+  # Base directory for vector index files and daemon sockets.
+  # Vector index paths (work_index, manifestation_index, agent_index)
+  # automatically derive from this directory unless individually overridden.
+  # All relational data (authority records, WEMI entities, vocabularies,
+  # clustering, linkages, and task telemetry) are persisted in PostgreSQL.
   data_dir: "data"
 
   # Three vector indexes, each with one consumer. Build them with
@@ -45,9 +43,6 @@ storage:
   # manifestation tiers do not already provide, and nothing searched it.
 
   # Optional path overrides (only needed if storing files in non-standard locations):
-  # authority_db: "data/authority.db"
-  # vocab_db: "data/vocab.db"
-  # progress_db: "data/progress.db"
   # work_index: "data/work.index"
   # manifestation_index: "data/manifestation.index"
   # agent_index: "data/agent.index"

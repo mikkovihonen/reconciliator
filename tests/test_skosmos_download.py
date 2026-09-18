@@ -11,6 +11,7 @@ import pytest
 import typer
 
 from reconciliator.cli import download_skosmos_cmd
+from reconciliator.config import load_config
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file, parse_turtle_simple
 from reconciliator.version import get_version
@@ -252,8 +253,7 @@ def test_ingest_vocab_directory(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    vocab_db = tmp_path / "vocab.db"
-    store = VocabStore(vocab_db)
+    store = VocabStore(tmp_path)
 
     c_count, m_count = ingest_vocab_file(finto_dir, store)
     assert c_count == 2
@@ -272,7 +272,6 @@ def test_ingest_vocab_directory(tmp_path: Path) -> None:
 def test_cli_download_skosmos_single_and_ingest(tmp_path: Path) -> None:
     """Test CLI download-skosmos command for a single source with --vocab and --ingest flags."""
     config_file = tmp_path / "config.yaml"
-    vocab_db = tmp_path / "vocab.db"
     out_dir = tmp_path / "finto_data"
 
     config_yaml = f"""
@@ -320,7 +319,7 @@ download_skosmos:
     assert downloaded_file.read_bytes() == sample_turtle
 
     # 2. Verify concepts were ingested into vocab database
-    store = VocabStore(vocab_db)
+    store = VocabStore(load_config(config_file).storage.database_url)
     concept = store.find_concept_by_label("filosofia", vocabulary="yso")
     assert concept is not None
     assert concept.uri == "http://www.yso.fi/onto/yso/p42"

@@ -994,10 +994,10 @@ class ReportGenerator:
             ),
             (
                 "execution",
-                "vocab_db",
-                str(self.config.storage.vocab_db if self.config and self.config.storage else ""),
+                "database_url",
+                str(self.config.storage.database_url if self.config and self.config.storage else ""),
                 "",
-                "Path to vocabulary SQLite reference database",
+                "PostgreSQL database connection URL",
             ),
             (
                 "execution",

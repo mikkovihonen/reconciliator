@@ -142,7 +142,7 @@ telemetry:
         reconcile_cmd(config=cfg)
 
     conf = load_config(cfg)
-    repo = WEMIRepository(conf.storage.authority_db, fts_config=conf.storage.fts)
+    repo = WEMIRepository(conf.storage.database_url, fts_config=conf.storage.fts)
 
     linkages = {lk.record_id: lk for lk in repo.get_all_corpus_linkages()}
     clusters = {c.cluster_id: c for c in repo.get_all_work_clusters()}

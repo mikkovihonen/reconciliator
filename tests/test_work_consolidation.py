@@ -460,7 +460,7 @@ telemetry:
         reconcile_cmd(config=cfg)
 
     conf = load_config(cfg)
-    repo = WEMIRepository(conf.storage.authority_db, fts_config=conf.storage.fts)
+    repo = WEMIRepository(conf.storage.database_url, fts_config=conf.storage.fts)
 
     exported: dict[str, list[str]] = {}
     for rec in etree.parse(str(out_xml)).getroot().findall(f".//{MARC}record"):

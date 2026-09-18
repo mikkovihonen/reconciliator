@@ -7,8 +7,7 @@ from reconciliator.vocab_store import VocabStore
 
 
 def test_ingest_vocab_file(tmp_path: Path) -> None:
-    vocab_db = tmp_path / "vocab.db"
-    store = VocabStore(vocab_db)
+    store = VocabStore(tmp_path)
     ttl_path = Path(__file__).parent / "fixtures" / "sample_finto.ttl"
 
     c_count, m_count = ingest_vocab_file(ttl_path, store)

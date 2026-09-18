@@ -19,8 +19,8 @@ def test_load_sample_config() -> None:
     config = load_config(sample_path)
 
     assert isinstance(config, AppConfig)
-    assert config.storage.authority_db.name == "test_authority.db"
-    assert config.storage.authority_db.is_absolute()
+    assert config.storage.work_index.name == "test_authority.faiss"
+    assert config.storage.work_index.is_absolute()
     assert config.embedding.device == "cpu"
     assert config.embedding.batch_size == 16
     assert config.reconcile is not None

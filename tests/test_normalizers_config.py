@@ -198,7 +198,7 @@ normalization:
     assert src_cfg.normalization.control_number_prefix == "(EXT-SOURCE)"
     assert src_cfg.normalization.control_number_padding_digits == 6
     # Relative data_dir resolved against tmp_path
-    assert loaded.storage.authority_db == (tmp_path / "data/authority.db").resolve()
+    assert loaded.storage.data_dir == (tmp_path / "data").resolve()
 
 
 def test_custom_roman_numerals_and_relator_mappings() -> None:

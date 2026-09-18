@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from pathlib import Path
@@ -598,7 +599,6 @@ def get_engine(
     schema: Optional[str] = None,
 ) -> Engine:
     """Create a configured SQLAlchemy 2.0 Engine for PostgreSQL."""
-    import hashlib
     import os
 
     if db_target is None:
@@ -614,8 +614,14 @@ def get_engine(
         elif not (target_str.startswith("postgresql://") or target_str.startswith("postgresql+")):
             if schema is None:
                 p = Path(target_str)
-                schema_path = str(p.parent.resolve()) if p.suffix == ".db" else str(p.resolve())
-                schema = f"test_{hashlib.md5(schema_path.encode()).hexdigest()[:10]}"
+                schema_path_obj = p.parent.resolve() if p.suffix == ".db" else p.resolve()
+                is_default_data = (
+                    schema_path_obj.name == "data"
+                    and schema_path_obj == (Path.cwd() / "data").resolve()
+                ) or p == Path("data") or (p.parent == Path("data"))
+                if not is_default_data:
+                    schema_path = str(schema_path_obj)
+                    schema = f"test_{hashlib.md5(schema_path.encode()).hexdigest()[:10]}"
             target_str = os.environ.get("RECONCILIATOR_DATABASE_URL", DEFAULT_PG_URL)
 
     if target_str.startswith("postgresql://"):
@@ -831,6 +837,16 @@ def reset_all_storage(storage_config: StorageConfig) -> None:
                     END LOOP;
                 END $$;
             """)
+            curr_schema = conn.execute(select(func.current_schema())).scalar()
+            if curr_schema == "public":
+                if storage_config.data_dir:
+                    try:
+                        data_hash = hashlib.md5(
+                            str(storage_config.data_dir.resolve()).encode()
+                        ).hexdigest()[:10]
+                        conn.exec_driver_sql(f"DROP SCHEMA IF EXISTS test_{data_hash} CASCADE;")
+                    except Exception:
+                        pass
         init_authority_db(engine)
         init_corpus_db(engine)
         from reconciliator.progress import init_progress_db
