@@ -265,7 +265,7 @@ def test_agent_fallback_resolver_e2e() -> None:
         surname="Virtanen",
         birth_year=1920,
         death_year=1995,
-        qualifiers={"professori": 1},
+        qualifiers=["professori"],
     )
 
     # 1. Candidate with matching dates accepted

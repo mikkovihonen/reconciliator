@@ -140,12 +140,12 @@ def test_wemi_serialization_engine() -> None:
         title_normalized="sinuhe egyptilainen",
         original_language="fin",
         work_type="text",
-        subjects_json=["muinainen egypti", "historia"],
         classification="84.2",
     )
     work_str = engine.render_work(
         work,
         authors=[{"name": "Waltari, Mika"}],
+        subjects=["muinainen egypti", "historia"],
     )
     assert "Nimeke: Sinuhe egyptiläinen" in work_str
     assert "Tekijät: Waltari, Mika" in work_str

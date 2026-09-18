@@ -267,7 +267,11 @@ def test_both_formats_fold_the_same_subjects_to_the_same_concepts(ctx: LoadConte
     bibframe = load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx)
 
     def concepts(record):
-        return sorted(f"{s['scheme']}:{s['code']}" for s in record.works[0].subjects_json)
+        return sorted(
+            f"{s.vocabulary}:{s.concept_id}"
+            for s in record.entity_subjects
+            if s.vocabulary and s.concept_id
+        )
 
     assert concepts(marc) == ["yso:Y1002", "yso:p2591"]
     assert concepts(bibframe) == concepts(marc)
@@ -278,8 +282,8 @@ def test_a_legacy_vocabulary_folds_from_the_uri_alone(ctx: LoadContext):
     nothing else. The URI pattern table lists only the modern vocabularies, so
     ysa went unrecognised - but the URI names its own vocabulary in its path."""
     record = load_record(Graph().parse(data=SUBJECT_TTL, format="turtle"), ctx)
-    ysa = next(s for s in record.works[0].subjects_json if s["code"] == "Y1002")
-    assert ysa["scheme"] == "yso", "legacy ysa should fold to yso"
+    ysa = next(s for s in record.entity_subjects if s.concept_id == "Y1002")
+    assert ysa.vocabulary == "yso", "legacy ysa should fold to yso"
 
 
 def test_the_agent_footprint_is_the_same_from_both_formats(ctx: LoadContext):
@@ -313,9 +317,9 @@ def test_an_unresolvable_heading_is_kept_but_not_counted(ctx: LoadContext):
         ),
         ctx,
     )
-    subjects = record.works[0].subjects_json
-    assert [s["heading"] for s in subjects] == ["vapaa asiasana"]
-    assert subjects[0]["scheme"] is None
+    subjects = record.entity_subjects
+    assert [s.raw_label for s in subjects] == ["vapaa asiasana"]
+    assert subjects[0].vocabulary is None
     # subject_counts no longer exists on Agent model
 
 

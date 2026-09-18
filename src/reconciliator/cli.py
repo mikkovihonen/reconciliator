@@ -1659,6 +1659,11 @@ def reconcile_cmd(
                     out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
                     out_f.write(b"\n")
                 elif rec_fmt == "marcxml":
+                    sibs = (
+                        corpus_repo.get_sibling_manifestation_record_ids(target_wemi.record_id)
+                        if is_clustered and corpus_repo
+                        else []
+                    )
                     enricher.enrich_record_tree(
                         orig_payload,
                         res,
@@ -1671,6 +1676,7 @@ def reconcile_cmd(
                         manifestation_cluster=m_cluster,
                         target_record=target_wemi,
                         enrichment_config=r_cfg.enrichment_toggles,
+                        sibling_ids=sibs,
                     )
                     out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
                     out_f.write(b"\n")
@@ -1826,7 +1832,38 @@ def consolidate_works_cmd(
         console.print("[yellow]Dry run: nothing was written.[/yellow]")
 
 
+@app.command("cluster-agents")
+def cluster_agents_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    threshold: Optional[float] = typer.Option(
+        None, "--threshold", help="Clustering similarity threshold override"
+    ),
+) -> None:
+    """Cluster agent entities across sources into canonical agent clusters."""
+    from reconciliator.agent_clusterer import AgentClusterer
+
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
+
+    cluster_config = cfg.agent_clustering
+    if threshold is not None:
+        cluster_config.similarity_threshold = threshold
+
+    wemi_repo = _wemi_repo(cfg)
+    clusterer = AgentClusterer(repo=wemi_repo, config=cluster_config)
+
+    result = clusterer.cluster_agents()
+    console.print(
+        f"[green]Clustered {result.total_agents} agents into {result.total_clusters} canonical clusters "
+        f"({result.multi_member_clusters} multi-member, max size {result.max_cluster_size}).[/green]"
+    )
+
+
 @app.command("build-agent-index")
+
 def build_agent_index_cmd(
     config_path: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to config.yaml"

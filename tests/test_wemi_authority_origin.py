@@ -341,6 +341,7 @@ def test_decompose_marc_authority_work():
       </datafield>
     </record>"""
     elem = etree.fromstring(xml.encode("utf-8"))
+    subject_sink = []
     (
         works,
         expressions,
@@ -352,22 +353,18 @@ def test_decompose_marc_authority_work():
         assocs,
         mops,
         contribs,
-    ) = decompose_marc_authority(elem, source="asteri", record_origin="authority")
+    ) = decompose_marc_authority(
+        elem, source="asteri", record_origin="authority", subject_sink=subject_sink
+    )
 
     assert len(works) == 1
     w = works[0]
     assert w.title == "Kalevala"
     assert w.work_uri == "asteri:auth_work_001"
     assert w.record_origin == "authority"
-    assert w.record_origin == "authority"
-    # 4XX variant titles ride in subjects_json, tagged as such, because that
-    # list is what the work serialisation renders and WorkEntity has no variant
-    # title column.
-    assert {
-        "heading": "Vanha Kalevala",
-        "pref_label": "Vanha Kalevala",
-        "kind": "variant_title",
-    } in w.subjects_json
+    # 4XX variant titles ride in subject_sink as EntitySubject with relation_type='variant_title'
+    variant_subjects = [s for s in subject_sink if s.relation_type == "variant_title"]
+    assert any(s.raw_label == "Vanha Kalevala" for s in variant_subjects)
 
     assert len(expressions) == 1
     assert expressions[0].language == "fin"
@@ -464,8 +461,10 @@ def test_decompose_marc_authority_agent():
     assert ag.death_year == 2001
     assert any(i.source == "orcid" and i.source_id == "0000-0002-1825-0097" for i in identifiers)
     assert "Jansson, Tove Marika" in ag.variant_names
-    assert ag.affiliations.get("Svenska författarföreningen") == 1
     assert ag.record_origin == "authority"
+
+
+
 
 
 def test_work_matcher_authority_isolation(tmp_path):

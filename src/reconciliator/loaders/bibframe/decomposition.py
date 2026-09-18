@@ -1111,9 +1111,12 @@ def decompose_bibframe_work(
         work_type=work_type,
         source=source,
         source_id=work_id,
-        subjects_json=[subject.as_dict() for subject in folded_subjects],
     )
-    work.serialized_text = engine.render_work(work, authors=authors_list)
+    work.serialized_text = engine.render_work(
+        work,
+        authors=authors_list,
+        subjects=[subject.as_dict() for subject in folded_subjects],
+    )
     for m in mediums_of_perf:
         if not m.work_curie:
             m.work_curie = work.curie

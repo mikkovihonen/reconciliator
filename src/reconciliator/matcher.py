@@ -807,10 +807,11 @@ class WorkMatcher:
                     uri_subfield_0=u0,
                     uri_subfield_1=u1,
                     variant_names=list(entity.variant_names),
-                    qualifiers=dict(entity.qualifiers),
-                    affiliations=dict(entity.affiliations),
+                    qualifiers=list(entity.qualifiers),
                 )
+
             )
+
 
         title = (work.title if work else None) or (manifestation.title if manifestation else "")
         source = (work.source if work else None) or (manifestation.source if manifestation else "")

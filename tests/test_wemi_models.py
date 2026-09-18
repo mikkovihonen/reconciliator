@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
+    EntitySubject,
     ExpressionEntity,
     HarvestState,
     IdentifierEntity,
@@ -31,27 +32,21 @@ def test_work_entity_validations():
         title_normalized="tuntematon sotilas",
         original_language="fin",
         work_type="text",
-        subjects_json=["sotakirjallisuus", "talvisota", "jatkosota"],
     )
     assert work.work_type == "text"
-    assert len(work.subjects_json) == 3
     assert work.curie == "melinda:000123456"
 
-    # Test subjects_json validator when passed as JSON string
-    work_from_json_str = WorkEntity(
-        work_uri="https://kansalliskirjasto.finna.fi/Record/work_456",
-        source="melinda",
-        source_id="000456789",
-        title="Kalevala",
-        title_normalized="kalevala",
-        subjects_json=json.dumps(["runous", "kansanperinne"]),
+    # Test EntitySubject model for decoupled subject relations
+    es = EntitySubject(
+        entity_type="work",
+        raw_label="sotakirjallisuus",
+        relation_type="topic",
+        vocabulary="yso",
+        concept_id="Y1002",
     )
-    # Bare headings are accepted and become the one thing they can honestly
-    # become: a heading with no vocabulary and no concept id.
-    assert work_from_json_str.subjects_json == [
-        {"heading": "runous", "pref_label": "runous"},
-        {"heading": "kansanperinne", "pref_label": "kansanperinne"},
-    ]
+    assert es.raw_label == "sotakirjallisuus"
+    assert es.vocabulary == "yso"
+    assert es.concept_id == "Y1002"
 
 
 def test_work_types_controlled_vocabulary():

@@ -45,9 +45,9 @@ class Agent(BaseModel):
     uri_subfield_0: list[str] = Field(default_factory=list)  # KANTO / ISNI / VIAF
     uri_subfield_1: list[str] = Field(default_factory=list)  # Wikidata QID
     variant_names: list[str] = Field(default_factory=list)  # Pseudonyms / alternative names
-    qualifiers: dict[str, int] = Field(default_factory=dict)
-    affiliations: dict[str, int] = Field(default_factory=dict)
+    qualifiers: list[str] = Field(default_factory=list)
     identifiers: list[IdentifierEntity] = Field(default_factory=list)
+
 
     @model_validator(mode="before")
     @classmethod
@@ -505,11 +505,9 @@ class AgentEntity(BaseModel):
     is_personal: bool = True
     is_fictional: bool = False
     variant_names: list[str] = Field(default_factory=list)
-    qualifiers: dict[str, int] = Field(default_factory=dict)
-    affiliations: dict[str, int] = Field(default_factory=dict)
+    qualifiers: list[str] = Field(default_factory=list)
     identifiers: list[IdentifierEntity] = Field(default_factory=list)
-    occupation: list[str] = Field(default_factory=list)
-    field_of_work: list[str] = Field(default_factory=list)
+
 
     @model_validator(mode="before")
     @classmethod
@@ -562,7 +560,21 @@ class AgentEntity(BaseModel):
         return self.curie
 
 
+class AgentRelationshipEntity(BaseModel):
+    """Relationship between agents (e.g. affiliation, pseudonym, corporate hierarchy)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: Optional[int] = None
+    source_agent_id: int
+    target_agent_id: Optional[int] = None
+    target_name: Optional[str] = None
+    target_uri: Optional[str] = None
+    relationship_type: str  # 'affiliation', 'pseudonym_of', 'real_identity_of'
+
+
 class WorkEntity(BaseModel):
+
     """Abstract intellectual creation (Work tier) in authority.db."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -579,18 +591,7 @@ class WorkEntity(BaseModel):
     classification: Optional[str] = None
     classification_scheme: Optional[str] = None
     work_type: WorkType = "text"
-    #: Folded subjects, one dict each (see loaders/subjects.FoldedSubject).
-    #: Was a list of bare heading strings, which neither consumer could use:
-    #: `work_serialization.j2` renders `subjects | map(attribute='pref_label')`
-    #: and so rendered nothing - the work's serialised text, which BM25 and the
-    #: dense index read, carried no subject terms at all - while
-    #: `find_classification_evidence` looks for `code`/`scheme` per entry and
-    #: failed silently inside its own try/except.
-    subjects_json: list[dict[str, Any]] = Field(default_factory=list)
     serialized_text: Optional[str] = None
-    # Representative of this work's cross-source equivalence group, set by
-    # WorkConsolidator. None means the work is its own canonical.
-    canonical_work_id: Optional[int] = None
     created_at: Optional[str] = None
     wikidata_qid: Optional[str] = None
 
@@ -609,38 +610,6 @@ class WorkEntity(BaseModel):
                 if src == "wikidata" and data.get("source_id"):
                     data["wikidata_qid"] = data["source_id"]
         return data
-
-    @field_validator("subjects_json", mode="before")
-    @classmethod
-    def parse_subjects_json(cls, v: Any) -> list[dict[str, Any]]:
-        """Accept the stored JSON, a list of dicts, or a list of bare headings.
-
-        The bare-heading form is still what a caller writes by hand, and rows
-        written before the shape changed read back that way, so a string becomes
-        the one thing it can honestly become: a heading with no vocabulary.
-        """
-        items: list[Any]
-        if isinstance(v, str):
-            try:
-                parsed = json.loads(v)
-                items = parsed if isinstance(parsed, list) else [v]
-            except Exception:
-                items = [v] if v else []
-        elif isinstance(v, list):
-            items = list(v)
-        else:
-            return []
-
-        out: list[dict[str, Any]] = []
-        for item in items:
-            if isinstance(item, dict):
-                entry = dict(item)
-                if not entry.get("pref_label"):
-                    entry["pref_label"] = entry.get("heading")
-                out.append(entry)
-            elif item:
-                out.append({"heading": str(item), "pref_label": str(item)})
-        return out
 
     @property
     def curie(self) -> str:
@@ -1018,6 +987,17 @@ class WorkRelationship(BaseModel):
         return self.target_work_curie
 
 
+class WorkConsolidation(BaseModel):
+    """Record of an elected canonical work for a consolidated work row."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    work_id: int
+    canonical_work_id: int
+    evidence: Optional[str] = None
+    created_at: Optional[str] = None
+
+
 class MediumOfPerformance(BaseModel):
     """Medium of performance instrumentation for musical works."""
 
@@ -1253,8 +1233,6 @@ class ExpressionCluster(BaseModel):
     content_type: ExpressionContentType = "text"
     language: str
     version_designation: Optional[str] = None
-    translators_json: list[str] = Field(default_factory=list)
-    performers_json: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -1296,7 +1274,6 @@ class CorpusLinkage(BaseModel):
     final_work_source_id: str = ""
     final_expression_source: str = ""
     final_expression_source_id: str = ""
-    sibling_manifestation_ids_json: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1368,7 +1345,69 @@ class MultiplexClusterResult(BaseModel):
     elapsed_seconds: float = 0.0
 
 
+class AgentClusterMember(BaseModel):
+
+    """Member agent linked to a canonical agent cluster."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    agent_id: int
+    cluster_id: str
+    source: str
+    source_id: str
+    link_method: str
+    confidence: float = 1.0
+
+
+class AgentClusterAttribute(BaseModel):
+    """Aggregated cluster attribute with empirical corpus frequency."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: Optional[int] = None
+    cluster_id: str
+    attribute_type: str  # 'variant_name', 'qualifier', 'affiliation', 'occupation', 'role'
+    value: str
+    concept_id: Optional[str] = None
+    frequency: int = 1
+    is_canonical: bool = False
+
+
+class AgentCluster(BaseModel):
+    """Canonical agent cluster resolving multiple agent occurrences across sources."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    cluster_id: str
+    canonical_agent_id: Optional[int] = None
+    canonical_agent_source: Optional[str] = None
+    canonical_agent_source_id: Optional[str] = None
+    canonical_name: str
+    canonical_surname: Optional[str] = None
+    canonical_uri: Optional[str] = None
+    birth_year: Optional[int] = None
+    death_year: Optional[int] = None
+    member_count: int = 1
+    work_count: int = 0
+    manifestation_count: int = 0
+    confidence_score: float = 1.0
+    members: list[AgentClusterMember] = Field(default_factory=list)
+    attributes: list[AgentClusterAttribute] = Field(default_factory=list)
+
+
+class AgentClusterResult(BaseModel):
+    """Summary result of an agent clustering run."""
+
+    total_agents: int = 0
+    total_clusters: int = 0
+    singletons: int = 0
+    multi_member_clusters: int = 0
+    max_cluster_size: int = 0
+    link_method_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class EntitySubject(BaseModel):
+
     """Polymorphic link between an entity (work, expression, manifestation, agent) and a subject concept."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)

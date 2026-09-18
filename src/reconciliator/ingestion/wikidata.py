@@ -975,15 +975,16 @@ def decompose_wikidata_entity(
                             source_id_normalized=s_val.strip().lower(),
                         )
                     )
-            author_affils = (
-                {aff: 1 for aff in (author_data.get("affiliations") or [])} if author_data else {}
-            )
-            author_quals: dict[str, int] = {}
+            author_quals: list[str] = []
             if author_data:
-                for q in author_data.get("qualifiers") or []:
-                    author_quals[q] = author_quals.get(q, 0) + 1
-                for occ in author_data.get("occupations") or []:
-                    author_quals[occ] = author_quals.get(occ, 0) + 1
+                author_quals = [
+                    q
+                    for q in dict.fromkeys(
+                        (author_data.get("qualifiers") or [])
+                        + (author_data.get("occupations") or [])
+                    )
+                    if q
+                ]
             agent = AgentEntity(
                 name=c_name,
                 name_normalized=c_name.strip().lower(),
@@ -994,9 +995,9 @@ def decompose_wikidata_entity(
                 source_id=c_qid,
                 variant_names=author_data.get("variant_names", []) if author_data else [],
                 qualifiers=author_quals,
-                affiliations=author_affils,
                 identifiers=author_idents,
             )
+
             agents_map[c_qid] = agent
             contributions.append(
                 ContributionEntity(
@@ -1026,15 +1027,16 @@ def decompose_wikidata_entity(
                             source_id_normalized=s_val.strip().lower(),
                         )
                     )
-            author_affils = (
-                {aff: 1 for aff in (author_data.get("affiliations") or [])} if author_data else {}
-            )
-            author_quals = {}
+            author_quals: list[str] = []
             if author_data:
-                for q in author_data.get("qualifiers") or []:
-                    author_quals[q] = author_quals.get(q, 0) + 1
-                for occ in author_data.get("occupations") or []:
-                    author_quals[occ] = author_quals.get(occ, 0) + 1
+                author_quals = [
+                    q
+                    for q in dict.fromkeys(
+                        (author_data.get("qualifiers") or [])
+                        + (author_data.get("occupations") or [])
+                    )
+                    if q
+                ]
             agent = AgentEntity(
                 name=r_name,
                 name_normalized=r_name.strip().lower(),
@@ -1045,9 +1047,9 @@ def decompose_wikidata_entity(
                 source_id=r_qid,
                 variant_names=author_data.get("variant_names", []) if author_data else [],
                 qualifiers=author_quals,
-                affiliations=author_affils,
                 identifiers=author_idents,
             )
+
             agents_map[r_qid] = agent
             contributions.append(
                 ContributionEntity(

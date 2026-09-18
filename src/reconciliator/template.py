@@ -204,7 +204,7 @@ class WEMISerializationEngine:
                 "original_title": getattr(work, "original_title", None),
                 "work_type": work.work_type,
                 "original_language": work.original_language or "",
-                "subjects": work.subjects_json,
+                "subjects": subjects or [],
                 "classifications": (
                     [{"code": work.classification, "scheme": work.classification_scheme}]
                     if work.classification

@@ -494,13 +494,14 @@ class RecordNormalizer:
                     norm_r = self.relator_registry.normalize_role(r_key) or r_key
                     role_counts[norm_r] = role_counts.get(norm_r, 0) + r_cnt
 
-                qual_counts = dict(raw_agent.get("qualifiers", {}))
-                if not qual_counts and raw_agent.get("qualifier"):
-                    qual_counts[str(raw_agent["qualifier"]).strip()] = 1
-
-                affil_counts = dict(raw_agent.get("affiliations", {}))
-                if not affil_counts and raw_agent.get("affiliation"):
-                    affil_counts[str(raw_agent["affiliation"]).strip()] = 1
+                quals: list[str] = []
+                raw_quals = raw_agent.get("qualifiers")
+                if isinstance(raw_quals, list):
+                    quals = [str(q) for q in raw_quals if q]
+                elif isinstance(raw_quals, dict):
+                    quals = [str(q) for q in raw_quals.keys() if q]
+                if not quals and raw_agent.get("qualifier"):
+                    quals = [str(raw_agent["qualifier"]).strip()]
 
                 # Build identifiers from agent dict
                 idents = []
@@ -529,11 +530,11 @@ class RecordNormalizer:
                         uri_subfield_0=list(raw_agent.get("uri_subfield_0", [])),
                         uri_subfield_1=list(raw_agent.get("uri_subfield_1", [])),
                         variant_names=list(raw_agent.get("variant_names", [])),
-                        qualifiers=qual_counts,
-                        affiliations=affil_counts,
+                        qualifiers=quals,
                         identifiers=idents,
                     )
                 )
+
 
         # Fallback agents from 245$c if no agents present
         if not agents and raw_data.get("statement_of_responsibility"):

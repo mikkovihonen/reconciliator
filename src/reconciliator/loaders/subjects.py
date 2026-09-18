@@ -52,7 +52,7 @@ class FoldedSubject:
         """The stored form.
 
         `code` and `scheme` are the names `find_classification_evidence` reads
-        out of `works.subjects_json`. That reader was written against this shape
+        out of `entity_subjects`. That reader was written against this shape
         while both loaders stored a bare list of heading strings, so it matched
         nothing and failed silently inside its own try/except.
         """

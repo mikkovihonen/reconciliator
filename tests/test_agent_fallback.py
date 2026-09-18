@@ -168,7 +168,7 @@ def setup_authority_system(tmp_path: Path):
         birth_year=1908,
         death_year=1979,
         dates="1908-1979",
-        qualifiers={"kirjailija": 1},
+        qualifiers=["kirjailija"],
     )
     # Two Matti Virtanens: a doctor and an artist, to exercise the homonym guard.
     virtanen_doctor = AgentEntity(
@@ -181,7 +181,7 @@ def setup_authority_system(tmp_path: Path):
         birth_year=1915,
         death_year=1980,
         dates="1915-1980",
-        qualifiers={"lääkäri": 1},
+        qualifiers=["lääkäri"],
     )
     virtanen_artist = AgentEntity(
         agent_uri="http://urn.fi/URN:NBN:fi:au:pn:00099902",
@@ -193,8 +193,9 @@ def setup_authority_system(tmp_path: Path):
         birth_year=1940,
         death_year=2010,
         dates="1940-2010",
-        qualifiers={"kuvataiteilija": 1},
+        qualifiers=["kuvataiteilija"],
     )
+
 
     for parts in (
         _authority_record(
@@ -340,8 +341,9 @@ def test_scenario3_fallback_success_with_qualifier(setup_authority_system) -> No
         source="target",
         title="Uusia lääketieteellisiä havaintoja",
         publication_year=1965,
-        agents=[Agent(name="Virtanen, Matti", surname="Virtanen", qualifiers={"lääkäri": 1})],
+        agents=[Agent(name="Virtanen, Matti", surname="Virtanen", qualifiers=["lääkäri"])],
         subjects=SubjectsContainer(),
+
     )
 
     res = _reconcile(matcher, target)

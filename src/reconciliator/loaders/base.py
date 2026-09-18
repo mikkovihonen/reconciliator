@@ -377,10 +377,9 @@ class RecordLoader(ABC):
             # another catalogue - and an unfolded heading looks identical to a
             # folded one in the stored row.
             unfolded = [
-                subject.get("heading")
-                for work in record.works
-                for subject in work.subjects_json
-                if subject.get("uri") and not subject.get("scheme")
+                es.raw_label
+                for es in record.entity_subjects
+                if es.concept_id and not es.vocabulary
             ]
             if unfolded:
                 findings.append(

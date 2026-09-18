@@ -57,12 +57,11 @@ def test_marcxml_agent_rich_fields_extraction() -> None:
     assert len(agents) == 1
     a = agents[0]
     assert a["name"] == "Virtanen, Matti"
-    assert a["qualifiers"] == {"professori": 1}
+    assert a["qualifiers"] == ["professori"]
     assert a["dates"] == "1920-1995"
     assert a["birth_year"] == 1920
     assert a["death_year"] == 1995
     assert a["fuller_name"] == "Matti Ilmari"
-    assert a["affiliations"] == {"Helsingin yliopisto": 1}
     assert a["uri_subfield_0"] == ["http://urn.fi/URN:NBN:fi:au:pn:000123"]
 
     normalizer = RecordNormalizer()
@@ -71,12 +70,12 @@ def test_marcxml_agent_rich_fields_extraction() -> None:
     norm_agent = rec.agents[0]
     assert norm_agent.name == "Virtanen, Matti"
     assert norm_agent.surname == "Virtanen"
-    assert norm_agent.qualifiers == {"professori": 1}
+    assert norm_agent.qualifiers == ["professori"]
     assert norm_agent.dates == "1920-1995"
     assert norm_agent.birth_year == 1920
     assert norm_agent.death_year == 1995
     assert norm_agent.fuller_name == "Matti Ilmari"
-    assert norm_agent.affiliations == {"Helsingin yliopisto": 1}
+
 
 
 def test_wikidata_author_rich_extraction() -> None:

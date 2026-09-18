@@ -76,6 +76,7 @@ class MARCXMLEnricher:
         manifestation_cluster: Optional[ManifestationCluster] = None,
         target_record: Optional[MatchRecord] = None,
         enrichment_config: Optional[EnrichmentTogglesConfig] = None,
+        sibling_ids: Optional[list[str]] = None,
     ) -> etree._Element:
         """Enrich a MARCXML <record> element in-place with novel authority links and modernized subjects."""
         if not enrich and not fold_legacy:
@@ -231,7 +232,7 @@ class MARCXMLEnricher:
         wikidata_qid: Optional[str] = None
         expression_uri: Optional[str] = None
         expression_title: Optional[str] = None
-        sibling_ids: list[str] = []
+        sibling_ids_resolved: list[str] = list(sibling_ids or [])
 
         if isinstance(result, WEMIMatchResult):
             wemi_res = result
@@ -260,11 +261,6 @@ class MARCXMLEnricher:
         if cor_link:
             work_uri = cor_link.final_work_uri or work_uri
             expression_uri = cor_link.final_expression_uri or expression_uri
-            if cor_link.sibling_manifestation_ids_json:
-                try:
-                    sibling_ids = json.loads(cor_link.sibling_manifestation_ids_json)
-                except Exception:
-                    pass
 
         if work_cluster:
             work_uri = work_cluster.canonical_work_uri or work_uri
@@ -470,7 +466,7 @@ class MARCXMLEnricher:
                 sw.text = target_record.get_first_key("citation")
 
         # 3.5 Enrich 775 Sibling Manifestation & 776 Reproduction / Digital Twin
-        for sib_id in sibling_ids:
+        for sib_id in sibling_ids_resolved:
             has_sib = any(
                 sib_id in _get_subfields(f, "w") for f in _get_datafields(record_elem, "775")
             )

@@ -71,7 +71,6 @@ def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
             title_normalized="sinuhe egyptilainen",
             original_language="fin",
             work_type="text",
-            subjects_json=["muinainen egypti", "historialliset romaanit"],
             serialized_text="Mika Waltari Sinuhe egyptiläinen historiallinen romaani",
         ),
         WorkEntity(
@@ -81,7 +80,6 @@ def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
             title_normalized="turms kuolematon",
             original_language="fin",
             work_type="text",
-            subjects_json=["etruskit", "historialliset romaanit"],
             serialized_text="Mika Waltari Turms kuolematon etruskit",
         ),
     ]
@@ -100,7 +98,6 @@ def test_insert_and_get_works_with_vectors_and_fts(repo: WEMIRepository):
     w1 = repo.get_work(work_ids[0])
     assert w1 is not None
     assert w1.title == "Sinuhe egyptiläinen"
-    assert "muinainen egypti" in [s["heading"] for s in w1.subjects_json]
 
     w_by_curie = repo.get_work_by_curie("melinda:w_turms")
     assert w_by_curie is not None
@@ -708,8 +705,8 @@ def test_wemi_repository_intra_batch_duplicates_postgres(tmp_storage: Any) -> No
 
 
 def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage: Any) -> None:
-    """Verify that agent attributes (qualifiers, affiliations, variant names) are stored relationally
-    with additive count merging across batches, and identifiers are stored in identifiers_table.
+    """Verify that agent attributes (qualifiers, variant names) are stored relationally
+    and idempotently without count pollution, and identifiers are stored in identifiers_table.
     """
     from reconciliator.models import IdentifierEntity
     from reconciliator.repository import WEMIRepository
@@ -719,7 +716,7 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
         dimension=4,
     )
 
-    # Batch 1: Insert agent with initial qualifier, affiliation, variant name, and ISNI identifier
+    # Batch 1: Insert agent with initial qualifier, variant name, and ISNI identifier
     agent1 = AgentEntity(
         source="asteri",
         source_id="12345",
@@ -727,8 +724,7 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
         name_normalized="waltari, mika",
         surname="Waltari",
         dates="1908-1979",
-        qualifiers={"kirjailija": 1},
-        affiliations={"Helsinki": 1},
+        qualifiers=["kirjailija"],
         variant_names=["Waltari, M."],
         identifiers=[
             IdentifierEntity(
@@ -747,13 +743,12 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
 
     fetched1 = repo.get_agent(aid1)
     assert fetched1 is not None
-    assert fetched1.qualifiers == {"kirjailija": 1}
-    assert fetched1.affiliations == {"Helsinki": 1}
+    assert fetched1.qualifiers == ["kirjailija"]
     assert "Waltari, M." in fetched1.variant_names
     assert len(fetched1.identifiers) == 1
     assert fetched1.identifiers[0].source == "isni"
 
-    # Batch 2: Re-insert same agent with additional qualifier counts, a new qualifier, and a new variant name
+    # Batch 2: Re-insert same agent with a new qualifier, a new variant name, and VIAF identifier
     agent2 = AgentEntity(
         source="asteri",
         source_id="12345",
@@ -761,8 +756,7 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
         name_normalized="waltari, mika",
         surname="Waltari",
         dates="1908-1979",
-        qualifiers={"kirjailija": 3, "toimittaja": 2},
-        affiliations={"Helsinki": 2},
+        qualifiers=["kirjailija", "toimittaja"],
         variant_names=["Mika Toimi Waltari"],
         identifiers=[
             IdentifierEntity(
@@ -779,19 +773,15 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
 
     fetched2 = repo.get_agent(aid1)
     assert fetched2 is not None
-    # Additive merging across batches:
-    # "kirjailija": 1 + 3 = 4
-    # "toimittaja": 2
-    # "Helsinki": 1 + 2 = 3
-    assert fetched2.qualifiers["kirjailija"] == 4
-    assert fetched2.qualifiers["toimittaja"] == 2
-    assert fetched2.affiliations["Helsinki"] == 3
+    # Idempotent union across batches:
+    assert set(fetched2.qualifiers) == {"kirjailija", "toimittaja"}
     assert "Waltari, M." in fetched2.variant_names
     assert "Mika Toimi Waltari" in fetched2.variant_names
     # Both identifiers should be linked
     ident_sources = {i.source: i.source_id for i in fetched2.identifiers}
     assert "isni" in ident_sources
     assert "viaf" in ident_sources
+
 
     # Test lookup via identifiers table
     matches = repo.lookup_by_identifier("isni", "0000000121487654")

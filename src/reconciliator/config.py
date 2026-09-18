@@ -172,11 +172,19 @@ _COMPUTE_DEFAULTS = get_bundled_section_defaults("compute")
 _STORAGE_DEFAULTS = get_bundled_section_defaults("storage")
 _EMBED_DEFAULTS = get_bundled_section_defaults("embedding")
 _RECONCILE_DEFAULTS = get_bundled_section_defaults("reconcile")
+_CLUSTER_DEFAULTS = dict(_RECONCILE_DEFAULTS.get("cluster") or {})
 _CONSOLIDATION_DEFAULTS = get_bundled_section_defaults("consolidation")
 _TELEMETRY_DEFAULTS = get_bundled_section_defaults("telemetry")
 _LOGGING_DEFAULTS = get_bundled_section_defaults("logging")
 _CONSTITUENTS_DEFAULTS = get_bundled_section_defaults("constituents")
 _FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
+_AGENT_CLUSTERING_DEFAULTS = get_bundled_section_defaults("agent_clustering")
+
+
+def get_bundled_agent_clustering_defaults() -> dict[str, Any]:
+    """Get bundled default agent clustering settings dictionary."""
+    return dict(_AGENT_CLUSTERING_DEFAULTS)
+
 
 DEFAULT_LANGUAGE: str = str(_LING_DEFAULTS.get("default_language") or "")
 DEFAULT_PRESERVED_DIACRITICS: str = str(_LING_DEFAULTS.get("preserved_diacritics") or "")
@@ -1214,6 +1222,101 @@ class MultiplexClusterThresholds(BaseModel):
         return self
 
 
+
+class WEMIScoringWeightsWithAuthor(BaseModel):
+    title: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("title", 0.45)
+        )
+    )
+    author: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("author", 0.35)
+        )
+    )
+    year: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("year", 0.10)
+        )
+    )
+    type: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("type", 0.10)
+        )
+    )
+
+
+class WEMIScoringWeightsWithoutAuthor(BaseModel):
+    title: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("title", 0.70)
+        )
+    )
+    year: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("year", 0.15)
+        )
+    )
+    type: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("type", 0.15)
+        )
+    )
+
+
+class WEMIScoringConfig(BaseModel):
+    with_author: WEMIScoringWeightsWithAuthor = Field(
+        default_factory=lambda: WEMIScoringWeightsWithAuthor(
+            **_CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {})
+        )
+    )
+    without_author: WEMIScoringWeightsWithoutAuthor = Field(
+        default_factory=lambda: WEMIScoringWeightsWithoutAuthor(
+            **_CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {})
+        )
+    )
+    author_missing_similarity: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("author_missing_similarity", 0.60)
+        )
+    )
+    year_missing_similarity: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("year_missing_similarity", 0.80)
+        )
+    )
+    year_max_difference: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("year_max_difference", 20.0)
+        )
+    )
+    cross_format_type_similarity: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("cross_format_type_similarity", 0.95)
+        )
+    )
+    default_type_similarity: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("scoring", {}).get("default_type_similarity", 0.50)
+        )
+    )
+
+
+class MusicScoreConfig(BaseModel):
+    terms: list[str] = Field(
+        default_factory=lambda: list(
+            _CLUSTER_DEFAULTS.get("music_score", {}).get(
+                "terms", ["score", "partituuri", "nuotti", "part", "stemma"]
+            )
+        )
+    )
+    standard_key_terms: list[str] = Field(
+        default_factory=lambda: list(
+            _CLUSTER_DEFAULTS.get("music_score", {}).get("standard_key_terms", ["ismn", "plate"])
+        )
+    )
+
+
 class ClusterConfig(BaseModel):
     """Configuration for multiplex graph clustering and blocking."""
 
@@ -1231,6 +1334,16 @@ class ClusterConfig(BaseModel):
     thresholds: MultiplexClusterThresholds = Field(default_factory=MultiplexClusterThresholds)
     message_passing: bool = True
     reconcile_items: bool = False
+    scoring: WEMIScoringConfig = Field(
+        default_factory=lambda: WEMIScoringConfig(
+            **_CLUSTER_DEFAULTS.get("scoring", {})
+        )
+    )
+    music_score: MusicScoreConfig = Field(
+        default_factory=lambda: MusicScoreConfig(
+            **_CLUSTER_DEFAULTS.get("music_score", {})
+        )
+    )
 
 
 class WorkConsolidationConfig(BaseModel):
@@ -1267,6 +1380,114 @@ class WorkConsolidationConfig(BaseModel):
     # Sources preferred as the canonical representative, best first. Sources not
     # listed rank after those that are; ties break on work_uri for stability.
     canonical_source_priority: list[str] = Field(default_factory=list)
+
+
+class AgentClusterScoringWeights(BaseModel):
+
+    """Weights for multi-feature agent cluster scoring."""
+
+    name_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("name_weight", 0.35)
+        )
+    )
+    dates_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("dates_weight", 0.20)
+        )
+    )
+    work_cluster_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("work_cluster_weight", 0.20)
+        )
+    )
+    coauthor_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("coauthor_weight", 0.10)
+        )
+    )
+    affiliation_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("affiliation_weight", 0.05)
+        )
+    )
+    concept_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("concept_weight", 0.05)
+        )
+    )
+    qualifier_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("qualifier_weight", 0.05)
+        )
+    )
+
+
+class AgentClusterConfig(BaseModel):
+    """Configuration for cross-source agent entity clustering."""
+
+    enabled: bool = Field(
+        default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS.get("enabled", True))
+    )
+    similarity_threshold: float = Field(
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("similarity_threshold", 0.85))
+    )
+    date_tolerance_years: int = Field(
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_years", 1))
+    )
+    major_date_discrepancy_veto_years: int = Field(
+        default_factory=lambda: int(
+            _AGENT_CLUSTERING_DEFAULTS.get("major_date_discrepancy_veto_years", 2)
+        )
+    )
+    require_corroboration_for_date_discrepancy: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_CLUSTERING_DEFAULTS.get("require_corroboration_for_date_discrepancy", True)
+        )
+    )
+    min_career_overlap_tolerance_years: int = Field(
+        default_factory=lambda: int(
+            _AGENT_CLUSTERING_DEFAULTS.get("min_career_overlap_tolerance_years", 40)
+        )
+    )
+    batch_size: int = Field(
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("batch_size", 1000))
+    )
+    token_matching_algorithm: str = Field(
+        default_factory=lambda: str(
+            _AGENT_CLUSTERING_DEFAULTS.get("token_matching_algorithm", "token_set_ratio")
+        )
+    )
+    affiliation_fuzzy_threshold: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_threshold", 80.0)
+        )
+    )
+    affiliation_fuzzy_score: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_score", 0.85)
+        )
+    )
+    source_authority_precedence: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_CLUSTERING_DEFAULTS.get("source_authority_precedence") or []
+        )
+    )
+    override_identifiers: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_CLUSTERING_DEFAULTS.get("override_identifiers") or []
+        )
+    )
+    blocking_keys: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_CLUSTERING_DEFAULTS.get("blocking_keys") or []
+        )
+    )
+    scoring_weights: AgentClusterScoringWeights = Field(
+        default_factory=lambda: AgentClusterScoringWeights(
+            **_AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {})
+        )
+    )
 
 
 class ReconcileFTSFallbackConfig(BaseModel):
@@ -1498,6 +1719,10 @@ class AppConfig(BaseModel):
     consolidation: WorkConsolidationConfig = Field(
         default_factory=lambda: WorkConsolidationConfig(**_CONSOLIDATION_DEFAULTS)
     )
+    agent_clustering: AgentClusterConfig = Field(
+        default_factory=lambda: AgentClusterConfig(**_AGENT_CLUSTERING_DEFAULTS)
+    )
+
     reconcile: Optional[ReconcileConfig] = None
     telemetry: TelemetryConfig = Field(
         default_factory=lambda: TelemetryConfig(**_TELEMETRY_DEFAULTS)

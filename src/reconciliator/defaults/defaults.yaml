@@ -971,6 +971,31 @@ reconcile:
       - "standard_key"
     message_passing: true
     reconcile_items: false
+    scoring:
+      with_author:
+        title: 0.45
+        author: 0.35
+        year: 0.10
+        type: 0.10
+      without_author:
+        title: 0.70
+        year: 0.15
+        type: 0.15
+      author_missing_similarity: 0.60
+      year_missing_similarity: 0.80
+      year_max_difference: 20.0
+      cross_format_type_similarity: 0.95
+      default_type_similarity: 0.50
+    music_score:
+      terms:
+        - "score"
+        - "partituuri"
+        - "nuotti"
+        - "part"
+        - "stemma"
+      standard_key_terms:
+        - "ismn"
+        - "plate"
   fts_fallback:
     enabled: false
     threshold: 0.70
@@ -1015,5 +1040,45 @@ funnels:
     default_language: "fin"
     title_suffix: " (äänikirja)"
     undefined_language: "und"
+
+agent_clustering:
+  enabled: true
+  similarity_threshold: 0.85
+  date_tolerance_years: 1
+  major_date_discrepancy_veto_years: 2
+  require_corroboration_for_date_discrepancy: true
+  min_career_overlap_tolerance_years: 40
+  batch_size: 1000
+  token_matching_algorithm: "token_set_ratio"
+  affiliation_fuzzy_threshold: 80.0
+  affiliation_fuzzy_score: 0.85
+
+  source_authority_precedence:
+    - "asteri"
+    - "wikidata"
+    - "melinda"
+
+  override_identifiers:
+    - "isni"
+    - "viaf"
+    - "orcid"
+    - "kanto"
+    - "wikidata"
+
+  blocking_keys:
+    - "name_normalized"
+    - "surname_decade"
+    - "folded_surname"
+    - "variant_names"
+
+  scoring_weights:
+    name_weight: 0.35
+    dates_weight: 0.20
+    work_cluster_weight: 0.20
+    coauthor_weight: 0.10
+    affiliation_weight: 0.05
+    concept_weight: 0.05
+    qualifier_weight: 0.05
+
 
 

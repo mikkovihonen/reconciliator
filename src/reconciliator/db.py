@@ -87,11 +87,29 @@ agent_attributes_table = Table(
     Column("agent_id", Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False),
     Column("attribute_type", String, nullable=False),
     Column("value", String, nullable=False),
-    Column("count", Integer, nullable=False, default=1, server_default="1"),
     UniqueConstraint("agent_id", "attribute_type", "value", name="uq_agent_attributes"),
     Index("idx_agent_attr_agent", "agent_id", "attribute_type"),
     Index("idx_agent_attr_lookup", "attribute_type", "value"),
 )
+
+agent_relationships_table = Table(
+    "agent_relationships",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "source_agent_id", Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column(
+        "target_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    ),
+    Column("target_name", String, nullable=True),
+    Column("target_uri", String, nullable=True),
+    Column("relationship_type", String, nullable=False),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_agent_rel_source", "source_agent_id", "relationship_type"),
+    Index("idx_agent_rel_target", "target_agent_id", "relationship_type"),
+)
+
 
 works_table = Table(
     "works",
@@ -109,14 +127,9 @@ works_table = Table(
     Column("classification", String, nullable=True),
     Column("classification_scheme", String, nullable=True),
     Column("work_type", String, nullable=False, default="text", server_default="text"),
-    Column("subjects_json", Text, nullable=False, default="[]", server_default="[]"),
     Column("serialized_text", Text, nullable=True),
-    Column(
-        "canonical_work_id", Integer, ForeignKey("works.id", ondelete="SET NULL"), nullable=True
-    ),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
     UniqueConstraint("source", "source_id", name="uq_works_source_source_id"),
-    Index("idx_works_canonical", "canonical_work_id"),
     Index("idx_works_source_id", "source", "source_id"),
     Index("idx_works_title_norm", "title_normalized"),
     Index("idx_works_primary_agent", "primary_agent_id"),
@@ -243,6 +256,13 @@ identifiers_table = Table(
         "entity_type IN ('work', 'expression', 'manifestation', 'item', 'agent')",
         name="chk_identifiers_entity_type",
     ),
+    UniqueConstraint(
+        "entity_type",
+        "entity_id",
+        "source",
+        "source_id",
+        name="uq_identifiers_composite",
+    ),
     Index("idx_identifiers_lookup", "source", "source_id_normalized"),
     Index("idx_identifiers_entity", "entity_type", "entity_id"),
 )
@@ -285,6 +305,13 @@ contributions_table = Table(
         "entity_type IN ('work', 'expression', 'manifestation', 'item')",
         name="chk_contributions_entity_type",
     ),
+    UniqueConstraint(
+        "entity_type",
+        "entity_id",
+        "agent_id",
+        "role",
+        name="uq_contributions_composite",
+    ),
     Index("idx_contributions_entity", "entity_type", "entity_id"),
     Index("idx_contributions_agent", "agent_id", "role"),
 )
@@ -305,6 +332,18 @@ work_relationships_table = Table(
     ),
     Index("idx_work_rel_source", "source_work_id", "relationship_type"),
     Index("idx_work_rel_target", "target_work_id", "relationship_type"),
+)
+
+work_consolidations_table = Table(
+    "work_consolidations",
+    metadata,
+    Column("work_id", Integer, ForeignKey("works.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "canonical_work_id", Integer, ForeignKey("works.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("evidence", String, nullable=True),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_work_consolidations_canonical", "canonical_work_id"),
 )
 
 work_medium_of_performance_table = Table(
@@ -460,6 +499,16 @@ entity_subjects_table = Table(
         "entity_type IN ('work', 'expression', 'manifestation', 'agent')",
         name="chk_entity_subjects_entity_type",
     ),
+    UniqueConstraint(
+        "entity_type",
+        "entity_id",
+        "vocabulary",
+        "concept_id",
+        "raw_label",
+        "relation_type",
+        name="uq_entity_subjects_composite",
+        postgresql_nulls_not_distinct=True,
+    ),
     Index("idx_entity_subjects_entity", "entity_type", "entity_id"),
     Index("idx_entity_subjects_concept", "vocabulary", "concept_id"),
     Index("idx_entity_subjects_unresolved", "vocabulary", "is_resolved"),
@@ -518,8 +567,6 @@ corpus_expression_clusters_table = Table(
     Column("content_type", String, nullable=False, default="text", server_default="text"),
     Column("language", String, nullable=False),
     Column("version_designation", String, nullable=True),
-    Column("translators_json", Text, nullable=False, default="[]", server_default="[]"),
-    Column("performers_json", Text, nullable=False, default="[]", server_default="[]"),
     Index("idx_exp_cluster_work", "work_cluster_id"),
 )
 
@@ -559,7 +606,6 @@ corpus_linkages_table = Table(
     Column("final_work_source_id", String, nullable=False, default="", server_default=""),
     Column("final_expression_source", String, nullable=False, default="", server_default=""),
     Column("final_expression_source_id", String, nullable=False, default="", server_default=""),
-    Column("sibling_manifestation_ids_json", Text, nullable=True),
     Index("idx_linkage_manifestation", "manifestation_cluster_id"),
     Index("idx_linkage_work", "work_cluster_id"),
 )
@@ -574,6 +620,67 @@ sammelband_bindings_table = Table(
     Index("idx_sammelband_binding", "binding_id"),
     Index("idx_sammelband_record", "record_id"),
 )
+
+corpus_agent_clusters_table = Table(
+    "corpus_agent_clusters",
+    metadata,
+    Column("cluster_id", String(64), primary_key=True),
+    Column(
+        "canonical_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    ),
+    Column("canonical_agent_source", String(32), nullable=True),
+    Column("canonical_agent_source_id", Text, nullable=True),
+    Column("canonical_name", Text, nullable=False),
+    Column("canonical_surname", Text, nullable=True),
+    Column("canonical_uri", Text, nullable=True),
+    Column("birth_year", Integer, nullable=True),
+    Column("death_year", Integer, nullable=True),
+    Column("member_count", Integer, nullable=False, default=1, server_default="1"),
+    Column("work_count", Integer, nullable=False, default=0, server_default="0"),
+    Column("manifestation_count", Integer, nullable=False, default=0, server_default="0"),
+    Column("confidence_score", Float, nullable=False, default=1.0, server_default="1.0"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_agent_cluster_canonical_id", "canonical_agent_id"),
+    Index("idx_agent_cluster_canonical_uri", "canonical_uri"),
+)
+
+corpus_agent_cluster_members_table = Table(
+    "corpus_agent_cluster_members",
+    metadata,
+    Column("agent_id", Integer, ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "cluster_id",
+        String(64),
+        ForeignKey("corpus_agent_clusters.cluster_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("source", String(32), nullable=False),
+    Column("source_id", Text, nullable=False),
+    Column("link_method", String(64), nullable=False),
+    Column("confidence", Float, nullable=False, default=1.0, server_default="1.0"),
+    Index("idx_agent_cluster_member_cluster", "cluster_id"),
+    Index("idx_agent_cluster_member_source_id", "source", "source_id"),
+)
+
+corpus_agent_cluster_attributes_table = Table(
+    "corpus_agent_cluster_attributes",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "cluster_id",
+        String(64),
+        ForeignKey("corpus_agent_clusters.cluster_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("attribute_type", String(32), nullable=False),
+    Column("value", Text, nullable=False),
+    Column("concept_id", Text, nullable=True),
+    Column("frequency", Integer, nullable=False, default=1, server_default="1"),
+    Column("is_canonical", Boolean, nullable=False, default=False, server_default="0"),
+    UniqueConstraint("cluster_id", "attribute_type", "value", name="uq_agent_cluster_attr"),
+    Index("idx_agent_cluster_attr_cluster", "cluster_id", "attribute_type"),
+)
+
 
 # ===================================================================
 # 3. PostgreSQL Full-Text & Trigram Index Statements
@@ -750,7 +857,11 @@ def init_corpus_db(target: Any) -> None:
         corpus_expression_clusters_table,
         corpus_linkages_table,
         sammelband_bindings_table,
+        corpus_agent_clusters_table,
+        corpus_agent_cluster_members_table,
+        corpus_agent_cluster_attributes_table,
     ]
+
     if isinstance(target, Engine):
         with target.begin() as conn:
             init_corpus_db(conn)

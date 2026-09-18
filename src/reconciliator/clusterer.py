@@ -186,20 +186,21 @@ class CorpusClusterer:
                 if sim > title_sim:
                     title_sim = sim
 
+        scoring = self.config.scoring
         # Author similarity
         if r1.author_key and r2.author_key:
             author_sim = fuzz.ratio(r1.author_key, r2.author_key) / 100.0
         elif not r1.author_key and not r2.author_key:
             author_sim = 1.0
         else:
-            author_sim = 0.60
+            author_sim = scoring.author_missing_similarity
 
         # Year similarity
         if r1.year and r2.year:
             year_diff = abs(r1.year - r2.year)
-            year_sim = max(0.0, 1.0 - year_diff / 20.0)
+            year_sim = max(0.0, 1.0 - year_diff / scoring.year_max_difference)
         else:
-            year_sim = 0.80
+            year_sim = scoring.year_missing_similarity
 
         # Work type compatibility
         if r1.work_type == r2.work_type:
@@ -208,14 +209,16 @@ class CorpusClusterer:
             # Cross-format: audiobook or braille realization of print work
             type_sim = 1.0
         elif {r1.work_type, r2.work_type}.issubset({"text", "article", "chapter"}):
-            type_sim = 0.95
+            type_sim = scoring.cross_format_type_similarity
         else:
-            type_sim = 0.50
+            type_sim = scoring.default_type_similarity
 
         if r1.author_key and r2.author_key:
-            score = 0.45 * title_sim + 0.35 * author_sim + 0.10 * year_sim + 0.10 * type_sim
+            w = scoring.with_author
+            score = w.title * title_sim + w.author * author_sim + w.year * year_sim + w.type * type_sim
         else:
-            score = 0.70 * title_sim + 0.15 * year_sim + 0.15 * type_sim
+            w = scoring.without_author
+            score = w.title * title_sim + w.year * year_sim + w.type * type_sim
 
         return round(score, 4), "metadata_similarity"
 
@@ -228,14 +231,16 @@ class CorpusClusterer:
         if wt == "audio_nonmusic":
             content_type = "spoken_word"
         elif wt == "music":
-            score_terms = ("score", "partituuri", "nuotti", "part", "stemma")
+            music_cfg = self.config.music_score
+            score_terms = tuple(t.lower() for t in music_cfg.terms)
             title_text = (target.title_stem or "").lower()
             vol_text = (target.volume_designation or "").lower()
             is_score = any(t in title_text for t in score_terms) or any(
                 t in vol_text for t in score_terms
             )
-            if target.get_first_key("standard") and any(
-                x in target.get_first_key("standard").lower() for x in ("ismn", "plate")
+            standard_key = target.get_first_key("standard")
+            if standard_key and any(
+                x.lower() in standard_key.lower() for x in music_cfg.standard_key_terms
             ):
                 is_score = True
 
@@ -489,9 +494,6 @@ class CorpusClusterer:
                     canonical_exp_curie = f"reconciliator:exp_{h_exp}"
                     exp_cluster_id = f"ec_{h_exp}"
 
-                translators = [sub_key] if sub_key and content_type == "text" else []
-                performers = [sub_key] if sub_key and content_type == "audio_music" else []
-
                 e_cluster = ExpressionCluster(
                     cluster_id=exp_cluster_id,
                     work_cluster_id=work_cluster_id,
@@ -499,8 +501,6 @@ class CorpusClusterer:
                     content_type=content_type,  # type: ignore[arg-type]
                     language=lang,
                     version_designation=sub_key or None,
-                    translators_json=translators,
-                    performers_json=performers,
                 )
                 expression_clusters.append(e_cluster)
 
@@ -533,9 +533,7 @@ class CorpusClusterer:
                     )
                     manifestation_clusters.append(m_cluster)
 
-                    sibling_ids = [r.record_id for r in m_recs]
                     for rec in m_recs:
-                        sibs = [sid for sid in sibling_ids if sid != rec.record_id]
                         linkage = CorpusLinkage(
                             record_id=rec.record_id,
                             manifestation_cluster_id=manif_cluster_id,
@@ -543,7 +541,6 @@ class CorpusClusterer:
                             expression_cluster_id=exp_cluster_id,
                             final_work_curie=canonical_work_curie,
                             final_expression_curie=canonical_exp_curie,
-                            sibling_manifestation_ids_json=json.dumps(sibs) if sibs else None,
                         )
                         corpus_linkages.append(linkage)
 

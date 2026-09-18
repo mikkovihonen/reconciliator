@@ -588,7 +588,6 @@ def parse_marc_record_elem(
                 sub_cs = [c.strip(" ,;.") for c in _get_subfields(f, "c") if c.strip(" ,;.")]
                 sub_d = _get_subfield(f, "d")
                 sub_q = _get_subfield(f, "q")
-                sub_us = [u.strip(" ,;.") for u in _get_subfields(f, "u") if u.strip(" ,;.")]
                 birth_yr, death_yr = parse_marc_dates(sub_d)
                 full_literal = f"{name} {' '.join(sub_cs)}".strip()
                 is_fictional = any(q in full_literal.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
@@ -643,13 +642,13 @@ def parse_marc_record_elem(
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
                         "identifiers": agent_identifiers,
-                        "qualifiers": dict(Counter(sub_cs)),
-                        "affiliations": dict(Counter(sub_us)),
+                        "qualifiers": [c for c in dict.fromkeys(sub_cs) if c],
                         "role_counts": dict(Counter(norm_roles)),
                         "language_counts": dict(rec_languages),
                         "subject_counts": {},
                     }
                 )
+
 
     for tag in ("110", "710", "111", "711"):
         for f in _get_datafields(record_elem, tag):
@@ -657,7 +656,6 @@ def parse_marc_record_elem(
             if name:
                 sub_cs = [c.strip(" ,;.") for c in _get_subfields(f, "c") if c.strip(" ,;.")]
                 sub_d = _get_subfield(f, "d")
-                sub_us = [u.strip(" ,;.") for u in _get_subfields(f, "u") if u.strip(" ,;.")]
                 full_literal = f"{name} {' '.join(sub_cs)}".strip()
                 is_fictional = any(q in full_literal.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
                 raw_roles = [
@@ -711,13 +709,13 @@ def parse_marc_record_elem(
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
                         "identifiers": agent_identifiers,
-                        "qualifiers": dict(Counter(sub_cs)),
-                        "affiliations": dict(Counter(sub_us)),
+                        "qualifiers": [c for c in dict.fromkeys(sub_cs) if c],
                         "role_counts": dict(Counter(norm_roles)),
                         "language_counts": dict(rec_languages),
                         "subject_counts": {},
                     }
                 )
+
 
     # Subjects
     subject_field_category_map = get_subject_field_category_map()
@@ -1536,17 +1534,22 @@ def decompose_marc_authority(
             title_normalized=compute_title_stem(title, lang=orig_lang),
             original_language=orig_lang,
             work_type=work_type,
-            # A work authority's 4XX variant titles, which have nowhere else to
-            # live: WorkEntity has one title field, and the serialised text -
-            # what BM25 and the dense index read - is built from this list, so
-            # putting them here is what makes "Vanha Kalevala" findable. Tagged
-            # so a reader can tell them from actual subjects; see
-            # docs/pipeline_overview.md for the open question of a proper
-            # variant-title column.
-            subjects_json=[
-                {"heading": vt, "pref_label": vt, "kind": "variant_title"} for vt in variant_titles
-            ],
         )
+
+        # Route variant titles through subject_sink so they're searchable
+        # via BM25 and the dense work index.
+        if subject_sink is not None:
+            for vt in variant_titles:
+                subject_sink.append(
+                    EntitySubject(
+                        entity_type="work",
+                        entity_id=0,
+                        source=source,
+                        source_record_id=source_id,
+                        relation_type="variant_title",
+                        raw_label=vt,
+                    )
+                )
 
         # Build canonical ExpressionEntity
         expr_lang = orig_lang or "und"
@@ -1685,9 +1688,9 @@ def decompose_marc_authority(
             fuller_name=_get_subfield(agent_field, "q"),
             is_personal=bool(f100),
             variant_names=variant_names,
-            affiliations=affiliations,
             identifiers=identifiers,
         )
+
 
         if subject_sink is not None:
             for f in _get_datafields(record_elem, "372"):
@@ -1833,20 +1836,23 @@ def decompose_marc_wemi(
     content_type = determine_content_type(record_elem, work_type=work_type)
     carrier_type = determine_carrier_type(record_elem)
 
-    # Subjects as folded by parse_marc_record_elem: heading, vocabulary, concept
-    # id. The work used to store bare heading strings, which the serialisation
-    # template could not render and the classification-evidence reader could not
-    # read.
-    flat_subjects = list(parsed.get("subjects_folded") or [])
-
     # Variant titles from 246 (Varying Form of Title) and 740 (Uncontrolled
-    # Related/Analytical Title) are already extracted by parse_marc_record_elem
-    # but were discarded here. Folding them into subjects_json makes alternative
-    # and parallel titles searchable via BM25 and the dense work index —
-    # the same mechanism MarcAuthorityLoader used for 4XX tracing entries.
-    for vt in parsed.get("variant_titles") or []:
-        if vt:
-            flat_subjects.append({"heading": vt, "pref_label": vt, "kind": "variant_title"})
+    # Related/Analytical Title) are routed through subject_sink so they're
+    # searchable via BM25 and the dense work index — the same mechanism
+    # MarcAuthorityLoader uses for 4XX tracing entries.
+    if subject_sink is not None:
+        for vt in parsed.get("variant_titles") or []:
+            if vt:
+                subject_sink.append(
+                    EntitySubject(
+                        entity_type="work",
+                        entity_id=0,
+                        source=source,
+                        source_record_id=source_id,
+                        relation_type="variant_title",
+                        raw_label=vt,
+                    )
+                )
 
     # Primary classification
     classification = None
@@ -1878,7 +1884,6 @@ def decompose_marc_wemi(
         original_title=parsed.get("original_title"),
         original_language=orig_lang,
         work_type=work_type,
-        subjects_json=flat_subjects,
         classification=classification,
         classification_scheme=classification_scheme,
     )
@@ -2146,7 +2151,9 @@ def decompose_marc_wemi(
         if any(r in a.get("role_counts", {}) for r in ("nrt", "lbr", "narrator", "lukija"))
         or (a.get("role") and a.get("role").strip().lower() in ("nrt", "lbr", "narrator", "lukija"))
     ]
-    work.serialized_text = engine.render_work(work, authors=parsed["agents"])
+    work.serialized_text = engine.render_work(
+        work, authors=parsed["agents"], subjects=parsed.get("subjects_folded") or []
+    )
     expression.serialized_text = engine.render_expression(
         expression, work_title=work.title, translators=translators, narrators=narrators
     )
@@ -2186,10 +2193,10 @@ def decompose_marc_wemi(
                 is_personal=a.get("is_personal", True),
                 is_fictional=a.get("is_fictional", False),
                 variant_names=list(a.get("variant_names", [])),
-                qualifiers=dict(a.get("qualifiers", {})),
-                affiliations=dict(a.get("affiliations", {})),
+                qualifiers=list(a.get("qualifiers") or []),
             )
         )
+
 
         # The agent's own role, from the histogram the parse already built. This
         # read `a.get("role")`, which no code ever set, so every contribution row

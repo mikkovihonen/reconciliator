@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from rapidfuzz import fuzz
 
@@ -237,12 +237,12 @@ def verify_agent_identifiers(
 
 
 def _verify_distribution_match(
-    target_dist: dict[str, int],
-    candidate_dist: dict[str, int],
+    target_dist: Iterable[str] | dict[str, Any],
+    candidate_dist: Iterable[str] | dict[str, Any],
     label: str,
     threshold: float = 80.0,
 ) -> tuple[bool, str]:
-    """Verify compatibility of two string distribution bags using substring and fuzzy token matching."""
+    """Verify compatibility of two string lists or distribution bags using substring and fuzzy token matching."""
     if not target_dist or not candidate_dist:
         return True, f"neutral_no_{label}"
 
@@ -259,19 +259,20 @@ def _verify_distribution_match(
 
 
 def verify_qualifiers(
-    target_qualifiers: dict[str, int],
-    candidate_qualifiers: dict[str, int],
+    target_qualifiers: Iterable[str] | dict[str, Any],
+    candidate_qualifiers: Iterable[str] | dict[str, Any],
 ) -> tuple[bool, str]:
-    """Verify compatibility of empirical agent qualifier distributions."""
+    """Verify compatibility of empirical agent qualifier distributions or lists."""
     return _verify_distribution_match(target_qualifiers, candidate_qualifiers, "qualifier")
 
 
 def verify_affiliations(
-    target_affiliations: dict[str, int],
-    candidate_affiliations: dict[str, int],
+    target_affiliations: Iterable[str] | dict[str, Any],
+    candidate_affiliations: Iterable[str] | dict[str, Any],
 ) -> tuple[bool, str]:
-    """Verify compatibility of agent affiliation distributions (e.g. universities, institutes)."""
+    """Verify compatibility of agent affiliations (e.g. universities, institutes)."""
     return _verify_distribution_match(target_affiliations, candidate_affiliations, "affiliation")
+
 
 
 def verify_languages(
@@ -366,8 +367,8 @@ def check_homonym_ambiguity(
     target_birth: Optional[int] = None,
     target_death: Optional[int] = None,
     target_qualifier: Optional[str] = None,
-    target_qualifiers: Optional[dict[str, int]] = None,
-    target_affiliations: Optional[dict[str, int]] = None,
+    target_qualifiers: Optional[dict[str, int] | list[str]] = None,
+    target_affiliations: Optional[dict[str, int] | list[str]] = None,
     target_languages: Optional[dict[str, int]] = None,
     target_subjects: Optional[dict[str, int]] = None,
     target_identifiers: Optional[list[dict[str, Any]] | list[IdentifierEntity]] = None,
@@ -402,9 +403,21 @@ def check_homonym_ambiguity(
         return True, "unambiguous_margin"
 
     # Merge target_qualifier into target_qualifiers dict if provided
-    effective_qualifiers = dict(target_qualifiers or {})
+    if isinstance(target_qualifiers, dict):
+        effective_qualifiers = dict(target_qualifiers)
+    elif isinstance(target_qualifiers, (list, set, tuple)):
+        effective_qualifiers = {q: 1 for q in target_qualifiers}
+    else:
+        effective_qualifiers = {}
     if target_qualifier and target_qualifier not in effective_qualifiers:
         effective_qualifiers[target_qualifier] = 1
+
+    if isinstance(target_affiliations, dict):
+        effective_affiliations = dict(target_affiliations)
+    elif isinstance(target_affiliations, (list, set, tuple)):
+        effective_affiliations = {a: 1 for a in target_affiliations}
+    else:
+        effective_affiliations = {}
 
     # --- Tier 1 In-Memory Disambiguation ---
     # 1. Identifier check
@@ -441,11 +454,11 @@ def check_homonym_ambiguity(
             return True, "ambiguity_resolved_by_qualifier"
 
     # 4. Affiliation distribution overlap
-    if target_affiliations:
+    if effective_affiliations:
         matching_a_cands = []
         for c in close_candidates:
             c_a_dict = c.get("affiliations") or {}
-            if c_a_dict and verify_affiliations(target_affiliations, c_a_dict)[0]:
+            if c_a_dict and verify_affiliations(effective_affiliations, c_a_dict)[0]:
                 matching_a_cands.append(c)
         if len(matching_a_cands) == 1:
             return True, "ambiguity_resolved_by_affiliation"
@@ -560,8 +573,9 @@ class AgentFallbackResolver:
                 target_death=target_agent.death_year,
                 target_identifiers=target_agent.identifiers,
                 target_qualifiers=target_agent.qualifiers,
-                target_affiliations=target_agent.affiliations,
+                target_affiliations=getattr(target_agent, "affiliations", None) or [],
                 authority_store=authority_store,
+
                 target_coauthors=target_coauthors,
                 target_publisher=target_publisher,
                 target_classifications=target_classifications,
@@ -619,11 +633,13 @@ class AgentFallbackResolver:
                     continue
 
             # Affiliation distribution guard
-            cand_a = cand.get("affiliations") or {}
-            if target_agent.affiliations and cand_a:
-                a_ok, _ = verify_affiliations(target_agent.affiliations, cand_a)
+            cand_a = cand.get("affiliations") or []
+            target_aff = getattr(target_agent, "affiliations", None) or []
+            if target_aff and cand_a:
+                a_ok, _ = verify_affiliations(target_aff, cand_a)
                 if not a_ok:
                     continue
+
 
             # Candidate passed all active dynamic selective guards!
             return cand, "accepted_via_selective_guards"
