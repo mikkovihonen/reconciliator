@@ -22,7 +22,7 @@ flowchart TD
 
     Sources["<b>External Metadata Sources</b><br/>• Asteri Authority (MARCXML)<br/>• Melinda Union Catalog (MARCXML)<br/>• Wikidata Graph (JSON / SPARQL)<br/>• Bibframe / RDF Sources"]:::leftAlign
 
-    Layer1["<b>Layer 1: Ingestion & Raw Staging (Authority DB)</b><br/>• agents, agent_attributes (count-free)<br/>• works, expressions, manifestations, items<br/>• manifestation_expressions (M:N)<br/>• identifiers, entity_keys, contributions<br/>• agent_relationships, work_relationships"]:::leftAlign
+    Layer1["<b>Layer 1: Ingestion & Raw Staging (Authority DB)</b><br/>• agents, agent_attributes (count-free)<br/>• works, expressions, manifestations, items<br/>• manifestation_expressions (M:N)<br/>• identifiers, entity_keys, contributions<br/>• agent_relationships, work_relationships, work_consolidations"]:::leftAlign
 
     Layer2["<b>Layer 2: Controlled Vocabularies & Ontologies</b><br/>• concepts, concept_labels (YSO, YKL, UDC, MeSH)<br/>• concept_mappings, concept_mapping_labels<br/>• relator_terms (RDA role codes)<br/>• entity_subjects (topic, genre, occupation, field_of_work)"]:::leftAlign
 
@@ -46,7 +46,7 @@ flowchart TD
 - **Zero Hardcoding**: All weights, tolerances, blocking keys, authority precedence, and vocabularies are configured dynamically via [`defaults.yaml`].
 - **Decoupled Relational Entities**: No JSON blob packing for queryable entities; relationships, subjects, and attributes are modeled as first-class relational tables.
 - **Idempotency**: Ingesting a batch twice produces identical database state without duplicate rows or unbounded counter increments.
-- **Strict Separation of Raw and Cluster Domains**: Raw staging preserves exact source evidence; consensus values, canonical entities, and frequencies are computed exclusively in the cluster layer.
+- **Strict Separation of Raw and Cluster Domains**: Raw staging preserves exact source evidence; consensus values, canonical entities, and frequencies are computed exclusively in the cluster layer. Work consolidation decisions are isolated in `work_consolidations` rather than mutating immutable raw work rows.
 
 ---
 
@@ -56,7 +56,7 @@ flowchart TD
 The Raw Staging Layer stores the ingested bibliographic and authority records as close to their source representation as possible while normalizing them into the IFLA LRM / FRBR conceptual model:
 - **Authority Grounding**: Stores person and corporate bodies (`agents`) without artificial counts or premature merges.
 - **Multi-Expression Support**: Supports complex manifestations (e.g. musical anthologies, multi-work vinyl records, translated omnibus editions) via the `manifestation_expressions` junction table.
-- **Structural Linkages**: Captures sequential and parent-child work hierarchies (`work_relationships`), physical item copies (`items`), and agent affiliations or pseudonyms (`agent_relationships`).
+- **Structural Linkages & Consolidation**: Captures sequential and parent-child work hierarchies (`work_relationships`), physical item copies (`items`), agent affiliations or pseudonyms (`agent_relationships`), and records audited canonical work equivalence decisions and rationale in `work_consolidations` without altering raw work entities.
 - **Deterministic Keying**: Extracts polymorphic identifiers (ISBN, ISSN, DOI, URN, ISNI, VIAF, ORCID) into `identifiers` and blocking signatures into `entity_keys`.
 
 ### Entity-Relationship Diagram

@@ -1,7 +1,7 @@
 """Two-pass streaming ingestion pipeline for gzipped Wikidata dump latest-all.json.gz.
 
-Pass 1: Pre-scan all human/organization/place entities into SQLite wikidata_authors table.
-Pass 2: Stream bibliographic entities, hydrating authors from SQLite for true O(1) memory.
+Pass 1: Pre-scan all human/organization/place entities into PostgreSQL agents, identifiers, and agent_attributes tables.
+Pass 2: Stream bibliographic entities, hydrating authors from PostgreSQL for true O(1) memory.
 """
 
 from __future__ import annotations

@@ -52,25 +52,22 @@ This runbook provides complete operational guidance for system administrators an
 
 ### Storage Components
 
-`reconciliator` operates strictly offline during reconciliation, storing all authority graphs, staging corpora, and vector indices in local SQLite databases and vector index files:
+`reconciliator` operates strictly offline during reconciliation, persisting relational metadata, WEMI graphs, and clusters in **PostgreSQL** (with `pg_trgm` and full-text search extensions), alongside local memory-mapped vector index files:
 
-| File | Type | Purpose | Typical Size |
+| Component | Storage Engine | Purpose | Typical Size |
 |---|---|---|---|
-| `data/authority.db` | SQLite 3 (WAL mode) | Normalized authority records (Melinda / Asteri, KANTO, Wikidata, ISNI, VIAF) and 4-tier WEMI repository (`works`, `expressions`, `manifestations`, `items`, `work_relationships`, `sammelband_bindings`) with FTS5 search tables (`works_fts`, `expressions_fts`, `manifestations_fts`). | 500 MB – 8 GB |
-| `data/reconcile_corpus.db` | SQLite 3 (WAL mode) | Staging database for incoming target corpus records (`target_records`, `target_keys`, `target_payloads`), 3-layer multiplex intra-corpus clusters (`corpus_work_clusters`, `corpus_expression_clusters`, `corpus_manifestation_clusters`), cross-layer linkages (`corpus_linkages`), and harvest state. | 100 MB – 5 GB |
-| `data/authority.index` | USearch / FAISS / Torch | Dense vector index storing normalized embedding vectors for semantic similarity matching (legacy/agent records). | 200 MB – 3 GB |
+| PostgreSQL Authority DB | PostgreSQL 15+ | Normalized authority records (Melinda / Asteri, KANTO, Wikidata, ISNI, VIAF), 4-tier WEMI repository (`works`, `expressions`, `manifestations`, `items`, `work_relationships`, `work_consolidations`), polymorphic linkages (`identifiers`, `entity_keys`, `contributions`), and value vocabularies (`concepts`, `concept_labels`, `relator_terms`, `entity_subjects`). | 1 GB – 20 GB |
+| PostgreSQL Corpus Subsystem | PostgreSQL 15+ | Staging tables for target records, multiplex intra-corpus clusters (`corpus_work_clusters`, `corpus_expression_clusters`, `corpus_manifestation_clusters`), cross-layer linkages (`corpus_linkages`), composite bindings (`sammelband_bindings`), and `harvest_state`. | 500 MB – 10 GB |
 | `data/work.index` | USearch / FAISS / Torch | Dense vector index storing conceptual Work-level embedding vectors for title, author, and subject matching. | 100 MB – 2 GB |
-| `data/expression.index` | USearch / FAISS / Torch | Dense vector index storing Expression-level embedding vectors (language, content type, version, translation). | 100 MB – 2 GB |
 | `data/manifestation.index`| USearch / FAISS / Torch | Dense vector index storing Manifestation-level embedding vectors (publication, publisher, carrier, edition). | 100 MB – 2 GB |
 | `data/agent.index` | USearch / FAISS / Torch | Dense vector index storing essential agent representations for Tier 3 guarded standalone agent fallback. | 50 MB – 500 MB |
-| `data/vocab.db` | SQLite 3 (WAL mode) | Value vocabularies (YSO, YSO-paikat, KAUNO, MUSO, SLM, SEKO), legacy migration tables (YSA, Allars, Kaunokki, MUSA), dynamic relator terms (`relator_terms`), and multilingual / bridge aliases (`concept_aliases`). | 100 MB – 500 MB |
-| `data/progress.db` | SQLite 3 (WAL mode) | Real-time task progress, stages, processed byte/record counters, and heartbeat telemetry. | < 5 MB |
+| Telemetry & State | PostgreSQL / Memory | Real-time task progress, stages, processed byte/record counters, and heartbeat telemetry (`task_progress`, `db_metadata`). | < 10 MB |
 
 ### Hardware & Acceleration
 
 - **CPU**: Modern multi-core x86_64 or ARM64 processor (8+ cores recommended for multi-worker ingestion and reconciliation).
 - **RAM**: Minimum 8 GB (16 GB or 32 GB recommended when handling full national bibliography indexes).
-- **Disk**: NVMe SSD strongly recommended for SQLite WAL and vector indexing throughput.
+- **Disk**: NVMe SSD strongly recommended for PostgreSQL WAL, vector indexing, and memory-mapped file throughput.
 - **Hardware Acceleration (`device`)**:
   - `auto`: Automatically picks CUDA if available, then Apple Silicon MPS (Metal Performance Shaders), otherwise CPU.
   - `cuda`: NVIDIA GPU with PyTorch CUDA runtime.
@@ -150,7 +147,7 @@ A foundational challenge in bibliographic authority reconciliation is balancing 
                                    │
               ┌────────────────────┴────────────────────┐
               ▼                                         ▼
-   Dense Vector Candidate Retrieval           SQLite Rich Metadata Hydration
+   Dense Vector Candidate Retrieval           PostgreSQL Rich Metadata Hydration
    (Top-k via agent.index, cosine ≥ 0.90)    (Full dates, occupations, affiliations)
               │                                         │
               └────────────────────┬────────────────────┘
@@ -180,21 +177,21 @@ To achieve optimal vector discriminatory power without losing rich contextual da
    The `agent_serialization.j2` template serializes only core distinguishing biographical fields:
    `Nimi: {{ name }} [Sukunimi: {{ surname }}] [Tarkenne: {{ fuller_name }}] | Vuodet: {{ dates }}`.
    This guarantees compact, high-dimensional vector separation without candidate retrieval drop-off caused by volatile career qualifiers.
-2. **Tier 1: Intrinsic Agent Footprint (In-Memory, Compact Dictionaries)**:
-   Stored directly on `Agent` / `AgentEntity` and serialized in `metadata_json` (~150–300 bytes per agent):
-   - **`qualifier_counts: dict[str, int]`**: Empirical frequency distribution of titles, occupations, and professions from MARC repeatable `$c` and Wikidata `P106` (e.g. `{"lääkäri": 25, "professori": 5}`).
-   - **`affiliation_counts: dict[str, int]`**: Empirical distribution of universities, research bodies, and corporate employers from MARC repeatable `$u` and Wikidata `P108/P1416` (e.g. `{"Helsingin yliopisto": 20}`).
-   - **`role_counts: dict[str, int]`**: Empirical distribution of contributor functions from MARC repeatable `$e` and `$4` normalized to canonical 3-letter MARC relator codes (e.g. `{"aut": 30, "edt": 2, "prf": 5}`), mapping terms, cataloging abbreviations (e.g. `kirj.`, `toim.`, `esitt.`, `säv.`), and Metatietosanasto (MTS) URIs.
-   - **`language_counts: dict[str, int]`**: Language footprints from MARC `008` (chars 35-37), `041$a/$h`, and Wikidata `P1412` (e.g. `{"fin": 28, "swe": 4}`).
-   - **`subject_counts: dict[str, int]`**: Empirical frequency distribution of canonical subject and genre concept IDs strictly matching supported vocabularies configured in YAML (e.g. `{"yso:p2591": 12, "slm:s123": 5, "wikidata:q11660": 3}`). Harvested from MARC repeatable fields (600, 610, 611, 630, 648, 650, 651, 655, 382) via `$0`/`$1` or resolved from `vocab_store`, with automatic vocabulary prefix normalization and legacy thesauri folding (e.g. `ysa` -> `yso`).
-   - **`orcid`: `Optional[str]`**: Persistent academic identifier from MARC `$1` (`https://orcid.org/...`) or Wikidata `P496`.
-   - **`variant_names: list[str]`**: Alternative spellings, pseudonyms, and maiden names from MARC `400` and Wikidata aliases.
+2. **Tier 1: Intrinsic Agent Footprint (In-Memory, Decoupled Relational Entities)**:
+   Stored in relational tables (`agent_attributes`, `entity_subjects`, `contributions`, `identifiers`) and hydrated on demand:
+   - **`qualifiers`**: Titles, occupations, and professions from MARC repeatable `$c` and Wikidata `P106` stored in `agent_attributes`.
+   - **`affiliations`**: Universities, research bodies, and corporate employers from MARC repeatable `$u` and Wikidata `P108/P1416` in `agent_relationships`.
+   - **`roles`**: Contributor functions from MARC repeatable `$e` and `$4` normalized to canonical 3-letter MARC relator codes in `contributions`.
+   - **`languages`**: Language footprints from MARC `008` (chars 35-37), `041$a/$h`, and Wikidata `P1412`.
+   - **`subjects`**: Canonical subject and genre concept IDs matching supported vocabularies configured in YAML, linked via `entity_subjects`.
+   - **`orcid`: `Optional[str]`**: Persistent academic identifier from MARC `$1` (`https://orcid.org/...`) or Wikidata `P496` in `identifiers`.
+   - **`variant_names: list[str]`**: Alternative spellings, pseudonyms, and maiden names in `agent_attributes` (`attribute_type="variant_name"`).
    - **Dates**: Structured `birth_year`, `death_year`, and natural language `dates`.
-3. **Tier 2: Relational Deep Disambiguation (On-Demand SQLite Graph Queries)**:
-   Queried from relational tables in `authority.db` via `AuthorityStore.get_relational_disambiguation_evidence` *only when 2+ candidates match with identical names and close dense scores*:
-   - **Co-author Graph Overlap**: Checks if any candidate co-authored works in `authority_records` / `contributions` with other creators on the target record.
-   - **Publisher Overlap**: Checks if candidate's publications in `authority_records` / `manifestations` match the target record's publisher (`260/264$b`).
-   - **Scheme-Agnostic Classification Overlap**: Checks if candidate's publications share classification notations across any scheme (UDC `080`, DDC `082`, YKL/SAB `084`, LCC `050`), formatted as `"{scheme}:{code}"` with hierarchical prefix matching.
+3. **Tier 2: Relational Deep Disambiguation (On-Demand PostgreSQL Graph Queries)**:
+   Queried from relational tables in PostgreSQL via `WEMIRepository` *only when 2+ candidates match with identical names and close dense scores*:
+   - **Co-author Graph Overlap**: Checks if any candidate co-authored works in `contributions` with other creators on the target record.
+   - **Publisher Overlap**: Checks if candidate's publications in `manifestations` match the target record's publisher (`260/264$b`).
+   - **Scheme-Agnostic Classification Overlap**: Checks if candidate's publications share classification notations across any scheme (UDC `080`, DDC `082`, YKL/SAB `084`, LCC `050`), formatted as `"{scheme}:{code}"` with hierarchical prefix matching via `entity_subjects`.
 
 #### Dynamic Selective Guards
 
@@ -215,8 +212,8 @@ During Tier 3 standalone agent fallback, candidate agents retrieved from `agent.
    Verifies overlap between empirical subject/genre concept ID distributions (e.g. `{"yso:p2591": 5}` vs `{"yso:p2591": 2}`). Evaluates exact concept ID keys, cross-vocabulary concept ID tokens (e.g. `p2591` across `kauno:p2591` and `yso:p2591`), and legacy mapped concept URIs via `vocab_store`. If both sides provide subjects and their distributions are completely disjoint with zero semantic overlap, the candidate is disqualified.
 7. **Strict Homonym Ambiguity Guard (`check_homonym_ambiguity`)**:
    Detects if 2+ candidate agents fall within a narrow score margin (`score_margin: 0.03`) of the top candidate.
-   - **Tier 1 Resolution**: Evaluates distinguishing dates, ORCID, qualifier counts, affiliation counts, language counts, and subject counts (`ambiguity_resolved_by_subjects`) in-memory.
-   - **Tier 2 Resolution**: If still tied, queries SQLite for co-author graph overlap, publisher overlap, and scheme-agnostic classification overlap.
+   - **Tier 1 Resolution**: Evaluates distinguishing dates, ORCID, qualifier counts, affiliation counts, language counts, and subject counts in-memory.
+   - **Tier 2 Resolution**: If still tied, queries PostgreSQL for co-author graph overlap, publisher overlap, and scheme-agnostic classification overlap.
    - If ambiguity cannot be resolved, the match is rejected as an ambiguous homonym to prevent false guesses.
 
 ### External Data Dumps & Upstream Sources
@@ -499,15 +496,15 @@ ingest_oai:
 ### Wikidata Ingestion Section (`ingest_wikidata`)
 
 Configures streaming from official Wikidata JSON gzip dumps (`latest-all.json.gz`). Operates in true $O(1)$ memory using two sequential streaming passes:
-1. **Pass 1 (Author Discovery)**: Scans the compressed dump and indexes author entities (humans, organizations, places) with their QID, family name, ISNI, VIAF, and Asteri ID into the local SQLite `wikidata_authors` table.
-2. **Pass 2 (Bibliographic Streaming & Hydration)**: Streams bibliographic records, hydra-populates author names and identifiers directly from SQLite, encodes dense embeddings, and inserts them into `authority.db` (and WEMI tables when `extract_works: true`).
+1. **Pass 1 (Author Discovery)**: Scans the compressed dump and indexes author entities (humans, organizations, places) with their QID, family name, ISNI, VIAF, and Asteri ID into the PostgreSQL `agents`, `identifiers`, and `agent_attributes` tables.
+2. **Pass 2 (Bibliographic Streaming & Hydration)**: Streams bibliographic records, hydra-populates author names and identifiers directly from PostgreSQL, encodes dense embeddings, and inserts them into WEMI tables (`works`, `expressions`, `manifestations`) when `extract_works: true`.
 
 ```yaml
 ingest_wikidata:
   dump_path: "data/wikidata/latest-all.json.gz"
   batch_size: 1000
   extract_works: true         # True: streams entities directly into WEMI tables (works, expressions, manifestations)
-  pass1_only: false           # True: scans author entities only (populates wikidata_authors table)
+  pass1_only: false           # True: scans author entities only (populates agents, identifiers, and attributes)
   normalization: null         # Optional RecordNormalizationConfig override
 ```
 
@@ -515,7 +512,7 @@ ingest_wikidata:
 |---|---|---|---|
 | `dump_path` | `Path` | `data/wikidata/latest-all.json.gz` | Path to `.json.gz` or `.json` Wikidata entity dump. |
 | `batch_size` | `int` | `1000` | Number of entities batched for embedding and indexing. |
-| `extract_works` | `bool` | `true` | When true, populates 4-tier WEMI tables (`works`, `expressions`, `manifestations`) in `authority.db`. |
+| `extract_works` | `bool` | `true` | When true, populates 4-tier WEMI tables (`works`, `expressions`, `manifestations`) in PostgreSQL. |
 | `pass1_only` | `bool` | `false` | When true, executes only author discovery pass 1 and halts. |
 | `normalization` | `Optional[RecordNormalizationConfig]` | `None` | Optional record normalization rules for Wikidata entity processing. |
 
@@ -580,6 +577,40 @@ reconcile:
       manifestation: 0.92      # Manifestation-layer similarity threshold
     message_passing: true      # Cross-layer graph message passing
     reconcile_items: false     # Cluster physical items
+    scoring:
+      with_author:
+        title: 0.45            # Title similarity weight when author is present
+        author: 0.35           # Author similarity weight
+        year: 0.10             # Publication year proximity weight
+        type: 0.10             # Work/content type consistency weight
+      without_author:
+        title: 0.70            # Title weight when author is absent
+        year: 0.15             # Year proximity weight
+        type: 0.15             # Type consistency weight
+      author_missing_similarity: 0.60    # Imputed similarity when author is missing
+      year_missing_similarity: 0.80      # Imputed similarity when year is missing
+      year_max_difference: 20.0          # Max year gap before similarity drops to 0.0
+      cross_format_type_similarity: 0.95 # Similarity across audio/text adaptations
+      default_type_similarity: 0.50      # Default similarity for mismatched formats
+    music_score:
+      terms: ["score", "partituuri", "nuotti", "part", "stemma"]
+      standard_key_terms: ["ismn", "plate"]
+
+  agent_clustering:
+    enabled: true
+    similarity_threshold: 0.85
+    date_tolerance_years: 1
+    major_date_discrepancy_veto_years: 2
+    require_corroboration_for_date_discrepancy: true
+    min_career_overlap_tolerance_years: 40
+    batch_size: 1000
+    token_matching_algorithm: "token_set_ratio"
+    affiliation_fuzzy_threshold: 80.0
+    affiliation_fuzzy_score: 0.85
+    source_authority_precedence:
+      - "asteri"
+      - "wikidata"
+      - "melinda"
 
   enrichment_toggles:
     inject_work_links: true       # Inject 758 / Work URIs
@@ -690,6 +721,16 @@ reconcile:
 | `cluster.thresholds.manifestation` | `float` | `0.92` | Manifestation-layer multiplex cosine threshold. |
 | `cluster.message_passing` | `bool` | `true` | Enables hierarchical cross-layer graph message passing. |
 | `cluster.reconcile_items` | `bool` | `false` | Enables physical item/holding resolution. |
+| `cluster.scoring.with_author` | `dict` | standard weights | Feature weights (title, author, year, type) when author metadata is available. |
+| `cluster.scoring.without_author` | `dict` | standard weights | Feature weights when author metadata is absent. |
+| `cluster.scoring.year_max_difference` | `float` | `20.0` | Maximum publication year difference before similarity drops to 0.0. |
+| `cluster.scoring.cross_format_type_similarity` | `float` | `0.95` | Type similarity for cross-format adaptations (audiobooks, text). |
+| `cluster.music_score.terms` | `list[str]` | standard terms | Sheet music and score designation terms for expression keying. |
+| `agent_clustering.enabled` | `bool` | `true` | Enables intra-corpus agent identity graph clustering. |
+| `agent_clustering.similarity_threshold` | `float` | `0.85` | Graph edge acceptance threshold for agent clustering. |
+| `agent_clustering.affiliation_fuzzy_threshold` | `float` | `80.0` | RapidFuzz token matching threshold for institutional affiliations. |
+| `agent_clustering.affiliation_fuzzy_score` | `float` | `0.85` | Score awarded when affiliation fuzzy similarity meets the threshold. |
+| `agent_clustering.source_authority_precedence` | `list[str]` | `['asteri', 'wikidata', 'melinda']` | Authority source priority for canonical identity election. |
 | `enrichment_toggles.inject_work_links` | `bool` | `true` | Injects MARC 758 / BIBFRAME Work URIs into enriched records. |
 | `enrichment_toggles.inject_expression_links` | `bool` | `true` | Injects MARC 758 / BIBFRAME Expression URIs. |
 | `enrichment_toggles.inject_hub_links` | `bool` | `true` | Injects Hub URIs into enriched BIBFRAME graphs. |
@@ -1373,7 +1414,7 @@ reconciliator daemon restart -c config.yaml
 
 ### `reconciliator prune`
 
-Prunes task telemetry records and pipeline run history from `progress.db` while safeguarding active running tasks. Automatically executes SQLite `VACUUM` when rows are deleted to reclaim disk space.
+Prunes task telemetry records and pipeline run history from the task telemetry store while safeguarding active running tasks.
 
 ```bash
 # 1. Prune all completed tasks (prompts for interactive confirmation [y/N])
@@ -1417,34 +1458,18 @@ reconciliator prune -c config.yaml --all --include-running -y
 
 ### `reconciliator reset`
 
-Resets and cleans SQLite databases and vector index files.
+Resets and cleans PostgreSQL database tables, vector indices, and daemon state.
 
 ```bash
-# 1. Interactively reset all configured databases and vector indices (prompts [y/N])
+# 1. Interactively reset all configured PostgreSQL tables and vector indices (prompts [y/N])
 reconciliator reset -c config.yaml
 
-# 2. Reset all storage non-interactively (ideal for test setups and scripts)
-reconciliator reset -c config.yaml --all --yes
-
-# 3. Reset authority database and all vector indices only (leaves vocab.db and corpus.db intact)
-reconciliator reset -c config.yaml --authority -y
-
-# 4. Reset vocab database only
-reconciliator reset -c config.yaml --vocab -y
-
-# 5. Reset progress and telemetry database only
-reconciliator reset -c config.yaml --progress -y
-
-# 6. Reset target corpus staging database only
-reconciliator reset -c config.yaml --corpus -y
+# 2. Reset all storage non-interactively (ideal for test setups, CI, and batch scripts)
+reconciliator reset -c config.yaml --yes
 ```
 
 #### Options:
-- `-a, --all`: Reset all storage components (`authority.db`, `vocab.db`, `progress.db`, `reconcile_corpus.db`, and all vector indices).
-- `--authority`: Reset `authority.db` and all authority/WEMI vector indices (`authority.index`, `work.index`, `expression.index`, `manifestation.index`, `agent.index`).
-- `--vocab`: Reset `vocab.db` only.
-- `--progress`: Reset `progress.db` task telemetry only.
-- `--corpus`: Reset `reconcile_corpus.db` staging database only.
+- `-c, --config PATH`: Path to YAML configuration file (default: `config.yaml`).
 - `-y, --yes`: Bypass interactive confirmation prompt.
 
 ---
@@ -1598,11 +1623,12 @@ Over time, long-running ingestion harvests and batch reconciliation jobs accumul
   - **Reduce embedding batch size**: Lower `embedding.batch_size` (e.g. from `64` to `32` or `16`).
   - **Adjust harvester workers**: If running on a low-memory instance, lower `workers` in `ingest_oai` (e.g. from `8` to `2` or `4`).
 
-### Issue 4: SQLite `database is locked`
-- **Symptom**: SQLite operational error during high-concurrency ingestion.
+### Issue 4: PostgreSQL Connection or Lock Contention
+- **Symptom**: Operational error or connection timeout during high-concurrency ingestion.
 - **Remedy**:
-  - `reconciliator` automatically configures SQLite WAL (`Write-Ahead Logging`) with 60-second busy timeouts.
-  - Ensure databases are stored on local SSD filesystems rather than network-attached mounts (NFS/SMB) that do not support reliable SQLite file locking.
+  - Verify PostgreSQL service is healthy and accepting connections on configured host/port (`storage.postgres` or `storage.database_url`).
+  - Ensure `max_connections` in `postgresql.conf` is sized appropriately for configured worker counts (`workers` in `ingest_oai`).
+  - Batch insertions in `reconciliator` use idempotent `ON CONFLICT DO NOTHING` / `DO UPDATE` semantics with connection pooling.
 
 ### Issue 5: Missing Language Suffixes on Modern Ontologies
 - **Symptom**: Cataloging rules require `yso/fin` or `yso/swe` in `$2`, but only `yso` is emitted.
@@ -1633,7 +1659,7 @@ Over time, long-running ingestion harvests and batch reconciliation jobs accumul
 
 ### Issue 9: Target Author Rejected as Ambiguous Homonym
 - **Symptom**: Author candidate achieves high dense vector similarity ($\ge 0.90$) during Tier 3 standalone fallback, but the reconciliation report emits `action: none` with match note `ambiguous_homonyms_detected`.
-- **Cause**: Two or more distinct candidate agents in `agent.index` match within the score margin (`score_margin: 0.03`) of the top candidate, and neither candidate could be unambiguously distinguished in-memory or via SQLite relational evidence.
+- **Cause**: Two or more distinct candidate agents in `agent.index` match within the score margin (`score_margin: 0.03`) of the top candidate, and neither candidate could be unambiguously distinguished in-memory or via PostgreSQL relational evidence.
 - **Remedy**:
   - Check whether target MARC records carry life dates in 100/700 `$d` or persistent academic identifier (ORCID in `$1`); matching dates or ORCID resolves candidates immediately.
   - Provide occupational titles in repeatable `$c` (e.g. `professori`, `lääkäri`) or institutional affiliations in `$u` (e.g. `Helsingin yliopisto`); candidate distributions will be evaluated via `verify_qualifiers` and `verify_affiliations`.
