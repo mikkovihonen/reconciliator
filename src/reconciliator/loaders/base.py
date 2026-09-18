@@ -32,7 +32,6 @@ from reconciliator.models import (
     ItemEntity,
     ManifestationEntity,
     ManifestationExpressionAssociation,
-    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
 )
@@ -109,7 +108,6 @@ class DecomposedRecord:
     relationships: list[WorkRelationship] = field(default_factory=list)
     identifiers: list[IdentifierEntity] = field(default_factory=list)
     associations: list[ManifestationExpressionAssociation] = field(default_factory=list)
-    mediums: list[MediumOfPerformance] = field(default_factory=list)
     contributions: list[ContributionEntity] = field(default_factory=list)
     entity_keys: list[EntityKey] = field(default_factory=list)
     entity_subjects: list[EntitySubject] = field(default_factory=list)
@@ -128,7 +126,6 @@ class DecomposedRecord:
             "relationships",
             "identifiers",
             "associations",
-            "mediums",
             "contributions",
             "entity_keys",
             "entity_subjects",

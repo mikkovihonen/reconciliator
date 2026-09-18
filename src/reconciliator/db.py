@@ -346,16 +346,6 @@ work_consolidations_table = Table(
     Index("idx_work_consolidations_canonical", "canonical_work_id"),
 )
 
-work_medium_of_performance_table = Table(
-    "work_medium_of_performance",
-    metadata,
-    Column("work_id", Integer, ForeignKey("works.id", ondelete="CASCADE"), primary_key=True),
-    Column("medium_uri", String, primary_key=True),
-    Column("label", String, nullable=False),
-    Column("player_count", Integer, nullable=True),
-    Column("is_soloist", Boolean, nullable=False, default=False, server_default="0"),
-)
-
 work_vectors_table = Table(
     "work_vectors",
     metadata,

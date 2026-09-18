@@ -612,6 +612,29 @@ reconcile:
       - "wikidata"
       - "melinda"
 
+  funnels:
+    default_match_tier: "tier2_domain_key"
+    default_confidence: 0.90
+    audiobook:
+      default_language: "fin"
+      title_suffix: " (äänikirja)"
+      undefined_language: "und"
+      source_id_suffix: "_audio"
+      expression_uri_prefix: "#spoken_word_"
+      content_type: "spoken_word"
+    recorded_sound:
+      jaccard_threshold: 0.75
+      max_candidates: 50
+      match_tier: "tier3_tracklist_jaccard"
+    notated_music:
+      fallback_match_tier: "tier2_domain_key"
+    patterns:
+      notated_music_title: "(?i)score|partituuri|nuotti|stemma"
+      podcast_title: "podcast"
+      parallel_translators_signature: "(?i)parallel"
+      government_valto_urn: "(?i)valto"
+      exhibition_title: "näyttely"
+
   enrichment_toggles:
     inject_work_links: true       # Inject 758 / Work URIs
     inject_expression_links: true # Inject Expression URIs
@@ -731,6 +754,18 @@ reconcile:
 | `agent_clustering.affiliation_fuzzy_threshold` | `float` | `80.0` | RapidFuzz token matching threshold for institutional affiliations. |
 | `agent_clustering.affiliation_fuzzy_score` | `float` | `0.85` | Score awarded when affiliation fuzzy similarity meets the threshold. |
 | `agent_clustering.source_authority_precedence` | `list[str]` | `['asteri', 'wikidata', 'melinda']` | Authority source priority for canonical identity election. |
+| `funnels.default_match_tier` | `str` | `"tier2_domain_key"` | Fallback match tier label when not overridden by a spec. |
+| `funnels.default_confidence` | `float` | `0.90` | Default match confidence score for domain funnels. |
+| `funnels.recorded_sound.jaccard_threshold` | `float` | `0.75` | Minimum tracklist Jaccard overlap for recorded sound matching. |
+| `funnels.recorded_sound.max_candidates` | `int` | `50` | Maximum candidate manifestations evaluated by tracklist index lookup. |
+| `funnels.recorded_sound.match_tier` | `str` | `"tier3_tracklist_jaccard"` | Match tier label for recorded sound tracklist overlap match. |
+| `funnels.audiobook.default_language` | `str` | `"fin"` | Default language code for synthesized spoken word expressions. |
+| `funnels.audiobook.title_suffix` | `str` | `" (äänikirja)"` | Title suffix appended to synthesized audiobook expressions. |
+| `funnels.audiobook.source_id_suffix` | `str` | `"_audio"` | Source ID suffix for synthesized audiobook expressions. |
+| `funnels.audiobook.expression_uri_prefix` | `str` | `"#spoken_word_"` | Fragment prefix for synthesized audiobook expression URIs. |
+| `funnels.audiobook.content_type` | `str` | `"spoken_word"` | Content type assigned to synthesized audiobook expressions. |
+| `funnels.notated_music.fallback_match_tier` | `str` | `"tier2_domain_key"` | Match tier label when medium of performance is absent. |
+| `funnels.patterns.*` | `str` | standard regexes | Configurable regexes for domain funnel dispatch (music, podcast, valto, exhibition). |
 | `enrichment_toggles.inject_work_links` | `bool` | `true` | Injects MARC 758 / BIBFRAME Work URIs into enriched records. |
 | `enrichment_toggles.inject_expression_links` | `bool` | `true` | Injects MARC 758 / BIBFRAME Expression URIs. |
 | `enrichment_toggles.inject_hub_links` | `bool` | `true` | Injects Hub URIs into enriched BIBFRAME graphs. |
@@ -738,6 +773,8 @@ reconcile:
 | `enrichment_toggles.inject_component_links` | `bool` | `true` | Injects MARC 773 / host publication component links. |
 | `enrichment_toggles.marc_predicate_profiles`| `list[str]` | `['bibframe', 'bffi', 'rda']` | Controlled relationship ontologies for MARC predicate mappings. |
 | `enrichment_toggles.marc_predicate_mode` | `Literal` | `stacked` | `stacked` combines relationship codes into repeated `$4`; `distinct` creates separate fields. |
+| `enrichment_toggles.thesis_relator_code` | `str` | `"dgg"` | MARC relator code in 710 $4 matching degree granting institutions. |
+| `enrichment_toggles.ephemera_terms` | `list[str]` | Standard Finnish/Swedish/English terms | Controlled terms triggering 655 corporate authority linking for ephemera. |
 | `rerank.enabled` | `bool` | `true` | When true, applies reranking and hard metadata discriminators to candidates. |
 | `rerank.engine` | `Literal` | `bm25` | Reranker engine backend: `bm25`, `cross_encoder`, `fuzzy`, or `noop`. |
 | `rerank.model_name` | `Optional[str]` | `None` | Transformer model name when `engine: "cross_encoder"` (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`). |

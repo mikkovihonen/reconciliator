@@ -326,3 +326,87 @@ def test_series_uri_generation() -> None:
     f830 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='830']")
     assert f830 is not None
     assert _get_subfields(f830, "0") == ["urn:reconciliator:series:otavan-kirjasto-12"]
+
+
+def test_ephemera_enrichment_configurable_terms() -> None:
+    from reconciliator.config import EnrichmentConfig
+    from reconciliator.models import MatchRecord
+
+    custom_cfg = EnrichmentConfig(
+        ephemera_terms=["custom_ephemera_tag"],
+    )
+    enricher = MARCXMLEnricher()
+
+    tr = MatchRecord(
+        record_id="ephem1",
+        title="Ephemera Item",
+        format="marcxml",
+        title_stem="ephemera item",
+        keys={"ephemera_corp": ["org1"]},
+    )
+
+    xml_str = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <controlfield tag="001">006</controlfield>
+      <datafield tag="655" ind1=" " ind2="7">
+        <subfield code="a">Custom_Ephemera_Tag</subfield>
+        <subfield code="2">slm</subfield>
+      </datafield>
+    </record>
+    """
+    elem = etree.fromstring(xml_str.strip())
+    from reconciliator.matcher import WEMIMatchResult
+
+    wemi_res = WEMIMatchResult(
+        target_record_id="ephem1",
+        work_uri="http://example.org/work/ephemera1",
+    )
+    enriched = enricher.enrich_record_tree(
+        elem,
+        target_record=tr,
+        wemi_result=wemi_res,
+        enrich=True,
+        enrichment_config=custom_cfg,
+    )
+    f655 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='655']")
+    assert f655 is not None
+    assert _get_subfields(f655, "0") == ["http://example.org/work/ephemera1"]
+
+
+def test_thesis_enrichment_configurable_relator() -> None:
+    from reconciliator.config import EnrichmentConfig
+    from reconciliator.models import MatchRecord
+
+    custom_cfg = EnrichmentConfig(
+        thesis_relator_code="custom_dgg",
+        thesis_institution_uri="http://example.org/institution/univ1",
+    )
+    enricher = MARCXMLEnricher()
+
+    tr = MatchRecord(
+        record_id="thesis1",
+        title="Thesis Item",
+        format="marcxml",
+        title_stem="thesis item",
+        work_type="thesis",
+    )
+
+    xml_str = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <controlfield tag="001">007</controlfield>
+      <datafield tag="710" ind1="2" ind2=" ">
+        <subfield code="a">Helsingin yliopisto</subfield>
+        <subfield code="4">custom_dgg</subfield>
+      </datafield>
+    </record>
+    """
+    elem = etree.fromstring(xml_str.strip())
+    enriched = enricher.enrich_record_tree(
+        elem,
+        target_record=tr,
+        enrich=True,
+        enrichment_config=custom_cfg,
+    )
+    f710 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='710']")
+    assert f710 is not None
+    assert _get_subfields(f710, "0") == ["http://example.org/institution/univ1"]

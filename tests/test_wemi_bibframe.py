@@ -20,7 +20,7 @@ from reconciliator.loaders.bibframe import (
     extract_marc_key_components,
     get_profile,
 )
-from reconciliator.models import MatchRecord
+from reconciliator.models import EntitySubject, MatchRecord
 from reconciliator.repository import WEMIRepository
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -77,7 +77,6 @@ def test_condition_c1_bffi_4tier_graph():
         relationships,
         identifiers,
         associations,
-        mediums,
         contributions,
     ) = decompose_bibframe_work(g, profile=profile, source="melinda")
 
@@ -262,6 +261,7 @@ def test_condition_c5_pmo_performance_realization():
     g = Graph()
     g.parse(data=turtle_data, format="turtle")
 
+    subjs = []
     (
         work,
         expression,
@@ -271,9 +271,8 @@ def test_condition_c5_pmo_performance_realization():
         rels,
         idents,
         assocs,
-        mediums,
         contribs,
-    ) = decompose_bibframe_work(g, source="music_source")
+    ) = decompose_bibframe_work(g, source="music_source", subject_sink=subjs)
 
     # Musical Work
     assert work.source_id == "http://example.org/work/violin-concerto"
@@ -285,8 +284,9 @@ def test_condition_c5_pmo_performance_realization():
     assert expression.content_type == "audio_music"
 
     # Mediums of performance
-    assert len(mediums) == 2
-    labels = {m.label for m in mediums}
+    mops = [s for s in subjs if s.relation_type == "medium_of_performance"]
+    assert len(mops) == 2
+    labels = {m.raw_label for m in mops}
     assert "violin" in labels
     assert "orchestra" in labels
 
@@ -297,6 +297,7 @@ def test_condition_c6_single_work_partitioning():
     g = Graph()
     g.parse(str(ttl_path), format="turtle")
 
+    subjs: list[EntitySubject] = []
     (
         work,
         expression,
@@ -306,9 +307,8 @@ def test_condition_c6_single_work_partitioning():
         relationships,
         identifiers,
         associations,
-        mediums,
         contributions,
-    ) = decompose_bibframe_work(g, source="lc")
+    ) = decompose_bibframe_work(g, source="lc", subject_sink=subjs)
 
     work_node_uri = "http://id.loc.gov/resources/works/c0284759"
     assert work.source_id == work_node_uri
@@ -324,8 +324,9 @@ def test_condition_c6_single_work_partitioning():
     assert manifestation.publisher == "Hansen"
 
     # Mediums of performance from bf:mediumOfPerformance
-    assert len(mediums) == 1
-    assert mediums[0].label == "orkesteri"
+    mops = [s for s in subjs if s.relation_type == "medium_of_performance"]
+    assert len(mops) == 1
+    assert mops[0].raw_label == "orkesteri"
 
     # Agent & Contribution
     assert len(agents) == 1
@@ -372,7 +373,6 @@ def test_repository_insert_bibframe_decomposition(test_repo: WEMIRepository):
         relationships,
         identifiers,
         associations,
-        mediums,
         contributions,
     ) = decompose_bibframe_work(g, profile=get_profile("bffi_1"), source="melinda")
 
@@ -386,7 +386,6 @@ def test_repository_insert_bibframe_decomposition(test_repo: WEMIRepository):
         relationships=relationships,
         identifiers=identifiers,
         manifestation_expressions=associations,
-        mediums_of_performance=mediums,
         contributions=contributions,
     )
 

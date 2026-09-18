@@ -115,7 +115,6 @@ def test_decompose_wikidata_creative_work(tmp_path: Path):
         relationships,
         identifiers,
         associations,
-        mops,
         contributions,
     ) = decomp
 

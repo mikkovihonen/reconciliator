@@ -10,9 +10,7 @@ from pathlib import Path
 from typing import Any, Final, Literal, Optional, Self, Union
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
-
-from reconciliator.funnels.spec import FunnelSpec
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Default Resources Loader
@@ -118,8 +116,12 @@ def get_bundled_record_defaults() -> dict[str, Any]:
         raw["marc_accessibility"] = enrich["accessibility"]
     if "thesis_institution_uri" not in raw and "thesis_institution_uri" in enrich:
         raw["thesis_institution_uri"] = enrich["thesis_institution_uri"]
+    if "thesis_relator_code" not in raw and "thesis_relator_code" in enrich:
+        raw["thesis_relator_code"] = enrich["thesis_relator_code"]
     if "surrogate_title_keywords" not in raw and "surrogate_title_keywords" in enrich:
         raw["surrogate_title_keywords"] = enrich["surrogate_title_keywords"]
+    if "ephemera_terms" not in raw and "ephemera_terms" in enrich:
+        raw["ephemera_terms"] = enrich["ephemera_terms"]
 
     ling = get_bundled_linguistic_defaults()
     if "preserved_diacritics" not in raw:
@@ -184,6 +186,11 @@ _AGENT_CLUSTERING_DEFAULTS = get_bundled_section_defaults("agent_clustering")
 def get_bundled_agent_clustering_defaults() -> dict[str, Any]:
     """Get bundled default agent clustering settings dictionary."""
     return dict(_AGENT_CLUSTERING_DEFAULTS)
+
+
+def get_bundled_funnels_defaults() -> dict[str, Any]:
+    """Get bundled default funnels settings dictionary."""
+    return dict(_FUNNELS_DEFAULTS)
 
 
 DEFAULT_LANGUAGE: str = str(_LING_DEFAULTS.get("default_language") or "")
@@ -864,12 +871,33 @@ def get_surrogate_title_keywords() -> list[str]:
     return list(_ENRICH_DEFAULTS.get("surrogate_title_keywords", ["surrogate"]))
 
 
+def get_default_thesis_relator_code() -> str:
+    """Load default thesis degree-granting institution relator code ($4)."""
+    return str(_ENRICH_DEFAULTS.get("thesis_relator_code", "dgg"))
+
+
+def get_ephemera_terms() -> list[str]:
+    """Load default ephemera corporate authority terms."""
+    return list(
+        _ENRICH_DEFAULTS.get("ephemera_terms")
+        or [
+            "pienpainatteet",
+            "småtryck",
+            "accidenstryck",
+            "tilapäispainatteet",
+            "ephemera",
+        ]
+    )
+
+
 DEFAULT_MARC_SCHEMES: dict[str, SchemeDefinition] = get_marc_schemes()
 DEFAULT_MARC_DOMAIN_CONCEPTS: dict[str, str] = get_marc_domain_concepts()
 DEFAULT_MARC_LINKING_LABELS: dict[str, dict[str, str]] = get_marc_linking_labels()
 DEFAULT_MARC_ACCESSIBILITY: dict[str, Any] = get_marc_accessibility()
 DEFAULT_THESIS_INSTITUTION_URI: str = get_default_thesis_institution_uri()
+DEFAULT_THESIS_RELATOR_CODE: str = get_default_thesis_relator_code()
 DEFAULT_SURROGATE_TITLE_KEYWORDS: list[str] = get_surrogate_title_keywords()
+DEFAULT_EPHEMERA_TERMS: list[str] = get_ephemera_terms()
 
 
 class EnrichmentConfig(BaseModel):
@@ -894,7 +922,9 @@ class EnrichmentConfig(BaseModel):
     linking_labels: dict[str, dict[str, str]] = Field(default_factory=get_marc_linking_labels)
     accessibility: dict[str, Any] = Field(default_factory=get_marc_accessibility)
     thesis_institution_uri: str = Field(default_factory=get_default_thesis_institution_uri)
+    thesis_relator_code: str = Field(default_factory=get_default_thesis_relator_code)
     surrogate_title_keywords: list[str] = Field(default_factory=get_surrogate_title_keywords)
+    ephemera_terms: list[str] = Field(default_factory=get_ephemera_terms)
 
     @property
     def marc_predicate_profiles(self) -> list[str]:
@@ -1506,6 +1536,68 @@ class ReconcileFTSFallbackConfig(BaseModel):
         return self
 
 
+class AudiobookFunnelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    default_language: str = "fin"
+    title_suffix: str = " (äänikirja)"
+    undefined_language: str = "und"
+    source_id_suffix: str = "_audio"
+    expression_uri_prefix: str = "#spoken_word_"
+    content_type: str = "spoken_word"
+
+
+class RecordedSoundFunnelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    jaccard_threshold: float = 0.75
+    max_candidates: int = 50
+    match_tier: str = "tier3_tracklist_jaccard"
+
+
+class NotatedMusicFunnelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fallback_match_tier: str = "tier2_domain_key"
+
+
+class FunnelPatternsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    notated_music_title: str = "(?i)score|partituuri|nuotti|stemma"
+    podcast_title: str = "podcast"
+    parallel_translators_signature: str = "(?i)parallel"
+    government_valto_urn: str = "(?i)valto"
+    exhibition_title: str = "näyttely"
+
+
+class FunnelsConfig(BaseModel):
+    """Configuration surface for funnel thresholds, heuristics, and pattern defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+    default_match_tier: str = "tier2_domain_key"
+    default_confidence: float = 0.90
+    audiobook: AudiobookFunnelConfig = Field(
+        default_factory=lambda: AudiobookFunnelConfig(
+            **dict(_FUNNELS_DEFAULTS.get("audiobook") or {})
+        )
+    )
+    recorded_sound: RecordedSoundFunnelConfig = Field(
+        default_factory=lambda: RecordedSoundFunnelConfig(
+            **dict(_FUNNELS_DEFAULTS.get("recorded_sound") or {})
+        )
+    )
+    notated_music: NotatedMusicFunnelConfig = Field(
+        default_factory=lambda: NotatedMusicFunnelConfig(
+            **dict(_FUNNELS_DEFAULTS.get("notated_music") or {})
+        )
+    )
+    patterns: FunnelPatternsConfig = Field(
+        default_factory=lambda: FunnelPatternsConfig(
+            **dict(_FUNNELS_DEFAULTS.get("patterns") or {})
+        )
+    )
+
+
+from reconciliator.funnels.spec import FunnelSpec
+
+
 class ReconcileConfig(BaseModel):
     """Offline reconciliation and enrichment configuration."""
 
@@ -1518,6 +1610,10 @@ class ReconcileConfig(BaseModel):
     # place; a new id is appended just before the fall-through funnel. Omitting
     # this leaves the 42 built-ins as they are.
     funnels: list[FunnelSpec] = Field(default_factory=list)
+    # Global funnel configuration settings (thresholds, patterns, defaults)
+    funnel_settings: FunnelsConfig = Field(
+        default_factory=lambda: FunnelsConfig(**_FUNNELS_DEFAULTS)
+    )
     # The directory the config file was loaded from, set by `load_config`. It is
     # what a relative `handler` or `constituents` path resolves against, so a
     # config keeps working wherever the CLI is invoked from. `WorkMatcher` has
@@ -1721,6 +1817,9 @@ class AppConfig(BaseModel):
     )
     agent_clustering: AgentClusterConfig = Field(
         default_factory=lambda: AgentClusterConfig(**_AGENT_CLUSTERING_DEFAULTS)
+    )
+    funnels: FunnelsConfig = Field(
+        default_factory=lambda: FunnelsConfig(**_FUNNELS_DEFAULTS)
     )
 
     reconcile: Optional[ReconcileConfig] = None
@@ -2131,6 +2230,8 @@ def load_config(config_path: Path | str, configure_log: bool = False) -> AppConf
     resolved.config_dir = base_dir.resolve()
     if resolved.reconcile is not None:
         resolved.reconcile.config_dir = resolved.config_dir
+        if "funnels" in raw_data and isinstance(raw_data["funnels"], dict):
+            resolved.reconcile.funnel_settings = resolved.funnels
     _validate_constituent_sources(resolved)
     if configure_log:
         configure_logging(resolved.logging)

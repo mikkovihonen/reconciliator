@@ -75,7 +75,6 @@ erDiagram
     works ||--o{ work_relationships : "source work (1:N)"
     works ||--o{ work_relationships : "target work (1:N)"
     works ||--o{ work_consolidations : "consolidates (0:1)"
-    works ||--o{ work_medium_of_performance : "scored for (1:N)"
 
     work_consolidations {
         int work_id PK, FK
@@ -604,12 +603,11 @@ sequenceDiagram
 | `contributions` | 1 | Roles linking agents to works/expressions | `id` (autoincrement) |
 | `work_relationships` | 1 | Work-to-work relationships (series, adaptations) | `id` (autoincrement) |
 | `work_consolidations` | 1 | Reconciled work equivalences and evidence | `work_id` (FK to works.id) |
-| `work_medium_of_performance`| 1 | Musical instrumentation and scoring details | `(work_id, medium_uri)` |
 | `concepts` | 2 | Controlled vocabulary concept identifiers | `id` (autoincrement) |
 | `concept_labels` | 2 | Multilingual preferred and alternative labels | `id` (autoincrement) |
 | `concept_mappings` | 2 | Mappings across vocabulary systems | `id` (autoincrement) |
 | `relator_terms` | 2 | Normalized contributor role term mappings | `folded_term` |
-| `entity_subjects` | 2 | Subject/topic/genre/occupation linkages | `id` (autoincrement) |
+| `entity_subjects` | 2 | Subject/topic/genre/medium of performance/occupation linkages | `id` (autoincrement) |
 | `work_vectors` | 3 | Work dense semantic embedding vectors | `vector_id` |
 | `manifestation_vectors` | 3 | Manifestation dense embedding vectors | `vector_id` |
 | `corpus_work_clusters` | 4 | Reconciled conceptual work clusters | `cluster_id` |

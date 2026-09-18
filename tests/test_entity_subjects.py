@@ -286,7 +286,7 @@ def test_marcxml_decompose_extracts_entity_subjects(vocab_store: VocabStore):
     record_elem = etree.fromstring(xml)
     subjs: list[EntitySubject] = []
 
-    work, expr, manif, items, agents, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+    work, expr, manif, items, agents, rels, idents, assoc, contribs = decompose_marc_wemi(
         record_elem,
         source="melinda",
         subject_sink=subjs,
@@ -314,33 +314,32 @@ def test_marcxml_decompose_extracts_entity_subjects(vocab_store: VocabStore):
 
 
 def test_marc_authority_extracts_agent_subjects():
-    xml = f"""<record xmlns="{MARC_NS}">
+    """Verify that MARC authority decomposer routes 368/372/370 to subject_sink as EntitySubject."""
+    xml = b"""<record xmlns="http://www.loc.gov/MARC21/slim">
         <leader>00000cz  a2200000n  4500</leader>
-        <controlfield tag="001">auth-agent-1</controlfield>
+        <controlfield tag="001">auth001</controlfield>
         <datafield tag="100" ind1="1" ind2=" ">
-            <subfield code="a">Waltari, Mika,</subfield>
-            <subfield code="d">1908-1979</subfield>
-            <subfield code="0">http://urn.fi/URN:NBN:fi:au:pn:000045678</subfield>
+            <subfield code="a">Virtanen, Matti</subfield>
+        </datafield>
+        <datafield tag="368" ind1=" " ind2=" ">
+            <subfield code="c">kirjailija</subfield>
+            <subfield code="0">http://www.yso.fi/onto/yso/p5678</subfield>
+            <subfield code="2">yso</subfield>
         </datafield>
         <datafield tag="372" ind1=" " ind2=" ">
             <subfield code="a">kirjallisuus</subfield>
-            <subfield code="2">yso</subfield>
             <subfield code="0">http://www.yso.fi/onto/yso/p1234</subfield>
-        </datafield>
-        <datafield tag="374" ind1=" " ind2=" ">
-            <subfield code="a">kirjailijat</subfield>
             <subfield code="2">yso</subfield>
-            <subfield code="0">http://www.yso.fi/onto/yso/p5678</subfield>
         </datafield>
         <datafield tag="370" ind1=" " ind2=" ">
-            <subfield code="c">Helsinki</subfield>
+            <subfield code="e">Helsinki</subfield>
         </datafield>
-    </record>""".encode()
+    </record>"""
 
     record_elem = etree.fromstring(xml)
     subjs: list[EntitySubject] = []
 
-    works, exprs, manifs, items, agents, rels, idents, assoc, mops, contribs = (
+    works, exprs, manifs, items, agents, rels, idents, assoc, contribs = (
         decompose_marc_authority(
             record_elem,
             source="authority",
@@ -362,3 +361,26 @@ def test_marc_authority_extracts_agent_subjects():
     place = next(s for s in subjs if s.relation_type == "associated_place")
     assert place.raw_label == "Helsinki"
     assert place.entity_type == "agent"
+
+
+def test_marcxml_decompose_extracts_medium_of_performance():
+    """Verify that MARC 382 medium of performance is extracted as EntitySubject with relation_type='medium_of_performance'."""
+    xml = b"""<record xmlns="http://www.loc.gov/MARC21/slim">
+        <leader>00000cam a22000004a 4500</leader>
+        <controlfield tag="001">mop001</controlfield>
+        <datafield tag="245" ind1="1" ind2="0">
+            <subfield code="a">Violin Concerto</subfield>
+        </datafield>
+        <datafield tag="382" ind1="0" ind2="1">
+            <subfield code="a">viulu</subfield>
+            <subfield code="2">seko</subfield>
+            <subfield code="0">http://urn.fi/URN:NBN:fi:au:seko:00123</subfield>
+        </datafield>
+    </record>"""
+    record_elem = etree.fromstring(xml)
+    subjs: list[EntitySubject] = []
+    decompose_marc_wemi(record_elem, source="melinda", subject_sink=subjs)
+    mop = next(s for s in subjs if s.relation_type == "medium_of_performance")
+    assert mop.raw_label == "viulu"
+    assert mop.entity_type == "work"
+    assert mop.vocabulary == "seko"

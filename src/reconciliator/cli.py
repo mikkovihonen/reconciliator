@@ -937,7 +937,6 @@ def _ingest_corpus_as_wemi(
             relationships=batch.get("relationships") or [],
             identifiers=batch.get("identifiers") or [],
             manifestation_expressions=batch.get("associations") or [],
-            mediums_of_performance=batch.get("mediums") or [],
             contributions=batch.get("contributions") or [],
             entity_keys=batch.get("entity_keys") or [],
             entity_subjects=batch.get("entity_subjects") or [],
@@ -953,7 +952,7 @@ def _ingest_corpus_as_wemi(
         subjs: list[Any] = []
         try:
             if rec_fmt == "marcxml":
-                w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+                w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
                     orig_payload,
                     source=source_name,
                     record_origin=source_name,
@@ -970,7 +969,7 @@ def _ingest_corpus_as_wemi(
                     g = Graph()
                     g.parse(data=json.dumps(orig_payload), format="json-ld")
                     node = None
-                w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
+                w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_bibframe_work(
                     g=g, instance_node=node, profile=profile, source=source_name, subject_sink=subjs
                 )
                 keys = bibframe_entity_keys(m, w, agts, idents)
@@ -987,7 +986,6 @@ def _ingest_corpus_as_wemi(
         _stage("relationships", rels)
         _stage("identifiers", idents)
         _stage("associations", assoc)
-        _stage("mediums", mops)
         _stage("contributions", contribs)
         _stage("entity_keys", keys)
         _stage("entity_subjects", subjs)

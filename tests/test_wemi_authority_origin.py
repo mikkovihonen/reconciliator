@@ -351,7 +351,6 @@ def test_decompose_marc_authority_work():
         relationships,
         identifiers,
         assocs,
-        mops,
         contribs,
     ) = decompose_marc_authority(
         elem, source="asteri", record_origin="authority", subject_sink=subject_sink
@@ -399,7 +398,6 @@ def test_decompose_marc_authority_author_title():
         relationships,
         identifiers,
         assocs,
-        mops,
         contribs,
     ) = decompose_marc_authority(elem, source="asteri")
 
@@ -448,7 +446,6 @@ def test_decompose_marc_authority_agent():
         relationships,
         identifiers,
         assocs,
-        mops,
         contribs,
     ) = decompose_marc_authority(elem, source="asteri")
 

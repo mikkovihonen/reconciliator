@@ -18,12 +18,27 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from reconciliator.config import get_bundled_section_defaults
 from reconciliator.funnels.engine import FunnelContext
 
-JACCARD_THRESHOLD = 0.75
-# Enough to cover a record's tracks appearing across several releases without
-# letting a very common track title drag in the whole collection.
-MAX_CANDIDATES = 50
+_RS_DEFAULTS = dict(get_bundled_section_defaults("funnels").get("recorded_sound") or {})
+DEFAULT_JACCARD_THRESHOLD = float(_RS_DEFAULTS.get("jaccard_threshold", 0.75))
+DEFAULT_MAX_CANDIDATES = int(_RS_DEFAULTS.get("max_candidates", 50))
+DEFAULT_MATCH_TIER = str(_RS_DEFAULTS.get("match_tier", "tier3_tracklist_jaccard"))
+
+JACCARD_THRESHOLD = DEFAULT_JACCARD_THRESHOLD
+MAX_CANDIDATES = DEFAULT_MAX_CANDIDATES
+
+
+def _get_rs_param(ctx: FunnelContext, key: str, default: Any) -> Any:
+    if key in ctx.spec.extra:
+        return ctx.spec.extra[key]
+    funnel_settings = getattr(ctx.config, "funnel_settings", None)
+    if funnel_settings is not None:
+        rs_conf = getattr(funnel_settings, "recorded_sound", None)
+        if rs_conf is not None and hasattr(rs_conf, key):
+            return getattr(rs_conf, key)
+    return default
 
 
 def _candidate_manifestations(tracks: set[str], ctx: FunnelContext) -> list[int]:
@@ -32,12 +47,13 @@ def _candidate_manifestations(tracks: set[str], ctx: FunnelContext) -> list[int]
     Uses the `analytic_title` keys written at ingest, so this is an index lookup
     per track rather than a scan of every music work.
     """
+    max_candidates = int(_get_rs_param(ctx, "max_candidates", DEFAULT_MAX_CANDIDATES))
     seen: list[int] = []
     for title in sorted(tracks):
         for manifestation_id in ctx.repo.find_entities_by_key("analytic_title", title):
             if manifestation_id not in seen:
                 seen.append(manifestation_id)
-                if len(seen) >= MAX_CANDIDATES:
+                if len(seen) >= max_candidates:
                     return seen
     return seen
 
@@ -84,6 +100,11 @@ def _constituent_matches(work: Any, tracks: set[str], ctx: FunnelContext) -> lis
 def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
     from reconciliator.utils import compute_jaccard_overlap, extract_target_track_titles
 
+    jaccard_threshold = float(
+        _get_rs_param(ctx, "jaccard_threshold", DEFAULT_JACCARD_THRESHOLD)
+    )
+    match_tier = str(_get_rs_param(ctx, "match_tier", DEFAULT_MATCH_TIER))
+
     tracks = extract_target_track_titles(record)
     if tracks:
         best: Optional[tuple[float, Any]] = None
@@ -94,7 +115,7 @@ def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
             if manifestation.source_id == record.record_id:
                 continue  # the record itself, when it is already in the store
             overlap = compute_jaccard_overlap(tracks, _tracks_of(manifestation_id, ctx))
-            if overlap >= JACCARD_THRESHOLD and (best is None or overlap > best[0]):
+            if overlap >= jaccard_threshold and (best is None or overlap > best[0]):
                 best = (overlap, manifestation)
 
         if best is not None:
@@ -113,7 +134,7 @@ def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
                     work_uri=work.work_uri,
                     expression_uri=expression.expression_uri if expression else None,
                     manifestation_uri=manifestation.manifestation_uri,
-                    match_tier="tier3_tracklist_jaccard",
+                    match_tier=match_tier,
                     funnel_used=ctx.spec.id,
                     # The overlap itself, rather than a fixed 0.85: a tier that
                     # accepts a range of agreement should report which it found.

@@ -28,7 +28,6 @@ def test_init_authority_db_tables_and_indexes(tmp_storage: StorageConfig):
         "identifiers",
         "contributions",
         "work_relationships",
-        "work_medium_of_performance",
         "work_vectors",
         "manifestation_vectors",
         "harvest_state",

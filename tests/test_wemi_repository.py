@@ -12,13 +12,13 @@ from reconciliator.models import (
     ContributionEntity,
     EntityKey,
     ExpressionEntity,
+    EntitySubject,
     HarvestState,
     IdentifierEntity,
     ItemEntity,
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MatchRecord,
-    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
 )
@@ -327,30 +327,33 @@ def test_contributions_and_relationships(repo: WEMIRepository):
     assert len(rels) == 1
     assert rels[0].relationship_type == "supersedes"
 
-    # Medium of Performance (verifying deduplication & ON CONFLICT DO UPDATE within same batch)
-    repo.insert_medium_of_performance_batch(
+    # Medium of Performance (verifying EntitySubject insertion & retrieval)
+    repo.insert_entity_subjects_batch(
         [
-            MediumOfPerformance(
-                work_id=w1_id,
-                medium_uri="http://rdaregistry.info/termList/mop/violin",
-                label="violin",
-                player_count=1,
-                is_soloist=False,
+            EntitySubject(
+                entity_type="work",
+                entity_id=w1_id,
+                concept_id="http://rdaregistry.info/termList/mop/violin",
+                raw_label="violin",
+                relation_type="medium_of_performance",
+                vocabulary="seko",
             ),
-            MediumOfPerformance(
-                work_id=w1_id,
-                medium_uri="http://rdaregistry.info/termList/mop/violin",
-                label="violin",
-                player_count=2,
-                is_soloist=True,
+            EntitySubject(
+                entity_type="work",
+                entity_id=w1_id,
+                concept_id="http://rdaregistry.info/termList/mop/cello",
+                raw_label="cello",
+                relation_type="medium_of_performance",
+                vocabulary="seko",
             ),
         ]
     )
     mops = repo.get_mediums_of_performance(w1_id)
-    assert len(mops) == 1
-    assert mops[0].medium_uri == "http://rdaregistry.info/termList/mop/violin"
-    assert mops[0].player_count == 2
-    assert mops[0].is_soloist is True
+    assert len(mops) == 2
+    assert {m.concept_id for m in mops} == {
+        "http://rdaregistry.info/termList/mop/violin",
+        "http://rdaregistry.info/termList/mop/cello",
+    }
 
 
 def test_insert_wemi_batch_mediums_of_performance_multi_work_binding(repo: WEMIRepository):
@@ -371,33 +374,39 @@ def test_insert_wemi_batch_mediums_of_performance_multi_work_binding(repo: WEMIR
     )
     mops = [
         # Two entries for w1 with the same URI to verify deduplication
-        MediumOfPerformance(
-            work_curie=w1.curie,
-            medium_uri="http://rdaregistry.info/termList/mop/violin",
-            label="violin",
-            player_count=1,
-            is_soloist=True,
+        EntitySubject(
+            entity_type="work",
+            entity_curie=w1.curie,
+            concept_id="http://rdaregistry.info/termList/mop/violin",
+            raw_label="violin",
+            relation_type="medium_of_performance",
+            vocabulary="seko",
         ),
-        MediumOfPerformance(
-            work_curie=w1.curie,
-            medium_uri="http://rdaregistry.info/termList/mop/violin",
-            label="violin",
-            player_count=1,
-            is_soloist=True,
+        EntitySubject(
+            entity_type="work",
+            entity_curie=w1.curie,
+            concept_id="http://rdaregistry.info/termList/mop/violin",
+            raw_label="violin",
+            relation_type="medium_of_performance",
+            vocabulary="seko",
         ),
         # One entry for w2
-        MediumOfPerformance(
-            work_curie=w2.curie,
-            medium_uri="http://rdaregistry.info/termList/mop/piano",
-            label="piano",
-            player_count=1,
-            is_soloist=True,
+        EntitySubject(
+            entity_type="work",
+            entity_curie=w2.curie,
+            concept_id="http://rdaregistry.info/termList/mop/piano",
+            raw_label="piano",
+            relation_type="medium_of_performance",
+            vocabulary="seko",
         ),
         # One unbound entry (should be safely dropped, not mapped to w1)
-        MediumOfPerformance(
-            work_curie="urn:work:nonexistent:9999",
-            medium_uri="http://rdaregistry.info/termList/mop/flute",
-            label="flute",
+        EntitySubject(
+            entity_type="work",
+            entity_curie="urn:work:nonexistent:9999",
+            concept_id="http://rdaregistry.info/termList/mop/flute",
+            raw_label="flute",
+            relation_type="medium_of_performance",
+            vocabulary="seko",
         ),
     ]
 
@@ -405,7 +414,7 @@ def test_insert_wemi_batch_mediums_of_performance_multi_work_binding(repo: WEMIR
         works=[w1, w2],
         expressions=[],
         manifestations=[],
-        mediums_of_performance=mops,
+        entity_subjects=mops,
     )
 
     assert w1.id is not None and w1.id > 0
@@ -413,11 +422,11 @@ def test_insert_wemi_batch_mediums_of_performance_multi_work_binding(repo: WEMIR
 
     w1_mops = repo.get_mediums_of_performance(w1.id)
     assert len(w1_mops) == 1
-    assert w1_mops[0].medium_uri == "http://rdaregistry.info/termList/mop/violin"
+    assert w1_mops[0].concept_id == "http://rdaregistry.info/termList/mop/violin"
 
     w2_mops = repo.get_mediums_of_performance(w2.id)
     assert len(w2_mops) == 1
-    assert w2_mops[0].medium_uri == "http://rdaregistry.info/termList/mop/piano"
+    assert w2_mops[0].concept_id == "http://rdaregistry.info/termList/mop/piano"
 
 
 def test_harvest_state_checkpoint(repo: WEMIRepository):

@@ -49,7 +49,7 @@ def _record(control: str, title: str) -> etree._Element:
 
 def _ingest(store: WEMIRepository, source: str, control: str, title: str) -> None:
     keys: list[Any] = []
-    w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+    w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
         _record(control, title), source=source, record_origin=source, key_sink=keys
     )
     store.insert_wemi_batch(
@@ -61,7 +61,6 @@ def _ingest(store: WEMIRepository, source: str, control: str, title: str) -> Non
         relationships=rels,
         identifiers=idents,
         manifestation_expressions=assoc,
-        mediums_of_performance=mops,
         contributions=contribs,
         entity_keys=keys,
         record_origin=source,

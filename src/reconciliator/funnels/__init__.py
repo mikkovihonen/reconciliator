@@ -23,7 +23,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Optional
 
-from reconciliator.funnels.builtin import BUILTIN_SPECS
+from reconciliator.funnels.builtin import BUILTIN_SPECS, build_builtin_specs
 from reconciliator.funnels.engine import FunnelContext, default_tier2, run_funnel
 from reconciliator.funnels.spec import FunnelSpec, FunnelWhen
 from reconciliator.module_ref import resolve_module_ref
@@ -31,6 +31,7 @@ from reconciliator.module_ref import resolve_module_ref
 __all__ = [
     "BUILTIN_HANDLERS",
     "BUILTIN_SPECS",
+    "build_builtin_specs",
     "FunnelContext",
     "FunnelSpec",
     "FunnelWhen",

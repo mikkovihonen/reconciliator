@@ -38,7 +38,7 @@ class MarcBibliographicLoader(RecordLoader):
 
         keys: list[Any] = []
         subjects: list[Any] = []
-        w, e, m, items, agents, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+        w, e, m, items, agents, rels, idents, assoc, contribs = decompose_marc_wemi(
             item,
             source=ctx.source,
             id_source=ctx.id_source,
@@ -63,7 +63,6 @@ class MarcBibliographicLoader(RecordLoader):
             relationships=list(rels),
             identifiers=list(idents),
             associations=list(assoc),
-            mediums=list(mops),
             contributions=list(contribs),
             entity_keys=keys,
             entity_subjects=subjects,
@@ -94,7 +93,7 @@ class MarcAuthorityLoader(RecordLoader):
         from reconciliator.loaders.marcxml import decompose_marc_authority
 
         subjects: list[Any] = []
-        works, exprs, manifs, items, agents, rels, idents, assoc, mops, contribs = (
+        works, exprs, manifs, items, agents, rels, idents, assoc, contribs = (
             decompose_marc_authority(
                 item,
                 source=ctx.source,
@@ -115,7 +114,6 @@ class MarcAuthorityLoader(RecordLoader):
             relationships=list(rels),
             identifiers=list(idents),
             associations=list(assoc),
-            mediums=list(mops),
             contributions=list(contribs),
             entity_subjects=subjects,
         )
@@ -142,7 +140,7 @@ class BibframeLoader(RecordLoader):
 
         constituents: list[Any] = []
         subjects: list[Any] = []
-        w, e, m, items, agents, rels, idents, assoc, mops, contribs = decompose_bibframe_work(
+        w, e, m, items, agents, rels, idents, assoc, contribs = decompose_bibframe_work(
             g=item,
             profile=ctx.profile,
             source=ctx.source,
@@ -164,7 +162,6 @@ class BibframeLoader(RecordLoader):
             relationships=list(rels),
             identifiers=list(idents),
             associations=list(assoc),
-            mediums=list(mops),
             contributions=list(contribs),
             entity_keys=bibframe_entity_keys(m, w, list(agents), list(idents)),
             entity_subjects=subjects,

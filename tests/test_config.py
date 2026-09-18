@@ -165,3 +165,72 @@ def test_configure_logging(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> 
     finally:
         # Reset logging back to clean state
         configure_logging(LoggingConfig(level="INFO"))
+
+
+def test_funnels_config_defaults() -> None:
+    from reconciliator.config import FunnelsConfig, get_bundled_funnels_defaults
+
+    defaults = get_bundled_funnels_defaults()
+    cfg = FunnelsConfig(**defaults)
+    assert cfg.default_match_tier == "tier2_domain_key"
+    assert cfg.default_confidence == 0.90
+    assert cfg.recorded_sound.jaccard_threshold == 0.75
+    assert cfg.recorded_sound.max_candidates == 50
+    assert cfg.recorded_sound.match_tier == "tier3_tracklist_jaccard"
+    assert cfg.audiobook.default_language == "fin"
+    assert cfg.audiobook.source_id_suffix == "_audio"
+    assert cfg.audiobook.expression_uri_prefix == "#spoken_word_"
+    assert cfg.audiobook.content_type == "spoken_word"
+    assert cfg.notated_music.fallback_match_tier == "tier2_domain_key"
+    assert cfg.patterns.podcast_title == "podcast"
+    assert cfg.patterns.exhibition_title == "näyttely"
+
+
+def test_funnels_config_override_from_yaml(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "custom_funnels.yaml"
+    cfg_file.write_text(
+        """
+funnels:
+  default_match_tier: "tier2_custom_domain"
+  default_confidence: 0.95
+  recorded_sound:
+    jaccard_threshold: 0.85
+    max_candidates: 20
+    match_tier: "tier3_custom_tracklist"
+  audiobook:
+    default_language: "swe"
+    title_suffix: " (ljudbok)"
+    source_id_suffix: "_ljud"
+    expression_uri_prefix: "#ljud_"
+    content_type: "ljud"
+  notated_music:
+    fallback_match_tier: "tier2_custom_nm"
+  patterns:
+    podcast_title: "podcast_custom"
+    exhibition_title: "utställning"
+reconcile:
+  target_file: data/target.xml
+""",
+        encoding="utf-8",
+    )
+
+    loaded = load_config(cfg_file)
+    assert loaded.funnels.default_match_tier == "tier2_custom_domain"
+    assert loaded.funnels.default_confidence == 0.95
+    assert loaded.funnels.recorded_sound.jaccard_threshold == 0.85
+    assert loaded.funnels.recorded_sound.max_candidates == 20
+    assert loaded.funnels.recorded_sound.match_tier == "tier3_custom_tracklist"
+    assert loaded.funnels.audiobook.default_language == "swe"
+    assert loaded.funnels.audiobook.title_suffix == " (ljudbok)"
+    assert loaded.funnels.audiobook.source_id_suffix == "_ljud"
+    assert loaded.funnels.audiobook.expression_uri_prefix == "#ljud_"
+    assert loaded.funnels.audiobook.content_type == "ljud"
+    assert loaded.funnels.notated_music.fallback_match_tier == "tier2_custom_nm"
+    assert loaded.funnels.patterns.podcast_title == "podcast_custom"
+    assert loaded.funnels.patterns.exhibition_title == "utställning"
+
+    # Verify reconcile inherits funnel settings
+    assert loaded.reconcile is not None
+    assert loaded.reconcile.funnel_settings.recorded_sound.jaccard_threshold == 0.85
+    assert loaded.reconcile.funnel_settings.audiobook.default_language == "swe"
+    assert loaded.reconcile.funnel_settings.patterns.exhibition_title == "utställning"

@@ -15,36 +15,53 @@ actually arrive.
 
 from __future__ import annotations
 
+from typing import Optional
+
+from reconciliator.config import get_bundled_section_defaults
 from reconciliator.funnels.spec import FunnelSpec
 
-BUILTIN_SPECS: list[FunnelSpec] = [
-    # --- components and articles -------------------------------------------
-    FunnelSpec(
-        id="funnel_c_article",
-        when=[{"is_component": True}, {"has_key": ["citation"]}],
-        identifier_schemes=["doi", "urn"],
-        match_tier="tier2_host_citation_key",
-        confidence=0.95,
-        align_expression=True,
-    ),
-    # --- music: notated before recorded ------------------------------------
-    FunnelSpec(
-        id="funnel_d_notated_music",
-        # Keyed on content_type, not on the music_work key. The original chain
-        # tested `music_work_key or "score" in stem or ismn/plate_number`, and
-        # derive_domain_keys emits a music_work key for EVERY music record - so
-        # that first alternative claimed every sound recording too, and
-        # funnel_b_music_sound was unreachable in practice. content_type comes
-        # from the MARC leader and is what actually distinguishes the two.
-        when=[
-            {"work_type": ["music"], "content_type": ["notated_music"]},
-            # The same score vocabulary the clusterer uses. "score" alone is
-            # English-only, and this is a Finnish-language catalogue.
-            {
-                "work_type": ["music"],
-                "title_matches": "(?i)score|partituuri|nuotti|stemma",
-            },
-            {"work_type": ["music"], "has_identifier": ["ismn"]},
+_FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
+_PATTERNS = dict(_FUNNELS_DEFAULTS.get("patterns") or {})
+
+__all__ = [
+    "build_builtin_specs",
+    "BUILTIN_SPECS",
+]
+
+
+def build_builtin_specs(patterns: Optional[dict[str, str]] = None) -> list[FunnelSpec]:
+    """The 42 built-in domain funnels, in dispatch order."""
+    p = {**_PATTERNS, **(patterns or {})}
+    return [
+        # --- components and articles -------------------------------------------
+        FunnelSpec(
+            id="funnel_c_article",
+            when=[{"is_component": True}, {"has_key": ["citation"]}],
+            identifier_schemes=["doi", "urn"],
+            match_tier="tier2_host_citation_key",
+            confidence=0.95,
+            align_expression=True,
+        ),
+        # --- music: notated before recorded ------------------------------------
+        FunnelSpec(
+            id="funnel_d_notated_music",
+            # Keyed on content_type, not on the music_work key. The original chain
+            # tested `music_work_key or "score" in stem or ismn/plate_number`, and
+            # derive_domain_keys emits a music_work key for EVERY music record - so
+            # that first alternative claimed every sound recording too, and
+            # funnel_b_music_sound was unreachable in practice. content_type comes
+            # from the MARC leader and is what actually distinguishes the two.
+            when=[
+                {"work_type": ["music"], "content_type": ["notated_music"]},
+                # The same score vocabulary the clusterer uses. "score" alone is
+                # English-only, and this is a Finnish-language catalogue.
+                {
+                    "work_type": ["music"],
+                    "title_matches": p.get(
+                        "notated_music_title", "(?i)score|partituuri|nuotti|stemma"
+                    ),
+                },
+                {"work_type": ["music"], "has_identifier": ["ismn"]},
             {"work_type": ["music"], "has_identifier": ["plate_number"]},
         ],
         identifier_schemes=["ismn", "plate_number"],
@@ -74,7 +91,7 @@ BUILTIN_SPECS: list[FunnelSpec] = [
         id="funnel_cc_podcast",
         when=[
             {"work_type": ["audio_nonmusic"], "has_key": ["podcast"]},
-            {"work_type": ["audio_nonmusic"], "title_matches": "podcast"},
+            {"work_type": ["audio_nonmusic"], "title_matches": p.get("podcast_title", "podcast")},
             {"work_type": ["podcast"]},
         ],
         identifier_schemes=["guid_rss", "spotify_uri"],
@@ -300,7 +317,13 @@ BUILTIN_SPECS: list[FunnelSpec] = [
     ),
     FunnelSpec(
         id="funnel_hh_parallel_multilingual",
-        when={"key_matches": {"translators_signature": "(?i)parallel"}},
+        when={
+            "key_matches": {
+                "translators_signature": p.get(
+                    "parallel_translators_signature", "(?i)parallel"
+                )
+            }
+        },
         identifier_schemes=["work_uri", "isbn"],
         asserts_relationship="parallel_expression_in",
         work_types=["text"],
@@ -350,7 +373,11 @@ BUILTIN_SPECS: list[FunnelSpec] = [
         id="funnel_p_government",
         when=[
             {"work_type": ["government"]},
-            {"identifier_matches": {"urn": "(?i)valto"}},
+            {
+                "identifier_matches": {
+                    "urn": p.get("government_valto_urn", "(?i)valto")
+                }
+            },
         ],
         identifier_schemes=["urn", "isbn"],
         work_types=["text"],
@@ -361,7 +388,10 @@ BUILTIN_SPECS: list[FunnelSpec] = [
         id="funnel_ll_exhibition",
         when=[
             {"work_type": ["exhibition", "event"], "has_key": ["exhibition_event"]},
-            {"work_type": ["exhibition", "event"], "title_matches": "näyttely"},
+            {
+                "work_type": ["exhibition", "event"],
+                "title_matches": p.get("exhibition_title", "näyttely"),
+            },
         ],
         identifier_schemes=["isbn", "event_id"],
         asserts_relationship="exhibits_work",
@@ -453,3 +483,6 @@ BUILTIN_SPECS: list[FunnelSpec] = [
         default=True,
     ),
 ]
+
+
+BUILTIN_SPECS: list[FunnelSpec] = build_builtin_specs()

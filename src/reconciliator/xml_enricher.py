@@ -563,7 +563,7 @@ class MARCXMLEnricher:
 
         # 3.11 Enrich 710 $4 dgg Degree Granting Institution (Theses)
         if target_record and target_record.work_type == "thesis":
-            thesis_relator_code = "dgg"
+            thesis_relator_code = toggles.thesis_relator_code
             for f710 in _get_datafields(record_elem, "710"):
                 if thesis_relator_code in _get_subfields(f710, "4"):
                     if not _get_subfields(f710, "0"):
@@ -635,22 +635,17 @@ class MARCXMLEnricher:
 
         # 3.16 Enrich Ephemera Corporate Authority 655 #7
         if target_record and target_record.get_first_key("ephemera_corp"):
-            ephemera_terms: set[str] = {
-                "pienpainatteet",
-                "småtryck",
-                "accidenstryck",
-                "tilapäispainatteet",
-                "ephemera",
-            }
+            ephemera_terms: set[str] = set(toggles.ephemera_terms)
             if self.vocab_folder and self.vocab_folder.vocab_store:
-                e_concept_id = toggles.domain_concepts.get("ephemera", "slm:s1492")
-                c = self.vocab_folder.vocab_store.find_concept_by_uri(e_concept_id)
-                if c:
-                    for lbl in c.pref_labels.values():
-                        ephemera_terms.add(lbl.lower().strip())
-                    for alt_list in c.alt_labels.values():
-                        for alt in alt_list:
-                            ephemera_terms.add(str(alt).lower().strip())
+                e_concept_id = toggles.domain_concepts.get("ephemera")
+                if e_concept_id:
+                    c = self.vocab_folder.vocab_store.find_concept_by_uri(e_concept_id)
+                    if c:
+                        for lbl in c.pref_labels.values():
+                            ephemera_terms.add(lbl.lower().strip())
+                        for alt_list in c.alt_labels.values():
+                            for alt in alt_list:
+                                ephemera_terms.add(str(alt).lower().strip())
 
             genre_field = get_category_default_field_map()["genre_form"]
             for f655 in _get_datafields(record_elem, genre_field):

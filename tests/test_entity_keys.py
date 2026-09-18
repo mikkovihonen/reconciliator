@@ -136,7 +136,7 @@ def test_key_sink_binds_keys_to_the_manifestation_uri():
 
 def test_decompose_without_sink_is_unchanged():
     """The sink is optional; omitting it must not alter the returned tuple."""
-    assert len(decompose_marc_wemi(_record("R1", "Sinuhe"), source="melinda")) == 10
+    assert len(decompose_marc_wemi(_record("R1", "Sinuhe"), source="melinda")) == 9
 
 
 # --- persistence ----------------------------------------------------------
@@ -144,7 +144,7 @@ def test_decompose_without_sink_is_unchanged():
 
 def _ingest(repo: WEMIRepository, control: str, title: str, source: str = "melinda"):
     sink: list[EntityKey] = []
-    w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decompose_marc_wemi(
+    w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
         _record(control, title), source=source, key_sink=sink
     )
     repo.insert_wemi_batch(
@@ -172,7 +172,7 @@ def test_multi_record_batch_does_not_collapse_keys_onto_the_first_row(repo: WEMI
     sink: list[EntityKey] = []
     works, exprs, manifs, idents = [], [], [], []
     for ctrl, title in (("R1", "Sinuhe egyptilainen"), ("R2", "Turms kuolematon")):
-        w, e, m, _itms, _agts, _rels, ids, _assoc, _mops, _c = decompose_marc_wemi(
+        w, e, m, _itms, _agts, _rels, ids, _assoc, _c = decompose_marc_wemi(
             _record(ctrl, title), source="melinda", key_sink=sink
         )
         works.append(w)

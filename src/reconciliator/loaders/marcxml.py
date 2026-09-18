@@ -42,7 +42,6 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MatchRecord,
-    MediumOfPerformance,
     RecordOrigin,
     WorkEntity,
     WorkRelationship,
@@ -1320,7 +1319,6 @@ def decompose_marc_authority(
     list[WorkRelationship],
     list[IdentifierEntity],
     list[ManifestationExpressionAssociation],
-    list[MediumOfPerformance],
     list[ContributionEntity],
 ]:
     """Decompose a MARC 21 Authority record (Leader/06 = 'z') into WEMI domain entities.
@@ -1439,22 +1437,32 @@ def decompose_marc_authority(
         work_type = determine_work_type(record_elem)
 
         # Medium of performance from 382
-        mops: list[MediumOfPerformance] = []
-        seen_mop_uris: set[str] = set()
-        for f in _get_datafields(record_elem, "382"):
-            h = _get_subfield(f, "a")
-            if h:
-                uri = _get_subfield(f, "0") or f"urn:mop:{h}"
-                if uri not in seen_mop_uris:
-                    seen_mop_uris.add(uri)
-                    mops.append(
-                        MediumOfPerformance(
-                            work_id=0,
-                            work_curie=to_curie(source, source_id),
-                            medium_uri=uri,
-                            label=h,
+        if subject_sink is not None:
+            seen_mop_keys: set[str] = set()
+            for f in _get_datafields(record_elem, "382"):
+                h = _get_subfield(f, "a")
+                if h:
+                    uri = _get_subfield(f, "0") or _get_subfield(f, "1")
+                    vocab = _get_subfield(f, "2") or "seko"
+                    cid = extract_concept_id(uri) if uri else None
+                    key = uri or f"{vocab}:{h}"
+                    if key not in seen_mop_keys:
+                        seen_mop_keys.add(key)
+                        subject_sink.append(
+                            EntitySubject(
+                                entity_type="work",
+                                entity_id=0,
+                                entity_uri=to_curie(source, source_id),
+                                source=source,
+                                source_record_id=source_id,
+                                relation_type="medium_of_performance",
+                                vocabulary=vocab,
+                                concept_id=cid or uri,
+                                raw_label=h,
+                                is_resolved=bool(vocab and (cid or uri)),
+                                is_primary=False,
+                            )
                         )
-                    )
 
         # Variant titles from 4xx
         variant_titles: list[str] = []
@@ -1580,7 +1588,6 @@ def decompose_marc_authority(
             relationships,
             identifiers,
             [],
-            mops,
             contributions,
         )
 
@@ -1714,27 +1721,28 @@ def decompose_marc_authority(
                             is_resolved=bool(v_sub2 and cid),
                         )
                     )
-            for f in _get_datafields(record_elem, "374"):
-                val = _get_subfield(f, "a")
-                if val:
-                    val_clean = strip_isbd(val, strip_isbd_punctuation, isbd_punctuation) or val
-                    v_sub2 = _get_subfield(f, "2")
-                    v_sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
-                    cid = extract_concept_id(v_sub0) if v_sub0 else None
-                    subject_sink.append(
-                        EntitySubject(
-                            entity_type="agent",
-                            entity_id=0,
-                            entity_uri=agent_uri,
-                            source=source,
-                            source_record_id=source_id,
-                            relation_type="occupation",
-                            vocabulary=v_sub2,
-                            concept_id=cid,
-                            raw_label=val_clean,
-                            is_resolved=bool(v_sub2 and cid),
+            for tag in ("368", "374"):
+                for f in _get_datafields(record_elem, tag):
+                    val = _get_subfield(f, "c") or _get_subfield(f, "d") or _get_subfield(f, "a")
+                    if val:
+                        val_clean = strip_isbd(val, strip_isbd_punctuation, isbd_punctuation) or val
+                        v_sub2 = _get_subfield(f, "2")
+                        v_sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
+                        cid = extract_concept_id(v_sub0) if v_sub0 else None
+                        subject_sink.append(
+                            EntitySubject(
+                                entity_type="agent",
+                                entity_id=0,
+                                entity_uri=agent_uri,
+                                source=source,
+                                source_record_id=source_id,
+                                relation_type="occupation",
+                                vocabulary=v_sub2,
+                                concept_id=cid,
+                                raw_label=val_clean,
+                                is_resolved=bool(v_sub2 and cid),
+                            )
                         )
-                    )
             for f in _get_datafields(record_elem, "370"):
                 val = _get_subfield(f, "c") or _get_subfield(f, "f") or _get_subfield(f, "e")
                 if val:
@@ -1757,10 +1765,10 @@ def decompose_marc_authority(
                         )
                     )
 
-        return ([], [], [], [], [agent], [], identifiers, [], [], [])
+        return ([], [], [], [], [agent], [], identifiers, [], [])
 
     # Subject/topical/form authority without work or agent heading
-    return ([], [], [], [], [], [], [], [], [], [])
+    return ([], [], [], [], [], [], [], [], [])
 
 
 def decompose_marc_wemi(
@@ -1787,7 +1795,6 @@ def decompose_marc_wemi(
     list[WorkRelationship],
     list[IdentifierEntity],
     list[ManifestationExpressionAssociation],
-    list[MediumOfPerformance],
     list[ContributionEntity],
 ]:
     """Decompose a single MARCXML record into the WEMI entity core hierarchy.
@@ -2122,24 +2129,34 @@ def decompose_marc_wemi(
             WorkRelationship(source_work_id=0, target_work_id=0, relationship_type="continued_by")
         )
 
-    # 9. Medium of Performance
-    mop_field = get_category_default_field_map()["medium_of_performance"]
-    mops: list[MediumOfPerformance] = []
+    # 9. Medium of Performance (MARC 382)
+    mop_field = get_category_default_field_map().get("medium_of_performance", "382")
     seen_mop_uris: set[str] = set()
     for f in _get_datafields(record_elem, mop_field):
         heading = _get_subfield(f, "a")
         if heading:
-            uri = _get_subfield(f, "0") or f"urn:mop:{heading}"
-            if uri not in seen_mop_uris:
-                seen_mop_uris.add(uri)
-                mops.append(
-                    MediumOfPerformance(
-                        work_id=0,
-                        work_curie=work.curie,
-                        medium_uri=uri,
-                        label=heading,
+            uri = _get_subfield(f, "0") or _get_subfield(f, "1")
+            vocab = _get_subfield(f, "2")
+            cid = extract_concept_id(uri) if uri else None
+            key = uri or f"{vocab or ''}:{heading}"
+            if key not in seen_mop_uris:
+                seen_mop_uris.add(key)
+                if subject_sink is not None:
+                    subject_sink.append(
+                        EntitySubject(
+                            entity_type="work",
+                            entity_id=0,
+                            entity_uri=work.work_uri,
+                            source=source,
+                            source_record_id=source_id,
+                            relation_type="medium_of_performance",
+                            vocabulary=vocab,
+                            concept_id=cid or uri,
+                            raw_label=heading,
+                            is_resolved=bool(vocab and (cid or uri)),
+                            is_primary=False,
+                        )
                     )
-                )
 
     # Pre-render serializations using the WEMI Triad
     translators = [
@@ -2332,6 +2349,8 @@ def decompose_marc_wemi(
     if subject_sink is not None:
         for s in parsed.get("subjects_folded") or []:
             field = str(s.get("field") or "")
+            if field == "382" or s.get("category") == "medium_of_performance":
+                continue
             relation_type = "topic"
             if field == "651":
                 relation_type = "geographic"
@@ -2341,6 +2360,7 @@ def decompose_marc_wemi(
                 relation_type = "temporal"
             vocab = s.get("vocabulary")
             cid = s.get("code") or s.get("concept_id")
+            raw_lbl = s.get("heading")
             subject_sink.append(
                 EntitySubject(
                     entity_type="work",
@@ -2351,7 +2371,7 @@ def decompose_marc_wemi(
                     relation_type=relation_type,
                     vocabulary=vocab,
                     concept_id=cid,
-                    raw_label=s.get("heading"),
+                    raw_label=raw_lbl,
                     is_resolved=bool(vocab and cid),
                     is_primary=False,
                 )
@@ -2366,7 +2386,6 @@ def decompose_marc_wemi(
         relationships,
         identifiers,
         [assoc],
-        mops,
         contributions,
     )
 

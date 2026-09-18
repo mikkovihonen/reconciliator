@@ -16,7 +16,6 @@ from reconciliator.models import (
     ManifestationCluster,
     ManifestationEntity,
     ManifestationExpressionAssociation,
-    MediumOfPerformance,
     MultiplexClusterResult,
     WorkCluster,
     WorkEntity,
@@ -251,15 +250,19 @@ def test_work_relationships():
 
 
 def test_medium_of_performance():
-    mop = MediumOfPerformance(
-        work_id=100,
-        medium_uri="http://rdaregistry.info/termList/mop/1001",
-        label="piano",
-        player_count=1,
-        is_soloist=True,
+    mop = EntitySubject(
+        entity_type="work",
+        entity_id=100,
+        concept_id="http://rdaregistry.info/termList/mop/1001",
+        raw_label="piano",
+        relation_type="medium_of_performance",
+        vocabulary="seko",
+        is_resolved=True,
     )
-    assert mop.label == "piano"
-    assert mop.is_soloist is True
+    assert mop.raw_label == "piano"
+    assert mop.relation_type == "medium_of_performance"
+    assert mop.vocabulary == "seko"
+    assert mop.concept_id == "http://rdaregistry.info/termList/mop/1001"
 
 
 def test_harvest_state():

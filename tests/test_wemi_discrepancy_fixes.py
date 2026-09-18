@@ -143,7 +143,6 @@ def test_bffi_simple_agent_fallback_decomposition():
         relationships,
         identifiers,
         associations,
-        mops,
         contributions,
     ) = decompose_bibframe_work(g)
 
@@ -182,7 +181,7 @@ def test_dual_path_consistency_matching():
         format="turtle",
     )
 
-    work, expression, manifestation, _, _, _, _, _, _, _ = decompose_bibframe_work(g)
+    work, expression, manifestation, *rest = decompose_bibframe_work(g)
     assert work.work_uri == "bibframe:http://example.org/work/canonical"
     assert expression.expression_uri == "bibframe:http://example.org/expression/dual1"
 
@@ -213,7 +212,7 @@ def test_dual_path_consistency_discrepancy_warning(caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        work, expression, manifestation, _, _, _, _, _, _, _ = decompose_bibframe_work(g)
+        work, expression, manifestation, *rest = decompose_bibframe_work(g)
 
     # Canonical expression-mediated work must be preferred
     assert work.work_uri == "bibframe:http://example.org/work/canonical_work"
@@ -279,7 +278,7 @@ def test_marcxml_domain_fields_parsing():
     assert parsed["system_requirements"] == ["Requires 16 GB RAM and GPU acceleration"]
 
     # 2. Test decompose_marc_wemi IdentifierEntity creation
-    _, _, _, _, _, _, identifiers, _, _, _ = decompose_marc_wemi(elem)
+    _, _, _, _, _, _, identifiers, _, _ = decompose_marc_wemi(elem)
     schemes = {i.scheme: i.value for i in identifiers}
     assert schemes.get("fingerprint") == "e-te e-re r-e- thal 1544R"
     assert schemes.get("patent_number") == "FI123456B"

@@ -53,7 +53,6 @@ from reconciliator.db import (
     sammelband_bindings_table,
     sources_table,
     work_consolidations_table,
-    work_medium_of_performance_table,
     work_relationships_table,
     work_vectors_table,
     works_table,
@@ -79,7 +78,6 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MatchRecord,
-    MediumOfPerformance,
     RecordOrigin,
     SammelbandBinding,
     WorkCluster,
@@ -1166,66 +1164,6 @@ class WEMIRepository:
             id_map.get((r.source_work_id, r.target_work_id, r.relationship_type), 0) for r in rels
         ]
 
-    def insert_medium_of_performance_batch(
-        self,
-        mops: list[MediumOfPerformance],
-        conn: Optional[Any] = None,
-        chunk_size: int = 1000,
-    ) -> None:
-        """Insert MediumOfPerformance records in batch."""
-        if not mops:
-            return
-        deduped: dict[tuple[int, str], dict[str, Any]] = {}
-        for mop in mops:
-            if not mop.work_id or mop.work_id <= 0:
-                continue
-            key = (mop.work_id, mop.medium_uri)
-            if key in deduped:
-                prev = deduped[key]
-                player_count = (
-                    mop.player_count if mop.player_count is not None else prev["player_count"]
-                )
-                is_soloist = bool(mop.is_soloist) or prev["is_soloist"]
-                label = mop.label or prev["label"]
-                deduped[key] = {
-                    "work_id": mop.work_id,
-                    "medium_uri": mop.medium_uri,
-                    "label": label,
-                    "player_count": player_count,
-                    "is_soloist": is_soloist,
-                }
-            else:
-                deduped[key] = {
-                    "work_id": mop.work_id,
-                    "medium_uri": mop.medium_uri,
-                    "label": mop.label,
-                    "player_count": mop.player_count,
-                    "is_soloist": bool(mop.is_soloist),
-                }
-        if not deduped:
-            return
-        rows = list(deduped.values())
-
-        def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
-                stmt = pg_insert(work_medium_of_performance_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["work_id", "medium_uri"],
-                    set_={
-                        "label": stmt.excluded.label,
-                        "player_count": stmt.excluded.player_count,
-                        "is_soloist": stmt.excluded.is_soloist,
-                    },
-                )
-                c.execute(stmt)
-
-        if conn is not None:
-            _exec(conn)
-        else:
-            with self.get_connection() as c:
-                _exec(c)
-
     def insert_entity_subjects_batch(
         self,
         subjects: list[EntitySubject],
@@ -1258,7 +1196,6 @@ class WEMIRepository:
         relationships: Optional[list[WorkRelationship]] = None,
         identifiers: Optional[list[IdentifierEntity]] = None,
         manifestation_expressions: Optional[list[ManifestationExpressionAssociation]] = None,
-        mediums_of_performance: Optional[list[MediumOfPerformance]] = None,
         contributions: Optional[list[ContributionEntity]] = None,
         entity_keys: Optional[list[EntityKey]] = None,
         entity_subjects: Optional[list[EntitySubject]] = None,
@@ -1528,31 +1465,7 @@ class WEMIRepository:
                 if bound_rels:
                     self.insert_work_relationships_batch(bound_rels, conn=c, chunk_size=chunk_size)
 
-            # 9. Mediums of Performance
-            if mediums_of_performance:
-                bound_mops: list[MediumOfPerformance] = []
-                for mop in mediums_of_performance:
-                    if not mop.work_id or mop.work_id <= 0:
-                        cand_id = _resolve(work_key_to_id, mop.work_curie)
-                        if cand_id is None and len(works) == 1:
-                            cand_id = works[0].id
-                        if cand_id:
-                            mop.work_id = cand_id
-                    if mop.work_id and mop.work_id > 0:
-                        bound_mops.append(mop)
-                    else:
-                        logger.warning(
-                            "Dropping medium of performance with unbound work: curie=%s uri=%s label=%s",
-                            mop.work_curie,
-                            mop.medium_uri,
-                            mop.label,
-                        )
-                if bound_mops:
-                    self.insert_medium_of_performance_batch(
-                        bound_mops, conn=c, chunk_size=chunk_size
-                    )
-
-            # 10. Contributions
+            # 9. Contributions
             if contributions:
                 valid_contribs: list[ContributionEntity] = []
                 for c_item in contributions:
@@ -1613,6 +1526,7 @@ class WEMIRepository:
             # 12. Entity subjects
             if entity_subjects:
                 bound_subjects: list[EntitySubject] = []
+                seen_subj_keys: set[tuple[str, int, Optional[str], Optional[str], Optional[str], str]] = set()
                 for subj in entity_subjects:
                     if (not subj.entity_id or subj.entity_id <= 0) and subj.entity_curie:
                         if subj.entity_type == "work":
@@ -1623,7 +1537,7 @@ class WEMIRepository:
                             subj.entity_id = int(_resolve(manif_key_to_id, subj.entity_curie) or 0)
                         elif subj.entity_type == "agent":
                             subj.entity_id = int(_resolve(agent_key_to_id, subj.entity_curie) or 0)
-                    if not subj.entity_id or subj.entity_id <= 0:
+                    elif not subj.entity_id or subj.entity_id <= 0:
                         if subj.entity_type == "work" and works and works[0].id:
                             subj.entity_id = int(works[0].id)
                         elif subj.entity_type == "expression" and expressions and expressions[0].id:
@@ -1637,7 +1551,17 @@ class WEMIRepository:
                         elif subj.entity_type == "agent" and agents and agents[0].id:
                             subj.entity_id = int(agents[0].id)
                     if subj.entity_id and subj.entity_id > 0:
-                        bound_subjects.append(subj)
+                        s_key = (
+                            subj.entity_type,
+                            subj.entity_id,
+                            subj.vocabulary,
+                            subj.concept_id,
+                            subj.raw_label,
+                            subj.relation_type,
+                        )
+                        if s_key not in seen_subj_keys:
+                            seen_subj_keys.add(s_key)
+                            bound_subjects.append(subj)
                 if bound_subjects:
                     self.insert_entity_subjects_batch(bound_subjects, conn=c, chunk_size=chunk_size)
 
@@ -2189,23 +2113,16 @@ class WEMIRepository:
                         filtered.append((etype, eid))
             return filtered
 
-    def get_mediums_of_performance(self, work_id: int) -> list[MediumOfPerformance]:
-        """Fetch MediumOfPerformance records for a given work."""
-        stmt = select(work_medium_of_performance_table).where(
-            work_medium_of_performance_table.c.work_id == work_id
+    def get_mediums_of_performance(self, work_id: int) -> list[EntitySubject]:
+        """Fetch medium_of_performance EntitySubject records for a given work."""
+        stmt = select(entity_subjects_table).where(
+            entity_subjects_table.c.entity_type == "work",
+            entity_subjects_table.c.entity_id == work_id,
+            entity_subjects_table.c.relation_type == "medium_of_performance",
         )
         with self.get_connection() as conn:
             rows = conn.execute(stmt).mappings().fetchall()
-            return [
-                MediumOfPerformance(
-                    work_id=r["work_id"],
-                    medium_uri=r["medium_uri"],
-                    label=r["label"],
-                    player_count=r["player_count"],
-                    is_soloist=bool(r["is_soloist"]),
-                )
-                for r in rows
-            ]
+            return [EntitySubject.model_validate(dict(r)) for r in rows]
 
     def find_works_by_author_and_title(
         self,

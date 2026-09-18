@@ -88,7 +88,6 @@ class _WEMIBatchAccumulator:
         self.relationships: list[Any] = []
         self.identifiers: list[Any] = []
         self.associations: list[Any] = []
-        self.mediums: list[Any] = []
         self.entity_keys: list[Any] = []
         self.entity_subjects: list[Any] = []
 
@@ -107,7 +106,6 @@ class _WEMIBatchAccumulator:
         self.relationships.extend(record.relationships)
         self.identifiers.extend(record.identifiers)
         self.associations.extend(record.associations)
-        self.mediums.extend(record.mediums)
         self.entity_keys.extend(record.entity_keys)
         self.entity_subjects.extend(record.entity_subjects)
 
@@ -139,7 +137,6 @@ class _WEMIBatchAccumulator:
             "relationships": self.relationships,
             "identifiers": self.identifiers,
             "associations": self.associations,
-            "mediums": self.mediums,
             "contributions": self.contributions,
             "entity_keys": self.entity_keys,
             "entity_subjects": self.entity_subjects,
@@ -155,7 +152,6 @@ class _WEMIBatchAccumulator:
         self.relationships = []
         self.identifiers = []
         self.associations = []
-        self.mediums = []
         self.entity_keys = []
         self.entity_subjects = []
         return payload
@@ -282,7 +278,6 @@ def write_wemi_batch(
         relationships=payload.get("relationships") or [],
         identifiers=payload.get("identifiers") or [],
         manifestation_expressions=payload.get("associations") or [],
-        mediums_of_performance=payload.get("mediums") or [],
         contributions=payload.get("contributions") or [],
         entity_keys=payload.get("entity_keys") or [],
         entity_subjects=payload.get("entity_subjects") or [],

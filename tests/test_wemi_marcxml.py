@@ -2,6 +2,7 @@
 
 from lxml import etree
 
+from reconciliator.models import EntitySubject
 from reconciliator.loaders.marcxml import (
     build_target_record_from_marc,
     decompose_marc_wemi,
@@ -124,7 +125,6 @@ def test_decompose_monograph_wemi():
         relationships,
         identifiers,
         assoc,
-        mops,
         contributions,
     ) = decompose_marc_wemi(rec, source="melinda", include_items=False)
 
@@ -175,6 +175,7 @@ def test_decompose_music_wemi():
         ],
     )
 
+    subjs: list[EntitySubject] = []
     (
         work,
         expr,
@@ -184,15 +185,15 @@ def test_decompose_music_wemi():
         relationships,
         identifiers,
         assoc,
-        mops,
         contributions,
-    ) = decompose_marc_wemi(rec, source="fennica")
+    ) = decompose_marc_wemi(rec, source="fennica", subject_sink=subjs)
 
     assert work.work_type == "music"
     assert work.title == "Finlandia"
+    mops = [s for s in subjs if s.relation_type == "medium_of_performance"]
     assert len(mops) == 1
-    assert mops[0].label == "orkesteri"
-    assert mops[0].work_curie == work.curie
+    assert mops[0].raw_label == "orkesteri"
+    assert mops[0].entity_uri == work.curie
 
     ismn_idents = [i for i in identifiers if i.scheme == "ismn"]
     assert len(ismn_idents) == 1
@@ -636,12 +637,19 @@ def test_decompose_authority_record_mop_work_curie_and_dedup():
             </datafield>
         </record>""".encode()
     )
-    works, _, _, _, _, _, _, _, mops, _ = decompose_marc_authority(auth, source="asteri")
+    subjs: list[EntitySubject] = []
+    works, _, _, _, _, _, _, _, _ = decompose_marc_authority(
+        auth, source="asteri", subject_sink=subjs
+    )
     assert len(works) == 1
     assert works[0].title == "Finlandia"
     # Duplicate 'orkesteri' with identical URI should be deduplicated
+    mops = [s for s in subjs if s.relation_type == "medium_of_performance"]
     assert len(mops) == 2
     for mop in mops:
-        assert mop.work_curie == works[0].curie
-    mop_uris = {m.medium_uri for m in mops}
-    assert mop_uris == {"http://rdaregistry.info/termList/mop/orchestra", "urn:mop:piano"}
+        assert mop.entity_uri == works[0].curie
+    assert {m.raw_label for m in mops} == {"orkesteri", "piano"}
+    assert {m.concept_id for m in mops} == {
+        "orchestra",
+        None,
+    }

@@ -64,7 +64,7 @@ def repo(tmp_path: Path) -> WEMIRepository:
 
 
 def _ingest(store: WEMIRepository, control: str, title: str) -> None:
-    w, e, m, _itms, agts, _rels, idents, _assoc, _mops, contribs = decompose_marc_wemi(
+    w, e, m, _itms, agts, _rels, idents, _assoc, contribs = decompose_marc_wemi(
         _record(control, title), source="melinda", record_origin="melinda"
     )
     store.insert_wemi_batch(
@@ -468,7 +468,7 @@ def _ingest_album(
     store: WEMIRepository, control: str, title: str, pubnum: str, tracks: list[str]
 ) -> None:
     keys: list = []
-    w, e, m, _itms, agts, _rels, idents, _assoc, _mops, contribs = decompose_marc_wemi(
+    w, e, m, _itms, agts, _rels, idents, _assoc, contribs = decompose_marc_wemi(
         _album_marc(control, title, pubnum, tracks),
         source="melinda",
         record_origin="melinda",

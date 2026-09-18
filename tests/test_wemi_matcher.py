@@ -12,10 +12,10 @@ from reconciliator.models import (
     AgentEntity,
     ExpressionEntity,
     IdentifierEntity,
+    EntitySubject,
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MatchRecord,
-    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
 )
@@ -392,14 +392,16 @@ def test_work_matcher_notated_music_and_mop(repo: WEMIRepository):
     )
     w_id = repo.insert_works_batch([work])[0]
 
-    repo.insert_medium_of_performance_batch(
+    repo.insert_entity_subjects_batch(
         [
-            MediumOfPerformance(
-                work_id=w_id,
-                medium_uri="http://id.loc.gov/authorities/performanceMediums/mp2013015550",
-                label="orkesteri",
-                player_count=None,
-                is_soloist=False,
+            EntitySubject(
+                entity_type="work",
+                entity_id=w_id,
+                concept_id="http://id.loc.gov/authorities/performanceMediums/mp2013015550",
+                raw_label="orkesteri",
+                relation_type="medium_of_performance",
+                vocabulary="lcmpt",
+                is_resolved=True,
             )
         ]
     )

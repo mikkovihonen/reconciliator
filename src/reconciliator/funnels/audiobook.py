@@ -11,11 +11,32 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from reconciliator.config import get_bundled_section_defaults
 from reconciliator.funnels.engine import FunnelContext
+
+_AUDIO_DEFAULTS = dict(get_bundled_section_defaults("funnels").get("audiobook") or {})
+
+
+def _get_audio_param(ctx: FunnelContext, key: str, default: Any) -> Any:
+    if key in ctx.spec.extra:
+        return ctx.spec.extra[key]
+    funnel_settings = getattr(ctx.config, "funnel_settings", None)
+    if funnel_settings is not None:
+        audio_conf = getattr(funnel_settings, "audiobook", None)
+        if audio_conf is not None and hasattr(audio_conf, key):
+            return getattr(audio_conf, key)
+    return default
 
 
 def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
     from reconciliator.models import ExpressionEntity
+
+    content_type = str(
+        ctx.spec.content_type
+        or _get_audio_param(
+            ctx, "content_type", _AUDIO_DEFAULTS.get("content_type", "spoken_word")
+        )
+    )
 
     candidates: list = []
     for work_type in ctx.spec.work_types or [None]:
@@ -29,32 +50,41 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
 
     work = candidates[0]
     expressions = ctx.repo.get_expressions_for_work(work.id)
-    spoken = [e for e in expressions if e.content_type == "spoken_word"]
+    spoken = [e for e in expressions if e.content_type == content_type]
     expression = (
-        ctx.align_expression(spoken, record.language, content_type="spoken_word")
+        ctx.align_expression(spoken, record.language, content_type=content_type)
         if spoken
         else None
     )
     if not expression:
-        from reconciliator.config import get_bundled_defaults
-
-        audio_defaults = get_bundled_defaults().get("funnels", {}).get("audiobook", {})
-        default_lang = ctx.spec.extra.get("default_language") or audio_defaults.get(
-            "default_language"
+        default_lang = _get_audio_param(
+            ctx, "default_language", _AUDIO_DEFAULTS.get("default_language", "fin")
         )
-        title_suffix = (
-            ctx.spec.extra.get("title_suffix") or audio_defaults.get("title_suffix") or ""
+        title_suffix = _get_audio_param(
+            ctx, "title_suffix", _AUDIO_DEFAULTS.get("title_suffix", " (äänikirja)")
         )
-        und_lang = audio_defaults.get("undefined_language") or ""
+        und_lang = _get_audio_param(
+            ctx, "undefined_language", _AUDIO_DEFAULTS.get("undefined_language", "und")
+        )
+        source_id_suffix = _get_audio_param(
+            ctx, "source_id_suffix", _AUDIO_DEFAULTS.get("source_id_suffix", "_audio")
+        )
+        uri_prefix = _get_audio_param(
+            ctx,
+            "expression_uri_prefix",
+            _AUDIO_DEFAULTS.get("expression_uri_prefix", "#spoken_word_"),
+        )
 
+        lang = record.language or default_lang
+        uri_lang = record.language or und_lang
         expression = ExpressionEntity(
             id=0,
             work_id=work.id or 0,
-            expression_uri=f"{work.work_uri}#spoken_word_{record.language or und_lang}",
+            expression_uri=f"{work.work_uri}{uri_prefix}{uri_lang}",
             source=work.source,
-            source_id=f"{work.source_id}_audio",
-            language=record.language or default_lang,
-            content_type="spoken_word",
+            source_id=f"{work.source_id}{source_id_suffix}",
+            language=lang,
+            content_type=content_type,
             title=f"{work.title}{title_suffix}",
         )
 

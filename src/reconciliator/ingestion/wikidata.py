@@ -33,7 +33,6 @@ from reconciliator.models import (
     ItemEntity,
     ManifestationEntity,
     ManifestationExpressionAssociation,
-    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
     WorkType,
@@ -777,7 +776,7 @@ def decompose_wikidata_entity(
         list[WorkRelationship],
         list[IdentifierEntity],
         list[ManifestationExpressionAssociation],
-        list[MediumOfPerformance],
+        list[ContributionEntity],
     ]
 ]:
     """Decompose a raw Wikidata entity dictionary into normalized WEMI domain entities.
@@ -1202,7 +1201,6 @@ def decompose_wikidata_entity(
         relationships,
         identifiers,
         associations,
-        [],
         contributions,
     )
 
@@ -1245,7 +1243,6 @@ def ingest_wikidata_wemi_pipeline(
     relationships_batch = []
     identifiers_batch = []
     associations_batch = []
-    mediums_batch = []
     contributions_batch = []
 
     def _flush_batch() -> None:
@@ -1260,7 +1257,6 @@ def ingest_wikidata_wemi_pipeline(
                 relationships=relationships_batch,
                 identifiers=identifiers_batch,
                 manifestation_expressions=associations_batch,
-                mediums_of_performance=mediums_batch,
                 contributions=contributions_batch,
             )
             total_ingested += len(works_batch)
@@ -1272,7 +1268,6 @@ def ingest_wikidata_wemi_pipeline(
             relationships_batch.clear()
             identifiers_batch.clear()
             associations_batch.clear()
-            mediums_batch.clear()
             contributions_batch.clear()
             if tracker:
                 tracker.update_progress(stage="wikidata_wemi", items_processed=total_ingested)
@@ -1291,7 +1286,7 @@ def ingest_wikidata_wemi_pipeline(
 
             decomp = decompose_wikidata_entity(entity, store=wemi_repo, serialization_engine=engine)
             if decomp:
-                w, e, m, itms, agts, rels, idents, assoc, mops, contribs = decomp
+                w, e, m, itms, agts, rels, idents, assoc, contribs = decomp
                 works_batch.append(w)
                 expressions_batch.append(e)
                 manifestations_batch.append(m)
@@ -1300,7 +1295,6 @@ def ingest_wikidata_wemi_pipeline(
                 relationships_batch.extend(rels)
                 identifiers_batch.extend(idents)
                 associations_batch.extend(assoc)
-                mediums_batch.extend(mops)
                 contributions_batch.extend(contribs)
 
                 if len(works_batch) >= config.batch_size:

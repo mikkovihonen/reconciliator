@@ -445,3 +445,81 @@ def test_names_are_not_folded_by_this():
     from reconciliator.normalizers.linguistic import fold_label
 
     assert fold_label("Åström, Ann", preserved_diacritics="åäöÅÄÖ").startswith("å")
+
+
+def test_build_builtin_specs_custom_patterns():
+    from reconciliator.funnels.builtin import build_builtin_specs
+
+    custom = build_builtin_specs(
+        patterns={
+            "podcast_title": "custom_podcast_regex",
+            "exhibition_title": "custom_exhibition_regex",
+        }
+    )
+    podcast_spec = next(s for s in custom if s.id == "funnel_cc_podcast")
+    assert any(
+        getattr(w, "title_matches", None) == "custom_podcast_regex"
+        for w in podcast_spec.when
+    )
+
+    exhibition_spec = next(s for s in custom if s.id == "funnel_ll_exhibition")
+    assert any(
+        getattr(w, "title_matches", None) == "custom_exhibition_regex"
+        for w in exhibition_spec.when
+    )
+
+
+def test_audiobook_custom_config_fields():
+    from unittest.mock import MagicMock
+    from reconciliator.funnels.audiobook import tier2
+    from reconciliator.funnels.engine import FunnelContext
+    from reconciliator.funnels.spec import FunnelSpec
+    from reconciliator.matcher import WEMIMatchResult
+    from reconciliator.models import WorkEntity
+
+    spec = FunnelSpec(
+        id="funnel_e_audiobook",
+        extra={
+            "default_language": "swe",
+            "title_suffix": " (talbok)",
+            "source_id_suffix": "_tal",
+            "expression_uri_prefix": "#talbok_",
+        },
+    )
+    repo = MagicMock()
+    work = WorkEntity(
+        id=42,
+        work_uri="http://example.org/work/42",
+        source="melinda",
+        source_id="src42",
+        title="Test Title",
+        title_normalized="test title",
+        work_type="text",
+    )
+    repo.find_works_by_author_and_title.return_value = [work]
+    repo.get_expressions_for_work.return_value = []
+
+    ctx = FunnelContext(
+        spec=spec,
+        repo=repo,
+        config=None,
+        identifiers={},
+        align_expression=MagicMock(),
+        try_identifiers=MagicMock(),
+        vector_or_fts=MagicMock(),
+        rank_candidates=MagicMock(),
+        result_cls=WEMIMatchResult,
+        constituent_cls=MagicMock(),
+    )
+    record = MagicMock()
+    record.record_id = "rec1"
+    record.author_key = "author"
+    record.title_stem = "title"
+    record.language = None
+
+    res = tier2(record, ctx)
+    assert res is not None
+    assert res.matched_expression.language == "swe"
+    assert res.matched_expression.title == "Test Title (talbok)"
+    assert res.matched_expression.source_id == "src42_tal"
+    assert res.matched_expression.expression_uri == "melinda:src42_tal"

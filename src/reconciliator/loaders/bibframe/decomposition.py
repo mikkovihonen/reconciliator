@@ -49,7 +49,6 @@ from reconciliator.models import (
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MatchRecord,
-    MediumOfPerformance,
     WorkEntity,
     WorkRelationship,
     WorkType,
@@ -476,9 +475,9 @@ def _extract_identifiers(
 
 def _extract_mediums_of_performance(
     g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile
-) -> list[MediumOfPerformance]:
+) -> list[dict[str, Any]]:
     """Extract PMO / BIBFRAME mediums of performance."""
-    mediums: list[MediumOfPerformance] = []
+    mediums: list[dict[str, Any]] = []
     pmo_preds = profile.expanded_music_performance_predicates
 
     for pred in pmo_preds:
@@ -500,13 +499,11 @@ def _extract_mediums_of_performance(
             player_count = int(counts[0]) if counts and counts[0].isdigit() else 1
 
             mediums.append(
-                MediumOfPerformance(
-                    work_id=0,
-                    medium_uri=mop_uri or "",
-                    label=label,
-                    player_count=player_count,
-                    is_soloist=False,
-                )
+                {
+                    "uri": mop_uri,
+                    "label": label,
+                    "player_count": player_count,
+                }
             )
 
     return mediums
@@ -622,7 +619,6 @@ def decompose_bibframe_work(
     list[WorkRelationship],
     list[IdentifierEntity],
     list[ManifestationExpressionAssociation],
-    list[MediumOfPerformance],
     list[ContributionEntity],
 ]:
     """
@@ -827,7 +823,7 @@ def decompose_bibframe_work(
     expr_lang: Optional[str] = None
 
     work_relationships: list[WorkRelationship] = []
-    mediums_of_perf: list[MediumOfPerformance] = []
+    mediums_of_perf: list[dict[str, Any]] = []
 
     if condition == "C-3":
         # Hub Hoisting: hub_node is canonical Work centroid
@@ -1035,12 +1031,12 @@ def decompose_bibframe_work(
     seen_mops = set()
     deduped_mops = []
     for m in mediums_of_perf:
-        key = (m.label, m.medium_uri)
+        key = (m.get("label"), m.get("uri"))
         if key not in seen_mops:
             seen_mops.add(key)
             deduped_mops.append(m)
     mediums_of_perf = deduped_mops
-    expr_mop_str = ", ".join(m.label for m in mediums_of_perf if m.label) or None
+    expr_mop_str = ", ".join(m.get("label") for m in mediums_of_perf if m.get("label")) or None
 
     # Items
     items = _extract_items(g, instance_node, manif_id, source=source, profile=profile)
@@ -1117,11 +1113,27 @@ def decompose_bibframe_work(
         authors=authors_list,
         subjects=[subject.as_dict() for subject in folded_subjects],
     )
-    for m in mediums_of_perf:
-        if not m.work_curie:
-            m.work_curie = work.curie
-
     if subject_sink is not None:
+        for m in mediums_of_perf:
+            m_uri = m.get("uri")
+            m_label = m.get("label")
+            vocab = detect_vocabulary(m_uri) if m_uri else "pmo"
+            cid = extract_concept_id(m_uri) if m_uri else None
+            subject_sink.append(
+                EntitySubject(
+                    entity_type="work",
+                    entity_id=0,
+                    entity_uri=work.work_uri,
+                    source=source,
+                    source_record_id=str(work_id),
+                    relation_type="medium_of_performance",
+                    vocabulary=vocab,
+                    concept_id=cid or m_uri,
+                    raw_label=m_label,
+                    is_resolved=bool(vocab and (cid or m_uri)),
+                    is_primary=False,
+                )
+            )
         for s in folded_subjects:
             field = str(s.field or "")
             relation_type = "topic"
@@ -1198,7 +1210,6 @@ def decompose_bibframe_work(
         work_relationships,
         identifiers,
         manifestation_expressions,
-        mediums_of_perf,
         contributions,
     )
 
@@ -1557,7 +1568,6 @@ def build_target_record_from_bibframe(
         relationships,
         identifiers,
         associations,
-        mediums,
         contributions,
     ) = decompose_bibframe_work(
         g=g,

@@ -998,28 +998,6 @@ class WorkConsolidation(BaseModel):
     created_at: Optional[str] = None
 
 
-class MediumOfPerformance(BaseModel):
-    """Medium of performance instrumentation for musical works."""
-
-    work_id: int = 0
-    work_curie: Optional[str] = None
-    medium_uri: str
-    label: str
-    player_count: Optional[int] = None
-    is_soloist: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def _sync_mop_fields(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "work_uri" in data and not data.get("work_curie"):
-                data["work_curie"] = data.get("work_uri")
-        return data
-
-    @property
-    def work_uri(self) -> Optional[str]:
-        return self.work_curie
-
 
 class HarvestState(BaseModel):
     """Persistent harvest checkpoint for date-sliced OAI-PMH / ResourceSync."""
@@ -1417,7 +1395,7 @@ class EntitySubject(BaseModel):
     entity_id: int = 0
     source: str = "unknown"
     source_record_id: Optional[str] = None
-    relation_type: str = "topic"  # topic, genre_form, geographic, temporal, occupation, field_of_activity, associated_place
+    relation_type: str = "topic"  # topic, genre_form, geographic, temporal, occupation, field_of_activity, associated_place, medium_of_performance
     vocabulary: Optional[str] = None
     concept_id: Optional[str] = None
     raw_label: Optional[str] = None

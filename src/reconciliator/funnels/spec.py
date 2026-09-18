@@ -63,6 +63,24 @@ class FunnelWhen(BaseModel):
         return True
 
 
+def _default_match_tier() -> str:
+    from reconciliator.config import get_bundled_section_defaults
+
+    return str(
+        get_bundled_section_defaults("funnels").get(
+            "default_match_tier", "tier2_domain_key"
+        )
+    )
+
+
+def _default_confidence() -> float:
+    from reconciliator.config import get_bundled_section_defaults
+
+    return float(
+        get_bundled_section_defaults("funnels").get("default_confidence", 0.90)
+    )
+
+
 class FunnelSpec(BaseModel):
     """One domain funnel, declared rather than written.
 
@@ -89,8 +107,8 @@ class FunnelSpec(BaseModel):
     # Several funnels genuinely widen their net this way - funnel AA looks for a
     # "software" work and then an "ai_model" one - so this is a list, not a value.
     work_types: list[str] = Field(default_factory=list)
-    match_tier: str = "tier2_domain_key"
-    confidence: float = 0.90
+    match_tier: str = Field(default_factory=_default_match_tier)
+    confidence: float = Field(default_factory=_default_confidence)
     content_type: Optional[str] = None
     align_expression: bool = False
     # Stored relationships of the matched work, read from work_relationships.

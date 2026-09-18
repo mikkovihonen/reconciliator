@@ -618,12 +618,20 @@ enrichment:
       expression: ["http://rdaregistry.info/Elements/m/P30139", "rda"]
 
   thesis_institution_uri: "http://urn.fi/URN:NBN:fi:au:pn:dgg_institution"
+  thesis_relator_code: "dgg"
 
   surrogate_title_keywords:
     - "surrogate"
     - "näköispainos"
     - "faksimile"
     - "faksimil"
+
+  ephemera_terms:
+    - "pienpainatteet"
+    - "småtryck"
+    - "accidenstryck"
+    - "tilapäispainatteet"
+    - "ephemera"
 
   schemes:
     fingerprint:
@@ -1036,10 +1044,27 @@ constituents:
   index_works: false
 
 funnels:
+  default_match_tier: "tier2_domain_key"
+  default_confidence: 0.90
   audiobook:
     default_language: "fin"
     title_suffix: " (äänikirja)"
     undefined_language: "und"
+    source_id_suffix: "_audio"
+    expression_uri_prefix: "#spoken_word_"
+    content_type: "spoken_word"
+  recorded_sound:
+    jaccard_threshold: 0.75
+    max_candidates: 50
+    match_tier: "tier3_tracklist_jaccard"
+  notated_music:
+    fallback_match_tier: "tier2_domain_key"
+  patterns:
+    notated_music_title: "(?i)score|partituuri|nuotti|stemma"
+    podcast_title: "podcast"
+    parallel_translators_signature: "(?i)parallel"
+    government_valto_urn: "(?i)valto"
+    exhibition_title: "näyttely"
 
 agent_clustering:
   enabled: true
