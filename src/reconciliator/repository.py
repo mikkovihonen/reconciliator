@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -247,52 +248,64 @@ class WEMIRepository:
     # Batch Insertions
     # -----------------------------------------------------------------------
 
-    def insert_agents_batch(self, agents: list[AgentEntity]) -> list[int]:
+    def insert_agents_batch(
+        self,
+        agents: list[AgentEntity],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
+    ) -> list[int]:
         """Insert or update AgentEntity records in batch."""
         if not agents:
             return []
-        agent_ids: list[int] = []
-        with self.get_connection() as conn:
-            for agent in agents:
-                agent_meta: dict[str, Any] = {}
-                if agent.metadata_json:
-                    try:
-                        agent_meta = json.loads(agent.metadata_json)
-                    except Exception:
-                        agent_meta = {}
-                if agent.qualifier_counts:
-                    agent_meta["qualifier_counts"] = agent.qualifier_counts
-                if agent.affiliation_counts:
-                    agent_meta["affiliation_counts"] = agent.affiliation_counts
-                if agent.role_counts:
-                    agent_meta["role_counts"] = agent.role_counts
-                if agent.language_counts:
-                    agent_meta["language_counts"] = agent.language_counts
-                if agent.subject_counts:
-                    agent_meta["subject_counts"] = agent.subject_counts
-                if agent.orcid:
-                    agent_meta["orcid"] = agent.orcid
-                if agent.variant_names:
-                    agent_meta["variant_names"] = agent.variant_names
-                meta_str = json.dumps(agent_meta, ensure_ascii=False) if agent_meta else None
 
-                stmt = pg_insert(agents_table).values(
-                    source=agent.source,
-                    source_id=agent.source_id,
-                    record_origin=agent.record_origin,
-                    name=agent.name,
-                    name_normalized=agent.name_normalized,
-                    surname=agent.surname,
-                    qualifier=None,
-                    dates=agent.dates,
-                    birth_year=agent.birth_year,
-                    death_year=agent.death_year,
-                    fuller_name=agent.fuller_name,
-                    affiliation=None,
-                    metadata_json=meta_str,
-                    is_personal=bool(agent.is_personal),
-                    is_fictional=bool(agent.is_fictional),
-                )
+        rows: list[dict[str, Any]] = []
+        for agent in agents:
+            agent_meta: dict[str, Any] = {}
+            if agent.metadata_json:
+                try:
+                    agent_meta = json.loads(agent.metadata_json)
+                except Exception:
+                    agent_meta = {}
+            if agent.qualifier_counts:
+                agent_meta["qualifier_counts"] = agent.qualifier_counts
+            if agent.affiliation_counts:
+                agent_meta["affiliation_counts"] = agent.affiliation_counts
+            if agent.role_counts:
+                agent_meta["role_counts"] = agent.role_counts
+            if agent.language_counts:
+                agent_meta["language_counts"] = agent.language_counts
+            if agent.subject_counts:
+                agent_meta["subject_counts"] = agent.subject_counts
+            if agent.orcid:
+                agent_meta["orcid"] = agent.orcid
+            if agent.variant_names:
+                agent_meta["variant_names"] = agent.variant_names
+            meta_str = json.dumps(agent_meta, ensure_ascii=False) if agent_meta else None
+
+            rows.append({
+                "source": agent.source,
+                "source_id": agent.source_id,
+                "record_origin": agent.record_origin,
+                "name": agent.name,
+                "name_normalized": agent.name_normalized,
+                "surname": agent.surname,
+                "qualifier": None,
+                "dates": agent.dates,
+                "birth_year": agent.birth_year,
+                "death_year": agent.death_year,
+                "fuller_name": agent.fuller_name,
+                "affiliation": None,
+                "metadata_json": meta_str,
+                "is_personal": bool(agent.is_personal),
+                "is_fictional": bool(agent.is_fictional),
+            })
+
+        id_map: dict[tuple[str, str], int] = {}
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
+                stmt = pg_insert(agents_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
                     set_={
@@ -322,36 +335,53 @@ class WEMIRepository:
                         "is_personal": stmt.excluded.is_personal,
                         "is_fictional": stmt.excluded.is_fictional,
                     },
-                ).returning(agents_table.c.id)
-                res = conn.execute(stmt).fetchone()
-                agent_ids.append(res[0] if res else 0)
-        return agent_ids
+                ).returning(agents_table.c.id, agents_table.c.source, agents_table.c.source_id)
+                res = c.execute(stmt).fetchall()
+                for r in res:
+                    id_map[(r[1], r[2])] = r[0]
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
+
+        return [id_map.get((a.source, a.source_id), 0) for a in agents]
 
     def insert_works_batch(
         self,
         works: list[WorkEntity],
         vectors: Optional[np.ndarray] = None,
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
     ) -> list[int]:
         """Insert or update WorkEntity records and optional dense vectors in batch."""
         if not works:
             return []
-        work_ids: list[int] = []
-        with self.get_connection() as conn:
-            for work in works:
-                stmt = pg_insert(works_table).values(
-                    source=work.source,
-                    source_id=work.source_id,
-                    record_origin=work.record_origin,
-                    title=work.title,
-                    title_normalized=work.title_normalized,
-                    original_language=work.original_language,
-                    primary_agent_id=work.primary_agent_id,
-                    classification=work.classification,
-                    classification_scheme=work.classification_scheme,
-                    work_type=work.work_type,
-                    subjects_json=json.dumps(work.subjects_json, ensure_ascii=False),
-                    serialized_text=work.serialized_text,
-                )
+
+        rows: list[dict[str, Any]] = []
+        for work in works:
+            rows.append({
+                "source": work.source,
+                "source_id": work.source_id,
+                "record_origin": work.record_origin,
+                "title": work.title,
+                "title_normalized": work.title_normalized,
+                "original_language": work.original_language,
+                "primary_agent_id": work.primary_agent_id,
+                "classification": work.classification,
+                "classification_scheme": work.classification_scheme,
+                "work_type": work.work_type,
+                "subjects_json": json.dumps(work.subjects_json, ensure_ascii=False),
+                "serialized_text": work.serialized_text,
+            })
+
+        id_map: dict[tuple[str, str], int] = {}
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
+                stmt = pg_insert(works_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
                     set_={
@@ -374,60 +404,88 @@ class WEMIRepository:
                         "subjects_json": stmt.excluded.subjects_json,
                         "serialized_text": stmt.excluded.serialized_text,
                     },
-                ).returning(works_table.c.id)
-                res = conn.execute(stmt).fetchone()
-                work_ids.append(res[0] if res else 0)
+                ).returning(works_table.c.id, works_table.c.source, works_table.c.source_id)
+                res = c.execute(stmt).fetchall()
+                for r in res:
+                    id_map[(r[1], r[2])] = r[0]
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
+
+        work_ids = [id_map.get((w.source, w.source_id), 0) for w in works]
 
         if vectors is not None and self.work_indexer is not None and len(vectors) == len(works):
             vector_ids = self.work_indexer.add_vectors(vectors, ids=work_ids)
-            with self.get_connection() as conn:
-                for v_id, w_id in zip(vector_ids, work_ids):
-                    v_stmt = pg_insert(work_vectors_table).values(vector_id=v_id, work_id=w_id)
+            vec_rows = [{"vector_id": v_id, "work_id": w_id} for v_id, w_id in zip(vector_ids, work_ids)]
+
+            def _exec_vec(c: Any) -> None:
+                for i in range(0, len(vec_rows), chunk_size):
+                    chunk = vec_rows[i : i + chunk_size]
+                    v_stmt = pg_insert(work_vectors_table).values(chunk)
                     v_stmt = v_stmt.on_conflict_do_update(
                         index_elements=["vector_id"],
                         set_={"work_id": v_stmt.excluded.work_id},
                     )
-                    conn.execute(v_stmt)
+                    c.execute(v_stmt)
 
+            if conn is not None:
+                _exec_vec(conn)
+            else:
+                with self.get_connection() as c:
+                    _exec_vec(c)
+
+        wikidata_idents: list[IdentifierEntity] = []
         for work, wid in zip(works, work_ids):
             if getattr(work, "wikidata_qid", None) and work.source != "wikidata":
-                self.insert_identifiers_batch(
-                    [
-                        IdentifierEntity(
-                            entity_type="work",
-                            entity_id=wid,
-                            source="wikidata",
-                            source_id=work.wikidata_qid,
-                            value=work.wikidata_qid,
-                        )
-                    ]
+                wikidata_idents.append(
+                    IdentifierEntity(
+                        entity_type="work",
+                        entity_id=wid,
+                        source="wikidata",
+                        source_id=work.wikidata_qid,
+                        value=work.wikidata_qid,
+                    )
                 )
+        if wikidata_idents:
+            self.insert_identifiers_batch(wikidata_idents, conn=conn)
 
         return work_ids
 
     def insert_expressions_batch(
         self,
         expressions: list[ExpressionEntity],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
     ) -> list[int]:
         """Insert or update ExpressionEntity records and optional dense vectors in batch."""
         if not expressions:
             return []
-        expression_ids: list[int] = []
-        with self.get_connection() as conn:
-            for exp in expressions:
-                stmt = pg_insert(expressions_table).values(
-                    work_id=exp.work_id,
-                    source=exp.source,
-                    source_id=exp.source_id,
-                    record_origin=exp.record_origin,
-                    language=exp.language,
-                    content_type=exp.content_type,
-                    title=exp.title,
-                    version_designation=exp.version_designation,
-                    arrangement_note=exp.arrangement_note,
-                    medium_of_performance=exp.medium_of_performance,
-                    serialized_text=exp.serialized_text,
-                )
+
+        rows: list[dict[str, Any]] = []
+        for exp in expressions:
+            rows.append({
+                "work_id": exp.work_id,
+                "source": exp.source,
+                "source_id": exp.source_id,
+                "record_origin": exp.record_origin,
+                "language": exp.language,
+                "content_type": exp.content_type,
+                "title": exp.title,
+                "version_designation": exp.version_designation,
+                "arrangement_note": exp.arrangement_note,
+                "medium_of_performance": exp.medium_of_performance,
+                "serialized_text": exp.serialized_text,
+            })
+
+        id_map: dict[tuple[str, str], int] = {}
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
+                stmt = pg_insert(expressions_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
                     set_={
@@ -441,49 +499,65 @@ class WEMIRepository:
                         "medium_of_performance": stmt.excluded.medium_of_performance,
                         "serialized_text": stmt.excluded.serialized_text,
                     },
-                ).returning(expressions_table.c.id)
-                res = conn.execute(stmt).fetchone()
-                expression_ids.append(res[0] if res else 0)
+                ).returning(expressions_table.c.id, expressions_table.c.source, expressions_table.c.source_id)
+                res = c.execute(stmt).fetchall()
+                for r in res:
+                    id_map[(r[1], r[2])] = r[0]
 
-        return expression_ids
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
+
+        return [id_map.get((e.source, e.source_id), 0) for e in expressions]
 
     def insert_manifestations_batch(
         self,
         manifestations: list[ManifestationEntity],
         vectors: Optional[np.ndarray] = None,
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
     ) -> list[int]:
         """Insert or update ManifestationEntity records and optional dense vectors in batch."""
         if not manifestations:
             return []
-        manif_ids: list[int] = []
-        with self.get_connection() as conn:
-            for manif in manifestations:
-                stmt = pg_insert(manifestations_table).values(
-                    work_id=manif.work_id,
-                    container_id=manif.container_id,
-                    is_component=bool(manif.is_component),
-                    component_type=manif.component_type,
-                    source=manif.source,
-                    source_id=manif.source_id,
-                    record_origin=manif.record_origin,
-                    title=manif.title,
-                    title_normalized=manif.title_normalized,
-                    subtitle=manif.subtitle,
-                    publication_year=manif.publication_year,
-                    publisher=manif.publisher,
-                    publication_place=manif.publication_place,
-                    edition_statement=manif.edition_statement,
-                    edition_number=manif.edition_number,
-                    series_title=manif.series_title,
-                    series_numbering=manif.series_numbering,
-                    volume_designation=manif.volume_designation,
-                    issue_enumeration=manif.issue_enumeration,
-                    pagination=manif.pagination,
-                    extent=manif.extent,
-                    carrier_type=manif.carrier_type,
-                    host_title=manif.host_title,
-                    serialized_text=manif.serialized_text,
-                )
+
+        rows: list[dict[str, Any]] = []
+        for manif in manifestations:
+            rows.append({
+                "work_id": manif.work_id,
+                "container_id": manif.container_id,
+                "is_component": bool(manif.is_component),
+                "component_type": manif.component_type,
+                "source": manif.source,
+                "source_id": manif.source_id,
+                "record_origin": manif.record_origin,
+                "title": manif.title,
+                "title_normalized": manif.title_normalized,
+                "subtitle": manif.subtitle,
+                "publication_year": manif.publication_year,
+                "publisher": manif.publisher,
+                "publication_place": manif.publication_place,
+                "edition_statement": manif.edition_statement,
+                "edition_number": manif.edition_number,
+                "series_title": manif.series_title,
+                "series_numbering": manif.series_numbering,
+                "volume_designation": manif.volume_designation,
+                "issue_enumeration": manif.issue_enumeration,
+                "pagination": manif.pagination,
+                "extent": manif.extent,
+                "carrier_type": manif.carrier_type,
+                "host_title": manif.host_title,
+                "serialized_text": manif.serialized_text,
+            })
+
+        id_map: dict[tuple[str, str], int] = {}
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
+                stmt = pg_insert(manifestations_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
                     set_={
@@ -514,9 +588,18 @@ class WEMIRepository:
                         "host_title": stmt.excluded.host_title,
                         "serialized_text": stmt.excluded.serialized_text,
                     },
-                ).returning(manifestations_table.c.id)
-                res = conn.execute(stmt).fetchone()
-                manif_ids.append(res[0] if res else 0)
+                ).returning(manifestations_table.c.id, manifestations_table.c.source, manifestations_table.c.source_id)
+                res = c.execute(stmt).fetchall()
+                for r in res:
+                    id_map[(r[1], r[2])] = r[0]
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
+
+        manif_ids = [id_map.get((m.source, m.source_id), 0) for m in manifestations]
 
         if (
             vectors is not None
@@ -524,35 +607,54 @@ class WEMIRepository:
             and len(vectors) == len(manifestations)
         ):
             vector_ids = self.manifestation_indexer.add_vectors(vectors, ids=manif_ids)
-            with self.get_connection() as conn:
-                for v_id, m_id in zip(vector_ids, manif_ids):
-                    v_stmt = pg_insert(manifestation_vectors_table).values(
-                        vector_id=v_id, manifestation_id=m_id
-                    )
+            vec_rows = [
+                {"vector_id": v_id, "manifestation_id": m_id}
+                for v_id, m_id in zip(vector_ids, manif_ids)
+            ]
+
+            def _exec_mvec(c: Any) -> None:
+                for i in range(0, len(vec_rows), chunk_size):
+                    chunk = vec_rows[i : i + chunk_size]
+                    v_stmt = pg_insert(manifestation_vectors_table).values(chunk)
                     v_stmt = v_stmt.on_conflict_do_update(
                         index_elements=["vector_id"],
                         set_={"manifestation_id": v_stmt.excluded.manifestation_id},
                     )
-                    conn.execute(v_stmt)
+                    c.execute(v_stmt)
+
+            if conn is not None:
+                _exec_mvec(conn)
+            else:
+                with self.get_connection() as c:
+                    _exec_mvec(c)
 
         return manif_ids
 
     def insert_manifestation_expressions_batch(
-        self, assocs: list[ManifestationExpressionAssociation]
+        self,
+        assocs: list[ManifestationExpressionAssociation],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
     ) -> None:
         """Insert or replace junction associations between Manifestations and Expressions."""
         if not assocs:
             return
-        with self.get_connection() as conn:
-            for a in assocs:
-                stmt = pg_insert(manifestation_expressions_table).values(
-                    manifestation_id=a.manifestation_id,
-                    expression_id=a.expression_id,
-                    track_number=a.track_number,
-                    disc_number=a.disc_number,
-                    duration=a.duration,
-                    is_primary=bool(a.is_primary),
-                )
+        rows = [
+            {
+                "manifestation_id": a.manifestation_id,
+                "expression_id": a.expression_id,
+                "track_number": a.track_number,
+                "disc_number": a.disc_number,
+                "duration": a.duration,
+                "is_primary": bool(a.is_primary),
+            }
+            for a in assocs
+        ]
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
+                stmt = pg_insert(manifestation_expressions_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["manifestation_id", "expression_id"],
                     set_={
@@ -562,7 +664,13 @@ class WEMIRepository:
                         "is_primary": stmt.excluded.is_primary,
                     },
                 )
-                conn.execute(stmt)
+                c.execute(stmt)
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
 
     def link_manifestation_expression(
         self, manifestation_id: int, expression_id: int, is_primary: bool = True
@@ -594,7 +702,13 @@ class WEMIRepository:
         vectors = np.expand_dims(vector, axis=0) if vector is not None else None
         return self.insert_manifestations_batch([manifestation], vectors=vectors)[0]
 
-    def _insert_simple_batch(self, table: Any, entities: list[Any]) -> list[int]:
+    def _insert_simple_batch(
+        self,
+        table: Any,
+        entities: list[Any],
+        conn: Optional[Any] = None,
+        chunk_size: Optional[int] = None,
+    ) -> list[int]:
         """Insert simple entity records in batch and return their assigned IDs."""
         if not entities:
             return []
@@ -609,24 +723,46 @@ class WEMIRepository:
             rows.append(row)
 
         ids: list[int] = []
-        batch_size = max(1, 10000 // max(1, len(col_names)))
-        with self.get_connection() as conn:
+        batch_size = chunk_size or max(1, 10000 // max(1, len(col_names)))
+
+        def _exec(c: Any) -> None:
             for i in range(0, len(rows), batch_size):
                 chunk = rows[i : i + batch_size]
                 stmt = pg_insert(table).values(chunk).returning(table.c.id)
-                res = conn.execute(stmt).fetchall()
+                res = c.execute(stmt).fetchall()
                 ids.extend(r[0] for r in res)
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
         return ids
 
-    def insert_items_batch(self, items: list[ItemEntity]) -> list[int]:
+    def insert_items_batch(
+        self,
+        items: list[ItemEntity],
+        conn: Optional[Any] = None,
+        chunk_size: Optional[int] = None,
+    ) -> list[int]:
         """Insert ItemEntity records in batch."""
-        return self._insert_simple_batch(items_table, items)
+        return self._insert_simple_batch(items_table, items, conn=conn, chunk_size=chunk_size)
 
-    def insert_identifiers_batch(self, identifiers: list[IdentifierEntity]) -> list[int]:
+    def insert_identifiers_batch(
+        self,
+        identifiers: list[IdentifierEntity],
+        conn: Optional[Any] = None,
+        chunk_size: Optional[int] = None,
+    ) -> list[int]:
         """Insert polymorphic IdentifierEntity records in batch."""
-        return self._insert_simple_batch(identifiers_table, identifiers)
+        return self._insert_simple_batch(identifiers_table, identifiers, conn=conn, chunk_size=chunk_size)
 
-    def insert_entity_keys_batch(self, keys: list[EntityKey]) -> None:
+    def insert_entity_keys_batch(
+        self,
+        keys: list[EntityKey],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
+    ) -> None:
         """Insert derived domain blocking keys in batch.
 
         Idempotent: the table's UNIQUE constraint makes re-ingesting a record a
@@ -634,21 +770,33 @@ class WEMIRepository:
         """
         if not keys:
             return
-        with self.get_connection() as conn:
-            for k in keys:
+        rows = [
+            {
+                "entity_type": k.entity_type,
+                "entity_id": k.entity_id,
+                "key_type": k.key_type,
+                "key_value": k.key_value,
+            }
+            for k in keys
+        ]
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
                 stmt = (
                     pg_insert(entity_keys_table)
-                    .values(
-                        entity_type=k.entity_type,
-                        entity_id=k.entity_id,
-                        key_type=k.key_type,
-                        key_value=k.key_value,
-                    )
+                    .values(chunk)
                     .on_conflict_do_nothing(
                         index_elements=["entity_type", "entity_id", "key_type", "key_value"]
                     )
                 )
-                conn.execute(stmt)
+                c.execute(stmt)
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
 
     def get_entity_keys(self, entity_type: str, entity_id: int) -> dict[str, list[str]]:
         """Return the key bag for one entity, shaped as the funnels consume it."""
@@ -818,31 +966,58 @@ class WEMIRepository:
         with self.get_connection() as conn:
             return list(conn.execute(stmt).scalars().all())
 
-    def insert_contributions_batch(self, contributions: list[ContributionEntity]) -> list[int]:
+    def insert_contributions_batch(
+        self,
+        contributions: list[ContributionEntity],
+        conn: Optional[Any] = None,
+        chunk_size: Optional[int] = None,
+    ) -> list[int]:
         """Insert ContributionEntity records in batch."""
-        return self._insert_simple_batch(contributions_table, contributions)
+        return self._insert_simple_batch(contributions_table, contributions, conn=conn, chunk_size=chunk_size)
 
-    def insert_work_relationships_batch(self, rels: list[WorkRelationship]) -> list[int]:
+    def insert_work_relationships_batch(
+        self,
+        rels: list[WorkRelationship],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
+    ) -> list[int]:
         """Insert WorkRelationship records in batch."""
         if not rels:
             return []
+        rows = [
+            {
+                "source_work_id": rel.source_work_id,
+                "target_work_id": rel.target_work_id,
+                "relationship_type": rel.relationship_type,
+            }
+            for rel in rels
+        ]
         r_ids: list[int] = []
-        with self.get_connection() as conn:
-            for rel in rels:
-                stmt = pg_insert(work_relationships_table).values(
-                    source_work_id=rel.source_work_id,
-                    target_work_id=rel.target_work_id,
-                    relationship_type=rel.relationship_type,
-                )
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
+                stmt = pg_insert(work_relationships_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source_work_id", "target_work_id", "relationship_type"],
                     set_={"relationship_type": stmt.excluded.relationship_type},
                 ).returning(work_relationships_table.c.id)
-                res = conn.execute(stmt).fetchone()
-                r_ids.append(res[0] if res else 0)
+                res = c.execute(stmt).fetchall()
+                r_ids.extend(r[0] for r in res)
+
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
         return r_ids
 
-    def insert_medium_of_performance_batch(self, mops: list[MediumOfPerformance]) -> None:
+    def insert_medium_of_performance_batch(
+        self,
+        mops: list[MediumOfPerformance],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
+    ) -> None:
         """Insert MediumOfPerformance records in batch."""
         if not mops:
             return
@@ -876,10 +1051,10 @@ class WEMIRepository:
         if not deduped:
             return
         rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i : i + chunk_size]
                 stmt = pg_insert(work_medium_of_performance_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["work_id", "medium_uri"],
@@ -889,11 +1064,22 @@ class WEMIRepository:
                         "is_soloist": stmt.excluded.is_soloist,
                     },
                 )
-                conn.execute(stmt)
+                c.execute(stmt)
 
-    def insert_entity_subjects_batch(self, subjects: list[EntitySubject]) -> list[int]:
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
+
+    def insert_entity_subjects_batch(
+        self,
+        subjects: list[EntitySubject],
+        conn: Optional[Any] = None,
+        chunk_size: Optional[int] = None,
+    ) -> list[int]:
         """Insert polymorphic EntitySubject records in batch."""
-        return self._insert_simple_batch(entity_subjects_table, subjects)
+        return self._insert_simple_batch(entity_subjects_table, subjects, conn=conn, chunk_size=chunk_size)
 
     def insert_wemi_batch(
         self,
@@ -912,8 +1098,10 @@ class WEMIRepository:
         work_vectors: Optional[Any] = None,
         manifestation_vectors: Optional[Any] = None,
         record_origin: Optional[RecordOrigin | str] = None,
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
     ) -> None:
-        """Coordinated batch insertion of WEMI domain entities with foreign key binding."""
+        """Coordinated batch insertion of WEMI domain entities with foreign key binding in a single transaction."""
         if record_origin:
             for w in works:
                 w.record_origin = record_origin
@@ -962,301 +1150,308 @@ class WEMIRepository:
                     return key_dict[sid_base]
             return None
 
-        # 1. Agents
-        agent_key_to_id: dict[Any, int] = {}
-        if agents:
-            a_ids = self.insert_agents_batch(agents)
-            for a, aid in zip(agents, a_ids):
-                a.id = aid
-                agent_key_to_id[a.curie] = aid
-                agent_key_to_id[(a.source, a.source_id)] = aid
-                agent_key_to_id[a.source_id] = aid
-                agent_key_to_id[a.name] = aid
-                agent_key_to_id[a.name_normalized] = aid
+        def _run_in_txn(c: Any) -> None:
+            # 1. Agents
+            agent_key_to_id: dict[Any, int] = {}
+            if agents:
+                a_ids = self.insert_agents_batch(agents, conn=c, chunk_size=chunk_size)
+                for a, aid in zip(agents, a_ids):
+                    a.id = aid
+                    agent_key_to_id[a.curie] = aid
+                    agent_key_to_id[(a.source, a.source_id)] = aid
+                    agent_key_to_id[a.source_id] = aid
+                    agent_key_to_id[a.name] = aid
+                    agent_key_to_id[a.name_normalized] = aid
 
-        # 2. Works
-        work_key_to_id: dict[Any, int] = {}
-        if works:
-            w_ids = self.insert_works_batch(works, vectors=work_vectors)
-            for w, wid in zip(works, w_ids):
-                w.id = wid
-                work_key_to_id[w.curie] = wid
-                work_key_to_id[(w.source, w.source_id)] = wid
-                work_key_to_id[w.source_id] = wid
+            # 2. Works
+            work_key_to_id: dict[Any, int] = {}
+            if works:
+                w_ids = self.insert_works_batch(works, vectors=work_vectors, conn=c, chunk_size=chunk_size)
+                for w, wid in zip(works, w_ids):
+                    w.id = wid
+                    work_key_to_id[w.curie] = wid
+                    work_key_to_id[(w.source, w.source_id)] = wid
+                    work_key_to_id[w.source_id] = wid
 
-        # 3. Expressions
-        expr_key_to_id: dict[Any, int] = {}
-        if expressions:
-            for exp in expressions:
-                if not exp.work_id or exp.work_id <= 0:
-                    cand_id = _resolve(work_key_to_id, exp.work_curie)
-                    if cand_id is None:
-                        cand_id = work_key_to_id.get((exp.source, exp.source_id))
-                    if cand_id is None and len(works) == 1:
-                        cand_id = works[0].id
-                    if cand_id:
-                        exp.work_id = cand_id
-            e_ids = self.insert_expressions_batch(expressions)
-            for exp, eid in zip(expressions, e_ids):
-                exp.id = eid
-                expr_key_to_id[exp.curie] = eid
-                expr_key_to_id[(exp.source, exp.source_id)] = eid
-                expr_key_to_id[exp.source_id] = eid
-                expr_key_to_id[f"{exp.source}:{exp.source_id}:{exp.language}"] = eid
-                expr_key_to_id[(exp.source, f"{exp.source_id}:{exp.language}")] = eid
+            # 3. Expressions
+            expr_key_to_id: dict[Any, int] = {}
+            if expressions:
+                for exp in expressions:
+                    if not exp.work_id or exp.work_id <= 0:
+                        cand_id = _resolve(work_key_to_id, exp.work_curie)
+                        if cand_id is None:
+                            cand_id = work_key_to_id.get((exp.source, exp.source_id))
+                        if cand_id is None and len(works) == 1:
+                            cand_id = works[0].id
+                        if cand_id:
+                            exp.work_id = cand_id
+                e_ids = self.insert_expressions_batch(expressions, conn=c, chunk_size=chunk_size)
+                for exp, eid in zip(expressions, e_ids):
+                    exp.id = eid
+                    expr_key_to_id[exp.curie] = eid
+                    expr_key_to_id[(exp.source, exp.source_id)] = eid
+                    expr_key_to_id[exp.source_id] = eid
+                    expr_key_to_id[f"{exp.source}:{exp.source_id}:{exp.language}"] = eid
+                    expr_key_to_id[(exp.source, f"{exp.source_id}:{exp.language}")] = eid
 
-        # 4. Manifestations, containers before components
-        manif_key_to_id: dict[Any, int] = {}
-        if manifestations:
-            for m in manifestations:
-                if not m.work_id or m.work_id <= 0:
-                    cand_id = _resolve(work_key_to_id, m.work_curie)
-                    if cand_id is None:
-                        cand_id = work_key_to_id.get((m.source, m.source_id))
-                    if cand_id is None and len(works) == 1:
-                        cand_id = works[0].id
-                    if cand_id:
-                        m.work_id = cand_id
+            # 4. Manifestations, containers before components
+            manif_key_to_id: dict[Any, int] = {}
+            if manifestations:
+                for m in manifestations:
+                    if not m.work_id or m.work_id <= 0:
+                        cand_id = _resolve(work_key_to_id, m.work_curie)
+                        if cand_id is None:
+                            cand_id = work_key_to_id.get((m.source, m.source_id))
+                        if cand_id is None and len(works) == 1:
+                            cand_id = works[0].id
+                        if cand_id:
+                            m.work_id = cand_id
 
-            def _insert_manifestations(rows: list[ManifestationEntity], idx: list[int]) -> None:
-                if not rows:
-                    return
-                vectors = (
-                    [manifestation_vectors[i] for i in idx]
-                    if manifestation_vectors is not None
-                    else None
-                )
-                ids = self.insert_manifestations_batch(rows, vectors=vectors)
-                for row, row_id in zip(rows, ids):
-                    row.id = row_id
-                    manif_key_to_id[row.curie] = row_id
-                    manif_key_to_id[(row.source, row.source_id)] = row_id
-                    manif_key_to_id[row.source_id] = row_id
+                def _insert_manifestations(rows: list[ManifestationEntity], idx: list[int]) -> None:
+                    if not rows:
+                        return
+                    vectors = (
+                        [manifestation_vectors[i] for i in idx]
+                        if manifestation_vectors is not None
+                        else None
+                    )
+                    ids = self.insert_manifestations_batch(rows, vectors=vectors, conn=c, chunk_size=chunk_size)
+                    for row, row_id in zip(rows, ids):
+                        row.id = row_id
+                        manif_key_to_id[row.curie] = row_id
+                        manif_key_to_id[(row.source, row.source_id)] = row_id
+                        manif_key_to_id[row.source_id] = row_id
 
-            component_idx = [i for i, m in enumerate(manifestations) if m.container_curie]
-            if not component_idx:
-                _insert_manifestations(manifestations, list(range(len(manifestations))))
-            else:
-                container_idx = [i for i, m in enumerate(manifestations) if not m.container_curie]
-                _insert_manifestations([manifestations[i] for i in container_idx], container_idx)
-                for i in component_idx:
-                    component = manifestations[i]
-                    resolved = _resolve(manif_key_to_id, component.container_curie)
-                    if not resolved and component.container_curie:
-                        existing = self.get_manifestation_by_curie(component.container_curie)
-                        resolved = existing.id if existing else None
-                    if resolved:
-                        component.container_id = resolved
+                component_idx = [i for i, m in enumerate(manifestations) if m.container_curie]
+                if not component_idx:
+                    _insert_manifestations(manifestations, list(range(len(manifestations))))
+                else:
+                    container_idx = [i for i, m in enumerate(manifestations) if not m.container_curie]
+                    _insert_manifestations([manifestations[i] for i in container_idx], container_idx)
+                    for i in component_idx:
+                        component = manifestations[i]
+                        resolved = _resolve(manif_key_to_id, component.container_curie)
+                        if not resolved and component.container_curie:
+                            existing = self.get_manifestation_by_curie(component.container_curie)
+                            resolved = existing.id if existing else None
+                        if resolved:
+                            component.container_id = resolved
+                        else:
+                            logger.warning(
+                                "Component %s/%s names container %s, which is not in "
+                                "this batch or the store; inserting it unlinked.",
+                                component.source,
+                                component.source_id,
+                                component.container_curie,
+                            )
+                    _insert_manifestations([manifestations[i] for i in component_idx], component_idx)
+
+            # 5. Manifestation-Expression Associations
+            if manifestation_expressions:
+                bound_assocs: list[ManifestationExpressionAssociation] = []
+                for assoc in manifestation_expressions:
+                    if (
+                        not assoc.manifestation_id or assoc.manifestation_id <= 0
+                    ) and assoc.manifestation_curie:
+                        assoc.manifestation_id = (
+                            _resolve(manif_key_to_id, assoc.manifestation_curie) or 0
+                        )
+                    if (not assoc.expression_id or assoc.expression_id <= 0) and assoc.expression_curie:
+                        assoc.expression_id = _resolve(expr_key_to_id, assoc.expression_curie) or 0
+                    if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and len(
+                        manifestations
+                    ) == 1:
+                        assoc.manifestation_id = manifestations[0].id or 0
+                    if (not assoc.expression_id or assoc.expression_id <= 0) and len(expressions) == 1:
+                        assoc.expression_id = expressions[0].id or 0
+                    if assoc.manifestation_id > 0 and assoc.expression_id > 0:
+                        bound_assocs.append(assoc)
                     else:
                         logger.warning(
-                            "Component %s/%s names container %s, which is not in "
-                            "this batch or the store; inserting it unlinked.",
-                            component.source,
-                            component.source_id,
-                            component.container_curie,
+                            "Dropping manifestation-expression association that binds "
+                            "to no row: manifestation=%s expression=%s",
+                            assoc.manifestation_curie,
+                            assoc.expression_curie,
                         )
-                _insert_manifestations([manifestations[i] for i in component_idx], component_idx)
+                if bound_assocs:
+                    self.insert_manifestation_expressions_batch(bound_assocs, conn=c, chunk_size=chunk_size)
 
-        # 5. Manifestation-Expression Associations
-        if manifestation_expressions:
-            bound_assocs: list[ManifestationExpressionAssociation] = []
-            for assoc in manifestation_expressions:
-                if (
-                    not assoc.manifestation_id or assoc.manifestation_id <= 0
-                ) and assoc.manifestation_curie:
-                    assoc.manifestation_id = (
-                        _resolve(manif_key_to_id, assoc.manifestation_curie) or 0
-                    )
-                if (not assoc.expression_id or assoc.expression_id <= 0) and assoc.expression_curie:
-                    assoc.expression_id = _resolve(expr_key_to_id, assoc.expression_curie) or 0
-                if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and len(
-                    manifestations
-                ) == 1:
-                    assoc.manifestation_id = manifestations[0].id or 0
-                if (not assoc.expression_id or assoc.expression_id <= 0) and len(expressions) == 1:
-                    assoc.expression_id = expressions[0].id or 0
-                if assoc.manifestation_id > 0 and assoc.expression_id > 0:
-                    bound_assocs.append(assoc)
-                else:
-                    logger.warning(
-                        "Dropping manifestation-expression association that binds "
-                        "to no row: manifestation=%s expression=%s",
-                        assoc.manifestation_curie,
-                        assoc.expression_curie,
-                    )
-            if bound_assocs:
-                self.insert_manifestation_expressions_batch(bound_assocs)
+            # 6. Items
+            if items:
+                for item in items:
+                    if not item.manifestation_id or item.manifestation_id <= 0:
+                        cand_id = manif_key_to_id.get((item.source, item.source_id))
+                        if cand_id is None and len(manifestations) == 1:
+                            cand_id = manifestations[0].id
+                        if cand_id:
+                            item.manifestation_id = cand_id
+                self.insert_items_batch(items, conn=c, chunk_size=chunk_size)
 
-        # 6. Items
-        if items:
-            for item in items:
-                if not item.manifestation_id or item.manifestation_id <= 0:
-                    cand_id = manif_key_to_id.get((item.source, item.source_id))
-                    if cand_id is None and len(manifestations) == 1:
-                        cand_id = manifestations[0].id
-                    if cand_id:
-                        item.manifestation_id = cand_id
-            self.insert_items_batch(items)
+            # 7. Identifiers
+            if identifiers:
+                bound_identifiers: list[IdentifierEntity] = []
+                for ident in identifiers:
+                    if not ident.entity_id or ident.entity_id <= 0:
+                        if ident.entity_curie:
+                            if ident.entity_type == "agent":
+                                resolved = _resolve(agent_key_to_id, ident.entity_curie)
+                            elif ident.entity_type == "work":
+                                resolved = _resolve(work_key_to_id, ident.entity_curie)
+                            elif ident.entity_type == "expression":
+                                resolved = _resolve(expr_key_to_id, ident.entity_curie)
+                            elif ident.entity_type == "manifestation":
+                                resolved = _resolve(manif_key_to_id, ident.entity_curie)
+                            else:
+                                resolved = None
+                            if resolved:
+                                ident.entity_id = resolved
+                    if not ident.entity_id or ident.entity_id <= 0:
+                        if ident.entity_type == "manifestation" and manifestations:
+                            ident.entity_id = manifestations[0].id
+                        elif ident.entity_type == "work" and works:
+                            ident.entity_id = works[0].id
+                        elif ident.entity_type == "expression" and expressions:
+                            ident.entity_id = expressions[0].id
+                        elif ident.entity_type == "agent" and agents:
+                            ident.entity_id = agents[0].id
+                    if ident.entity_id and ident.entity_id > 0:
+                        bound_identifiers.append(ident)
+                if bound_identifiers:
+                    self.insert_identifiers_batch(bound_identifiers, conn=c, chunk_size=chunk_size)
 
-        # 7. Identifiers
-        if identifiers:
-            bound_identifiers: list[IdentifierEntity] = []
-            for ident in identifiers:
-                if not ident.entity_id or ident.entity_id <= 0:
-                    if ident.entity_curie:
-                        if ident.entity_type == "agent":
-                            resolved = _resolve(agent_key_to_id, ident.entity_curie)
-                        elif ident.entity_type == "work":
-                            resolved = _resolve(work_key_to_id, ident.entity_curie)
-                        elif ident.entity_type == "expression":
-                            resolved = _resolve(expr_key_to_id, ident.entity_curie)
-                        elif ident.entity_type == "manifestation":
-                            resolved = _resolve(manif_key_to_id, ident.entity_curie)
-                        else:
-                            resolved = None
-                        if resolved:
-                            ident.entity_id = resolved
-                if not ident.entity_id or ident.entity_id <= 0:
-                    if ident.entity_type == "manifestation" and manifestations:
-                        ident.entity_id = manifestations[0].id
-                    elif ident.entity_type == "work" and works:
-                        ident.entity_id = works[0].id
-                    elif ident.entity_type == "expression" and expressions:
-                        ident.entity_id = expressions[0].id
-                    elif ident.entity_type == "agent" and agents:
-                        ident.entity_id = agents[0].id
-                if ident.entity_id and ident.entity_id > 0:
-                    bound_identifiers.append(ident)
-            if bound_identifiers:
-                self.insert_identifiers_batch(bound_identifiers)
+            # 8. Work Relationships
+            if relationships:
+                bound_rels: list[WorkRelationship] = []
+                for rel in relationships:
+                    if (not rel.source_work_id or rel.source_work_id <= 0) and rel.source_work_curie:
+                        rel.source_work_id = _resolve(work_key_to_id, rel.source_work_curie) or 0
+                    if (not rel.target_work_id or rel.target_work_id <= 0) and rel.target_work_curie:
+                        rel.target_work_id = _resolve(work_key_to_id, rel.target_work_curie) or 0
+                    if (not rel.source_work_id or rel.source_work_id <= 0) and works:
+                        rel.source_work_id = works[0].id or 0
+                    if rel.source_work_id > 0 and rel.target_work_id > 0:
+                        bound_rels.append(rel)
+                    else:
+                        logger.warning(
+                            "Dropping %s edge with an unbound endpoint: source=%s target=%s",
+                            rel.relationship_type,
+                            rel.source_work_curie or rel.source_work_id,
+                            rel.target_work_curie or rel.target_work_id,
+                        )
+                if bound_rels:
+                    self.insert_work_relationships_batch(bound_rels, conn=c, chunk_size=chunk_size)
 
-        # 8. Work Relationships
-        if relationships:
-            bound_rels: list[WorkRelationship] = []
-            for rel in relationships:
-                if (not rel.source_work_id or rel.source_work_id <= 0) and rel.source_work_curie:
-                    rel.source_work_id = _resolve(work_key_to_id, rel.source_work_curie) or 0
-                if (not rel.target_work_id or rel.target_work_id <= 0) and rel.target_work_curie:
-                    rel.target_work_id = _resolve(work_key_to_id, rel.target_work_curie) or 0
-                if (not rel.source_work_id or rel.source_work_id <= 0) and works:
-                    rel.source_work_id = works[0].id or 0
-                if rel.source_work_id > 0 and rel.target_work_id > 0:
-                    bound_rels.append(rel)
-                else:
-                    logger.warning(
-                        "Dropping %s edge with an unbound endpoint: source=%s target=%s",
-                        rel.relationship_type,
-                        rel.source_work_curie or rel.source_work_id,
-                        rel.target_work_curie or rel.target_work_id,
-                    )
-            if bound_rels:
-                self.insert_work_relationships_batch(bound_rels)
+            # 9. Mediums of Performance
+            if mediums_of_performance:
+                bound_mops: list[MediumOfPerformance] = []
+                for mop in mediums_of_performance:
+                    if not mop.work_id or mop.work_id <= 0:
+                        cand_id = _resolve(work_key_to_id, mop.work_curie)
+                        if cand_id is None and len(works) == 1:
+                            cand_id = works[0].id
+                        if cand_id:
+                            mop.work_id = cand_id
+                    if mop.work_id and mop.work_id > 0:
+                        bound_mops.append(mop)
+                    else:
+                        logger.warning(
+                            "Dropping medium of performance with unbound work: curie=%s uri=%s label=%s",
+                            mop.work_curie,
+                            mop.medium_uri,
+                            mop.label,
+                        )
+                if bound_mops:
+                    self.insert_medium_of_performance_batch(bound_mops, conn=c, chunk_size=chunk_size)
 
-        # 9. Mediums of Performance
-        if mediums_of_performance:
-            bound_mops: list[MediumOfPerformance] = []
-            for mop in mediums_of_performance:
-                if not mop.work_id or mop.work_id <= 0:
-                    cand_id = _resolve(work_key_to_id, mop.work_curie)
-                    if cand_id is None and len(works) == 1:
-                        cand_id = works[0].id
-                    if cand_id:
-                        mop.work_id = cand_id
-                if mop.work_id and mop.work_id > 0:
-                    bound_mops.append(mop)
-                else:
-                    logger.warning(
-                        "Dropping medium of performance with unbound work: curie=%s uri=%s label=%s",
-                        mop.work_curie,
-                        mop.medium_uri,
-                        mop.label,
-                    )
-            if bound_mops:
-                self.insert_medium_of_performance_batch(bound_mops)
+            # 10. Contributions
+            if contributions:
+                valid_contribs: list[ContributionEntity] = []
+                for c_item in contributions:
+                    if (not c_item.entity_id or c_item.entity_id <= 0) and c_item.entity_curie:
+                        if c_item.entity_type == "work":
+                            c_item.entity_id = _resolve(work_key_to_id, c_item.entity_curie) or 0
+                        elif c_item.entity_type == "expression":
+                            c_item.entity_id = _resolve(expr_key_to_id, c_item.entity_curie) or 0
+                        elif c_item.entity_type == "manifestation":
+                            c_item.entity_id = _resolve(manif_key_to_id, c_item.entity_curie) or 0
+                    if (not c_item.agent_id or c_item.agent_id <= 0) and c_item.agent_curie:
+                        c_item.agent_id = _resolve(agent_key_to_id, c_item.agent_curie) or 0
+                    if not c_item.entity_id or c_item.entity_id <= 0:
+                        if c_item.entity_type == "work" and works:
+                            c_item.entity_id = works[0].id
+                        elif c_item.entity_type == "expression" and expressions:
+                            c_item.entity_id = expressions[0].id
+                        elif c_item.entity_type == "manifestation" and manifestations:
+                            c_item.entity_id = manifestations[0].id
+                    if not c_item.agent_id or c_item.agent_id <= 0:
+                        if agents:
+                            c_item.agent_id = agents[0].id
+                    if c_item.agent_id and c_item.agent_id > 0 and c_item.entity_id and c_item.entity_id > 0:
+                        valid_contribs.append(c_item)
+                if valid_contribs:
+                    self.insert_contributions_batch(valid_contribs, conn=c, chunk_size=chunk_size)
 
-        # 10. Contributions
-        if contributions:
-            valid_contribs: list[ContributionEntity] = []
-            for c in contributions:
-                if (not c.entity_id or c.entity_id <= 0) and c.entity_curie:
-                    if c.entity_type == "work":
-                        c.entity_id = _resolve(work_key_to_id, c.entity_curie) or 0
-                    elif c.entity_type == "expression":
-                        c.entity_id = _resolve(expr_key_to_id, c.entity_curie) or 0
-                    elif c.entity_type == "manifestation":
-                        c.entity_id = _resolve(manif_key_to_id, c.entity_curie) or 0
-                if (not c.agent_id or c.agent_id <= 0) and c.agent_curie:
-                    c.agent_id = _resolve(agent_key_to_id, c.agent_curie) or 0
-                if not c.entity_id or c.entity_id <= 0:
-                    if c.entity_type == "work" and works:
-                        c.entity_id = works[0].id
-                    elif c.entity_type == "expression" and expressions:
-                        c.entity_id = expressions[0].id
-                    elif c.entity_type == "manifestation" and manifestations:
-                        c.entity_id = manifestations[0].id
-                if not c.agent_id or c.agent_id <= 0:
-                    if agents:
-                        c.agent_id = agents[0].id
-                if c.agent_id and c.agent_id > 0 and c.entity_id and c.entity_id > 0:
-                    valid_contribs.append(c)
-            if valid_contribs:
-                self.insert_contributions_batch(valid_contribs)
+            # 11. Derived domain keys
+            if entity_keys:
+                bound_keys: list[EntityKey] = []
+                for ek in entity_keys:
+                    if (not ek.entity_id or ek.entity_id <= 0) and ek.entity_curie:
+                        if ek.entity_type == "work":
+                            ek.entity_id = _resolve(work_key_to_id, ek.entity_curie) or 0
+                        elif ek.entity_type == "expression":
+                            ek.entity_id = _resolve(expr_key_to_id, ek.entity_curie) or 0
+                        elif ek.entity_type == "manifestation":
+                            ek.entity_id = _resolve(manif_key_to_id, ek.entity_curie) or 0
+                        elif ek.entity_type == "agent":
+                            ek.entity_id = _resolve(agent_key_to_id, ek.entity_curie) or 0
+                    if not ek.entity_id or ek.entity_id <= 0:
+                        if ek.entity_type == "manifestation" and manifestations:
+                            ek.entity_id = manifestations[0].id or 0
+                        elif ek.entity_type == "work" and works:
+                            ek.entity_id = works[0].id or 0
+                        elif ek.entity_type == "expression" and expressions:
+                            ek.entity_id = expressions[0].id or 0
+                    if ek.entity_id and ek.entity_id > 0:
+                        bound_keys.append(ek)
+                if bound_keys:
+                    self.insert_entity_keys_batch(bound_keys, conn=c, chunk_size=chunk_size)
 
-        # 11. Derived domain keys
-        if entity_keys:
-            bound_keys: list[EntityKey] = []
-            for ek in entity_keys:
-                if (not ek.entity_id or ek.entity_id <= 0) and ek.entity_curie:
-                    if ek.entity_type == "work":
-                        ek.entity_id = _resolve(work_key_to_id, ek.entity_curie) or 0
-                    elif ek.entity_type == "expression":
-                        ek.entity_id = _resolve(expr_key_to_id, ek.entity_curie) or 0
-                    elif ek.entity_type == "manifestation":
-                        ek.entity_id = _resolve(manif_key_to_id, ek.entity_curie) or 0
-                    elif ek.entity_type == "agent":
-                        ek.entity_id = _resolve(agent_key_to_id, ek.entity_curie) or 0
-                if not ek.entity_id or ek.entity_id <= 0:
-                    if ek.entity_type == "manifestation" and manifestations:
-                        ek.entity_id = manifestations[0].id or 0
-                    elif ek.entity_type == "work" and works:
-                        ek.entity_id = works[0].id or 0
-                    elif ek.entity_type == "expression" and expressions:
-                        ek.entity_id = expressions[0].id or 0
-                if ek.entity_id and ek.entity_id > 0:
-                    bound_keys.append(ek)
-            if bound_keys:
-                self.insert_entity_keys_batch(bound_keys)
+            # 12. Entity subjects
+            if entity_subjects:
+                bound_subjects: list[EntitySubject] = []
+                for subj in entity_subjects:
+                    if (not subj.entity_id or subj.entity_id <= 0) and subj.entity_curie:
+                        if subj.entity_type == "work":
+                            subj.entity_id = int(_resolve(work_key_to_id, subj.entity_curie) or 0)
+                        elif subj.entity_type == "expression":
+                            subj.entity_id = int(_resolve(expr_key_to_id, subj.entity_curie) or 0)
+                        elif subj.entity_type == "manifestation":
+                            subj.entity_id = int(_resolve(manif_key_to_id, subj.entity_curie) or 0)
+                        elif subj.entity_type == "agent":
+                            subj.entity_id = int(_resolve(agent_key_to_id, subj.entity_curie) or 0)
+                    if not subj.entity_id or subj.entity_id <= 0:
+                        if subj.entity_type == "work" and works and works[0].id:
+                            subj.entity_id = int(works[0].id)
+                        elif subj.entity_type == "expression" and expressions and expressions[0].id:
+                            subj.entity_id = int(expressions[0].id)
+                        elif (
+                            subj.entity_type == "manifestation"
+                            and manifestations
+                            and manifestations[0].id
+                        ):
+                            subj.entity_id = int(manifestations[0].id)
+                        elif subj.entity_type == "agent" and agents and agents[0].id:
+                            subj.entity_id = int(agents[0].id)
+                    if subj.entity_id and subj.entity_id > 0:
+                        bound_subjects.append(subj)
+                if bound_subjects:
+                    self.insert_entity_subjects_batch(bound_subjects, conn=c, chunk_size=chunk_size)
 
-        # 12. Entity subjects
-        if entity_subjects:
-            bound_subjects: list[EntitySubject] = []
-            for subj in entity_subjects:
-                if (not subj.entity_id or subj.entity_id <= 0) and subj.entity_curie:
-                    if subj.entity_type == "work":
-                        subj.entity_id = int(_resolve(work_key_to_id, subj.entity_curie) or 0)
-                    elif subj.entity_type == "expression":
-                        subj.entity_id = int(_resolve(expr_key_to_id, subj.entity_curie) or 0)
-                    elif subj.entity_type == "manifestation":
-                        subj.entity_id = int(_resolve(manif_key_to_id, subj.entity_curie) or 0)
-                    elif subj.entity_type == "agent":
-                        subj.entity_id = int(_resolve(agent_key_to_id, subj.entity_curie) or 0)
-                if not subj.entity_id or subj.entity_id <= 0:
-                    if subj.entity_type == "work" and works and works[0].id:
-                        subj.entity_id = int(works[0].id)
-                    elif subj.entity_type == "expression" and expressions and expressions[0].id:
-                        subj.entity_id = int(expressions[0].id)
-                    elif (
-                        subj.entity_type == "manifestation"
-                        and manifestations
-                        and manifestations[0].id
-                    ):
-                        subj.entity_id = int(manifestations[0].id)
-                    elif subj.entity_type == "agent" and agents and agents[0].id:
-                        subj.entity_id = int(agents[0].id)
-                if subj.entity_id and subj.entity_id > 0:
-                    bound_subjects.append(subj)
-            if bound_subjects:
-                self.insert_entity_subjects_batch(bound_subjects)
+        if conn is not None:
+            _run_in_txn(conn)
+        else:
+            with self.get_connection() as c:
+                _run_in_txn(c)
 
     # -----------------------------------------------------------------------
     # Lookups & Retrievals

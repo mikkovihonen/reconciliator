@@ -1,7 +1,11 @@
 """Tests for OAI-PMH checkpointing, resumption tokens, and dual-routing WEMI ingestion."""
 
+from __future__ import annotations
+
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any, AsyncIterator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from reconciliator.config import OAIIngestConfig
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester
@@ -10,8 +14,15 @@ from reconciliator.models import HarvestState
 from reconciliator.repository import WEMIRepository
 
 
+async def _collect(gen: AsyncIterator[Any]) -> list[Any]:
+    items = []
+    async for item in gen:
+        items.append(item)
+    return items
+
+
 def test_harvest_partition_resumption_token_callback():
-    """Verify that harvest_partition invokes on_resumption_token when resumptionToken is present and when exhausted."""
+    """Verify that harvest_partition extracts and yields resumptionToken on page boundaries and exhausts properly."""
     page_1_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
     <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
       <ListRecords>
@@ -47,11 +58,6 @@ def test_harvest_partition_resumption_token_callback():
 
     harvester = OAIPMHHarvester(endpoint_url="http://example.org/oai", request_delay=0.0)
 
-    tokens_captured: list[str | None] = []
-
-    def on_token(t: str | None) -> None:
-        tokens_captured.append(t)
-
     resp1 = MagicMock()
     resp1.content = page_1_xml
     resp1.raise_for_status = MagicMock()
@@ -60,19 +66,21 @@ def test_harvest_partition_resumption_token_callback():
     resp2.content = page_2_xml
     resp2.raise_for_status = MagicMock()
 
-    with patch("httpx2.Client.get", side_effect=[resp1, resp2]) as mock_get:
-        records = list(
-            harvester.harvest_partition(
-                from_date="2026-01-01",
-                until_date="2026-01-31",
-                on_resumption_token=on_token,
+    with patch("httpx2.AsyncClient.get", side_effect=[resp1, resp2]) as mock_get:
+        pages = asyncio.run(
+            _collect(
+                harvester.harvest_partition(
+                    from_date="2026-01-01",
+                    until_date="2026-01-31",
+                )
             )
         )
 
-        assert len(records) == 2
-        assert len(tokens_captured) == 2
-        assert tokens_captured[0] == "tok_page_2"
-        assert tokens_captured[1] is None
+        assert len(pages) == 2
+        page1_bytes, tok1 = pages[0]
+        page2_bytes, tok2 = pages[1]
+        assert tok1 == "tok_page_2"
+        assert tok2 is None
         assert mock_get.call_count == 2
         # Check that second request sent resumptionToken
         second_call_params = mock_get.call_args_list[1][1]["params"]
@@ -169,11 +177,13 @@ def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
         batch_size=1,
     )
 
-    with patch("httpx2.Client.get", return_value=mock_resp):
-        total_a = ingest_oai_pipeline(
-            source_name="target_src",
-            config=target_config,
-            store=repo,
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        total_a = asyncio.run(
+            ingest_oai_pipeline(
+                source_name="target_src",
+                config=target_config,
+                store=repo,
+            )
         )
         assert total_a == 1
 
@@ -200,11 +210,13 @@ def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
         batch_size=1,
     )
 
-    with patch("httpx2.Client.get", return_value=mock_resp):
-        total_b = ingest_oai_pipeline(
-            source_name="melinda_src",
-            config=auth_config,
-            store=repo,
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        total_b = asyncio.run(
+            ingest_oai_pipeline(
+                source_name="melinda_src",
+                config=auth_config,
+                store=repo,
+            )
         )
         assert total_b == 1
 
@@ -218,6 +230,7 @@ def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
     # did not. `RecordLoader.finalise` now applies it to every loader's output.
     assert w.title == "Testikirja"
     assert w.work_type == "text"
+
     assert w.original_language == "fin"
 
     m = repo.get_manifestation_by_source("melinda_src", "FI-MEL-101")
@@ -228,3 +241,6 @@ def test_ingest_oai_pipeline_single_routing(tmp_path: Path):
     w_ckpt = repo.get_harvest_state("melinda_src")
     assert w_ckpt is not None
     assert w_ckpt.status == "completed"
+
+    # Source registered as authoritative
+    assert repo.get_sources()["melinda_src"] is True

@@ -1,17 +1,16 @@
-"""Multithreaded OAI-PMH harvester with temporal partitioning and resumptionToken handling."""
+"""Asynchronous OAI-PMH harvester with temporal partitioning and resumptionToken pipelining."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
-from collections.abc import Callable
+import re
 from datetime import datetime, timedelta
-from typing import Iterator, Optional
+from typing import AsyncIterator, Optional
 
 import httpx2
 from lxml import etree
 
-from reconciliator.progress import ProgressTracker
 from reconciliator.version import get_default_user_agent
 
 logger = logging.getLogger(__name__)
@@ -20,6 +19,15 @@ OAI_NS = {
     "oai": "http://www.openarchives.org/OAI/2.0/",
     "marc": "http://www.loc.gov/MARC21/slim",
 }
+
+_RESUMPTION_TOKEN_RE = re.compile(
+    rb"<(?:\w+:)?resumptionToken[^>]*>([^<]+)</(?:\w+:)?resumptionToken>",
+    re.IGNORECASE,
+)
+_ERROR_RE = re.compile(
+    rb"<(?:\w+:)?error\s+[^>]*code=[\"']([^\"']+)[\"'][^>]*>(.*?)</(?:\w+:)?error>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def partition_date_range(
@@ -47,8 +55,28 @@ def partition_date_range(
     return slices
 
 
+def extract_page_resumption_token(page_bytes: bytes) -> Optional[str]:
+    """Fast extraction of resumptionToken from raw OAI-PMH XML response bytes."""
+    match = _RESUMPTION_TOKEN_RE.search(page_bytes)
+    if match:
+        token = match.group(1).strip()
+        if token:
+            return token.decode("utf-8", errors="replace")
+    return None
+
+
+def extract_page_error(page_bytes: bytes) -> Optional[tuple[str, str]]:
+    """Fast extraction of OAI-PMH error code and message from response bytes."""
+    match = _ERROR_RE.search(page_bytes)
+    if match:
+        code = match.group(1).decode("utf-8", errors="replace").strip()
+        msg = match.group(2).decode("utf-8", errors="replace").strip()
+        return code, msg
+    return None
+
+
 class OAIPMHHarvester:
-    """Client for harvesting MARCXML records from OAI-PMH endpoints."""
+    """Asynchronous client for harvesting MARCXML records from OAI-PMH endpoints."""
 
     def __init__(
         self,
@@ -59,7 +87,9 @@ class OAIPMHHarvester:
         user_agent: Optional[str] = None,
         max_retries: int = 5,
         base_delay: float = 1.0,
-        request_delay: float = 0.1,
+        request_delay: float = 0.05,
+        http2: bool = True,
+        prefetch: bool = True,
     ) -> None:
         self.endpoint_url = endpoint_url
         self.metadata_prefix = metadata_prefix
@@ -69,23 +99,24 @@ class OAIPMHHarvester:
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.request_delay = request_delay
+        self.http2 = http2
+        self.prefetch = prefetch
 
-    def _request_with_retry(
+    async def _request_with_retry(
         self,
-        client: httpx2.Client,
+        client: httpx2.AsyncClient,
         params: dict[str, str],
     ) -> httpx2.Response:
-        """Execute an HTTP GET with exponential backoff on transient failures."""
+        """Execute an asynchronous HTTP GET with exponential backoff on transient failures."""
         for attempt in range(self.max_retries):
             try:
-                resp = client.get(self.endpoint_url, params=params)
+                resp = await client.get(self.endpoint_url, params=params)
                 resp.raise_for_status()
                 return resp
             except (httpx2.HTTPStatusError, httpx2.TransportError) as exc:
                 if attempt == self.max_retries - 1:
                     raise
 
-                # Respect Retry-After header if present
                 retry_after = getattr(
                     getattr(exc, "response", None),
                     "headers",
@@ -103,22 +134,20 @@ class OAIPMHHarvester:
                     delay,
                     exc,
                 )
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
-        # Unreachable, but satisfies type checker
-        raise RuntimeError("Retry loop exited without returning or raising")  # pragma: no cover
+        raise RuntimeError("Retry loop exited without returning or raising")
 
-    def get_earliest_datestamp(self) -> Optional[str]:
+    async def get_earliest_datestamp(self) -> Optional[str]:
         """Discover the repository earliestDatestamp via OAI-PMH Identify verb."""
         try:
-            client = httpx2.Client(
+            async with httpx2.AsyncClient(
                 timeout=min(self.timeout, 10.0),
                 headers={"User-Agent": self.user_agent},
                 follow_redirects=True,
-            )
-            try:
-                resp = client.get(self.endpoint_url, params={"verb": "Identify"})
-                resp.raise_for_status()
+                http2=self.http2,
+            ) as client:
+                resp = await self._request_with_retry(client, {"verb": "Identify"})
                 root = etree.fromstring(resp.content)
                 elem = root.find(".//oai:earliestDatestamp", OAI_NS)
                 if elem is None:
@@ -130,27 +159,22 @@ class OAIPMHHarvester:
                 if elem is not None and elem.text and elem.text.strip():
                     raw = elem.text.strip()
                     return str(raw[:10])
-            finally:
-                client.close()
         except Exception as exc:
             logger.debug("Failed to query OAI-PMH Identify for earliestDatestamp: %s", exc)
         return None
 
-    def harvest_partition(
+    async def harvest_partition(
         self,
         from_date: Optional[str] = None,
         until_date: Optional[str] = None,
         resumption_token: Optional[str] = None,
-        tracker: Optional[ProgressTracker] = None,
-        on_record_harvested: Optional[Callable[[], None]] = None,
-        on_resumption_token: Optional[Callable[[Optional[str]], None]] = None,
-    ) -> Iterator[etree._Element]:
-        """Harvest records for a given date slice, following resumptionTokens."""
-        client = httpx2.Client(
-            timeout=self.timeout,
-            headers={"User-Agent": self.user_agent},
-            follow_redirects=True,
-        )
+        semaphore: Optional[asyncio.Semaphore] = None,
+    ) -> AsyncIterator[tuple[bytes, Optional[str]]]:
+        """Asynchronously harvest raw XML pages for a date slice, yielding (page_bytes, next_token).
+
+        If prefetch is enabled, the next page is fetched in the background while the
+        current page is yielded and consumed.
+        """
         params: dict[str, str] = {
             "verb": "ListRecords",
             "metadataPrefix": self.metadata_prefix,
@@ -162,98 +186,63 @@ class OAIPMHHarvester:
         if until_date:
             params["until"] = until_date
 
-        resumption_token = resumption_token
+        current_token = resumption_token
 
-        try:
-            while True:
-                if resumption_token:
-                    req_params = {
-                        "verb": "ListRecords",
-                        "resumptionToken": resumption_token,
-                    }
+        async with httpx2.AsyncClient(
+            timeout=self.timeout,
+            headers={"User-Agent": self.user_agent},
+            follow_redirects=True,
+            http2=self.http2,
+        ) as client:
+
+            async def _fetch(tok: Optional[str]) -> bytes:
+                req_params = (
+                    {"verb": "ListRecords", "resumptionToken": tok}
+                    if tok
+                    else params
+                )
+                if semaphore:
+                    async with semaphore:
+                        resp = await self._request_with_retry(client, req_params)
                 else:
-                    req_params = params
+                    resp = await self._request_with_retry(client, req_params)
+                return resp.content
 
-                resp = self._request_with_retry(client, req_params)
+            prefetch_task: Optional[asyncio.Task[bytes]] = None
 
-                root = etree.fromstring(resp.content)
+            while True:
+                if prefetch_task is not None:
+                    page_content = await prefetch_task
+                    prefetch_task = None
+                else:
+                    page_content = await _fetch(current_token)
 
-                # Check for OAI-PMH error response (e.g. noRecordsMatch for empty date partitions)
-                error_elem = root.find(".//oai:error", OAI_NS)
-                if error_elem is None:
-                    error_elem = root.find(".//error")
-                if error_elem is not None:
-                    code = error_elem.get("code")
+                error = extract_page_error(page_content)
+                if error:
+                    code, msg = error
                     if code == "noRecordsMatch":
                         logger.debug("No records match partition %s - %s", from_date, until_date)
-                        break
-                    err_msg = error_elem.text or code or "Unknown error"
-                    logger.warning(
-                        "OAI-PMH response error for partition %s - %s: %s",
-                        from_date,
-                        until_date,
-                        err_msg,
-                    )
-                    break
-
-                records = root.findall(".//oai:record", OAI_NS)
-                if not records:
-                    records = root.findall(".//record")
-
-                for rec in records:
-                    hdr = rec.find("oai:header", OAI_NS)
-                    if hdr is None:
-                        hdr = rec.find(".//header")
-                    if hdr is not None and hdr.get("status") == "deleted":
-                        continue
-
-                    header_id: Optional[str] = None
-                    if hdr is not None:
-                        id_el = hdr.find("oai:identifier", OAI_NS)
-                        if id_el is None:
-                            id_el = hdr.find(".//identifier")
-                        if id_el is not None and id_el.text:
-                            header_id = id_el.text.strip()
-
-                    metadata_elem = rec.find("oai:metadata", OAI_NS)
-                    target_elem: etree._Element
-                    if metadata_elem is not None and len(metadata_elem) > 0:
-                        target_elem = metadata_elem[0]
                     else:
-                        marc_rec = rec.find(".//marc:record", OAI_NS)
-                        if marc_rec is not None:
-                            target_elem = marc_rec
-                        else:
-                            target_elem = rec
-
-                    if header_id:
-                        target_elem.set("_oai_identifier", header_id)
-
-                    yield target_elem
-
-                    if on_record_harvested:
-                        on_record_harvested()
-                    elif tracker:
-                        tracker.update_progress(items_increment=1)
-
-                # Check resumptionToken. The callback fires only at a page boundary,
-                # after every record on the page has been yielded, so a consumer may
-                # treat the token as "everything before this has been delivered".
-                token_elem = root.find(".//oai:resumptionToken", OAI_NS)
-                if token_elem is None:
-                    token_elem = root.find(".//resumptionToken")
-
-                if token_elem is not None and token_elem.text and token_elem.text.strip():
-                    resumption_token = token_elem.text.strip()
-                    if on_resumption_token:
-                        on_resumption_token(resumption_token)
-                else:
-                    if on_resumption_token:
-                        on_resumption_token(None)
+                        logger.warning(
+                            "OAI-PMH response error for partition %s - %s: %s (%s)",
+                            from_date,
+                            until_date,
+                            msg,
+                            code,
+                        )
                     break
 
-                # Rate limiting between pagination requests
+                next_token = extract_page_resumption_token(page_content)
+
+                # Prefetch next page concurrently if token is available
+                if next_token and self.prefetch:
+                    prefetch_task = asyncio.create_task(_fetch(next_token))
+
+                yield page_content, next_token
+
+                current_token = next_token
+                if not current_token:
+                    break
+
                 if self.request_delay > 0:
-                    time.sleep(self.request_delay)
-        finally:
-            client.close()
+                    await asyncio.sleep(self.request_delay)

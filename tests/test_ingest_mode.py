@@ -8,6 +8,7 @@ operation. Both behaviours are wanted, so it is a per-source setting.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -178,7 +179,11 @@ def test_replace_clears_before_a_fresh_harvest(tmp_path: Path):
 
     endpoint = FakeEndpoint(pages=[["N1", "N2"]])
     with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint):
-        ingest_oai_pipeline(source_name="src", config=oai_config(ingest_mode="replace"), store=repo)
+        asyncio.run(
+            ingest_oai_pipeline(
+                source_name="src", config=oai_config(ingest_mode="replace"), store=repo
+            )
+        )
 
     ids = stored_ids(repo)
     assert "OLD1" not in ids, "replace must remove rows the source wrote before"
@@ -191,8 +196,10 @@ def test_accumulate_keeps_earlier_rows(tmp_path: Path):
 
     endpoint = FakeEndpoint(pages=[["N1"]])
     with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint):
-        ingest_oai_pipeline(
-            source_name="src", config=oai_config(ingest_mode="accumulate"), store=repo
+        asyncio.run(
+            ingest_oai_pipeline(
+                source_name="src", config=oai_config(ingest_mode="accumulate"), store=repo
+            )
         )
 
     assert {"OLD1", "N1"} <= set(stored_ids(repo))
@@ -219,8 +226,13 @@ def test_replace_does_not_clear_when_resuming_an_interrupted_harvest(tmp_path: P
 
     endpoint = FakeEndpoint(pages=[["A1"], ["B1"]])
     with patch("reconciliator.harvest.oai_pmh.OAIPMHHarvester.harvest_partition", new=endpoint):
-        ingest_oai_pipeline(
-            source_name="src", config=oai_config(ingest_mode="replace"), store=repo, resume=True
+        asyncio.run(
+            ingest_oai_pipeline(
+                source_name="src",
+                config=oai_config(ingest_mode="replace"),
+                store=repo,
+                resume=True,
+            )
         )
 
     assert "FROM_EARLIER_SLICE" in stored_ids(repo)

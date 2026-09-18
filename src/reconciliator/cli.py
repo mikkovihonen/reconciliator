@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -745,6 +746,12 @@ def ingest_oai_cmd(
     slice_days: Optional[int] = typer.Option(
         None, "--slice-days", help="Override the width in days of each concurrent date slice"
     ),
+    max_concurrent_requests: Optional[int] = typer.Option(
+        None, "--max-concurrent-requests", help="Override maximum concurrent OAI requests"
+    ),
+    prefetch: Optional[bool] = typer.Option(
+        None, "--prefetch/--no-prefetch", help="Override background page prefetching"
+    ),
     skip_existing: bool = typer.Option(
         False,
         "--skip-existing",
@@ -806,6 +813,10 @@ def ingest_oai_cmd(
             src_cfg.workers = workers
         if isinstance(slice_days, int):
             src_cfg.slice_days = slice_days
+        if isinstance(max_concurrent_requests, int):
+            src_cfg.max_concurrent_requests = max_concurrent_requests
+        if prefetch is not None:
+            src_cfg.prefetch = prefetch
 
         tracker = ProgressTracker(
             db_path=cfg.storage.database_url,
@@ -816,20 +827,22 @@ def ingest_oai_cmd(
 
         console.print(f"[cyan]Ingesting authority records from source '{src_name}'...[/cyan]")
         wemi_repo = _wemi_repo(cfg)
-        total = ingest_oai_pipeline(
-            source_name=src_name,
-            config=src_cfg,
-            store=wemi_repo,
-            tracker=tracker,
-            skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-            relator_mappings=relator_mappings,
-            vocab_store=vocab_store,
-            strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
-            isbd_punctuation=cfg.record_normalization.isbd_punctuation,
-            resume=not (bool(restart) if isinstance(restart, bool) else False),
-            constituents_default_profile=cfg.constituents.profile,
-            constituents_default_mode=cfg.constituents.mode,
-            config_dir=cfg.config_dir,
+        total = asyncio.run(
+            ingest_oai_pipeline(
+                source_name=src_name,
+                config=src_cfg,
+                store=wemi_repo,
+                tracker=tracker,
+                skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
+                relator_mappings=relator_mappings,
+                vocab_store=vocab_store,
+                strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
+                isbd_punctuation=cfg.record_normalization.isbd_punctuation,
+                resume=not (bool(restart) if isinstance(restart, bool) else False),
+                constituents_default_profile=cfg.constituents.profile,
+                constituents_default_mode=cfg.constituents.mode,
+                config_dir=cfg.config_dir,
+            )
         )
         console.print(
             f"[green]Successfully ingested {total} records from source '{src_name}'.[/green]"

@@ -1,17 +1,15 @@
-"""OAI-PMH, ResourceSync, and MARCXML ingestion into WEMI storage.
+"""AsyncIO and ProcessPool hybrid OAI-PMH, ResourceSync, and MARCXML ingestion into WEMI storage.
 
 Harvesting is decoupled from database writes and checkpointed to harvest_state so
-an interrupted run resumes where it stopped. Records are not embedded here; vector
-indices are built separately by build-index.
+an interrupted run resumes where it stopped.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import queue
-import threading
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -22,8 +20,7 @@ from rdflib import Graph
 from reconciliator.config import OAIIngestConfig
 from reconciliator.constituents import resolve_for_source
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
-from reconciliator.harvest.resourcesync import ResourceSyncHarvester
-from reconciliator.loaders.base import LoadContext
+from reconciliator.loaders.base import DecomposedRecord, LoadContext
 from reconciliator.loaders.bibframe import (
     get_profile,
     stream_bibframe_records,
@@ -38,155 +35,34 @@ from reconciliator.repository import WEMIRepository
 
 logger = logging.getLogger(__name__)
 
+OAI_NS = {
+    "oai": "http://www.openarchives.org/OAI/2.0/",
+    "marc": "http://www.loc.gov/MARC21/slim",
+}
 
-def stream_oai_raw_elements(
-    source_name: str,
-    config: OAIIngestConfig,
-    initial_resumption_token: Optional[str] = None,
-    tracker: Optional[ProgressTracker] = None,
-    on_record_harvested: Optional[Callable[[], None]] = None,
-    on_resumption_token: Optional[Callable[[Optional[str]], None]] = None,
-    from_date: Optional[str] = None,
-    until_date: Optional[str] = None,
-) -> Iterator[Any]:
-    """Yield raw MARCXML etree elements or RDF graphs from local file, ResourceSync, or OAI-PMH harvest.
-
-    ``from_date`` / ``until_date`` override the configured harvest window, so a
-    caller can drive one date slice of a partitioned harvest.
-    """
-    if config.source_type == "file":
-        if not config.input_path:
-            raise ValueError(
-                f"input_path must be specified for source '{source_name}' when source_type is 'file'"
-            )
-        if config.format == "bibframe":
-            profile = get_profile(config.schema_profile) if config.schema_profile else None
-            for _raw_rec, _offset, orig_doc in stream_bibframe_records(
-                config.input_path, profile=profile, source=source_name
-            ):
-                # The RDFLib loader yields (graph, nodes); the JSON-LD streamer
-                # yields a plain dict. Unwrap the tuple before deciding.
-                if isinstance(orig_doc, tuple) and orig_doc:
-                    orig_doc = orig_doc[0]
-                if isinstance(orig_doc, Graph):
-                    yield orig_doc
-                else:
-                    g = Graph()
-                    import orjson
-
-                    g.parse(data=orjson.dumps(orig_doc).decode("utf-8"), format="json-ld")
-                    yield g
-        else:
-            path = str(config.input_path)
-            if path.endswith(".gz"):
-                import gzip
-
-                f_in = gzip.open(path, "rb")
-            else:
-                f_in = open(path, "rb")
-            try:
-                context = etree.iterparse(f_in, events=("end",))
-                for _, elem in context:
-                    tag = elem.tag
-                    if tag.endswith("record") and not tag.endswith("collection"):
-                        yield elem
-                        elem.clear()
-            finally:
-                f_in.close()
-        return
-
-    if config.source_type == "resourcesync":
-        url = config.resourcesync_url or config.oai_url
-        if not url:
-            raise ValueError(
-                f"resourcesync_url or oai_url must be specified for source '{source_name}' when source_type is 'resourcesync'"
-            )
-        rs_harvester = ResourceSyncHarvester(
-            endpoint_url=url,
-            timeout=config.timeout,
-            request_delay=config.request_delay,
-        )
-        for item, payload in rs_harvester.harvest_contents():
-            if on_record_harvested is not None:
-                on_record_harvested()
-            elif tracker is not None:
-                tracker.update_progress(items_increment=1)
-
-            g = Graph()
-            fmt = "turtle"
-            if item.mime_type:
-                if "json" in item.mime_type:
-                    fmt = "json-ld"
-                elif "xml" in item.mime_type or "rdf" in item.mime_type:
-                    fmt = "xml"
-            elif item.loc.endswith(".json") or item.loc.endswith(".jsonld"):
-                fmt = "json-ld"
-            elif item.loc.endswith(".rdf") or item.loc.endswith(".xml"):
-                fmt = "xml"
-
-            try:
-                g.parse(data=payload.decode("utf-8", errors="replace"), format=fmt)
-                yield g
-            except Exception as exc:
-                logger.warning("Failed to parse ResourceSync payload from %s: %s", item.loc, exc)
-        return
-
-    # OAI-PMH source
-    if not config.oai_url:
-        raise ValueError(
-            f"oai_url must be specified for source '{source_name}' when source_type is 'oai'"
-        )
-
-    harvester = OAIPMHHarvester(
-        endpoint_url=config.oai_url,
-        metadata_prefix=config.metadata_prefix,
-        set_spec=config.set_spec,
-        request_delay=config.request_delay,
-        timeout=config.timeout,
-    )
-
-    for elem in harvester.harvest_partition(
-        from_date=from_date if from_date is not None else config.from_date,
-        until_date=until_date if until_date is not None else config.until_date,
-        resumption_token=initial_resumption_token,
-        tracker=tracker if on_record_harvested is None else None,
-        on_record_harvested=on_record_harvested,
-        on_resumption_token=on_resumption_token,
-    ):
-        if config.format == "bibframe":
-            raw_xml = etree.tostring(elem, encoding="utf-8")
-            g = Graph()
-            g.parse(data=raw_xml.decode("utf-8"), format="xml")
-            yield g
-        else:
-            yield elem
+_worker_vocab_store: Optional[Any] = None
 
 
-def _raw_source_id(item: Any, config: OAIIngestConfig) -> Optional[str]:
-    """Best-effort source_id of a harvested record, for skip-existing filtering.
+def _get_worker_vocab_store(db_url: Optional[str]) -> Optional[Any]:
+    global _worker_vocab_store
+    if db_url and _worker_vocab_store is None:
+        try:
+            from reconciliator.vocab_store import VocabStore
 
-    RDF graphs return None: their identifiers live in the graph rather than a
-    control field, so they are always ingested rather than skipped.
-    """
-    if isinstance(item, Graph):
-        return None
-    try:
-        return extract_marc_source_id(item, id_source=config.id_source)
-    except Exception:
-        return None
+            _worker_vocab_store = VocabStore(db_url)
+        except Exception:
+            _worker_vocab_store = None
+    return _worker_vocab_store
 
 
 class _WEMIBatchAccumulator:
-    """Stages decomposed WEMI entities until a batch is ready to hand to the writer.
-
-    One accumulator per producer thread; batches are detached with take() and
-    persisted by write_wemi_batch() on the consumer thread.
-    """
+    """Stages decomposed WEMI entities until a batch is ready to hand to the writer."""
 
     def __init__(
         self,
         source_name: str,
-        config: OAIIngestConfig,
+        id_source: str = "auto",
+        include_items: bool = False,
         relator_mappings: Optional[dict[str, str]] = None,
         vocab_store: Optional[Any] = None,
         strip_isbd_punctuation: bool = True,
@@ -194,15 +70,13 @@ class _WEMIBatchAccumulator:
         constituents: Optional[Any] = None,
     ) -> None:
         self.source_name = source_name
+        self.id_source = id_source
+        self.include_items = include_items
         self.strip_isbd_punctuation = strip_isbd_punctuation
         self.isbd_punctuation = isbd_punctuation
-        self.config = config
         self.relator_mappings = relator_mappings
         self.vocab_store = vocab_store
         self.constituents = constituents
-        # Harvested records staged since the last take(). Counted separately from
-        # the entity lists because one record can decompose into several agents,
-        # and the resume watermark has to advance in records, not entities.
         self.staged_records = 0
 
         self.works: list[Any] = []
@@ -216,22 +90,14 @@ class _WEMIBatchAccumulator:
         self.associations: list[Any] = []
         self.mediums: list[Any] = []
         self.entity_keys: list[Any] = []
+        self.entity_subjects: list[Any] = []
 
     @property
     def pending(self) -> int:
-        """Number of staged records awaiting a flush."""
         return self.staged_records
 
-    def add(self, item: Any) -> None:
-        """Decompose one harvested item into the staging batch.
-
-        Dispatch is the loader registry's job now. This used to be an
-        isinstance/leader-test chain that called three decomposers with three
-        different argument lists, which is how the BibFrame path came to receive
-        none of the normalisation options the MARC path does.
-        """
+    def add_record(self, record: DecomposedRecord) -> None:
         self.staged_records += 1
-        record = load_record(item, self._load_context())
         self.works.extend(record.works)
         self.expressions.extend(record.expressions)
         self.manifestations.extend(record.manifestations)
@@ -243,23 +109,24 @@ class _WEMIBatchAccumulator:
         self.associations.extend(record.associations)
         self.mediums.extend(record.mediums)
         self.entity_keys.extend(record.entity_keys)
+        self.entity_subjects.extend(record.entity_subjects)
 
-    def _load_context(self) -> LoadContext:
-        """The options every loader receives, whatever the format."""
-        return LoadContext(
+    def add(self, item: Any) -> None:
+        ctx = LoadContext(
             source=self.source_name,
             record_origin=self.source_name,
-            id_source=self.config.id_source,
-            include_items=self.config.include_items,
+            id_source=self.id_source,
+            include_items=self.include_items,
             relator_mappings=self.relator_mappings,
             vocab_store=self.vocab_store,
             strip_isbd_punctuation=self.strip_isbd_punctuation,
             isbd_punctuation=self.isbd_punctuation,
             constituents=self.constituents,
         )
+        record = load_record(item, ctx)
+        self.add_record(record)
 
     def take(self) -> dict[str, Any]:
-        """Detach the staged batch so it can be handed to a writer thread."""
         record_count = self.staged_records
         self.staged_records = 0
 
@@ -275,6 +142,7 @@ class _WEMIBatchAccumulator:
             "mediums": self.mediums,
             "contributions": self.contributions,
             "entity_keys": self.entity_keys,
+            "entity_subjects": self.entity_subjects,
             "record_count": record_count,
             "record_origin": self.source_name,
         }
@@ -289,20 +157,113 @@ class _WEMIBatchAccumulator:
         self.associations = []
         self.mediums = []
         self.entity_keys = []
+        self.entity_subjects = []
         return payload
+
+
+def parse_and_decompose_page(
+    page_bytes: bytes,
+    source_name: str,
+    id_source: str,
+    include_items: bool,
+    strip_isbd_punctuation: bool,
+    isbd_punctuation: str,
+    relator_mappings: Optional[dict[str, str]],
+    database_url: Optional[str],
+    skip_ids: Optional[set[str]],
+    format: str = "marcxml",
+    constituents: Optional[Any] = None,
+) -> tuple[dict[str, Any], int, int]:
+    """Parse raw XML page bytes and decompose MARCXML/BibFrame records in a worker process.
+
+    Returns:
+        (batch_payload_dict, decomposed_records_count, skipped_records_count)
+    """
+    root = etree.fromstring(page_bytes)
+    records = root.findall(".//oai:record", OAI_NS)
+    if not records:
+        records = root.findall(".//record")
+
+    vocab_store = _get_worker_vocab_store(database_url)
+
+    ctx = LoadContext(
+        source=source_name,
+        record_origin=source_name,
+        id_source=id_source,
+        include_items=include_items,
+        relator_mappings=relator_mappings,
+        vocab_store=vocab_store,
+        strip_isbd_punctuation=strip_isbd_punctuation,
+        isbd_punctuation=isbd_punctuation,
+        constituents=constituents,
+    )
+
+    acc = _WEMIBatchAccumulator(
+        source_name=source_name,
+        id_source=id_source,
+        include_items=include_items,
+        relator_mappings=relator_mappings,
+        vocab_store=vocab_store,
+        strip_isbd_punctuation=strip_isbd_punctuation,
+        isbd_punctuation=isbd_punctuation,
+        constituents=constituents,
+    )
+
+    skipped_count = 0
+    decomposed_count = 0
+
+    for rec in records:
+        hdr = rec.find("oai:header", OAI_NS)
+        if hdr is None:
+            hdr = rec.find(".//header")
+        if hdr is not None and hdr.get("status") == "deleted":
+            continue
+
+        header_id: Optional[str] = None
+        if hdr is not None:
+            id_el = hdr.find("oai:identifier", OAI_NS)
+            if id_el is None:
+                id_el = hdr.find(".//identifier")
+            if id_el is not None and id_el.text:
+                header_id = id_el.text.strip()
+
+        metadata_elem = rec.find("oai:metadata", OAI_NS)
+        if metadata_elem is not None and len(metadata_elem) > 0:
+            target_elem = metadata_elem[0]
+        else:
+            marc_rec = rec.find(".//marc:record", OAI_NS)
+            target_elem = marc_rec if marc_rec is not None else rec
+
+        if header_id:
+            target_elem.set("_oai_identifier", header_id)
+
+        if skip_ids:
+            raw_id = extract_marc_source_id(target_elem, id_source=id_source)
+            if raw_id and raw_id in skip_ids:
+                skipped_count += 1
+                continue
+
+        if format == "bibframe":
+            raw_xml = etree.tostring(target_elem, encoding="utf-8")
+            g = Graph()
+            g.parse(data=raw_xml.decode("utf-8"), format="xml")
+            item_to_load = g
+        else:
+            item_to_load = target_elem
+
+        rec_decomp = load_record(item_to_load, ctx)
+        acc.add_record(rec_decomp)
+        decomposed_count += 1
+
+    return acc.take(), decomposed_count, skipped_count
 
 
 def write_wemi_batch(
     repo: WEMIRepository,
     payload: dict[str, Any],
+    chunk_size: int = 1000,
 ) -> int:
-    """Persist a batch detached by `_WEMIBatchAccumulator.take()`.
-
-    Standalone so a writer thread can persist batches produced by several
-    accumulators without owning any of them. Returns the number of harvested
-    records written, which is not the number of entities: one record can
-    decompose into several agents.
-    """
+    """Persist a batch detached by `_WEMIBatchAccumulator.take()` using multi-row bulk upserts."""
     record_count = int(payload.get("record_count") or 0)
     record_origin = str(payload.get("record_origin") or "unknown")
 
@@ -324,20 +285,16 @@ def write_wemi_batch(
         entity_keys=payload.get("entity_keys") or [],
         entity_subjects=payload.get("entity_subjects") or [],
         record_origin=record_origin,
+        chunk_size=chunk_size,
     )
     return record_count or (len(works) or len(agents))
 
 
-def _resolve_harvest_window(
+async def _resolve_harvest_window(
     source_name: str,
     config: OAIIngestConfig,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Resolve the (from, until) window for a partitioned harvest.
-
-    Date partitioning needs both bounds. When more than one worker is requested
-    but from_date was omitted, the repository's earliestDatestamp is discovered
-    via the OAI-PMH Identify verb; until_date defaults to today.
-    """
+    """Resolve the (from, until) window for a partitioned harvest."""
     from_date = config.from_date
     until_date = config.until_date
 
@@ -351,8 +308,12 @@ def _resolve_harvest_window(
             set_spec=config.set_spec,
             request_delay=config.request_delay,
             timeout=config.timeout,
+            max_retries=config.max_retries,
+            base_delay=config.base_delay,
+            http2=config.http2,
+            prefetch=config.prefetch,
         )
-        discovered = harvester.get_earliest_datestamp()
+        discovered = await harvester.get_earliest_datestamp()
         if discovered:
             from_date = discovered
             if not until_date:
@@ -378,7 +339,51 @@ def _resolve_harvest_window(
     return from_date, until_date
 
 
-def ingest_oai_pipeline(
+def stream_file_raw_elements(
+    source_name: str,
+    config: OAIIngestConfig,
+) -> Iterator[Any]:
+    """Stream raw elements from a local MARCXML or Bibframe file."""
+    if not config.input_path:
+        raise ValueError(
+            f"input_path must be specified for source '{source_name}' when source_type is 'file'"
+        )
+    if config.format == "bibframe":
+        profile = get_profile(config.schema_profile) if config.schema_profile else None
+        for _raw_rec, _offset, orig_doc in stream_bibframe_records(
+            config.input_path, profile=profile, source=source_name
+        ):
+            if isinstance(orig_doc, tuple) and orig_doc:
+                orig_doc = orig_doc[0]
+            if isinstance(orig_doc, Graph):
+                yield orig_doc
+            else:
+                g = Graph()
+                import orjson
+
+                g.parse(data=orjson.dumps(orig_doc).decode("utf-8"), format="json-ld")
+                yield g
+    else:
+        path = str(config.input_path)
+        f_in: Any
+        if path.endswith(".gz"):
+            import gzip
+
+            f_in = gzip.open(path, "rb")
+        else:
+            f_in = open(path, "rb")
+        try:
+            context = etree.iterparse(f_in, events=("end",))
+            for _, elem in context:
+                tag = elem.tag
+                if tag.endswith("record") and not tag.endswith("collection"):
+                    yield elem
+                    elem.clear()
+        finally:
+            f_in.close()
+
+
+async def ingest_oai_pipeline(
     source_name: str,
     config: OAIIngestConfig,
     store: WEMIRepository,
@@ -393,32 +398,10 @@ def ingest_oai_pipeline(
     constituents_default_mode: str = "keys_only",
     config_dir: Optional[Path] = None,
 ) -> int:
-    """Ingest a configured OAI/file source into WEMI storage over a decoupled pipeline.
-
-    Producer threads fetch records, drop already-ingested ones, and decompose what
-    remains into WEMI entities; this thread performs the batch writes. That keeps
-    network fetching and parsing off the critical path of the SQLite writes, with
-    ``batch_queue_size`` batches of slack between the stages.
-
-    Decomposition deliberately runs on the producer thread rather than a further
-    stage: the MARCXML streamer calls ``elem.clear()`` as soon as control returns
-    to it, so a queued lxml element would be emptied before another thread could
-    read it.
-
-    With ``workers > 1`` and a resolvable date window the harvest is partitioned
-    into ``slice_days`` slices fetched concurrently; otherwise a single continuous
-    stream is followed via resumptionToken.
-
-    Harvest progress is checkpointed to ``harvest_state`` so an interrupted run
-    resumes where it left off, and a completed run harvests incrementally next
-    time. Pass ``resume=False`` to force a full re-harvest.
-    """
-    is_oai = config.source_type != "file"
+    """Ingest a configured OAI/file source into WEMI storage using AsyncIO and ProcessPool."""
+    is_oai = config.source_type == "oai"
     stage_name = "harvest_and_index" if is_oai else "indexing"
 
-    # Every ingested source is registered, authoritative or not, so matching can
-    # decide what may be used as authority from the registry rather than from a
-    # literal stamped on each row.
     store.register_source(source_name, is_authoritative=config.authoritative)
 
     existing_ids = store.get_indexed_source_ids(source=source_name) if skip_existing else set()
@@ -429,8 +412,6 @@ def ingest_oai_pipeline(
             source_name,
         )
 
-    # Resolved once, before any record is read, so a bad profile name stops the
-    # harvest at the start rather than after 200,000 records.
     source_constituents = resolve_for_source(
         source_name,
         config.constituents,
@@ -439,17 +420,7 @@ def ingest_oai_pipeline(
         default_mode=constituents_default_mode,  # type: ignore[arg-type]
         config_dir=config_dir,
     )
-    if source_constituents.enabled:
-        logger.info(
-            "Source %r reads constituents with profile %r (mode: %s).",
-            source_name,
-            source_constituents.profile.name if source_constituents.profile else None,
-            source_constituents.mode,
-        )
 
-    # ------------------------------------------------------------------
-    # Resume decision
-    # ------------------------------------------------------------------
     initial_token: Optional[str] = None
     already_harvested = 0
     done_slices: set[tuple[Optional[str], Optional[str]]] = set()
@@ -486,13 +457,6 @@ def ingest_oai_pipeline(
                     prior.last_harvest_until,
                 )
 
-    # ------------------------------------------------------------------
-    # Replace mode
-    # ------------------------------------------------------------------
-    # Clear once, here, before the first batch - and only when this run is not
-    # continuing an earlier one. A resumed harvest that cleared would delete
-    # exactly what its own completed slices had just written, and an incremental
-    # harvest would throw away everything outside the new date window.
     is_continuation = bool(initial_token or done_slices) or effective_config is not config
     if config.ingest_mode == "replace" and not is_continuation:
         removed = store.delete_source(source_name)
@@ -511,7 +475,7 @@ def ingest_oai_pipeline(
             source_name,
         )
 
-    from_date, until_date = _resolve_harvest_window(source_name, effective_config)
+    from_date, until_date = await _resolve_harvest_window(source_name, effective_config)
 
     if from_date and until_date and effective_config.workers > 1:
         slices = partition_date_range(from_date, until_date, effective_config.slice_days)
@@ -520,31 +484,21 @@ def ingest_oai_pipeline(
 
     pending_slices = [s for s in slices if tuple(s) not in done_slices]
     partitioned = len(pending_slices) > 1 and effective_config.workers > 1
-    if not pending_slices:
-        logger.info("Source '%s': every date slice already harvested.", source_name)
 
-    # A resumptionToken only applies to a single continuous stream; a partitioned
-    # harvest resumes at slice granularity instead.
     if partitioned:
         initial_token = None
 
-    counters_lock = threading.Lock()
     harvested_count = 0
     skipped_count = 0
     total_ingested = 0
-    # (records_handed_off_at_page_end, token) watermarks. A token is only safe to
-    # checkpoint once every record handed off before it was received has been
-    # written, otherwise resuming from it would skip unwritten records.
+    finished_slices: list[tuple[Optional[str], Optional[str]]] = [
+        (s[0], s[1])
+        for s in slices
+        if tuple(s) in done_slices
+    ]
+    safe_token: Optional[str] = initial_token
     pending_tokens: list[tuple[int, Optional[str]]] = []
     delivered = 0
-    # Furthest token justified by durable writes. Sticky, so re-checkpointing
-    # after every watermark has been promoted cannot regress it.
-    safe_token: Optional[str] = initial_token
-    finished_slices: list[tuple[Optional[str], Optional[str]]] = [
-        tuple(s)
-        for s in slices
-        if tuple(s) in done_slices  # type: ignore[misc]
-    ]
 
     def _telemetry() -> dict[str, Any]:
         return {
@@ -574,238 +528,188 @@ def ingest_oai_pipeline(
             )
         )
 
-    def on_record_harvested() -> None:
-        nonlocal harvested_count
-        with counters_lock:
-            harvested_count += 1
-            should_report = harvested_count % 200 == 0
-            snapshot = _telemetry()
-        if tracker and should_report:
-            tracker.update_progress(stage=stage_name, metadata=snapshot)
+    last_checkpoint_time = time.time()
+    last_checkpoint_count = 0
+
+    def _maybe_checkpoint(force: bool = False) -> None:
+        nonlocal safe_token, last_checkpoint_time, last_checkpoint_count
+        if not is_oai:
+            return
+        now = time.time()
+        records_since = total_ingested - last_checkpoint_count
+        time_since = now - last_checkpoint_time
+
+        should_checkpoint = force or (
+            records_since >= effective_config.checkpoint_interval_records
+            or time_since >= effective_config.checkpoint_interval_seconds
+        )
+        if not should_checkpoint:
+            return
+
+        last_checkpoint_time = now
+        last_checkpoint_count = total_ingested
+
+        while pending_tokens and pending_tokens[0][0] <= total_ingested:
+            safe_token = pending_tokens.pop(0)[1]
+
+        if partitioned:
+            _save_state("in_progress", None, list(finished_slices))
+        else:
+            _save_state("in_progress", safe_token, None)
 
     if tracker:
         tracker.start_task(stage=stage_name, metadata=_telemetry() if is_oai else None)
 
-    batch_queue_size = effective_config.batch_queue_size
-    batch_queue: queue.Queue[Any] = queue.Queue(maxsize=batch_queue_size)
-
+    loop = asyncio.get_running_loop()
+    batch_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=effective_config.batch_queue_size)
     sentinel = object()
-    stop_event = threading.Event()
-    harvest_error: list[BaseException] = []
+    db_url = store.db_path
 
-    def _should_skip(item: Any) -> bool:
-        """Test a harvested record against the already-ingested id set.
-
-        Both sides derive the id from extract_marc_source_id, so an exact match
-        is sufficient; records without a resolvable id are always ingested.
-        """
-        if not existing_ids:
-            return False
-        raw_id = _raw_source_id(item, effective_config)
-        return bool(raw_id and raw_id in existing_ids)
-
-    def _enqueue(payload: Any) -> None:
-        while not stop_event.is_set():
-            if harvest_error:
-                return
-            try:
-                batch_queue.put(payload, timeout=0.2)
-                return
-            except queue.Full:
-                continue
-
-    def harvest_slice(slice_from: Optional[str], slice_until: Optional[str]) -> None:
-        nonlocal skipped_count, delivered
-        acc = _WEMIBatchAccumulator(
-            source_name=source_name,
-            config=effective_config,
-            relator_mappings=relator_mappings,
-            vocab_store=vocab_store,
-            strip_isbd_punctuation=strip_isbd_punctuation,
-            isbd_punctuation=isbd_punctuation,
-            constituents=source_constituents,
-        )
-
-        def note_token(token: Optional[str]) -> None:
-            # Called at a page boundary, after every record on the page was yielded.
-            with counters_lock:
-                pending_tokens.append((delivered, token))
-
-        try:
-            for item in stream_oai_raw_elements(
-                source_name=source_name,
-                config=effective_config,
-                initial_resumption_token=initial_token,
-                tracker=tracker,
-                on_record_harvested=on_record_harvested if is_oai else None,
-                on_resumption_token=None if partitioned else note_token,
-                from_date=slice_from,
-                until_date=slice_until,
-            ):
-                if stop_event.is_set() or harvest_error:
-                    return
-
-                if _should_skip(item):
-                    with counters_lock:
-                        skipped_count += 1
-                        cur_sk = skipped_count
-                        snapshot = _telemetry()
-                    if cur_sk % 10000 == 0:
-                        logger.info(
-                            "Source '%s': skipped %d already ingested records...",
-                            source_name,
-                            cur_sk,
-                        )
-                    if tracker and cur_sk % 500 == 0:
-                        tracker.update_progress(
-                            stage=stage_name,
-                            items_processed=snapshot["indexed"],
-                            metadata=snapshot if is_oai else None,
-                        )
-                    continue
-
-                acc.add(item)
-                with counters_lock:
-                    delivered += 1
-                if acc.pending >= effective_config.batch_size:
-                    _enqueue({"batch": acc.take()})
-
-            if acc.pending:
-                _enqueue({"batch": acc.take()})
-            # Only a fully drained slice may be recorded as complete.
-            _enqueue({"slice_done": (slice_from, slice_until)})
-        except Exception as exc:
-            logger.error(
-                "Error harvesting partition %s to %s for source '%s': %s",
-                slice_from,
-                slice_until,
-                source_name,
-                exc,
-            )
-            harvest_error.append(exc)
-            raise
-
-    def produce() -> None:
-        try:
-            if not pending_slices:
-                return
-            if not partitioned:
-                harvest_slice(*pending_slices[0])
-                return
-            with ThreadPoolExecutor(max_workers=effective_config.workers) as executor:
-                futures = [executor.submit(harvest_slice, f, u) for f, u in pending_slices]
-                for fut in futures:
-                    fut.result()
-        except Exception as exc:
-            if exc not in harvest_error:
-                harvest_error.append(exc)
-        finally:
-            batch_queue.put(sentinel)
-
-    def _checkpoint() -> None:
-        """Persist the furthest checkpoint that durable writes actually justify.
-
-        Watermarks are promoted only once the records handed off before them have
-        been written, so an interrupted run never resumes past stored data.
-        """
-        nonlocal safe_token
-        if not is_oai:
-            return
-        with counters_lock:
-            while pending_tokens and pending_tokens[0][0] <= total_ingested:
-                safe_token = pending_tokens.pop(0)[1]
-            slices_done = list(finished_slices)
-            token = safe_token
-        if partitioned:
-            _save_state("in_progress", None, slices_done)
-        else:
-            _save_state("in_progress", token, None)
-
-    def handle(payload: Any) -> None:
-        """Apply one queued payload: a decomposed batch, or a slice completion."""
+    async def db_writer() -> None:
         nonlocal total_ingested
-        if "slice_done" in payload:
-            finished_slices.append(payload["slice_done"])
-            _checkpoint()
-            return
-
-        written = write_wemi_batch(store, payload["batch"])
-        with counters_lock:
-            total_ingested += written
-            snapshot = _telemetry()
-        _checkpoint()
-
-        if tracker:
-            tracker.update_progress(
-                stage=stage_name,
-                items_processed=snapshot["indexed"],
-                metadata=snapshot if is_oai else None,
-            )
-
-    def drain() -> None:
-        """Apply whatever is already queued, without waiting for more.
-
-        Used after a failure: batches and slice completions still in flight are
-        real, finished work, and dropping them would re-harvest them next run.
-        """
         while True:
-            try:
-                payload = batch_queue.get_nowait()
-            except queue.Empty:
-                return
-            try:
-                if payload is not sentinel:
-                    handle(payload)
-            finally:
-                batch_queue.task_done()
-
-    producer = threading.Thread(target=produce, daemon=True)
-    try:
-        producer.start()
-
-        while True:
-            if harvest_error:
-                break
-
-            try:
-                payload = batch_queue.get(timeout=0.2)
-            except queue.Empty:
-                if not producer.is_alive() and batch_queue.empty():
-                    break
-                continue
-
+            payload = await batch_queue.get()
             if payload is sentinel:
                 batch_queue.task_done()
                 break
 
             try:
-                handle(payload)
+                if "slice_done" in payload:
+                    finished_slices.append(payload["slice_done"])
+                    _maybe_checkpoint(force=True)
+                elif "batch" in payload:
+                    written = await loop.run_in_executor(
+                        None,
+                        write_wemi_batch,
+                        store,
+                        payload["batch"],
+                        effective_config.db_batch_chunk_size,
+                    )
+                    total_ingested += written
+                    snapshot = _telemetry()
+                    _maybe_checkpoint(force=False)
+                    if tracker:
+                        tracker.update_progress(
+                            stage=stage_name,
+                            items_processed=snapshot["indexed"],
+                            metadata=snapshot if is_oai else None,
+                        )
             finally:
                 batch_queue.task_done()
 
-        # A producer failure must surface, but only after the work that did land
-        # has been written and checkpointed.
-        if harvest_error:
-            stop_event.set()
-            producer.join(timeout=5.0)
-            drain()
-            _checkpoint()
-            raise harvest_error[0]
+    writer_task = asyncio.create_task(db_writer())
 
-        # Late watermarks can arrive after the final batch, so settle up once more.
-        _checkpoint()
+    try:
+        if not is_oai:
+            # File or ResourceSync source
+            acc = _WEMIBatchAccumulator(
+                source_name=source_name,
+                id_source=effective_config.id_source,
+                include_items=effective_config.include_items,
+                relator_mappings=relator_mappings,
+                vocab_store=vocab_store,
+                strip_isbd_punctuation=strip_isbd_punctuation,
+                isbd_punctuation=isbd_punctuation,
+                constituents=source_constituents,
+            )
+            for item in stream_file_raw_elements(source_name, effective_config):
+                harvested_count += 1
+                if existing_ids:
+                    raw_id = extract_marc_source_id(item, id_source=effective_config.id_source)
+                    if raw_id and raw_id in existing_ids:
+                        skipped_count += 1
+                        continue
+                acc.add(item)
+                if acc.pending >= effective_config.batch_size:
+                    await batch_queue.put({"batch": acc.take()})
+            if acc.pending:
+                await batch_queue.put({"batch": acc.take()})
+        else:
+            # OAI-PMH harvest with ProcessPoolExecutor and AsyncIO
+            process_pool = ProcessPoolExecutor(max_workers=effective_config.workers)
+            semaphore = asyncio.Semaphore(effective_config.max_concurrent_requests)
+
+            async def harvest_partition_task(
+                slice_from: Optional[str], slice_until: Optional[str]
+            ) -> None:
+                nonlocal harvested_count, skipped_count, delivered
+                harvester = OAIPMHHarvester(
+                    endpoint_url=effective_config.oai_url,  # type: ignore[arg-type]
+                    metadata_prefix=effective_config.metadata_prefix,
+                    set_spec=effective_config.set_spec,
+                    timeout=effective_config.timeout,
+                    request_delay=effective_config.request_delay,
+                    max_retries=effective_config.max_retries,
+                    base_delay=effective_config.base_delay,
+                    http2=effective_config.http2,
+                    prefetch=effective_config.prefetch,
+                )
+                async for page_bytes, next_token in harvester.harvest_partition(
+                    from_date=slice_from,
+                    until_date=slice_until,
+                    resumption_token=initial_token if not partitioned else None,
+                    semaphore=semaphore,
+                ):
+                    batch_payload, dec_cnt, sk_cnt = await loop.run_in_executor(
+                        process_pool,
+                        parse_and_decompose_page,
+                        page_bytes,
+                        source_name,
+                        effective_config.id_source,
+                        effective_config.include_items,
+                        strip_isbd_punctuation,
+                        isbd_punctuation,
+                        relator_mappings,
+                        db_url,
+                        existing_ids if existing_ids else None,
+                        effective_config.format,
+                        source_constituents,
+                    )
+                    harvested_count += dec_cnt + sk_cnt
+                    skipped_count += sk_cnt
+                    delivered += dec_cnt
+
+                    if not partitioned:
+                        pending_tokens.append((delivered, next_token))
+
+                    if batch_payload.get("works") or batch_payload.get("agents"):
+                        await batch_queue.put({"batch": batch_payload})
+
+                    if tracker and (harvested_count % 200 == 0):
+                        tracker.update_progress(stage=stage_name, metadata=_telemetry())
+
+                await batch_queue.put({"slice_done": (slice_from, slice_until)})
+
+            try:
+                if pending_slices:
+                    tasks = [
+                        asyncio.create_task(harvest_partition_task(s_from, s_until))
+                        for s_from, s_until in pending_slices
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for res in results:
+                        if isinstance(res, Exception):
+                            raise res
+            finally:
+                process_pool.shutdown(wait=False)
+
+        await batch_queue.put(sentinel)
+        await writer_task
+
+        _maybe_checkpoint(force=True)
         if is_oai:
-            # Harvest ran to the end: clear the token and the slice ledger so the
-            # next run harvests incrementally from last_harvest_until.
             _save_state("completed", None, None)
+
     except Exception as exc:
-        stop_event.set()
+        try:
+            await batch_queue.put(sentinel)
+            await writer_task
+        except Exception:
+            pass
+        _maybe_checkpoint(force=True)
         if tracker:
             tracker.fail_task(error_message=str(exc))
         raise
-    finally:
-        stop_event.set()
-        producer.join(timeout=5.0)
 
     if skipped_count > 0:
         logger.info(
@@ -816,9 +720,6 @@ def ingest_oai_pipeline(
         )
 
     if tracker:
-        meta = (
-            _telemetry() if is_oai else {"records_ingested": total_ingested, "source": source_name}
-        )
-        tracker.complete_task(metadata=meta)
+        tracker.complete_task(metadata=_telemetry())
 
     return total_ingested

@@ -9,14 +9,19 @@ melinda:
   id_source: "marc_001"
   control_number_prefix: "(FI-MELINDA)"
   control_number_padding_digits: 9
-  workers: 8               # Number of concurrent harvest workers (>1 auto-slices across earliestDatestamp to today)
-  normalization_workers: 8 # Concurrent worker threads for record normalization
-  queue_size: null          # Decoupled raw harvest queue buffer capacity (null = auto: max(batch_size * 20, 10000))
-  batch_queue_size: 4       # Number of pre-normalized batches queued for embedding/indexing
-  checkpoint_interval: 50000 # Save vector index snapshot every N indexed records
+  workers: 8               # Number of worker processes in ProcessPoolExecutor for CPU MARC decomposition
+  max_concurrent_requests: 8 # Global concurrency ceiling for simultaneous HTTP requests (asyncio.Semaphore)
+  batch_queue_size: 8       # Capacity of the detached decomposed batch queue
+  batch_size: 1000          # Number of records per decomposed batch before handing to DB writer
+  db_batch_chunk_size: 1000 # Maximum rows per single multi-row SQL INSERT statement
+  http2: true               # Enable HTTP/2 multiplexing for OAI endpoint
+  prefetch: true            # Asynchronously prefetch page N+1 while page N is being decomposed
+  request_delay: 0.05       # Non-blocking pause between requests per partition stream (seconds)
+  timeout: 60.0             # HTTP request timeout (seconds)
+  max_retries: 5            # Max retry attempts on transient network/HTTP errors
+  base_delay: 1.0           # Exponential backoff base delay (seconds)
+  checkpoint_interval_records: 10000 # Commit watermark checkpoint to harvest_state every N records
+  checkpoint_interval_seconds: 30.0  # Commit watermark checkpoint if N seconds have elapsed
   from_date: null
   until_date: null
   slice_days: 30
-  batch_size: 500
-  request_delay: 0.1
-  timeout: 60.0

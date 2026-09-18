@@ -1011,13 +1011,21 @@ class OAIIngestConfig(BaseModel):
     control_number_padding_digits: Optional[int] = None
     control_number_pattern: Optional[str] = None
     workers: int = 4
+    max_concurrent_requests: int = 8
     from_date: Optional[str] = None
     until_date: Optional[str] = None
     slice_days: int = 30
     batch_size: int = 500
     batch_queue_size: int = 4
+    db_batch_chunk_size: int = 1000
     request_delay: float = 0.1
     timeout: float = 60.0
+    max_retries: int = 5
+    base_delay: float = 1.0
+    http2: bool = True
+    prefetch: bool = True
+    checkpoint_interval_records: int = 10000
+    checkpoint_interval_seconds: float = 30.0
     include_items: bool = False
     normalization: Optional[RecordNormalizationConfig] = None
     # How this source records what a publication contains: a bundled profile
@@ -1033,12 +1041,24 @@ class OAIIngestConfig(BaseModel):
     def validate_workers_and_queues(self) -> OAIIngestConfig:
         if self.workers < 1:
             raise ValueError(f"workers must be at least 1, got {self.workers}")
+        if self.max_concurrent_requests < 1:
+            raise ValueError(f"max_concurrent_requests must be at least 1, got {self.max_concurrent_requests}")
         if self.batch_queue_size < 1:
             raise ValueError(f"batch_queue_size must be at least 1, got {self.batch_queue_size}")
         if self.slice_days < 1:
             raise ValueError(f"slice_days must be at least 1, got {self.slice_days}")
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be at least 1, got {self.batch_size}")
+        if self.db_batch_chunk_size < 1:
+            raise ValueError(f"db_batch_chunk_size must be at least 1, got {self.db_batch_chunk_size}")
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries cannot be negative, got {self.max_retries}")
+        if self.base_delay < 0:
+            raise ValueError(f"base_delay cannot be negative, got {self.base_delay}")
+        if self.checkpoint_interval_records < 1:
+            raise ValueError(f"checkpoint_interval_records must be at least 1, got {self.checkpoint_interval_records}")
+        if self.checkpoint_interval_seconds <= 0:
+            raise ValueError(f"checkpoint_interval_seconds must be positive, got {self.checkpoint_interval_seconds}")
         return self
 
 

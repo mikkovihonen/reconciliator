@@ -1,9 +1,13 @@
 """Unit tests for multithreaded OAI-PMH harvester and date partitioning."""
 
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from typing import Any, AsyncIterator
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy import select
 
 from reconciliator.db import works_table
@@ -15,7 +19,7 @@ MARC_NS = "http://www.loc.gov/MARC21/slim"
 def make_marc_record(source_id: str, title: str, org_code: str | None = None) -> Any:
     """Build a minimal MARCXML <record> element for driving the ingest pipeline.
 
-    The WEMI pipeline consumes raw lxml elements from stream_oai_raw_elements,
+    The WEMI pipeline consumes raw lxml elements from stream_file_raw_elements,
     so tests feed it elements rather than pre-normalized dicts.
     """
     from lxml import etree
@@ -30,6 +34,13 @@ def make_marc_record(source_id: str, title: str, org_code: str | None = None) ->
     sf_a = etree.SubElement(df245, f"{{{MARC_NS}}}subfield", code="a")
     sf_a.text = title
     return record
+
+
+async def _collect(gen: AsyncIterator[Any]) -> list[Any]:
+    items = []
+    async for item in gen:
+        items.append(item)
+    return items
 
 
 def test_partition_date_range() -> None:
@@ -64,13 +75,14 @@ def test_harvest_partition_mocked() -> None:
     mock_resp.content = sample_oai_xml
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("httpx2.Client.get", return_value=mock_resp):
-        records = list(harvester.harvest_partition(from_date="2021-01-01", until_date="2021-01-31"))
-        assert len(records) == 1
-        assert (
-            records[0].find(".//{http://www.loc.gov/MARC21/slim}controlfield[@tag='001']").text
-            == "000100201"
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        pages = asyncio.run(
+            _collect(harvester.harvest_partition(from_date="2021-01-01", until_date="2021-01-31"))
         )
+        assert len(pages) == 1
+        page_bytes, token = pages[0]
+        assert b"000100201" in page_bytes
+        assert token is None
 
 
 def test_oai_pmh_user_agent() -> None:
@@ -121,10 +133,10 @@ def test_harvest_partition_retry_on_transient_error() -> None:
     ok_resp.content = sample_xml
     ok_resp.raise_for_status = MagicMock()
 
-    with patch("httpx2.Client.get", side_effect=[fail_resp, ok_resp]):
-        with patch("time.sleep") as mock_sleep:
-            records = list(harvester.harvest_partition(from_date="2021-01-01"))
-            assert len(records) == 1
+    with patch("httpx2.AsyncClient.get", side_effect=[fail_resp, ok_resp]):
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            pages = asyncio.run(_collect(harvester.harvest_partition(from_date="2021-01-01")))
+            assert len(pages) == 1
             assert mock_sleep.called
             assert mock_sleep.call_args[0][0] == 0.01  # base_delay * (2 ** 0)
 
@@ -162,17 +174,16 @@ def test_harvest_partition_retry_after_header() -> None:
     ok_resp.content = sample_xml
     ok_resp.raise_for_status = MagicMock()
 
-    with patch("httpx2.Client.get", side_effect=[fail_resp, ok_resp]):
-        with patch("time.sleep") as mock_sleep:
-            records = list(harvester.harvest_partition(from_date="2021-01-01"))
-            assert len(records) == 1
+    with patch("httpx2.AsyncClient.get", side_effect=[fail_resp, ok_resp]):
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            pages = asyncio.run(_collect(harvester.harvest_partition(from_date="2021-01-01")))
+            assert len(pages) == 1
             assert mock_sleep.called
             assert mock_sleep.call_args[0][0] == 5.0
 
 
 def test_harvest_partition_retry_exhausted() -> None:
     import httpx2
-    import pytest
 
     harvester = OAIPMHHarvester(
         endpoint_url="http://example.org/oai",
@@ -186,10 +197,10 @@ def test_harvest_partition_retry_exhausted() -> None:
     fail_err = httpx2.HTTPStatusError("500 Server Error", request=req, response=fail_resp)
     fail_resp.raise_for_status.side_effect = fail_err
 
-    with patch("httpx2.Client.get", return_value=fail_resp):
-        with patch("time.sleep"):
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock, return_value=fail_resp):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(httpx2.HTTPStatusError):
-                list(harvester.harvest_partition(from_date="2021-01-01"))
+                asyncio.run(_collect(harvester.harvest_partition(from_date="2021-01-01")))
 
 
 def test_get_earliest_datestamp() -> None:
@@ -212,8 +223,8 @@ def test_get_earliest_datestamp() -> None:
     mock_resp.content = identify_xml
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("httpx2.Client.get", return_value=mock_resp):
-        earliest = harvester.get_earliest_datestamp()
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        earliest = asyncio.run(harvester.get_earliest_datestamp())
         assert earliest == "2005-06-15"
 
 
@@ -230,15 +241,14 @@ def test_harvest_partition_no_records_match() -> None:
     mock_resp.content = no_records_xml
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("httpx2.Client.get", return_value=mock_resp):
-        records = list(harvester.harvest_partition(from_date="2001-01-01", until_date="2001-01-31"))
-        assert len(records) == 0
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        pages = asyncio.run(
+            _collect(harvester.harvest_partition(from_date="2001-01-01", until_date="2001-01-31"))
+        )
+        assert len(pages) == 0
 
 
 def test_ingest_oai_pipeline_custom_batch_queue_size() -> None:
-    import queue
-    from pathlib import Path
-
     from reconciliator.config import OAIIngestConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
 
@@ -251,29 +261,30 @@ def test_ingest_oai_pipeline_custom_batch_queue_size() -> None:
     store = MagicMock()
     store.get_indexed_source_ids.return_value = set()
 
-    created_queues: list[queue.Queue] = []
-    real_queue = queue.Queue
+    created_queues: list[asyncio.Queue[Any]] = []
+    real_queue = asyncio.Queue
 
-    def queue_spy(*args: Any, **kwargs: Any) -> queue.Queue:
+    def queue_spy(*args: Any, **kwargs: Any) -> asyncio.Queue[Any]:
         q = real_queue(*args, **kwargs)
         created_queues.append(q)
         return q
 
     with patch(
-        "reconciliator.ingestion.oai.stream_oai_raw_elements",
+        "reconciliator.ingestion.oai.stream_file_raw_elements",
         return_value=[
             make_marc_record("rec_1", "Book 1"),
             make_marc_record("rec_2", "Book 2"),
         ],
     ):
-        with patch("queue.Queue", side_effect=queue_spy):
-            total = ingest_oai_pipeline("test", config, store)
+        with patch("asyncio.Queue", side_effect=queue_spy):
+            total = asyncio.run(ingest_oai_pipeline("test", config, store))
             assert total == 2
             assert any(q.maxsize == 9 for q in created_queues)
 
 
 def test_wemi_repository_get_indexed_source_ids(tmp_path: Path) -> None:
     from reconciliator.config import VectorEngineConfig
+    from reconciliator.models import ManifestationEntity
     from reconciliator.repository import WEMIRepository
 
     db_path = tmp_path / "test_auth.db"
@@ -287,8 +298,6 @@ def test_wemi_repository_get_indexed_source_ids(tmp_path: Path) -> None:
     assert store.get_indexed_source_ids("melinda") == set()
 
     # Insert two manifestations
-    from reconciliator.models import ManifestationEntity
-
     store.insert_manifestation(
         ManifestationEntity(
             manifestation_uri="http://example.org/manifest/rec_101",
@@ -339,11 +348,11 @@ def test_ingest_oai_pipeline_skip_existing(tmp_path: Path) -> None:
         make_marc_record("rec_4", "New Book 4"),
     ]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
+    with patch("reconciliator.ingestion.oai.stream_file_raw_elements", return_value=raw_stream):
         with patch.object(
             WEMIRepository, "get_indexed_source_ids", return_value={"rec_1", "rec_3"}
         ):
-            total = ingest_oai_pipeline("melinda", config, store, skip_existing=True)
+            total = asyncio.run(ingest_oai_pipeline("melinda", config, store, skip_existing=True))
 
     assert total == 2
     # Only the previously unseen records reached storage.
@@ -407,13 +416,13 @@ def test_ingest_oai_pipeline_skip_existing_matches_canonical_ids(tmp_path: Path)
         make_marc_record("888888", "New Book 3"),
     ]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
+    with patch("reconciliator.ingestion.oai.stream_file_raw_elements", return_value=raw_stream):
         with patch.object(
             WEMIRepository,
             "get_indexed_source_ids",
             return_value={"(FI-MELINDA)000298022"},
         ):
-            total = ingest_oai_pipeline("melinda", config, store, skip_existing=True)
+            total = asyncio.run(ingest_oai_pipeline("melinda", config, store, skip_existing=True))
 
     assert total == 2
     with store.get_connection() as conn:
@@ -422,8 +431,6 @@ def test_ingest_oai_pipeline_skip_existing_matches_canonical_ids(tmp_path: Path)
 
 
 def test_ingest_oai_pipeline_propagates_producer_error() -> None:
-    import pytest
-
     from reconciliator.config import OAIIngestConfig
     from reconciliator.ingestion.oai import ingest_oai_pipeline
 
@@ -440,13 +447,15 @@ def test_ingest_oai_pipeline_propagates_producer_error() -> None:
         raise RuntimeError("Harvester stream failed abruptly")
         yield {}
 
-    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", side_effect=failing_stream):
+    with patch("reconciliator.ingestion.oai.stream_file_raw_elements", side_effect=failing_stream):
         with pytest.raises(RuntimeError, match="Harvester stream failed abruptly"):
-            ingest_oai_pipeline(
-                "melinda",
-                config,
-                store,
-                tracker=tracker,
+            asyncio.run(
+                ingest_oai_pipeline(
+                    "melinda",
+                    config,
+                    store,
+                    tracker=tracker,
+                )
             )
         tracker.fail_task.assert_called_once()
 
@@ -478,8 +487,8 @@ def test_ingest_oai_pipeline_decoupled_harvest_queue() -> None:
 
     raw_stream = [make_marc_record(f"rec_{i}", f"Book {i}") for i in range(10)]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
-        total = ingest_oai_pipeline("melinda", config, store)
+    with patch("reconciliator.ingestion.oai.stream_file_raw_elements", return_value=raw_stream):
+        total = asyncio.run(ingest_oai_pipeline("melinda", config, store))
 
     assert total == 10
     assert store.insert_wemi_batch.call_count == 5
@@ -491,8 +500,8 @@ def test_ingest_oai_pipeline_preserves_skipped_in_telemetry() -> None:
     from reconciliator.ingestion.oai import ingest_oai_pipeline
 
     config = OAIIngestConfig(
-        source_type="oai",
-        oai_url="https://example.org/oai",
+        source_type="file",
+        input_path=Path("dummy.xml"),
         batch_size=2,
     )
     store = MagicMock()
@@ -506,13 +515,15 @@ def test_ingest_oai_pipeline_preserves_skipped_in_telemetry() -> None:
         make_marc_record("rec_new_2", "New 2"),
     ]
 
-    with patch("reconciliator.ingestion.oai.stream_oai_raw_elements", return_value=raw_stream):
-        total = ingest_oai_pipeline(
-            "melinda",
-            config,
-            store,
-            tracker=tracker,
-            skip_existing=True,
+    with patch("reconciliator.ingestion.oai.stream_file_raw_elements", return_value=raw_stream):
+        total = asyncio.run(
+            ingest_oai_pipeline(
+                "melinda",
+                config,
+                store,
+                tracker=tracker,
+                skip_existing=True,
+            )
         )
 
     assert total == 2
