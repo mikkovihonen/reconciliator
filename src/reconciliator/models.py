@@ -973,11 +973,24 @@ class WorkRelationship(BaseModel):
 class MediumOfPerformance(BaseModel):
     """Medium of performance instrumentation for musical works."""
 
-    work_id: int
+    work_id: int = 0
+    work_curie: Optional[str] = None
     medium_uri: str
     label: str
     player_count: Optional[int] = None
     is_soloist: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_mop_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "work_uri" in data and not data.get("work_curie"):
+                data["work_curie"] = data.get("work_uri")
+        return data
+
+    @property
+    def work_uri(self) -> Optional[str]:
+        return self.work_curie
 
 
 class HarvestState(BaseModel):

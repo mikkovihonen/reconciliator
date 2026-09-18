@@ -20,6 +20,7 @@ from reconciliator.config import (
 from reconciliator.constituents import ConstituentProfile, get_constituent_profile
 from reconciliator.constituents.record import Constituent
 from reconciliator.constituents.record import finalise as finalise_constituents
+from reconciliator.curie import to_curie
 
 # ISBD presentation punctuation and the stripper live with the loader contract:
 # the charset had a second declaration here, and two copies of a normalisation
@@ -1412,11 +1413,21 @@ def decompose_marc_authority(
 
         # Medium of performance from 382
         mops: list[MediumOfPerformance] = []
+        seen_mop_uris: set[str] = set()
         for f in _get_datafields(record_elem, "382"):
             h = _get_subfield(f, "a")
             if h:
                 uri = _get_subfield(f, "0") or f"urn:mop:{h}"
-                mops.append(MediumOfPerformance(work_id=0, medium_uri=uri, label=h))
+                if uri not in seen_mop_uris:
+                    seen_mop_uris.add(uri)
+                    mops.append(
+                        MediumOfPerformance(
+                            work_id=0,
+                            work_curie=to_curie(source, source_id),
+                            medium_uri=uri,
+                            label=h,
+                        )
+                    )
 
         # Variant titles from 4xx
         variant_titles: list[str] = []
@@ -2083,17 +2094,21 @@ def decompose_marc_wemi(
     # 9. Medium of Performance
     mop_field = get_category_default_field_map()["medium_of_performance"]
     mops: list[MediumOfPerformance] = []
+    seen_mop_uris: set[str] = set()
     for f in _get_datafields(record_elem, mop_field):
         heading = _get_subfield(f, "a")
         if heading:
             uri = _get_subfield(f, "0") or f"urn:mop:{heading}"
-            mops.append(
-                MediumOfPerformance(
-                    work_id=0,
-                    medium_uri=uri,
-                    label=heading,
+            if uri not in seen_mop_uris:
+                seen_mop_uris.add(uri)
+                mops.append(
+                    MediumOfPerformance(
+                        work_id=0,
+                        work_curie=work.curie,
+                        medium_uri=uri,
+                        label=heading,
+                    )
                 )
-            )
 
     # Pre-render serializations using the WEMI Triad
     translators = [

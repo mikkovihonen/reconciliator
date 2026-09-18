@@ -192,6 +192,7 @@ def test_decompose_music_wemi():
     assert work.title == "Finlandia"
     assert len(mops) == 1
     assert mops[0].label == "orkesteri"
+    assert mops[0].work_curie == work.curie
 
     ismn_idents = [i for i in identifiers if i.scheme == "ismn"]
     assert len(ismn_idents) == 1
@@ -605,3 +606,42 @@ def test_all_decomposition_paths_mint_the_same_uri_shape():
         assert shape.match(agent.agent_uri), agent.agent_uri
     for agent in decompose_marc_authority(auth, source="kanto")[4]:
         assert shape.match(agent.agent_uri), agent.agent_uri
+
+
+def test_decompose_authority_record_mop_work_curie_and_dedup():
+    """Verify that authority records set work_curie on MOPs and deduplicate identical medium_uris."""
+    from lxml import etree
+
+    from reconciliator.loaders.marcxml import decompose_marc_authority
+
+    ns = "http://www.loc.gov/MARC21/slim"
+    auth = etree.fromstring(
+        f"""<record xmlns="{ns}">
+            <leader>00000nz  a2200000n  4500</leader>
+            <controlfield tag="001">AUTH-MUSIC-1</controlfield>
+            <datafield tag="100" ind1="1" ind2=" ">
+                <subfield code="a">Sibelius, Jean,</subfield>
+                <subfield code="t">Finlandia</subfield>
+            </datafield>
+            <datafield tag="382" ind1="0" ind2="1">
+                <subfield code="a">orkesteri</subfield>
+                <subfield code="0">http://rdaregistry.info/termList/mop/orchestra</subfield>
+            </datafield>
+            <datafield tag="382" ind1="0" ind2="1">
+                <subfield code="a">orkesteri</subfield>
+                <subfield code="0">http://rdaregistry.info/termList/mop/orchestra</subfield>
+            </datafield>
+            <datafield tag="382" ind1="0" ind2="1">
+                <subfield code="a">piano</subfield>
+            </datafield>
+        </record>""".encode()
+    )
+    works, _, _, _, _, _, _, _, mops, _ = decompose_marc_authority(auth, source="asteri")
+    assert len(works) == 1
+    assert works[0].title == "Finlandia"
+    # Duplicate 'orkesteri' with identical URI should be deduplicated
+    assert len(mops) == 2
+    for mop in mops:
+        assert mop.work_curie == works[0].curie
+    mop_uris = {m.medium_uri for m in mops}
+    assert mop_uris == {"http://rdaregistry.info/termList/mop/orchestra", "urn:mop:piano"}

@@ -850,16 +850,36 @@ class WEMIRepository:
         """Insert MediumOfPerformance records in batch."""
         if not mops:
             return
-        rows = [
-            {
-                "work_id": mop.work_id,
-                "medium_uri": mop.medium_uri,
-                "label": mop.label,
-                "player_count": mop.player_count,
-                "is_soloist": bool(mop.is_soloist),
-            }
-            for mop in mops
-        ]
+        deduped: dict[tuple[int, str], dict[str, Any]] = {}
+        for mop in mops:
+            if not mop.work_id or mop.work_id <= 0:
+                continue
+            key = (mop.work_id, mop.medium_uri)
+            if key in deduped:
+                prev = deduped[key]
+                player_count = (
+                    mop.player_count if mop.player_count is not None else prev["player_count"]
+                )
+                is_soloist = bool(mop.is_soloist) or prev["is_soloist"]
+                label = mop.label or prev["label"]
+                deduped[key] = {
+                    "work_id": mop.work_id,
+                    "medium_uri": mop.medium_uri,
+                    "label": label,
+                    "player_count": player_count,
+                    "is_soloist": is_soloist,
+                }
+            else:
+                deduped[key] = {
+                    "work_id": mop.work_id,
+                    "medium_uri": mop.medium_uri,
+                    "label": mop.label,
+                    "player_count": mop.player_count,
+                    "is_soloist": bool(mop.is_soloist),
+                }
+        if not deduped:
+            return
+        rows = list(deduped.values())
         batch_size = 5000
         with self.get_connection() as conn:
             for i in range(0, len(rows), batch_size):
@@ -1138,10 +1158,25 @@ class WEMIRepository:
 
         # 9. Mediums of Performance
         if mediums_of_performance:
+            bound_mops: list[MediumOfPerformance] = []
             for mop in mediums_of_performance:
-                if (not mop.work_id or mop.work_id <= 0) and works:
-                    mop.work_id = works[0].id
-                self.insert_medium_of_performance_batch(mediums_of_performance)
+                if not mop.work_id or mop.work_id <= 0:
+                    cand_id = _resolve(work_key_to_id, mop.work_curie)
+                    if cand_id is None and len(works) == 1:
+                        cand_id = works[0].id
+                    if cand_id:
+                        mop.work_id = cand_id
+                if mop.work_id and mop.work_id > 0:
+                    bound_mops.append(mop)
+                else:
+                    logger.warning(
+                        "Dropping medium of performance with unbound work: curie=%s uri=%s label=%s",
+                        mop.work_curie,
+                        mop.medium_uri,
+                        mop.label,
+                    )
+            if bound_mops:
+                self.insert_medium_of_performance_batch(bound_mops)
 
         # 10. Contributions
         if contributions:

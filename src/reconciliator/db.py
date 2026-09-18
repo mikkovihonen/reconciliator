@@ -484,19 +484,6 @@ task_progress_table = Table(
 # 4. Corpus Staging and Clustering Tables (§4.4)
 # ===================================================================
 
-corpus_manifestation_clusters_table = Table(
-    "corpus_manifestation_clusters",
-    metadata,
-    Column("cluster_id", String, primary_key=True),
-    Column("canonical_record_id", String, nullable=False),
-    Column("publisher", String, nullable=True),
-    Column("publication_year", Integer, nullable=True),
-    Column("edition_statement", String, nullable=True),
-    Column("extent", String, nullable=True),
-    Column("carrier_type", String, nullable=True),
-    Column("member_record_count", Integer, nullable=False, default=1, server_default="1"),
-)
-
 corpus_work_clusters_table = Table(
     "corpus_work_clusters",
     metadata,
@@ -523,6 +510,19 @@ corpus_expression_clusters_table = Table(
     Column("translators_json", Text, nullable=False, default="[]", server_default="[]"),
     Column("performers_json", Text, nullable=False, default="[]", server_default="[]"),
     Index("idx_exp_cluster_work", "work_cluster_id"),
+)
+
+corpus_manifestation_clusters_table = Table(
+    "corpus_manifestation_clusters",
+    metadata,
+    Column("cluster_id", String, primary_key=True),
+    Column("canonical_record_id", String, nullable=False),
+    Column("publisher", String, nullable=True),
+    Column("publication_year", Integer, nullable=True),
+    Column("edition_statement", String, nullable=True),
+    Column("extent", String, nullable=True),
+    Column("carrier_type", String, nullable=True),
+    Column("member_record_count", Integer, nullable=False, default=1, server_default="1"),
 )
 
 corpus_linkages_table = Table(

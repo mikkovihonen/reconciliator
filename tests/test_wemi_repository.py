@@ -328,7 +328,7 @@ def test_contributions_and_relationships(repo: WEMIRepository):
     assert len(rels) == 1
     assert rels[0].relationship_type == "supersedes"
 
-    # Medium of Performance
+    # Medium of Performance (verifying deduplication & ON CONFLICT DO UPDATE within same batch)
     repo.insert_medium_of_performance_batch(
         [
             MediumOfPerformance(
@@ -336,10 +336,89 @@ def test_contributions_and_relationships(repo: WEMIRepository):
                 medium_uri="http://rdaregistry.info/termList/mop/violin",
                 label="violin",
                 player_count=1,
+                is_soloist=False,
+            ),
+            MediumOfPerformance(
+                work_id=w1_id,
+                medium_uri="http://rdaregistry.info/termList/mop/violin",
+                label="violin",
+                player_count=2,
                 is_soloist=True,
-            )
+            ),
         ]
     )
+    mops = repo.get_mediums_of_performance(w1_id)
+    assert len(mops) == 1
+    assert mops[0].medium_uri == "http://rdaregistry.info/termList/mop/violin"
+    assert mops[0].player_count == 2
+    assert mops[0].is_soloist is True
+
+
+def test_insert_wemi_batch_mediums_of_performance_multi_work_binding(repo: WEMIRepository):
+    """Verify that multi-work batches correctly bind MOPs by work_curie, dedup, and drop unbounds."""
+    w1 = WorkEntity(
+        source="fennica",
+        source_id="w1_mop",
+        title="Violin Concerto",
+        title_normalized="violin concerto",
+        work_type="music",
+    )
+    w2 = WorkEntity(
+        source="fennica",
+        source_id="w2_mop",
+        title="Piano Sonata",
+        title_normalized="piano sonata",
+        work_type="music",
+    )
+    mops = [
+        # Two entries for w1 with the same URI to verify deduplication
+        MediumOfPerformance(
+            work_curie=w1.curie,
+            medium_uri="http://rdaregistry.info/termList/mop/violin",
+            label="violin",
+            player_count=1,
+            is_soloist=True,
+        ),
+        MediumOfPerformance(
+            work_curie=w1.curie,
+            medium_uri="http://rdaregistry.info/termList/mop/violin",
+            label="violin",
+            player_count=1,
+            is_soloist=True,
+        ),
+        # One entry for w2
+        MediumOfPerformance(
+            work_curie=w2.curie,
+            medium_uri="http://rdaregistry.info/termList/mop/piano",
+            label="piano",
+            player_count=1,
+            is_soloist=True,
+        ),
+        # One unbound entry (should be safely dropped, not mapped to w1)
+        MediumOfPerformance(
+            work_curie="urn:work:nonexistent:9999",
+            medium_uri="http://rdaregistry.info/termList/mop/flute",
+            label="flute",
+        ),
+    ]
+
+    repo.insert_wemi_batch(
+        works=[w1, w2],
+        expressions=[],
+        manifestations=[],
+        mediums_of_performance=mops,
+    )
+
+    assert w1.id is not None and w1.id > 0
+    assert w2.id is not None and w2.id > 0
+
+    w1_mops = repo.get_mediums_of_performance(w1.id)
+    assert len(w1_mops) == 1
+    assert w1_mops[0].medium_uri == "http://rdaregistry.info/termList/mop/violin"
+
+    w2_mops = repo.get_mediums_of_performance(w2.id)
+    assert len(w2_mops) == 1
+    assert w2_mops[0].medium_uri == "http://rdaregistry.info/termList/mop/piano"
 
 
 def test_harvest_state_checkpoint(repo: WEMIRepository):

@@ -1122,6 +1122,9 @@ def decompose_bibframe_work(
         subjects_json=[subject.as_dict() for subject in folded_subjects],
     )
     work.serialized_text = engine.render_work(work, authors=authors_list)
+    for m in mediums_of_perf:
+        if not m.work_curie:
+            m.work_curie = work.curie
 
     if subject_sink is not None:
         for s in folded_subjects:
