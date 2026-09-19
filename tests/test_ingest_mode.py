@@ -96,8 +96,8 @@ def test_delete_source_removes_only_that_source(store: WEMIRepository):
 def test_delete_source_leaves_no_orphaned_polymorphic_rows(store: WEMIRepository):
     """`identifiers`, `entity_keys` and `contributions` carry no foreign key.
 
-    entity_type/entity_id can name any tier, which SQLite cannot express as one
-    constraint, so there is no cascade and these rows must be deleted explicitly
+    entity_type/entity_id can name any tier and cannot be expressed as a single
+    foreign key constraint, so there is no cascade and these rows must be deleted explicitly
     or they outlive their owners.
     """
     _ingest(store, "melinda", "M1", "Seitseman veljesta")

@@ -458,10 +458,10 @@ pytest tests/test_bibframe_ingest_and_reconcile.py tests/test_reconciliation_off
 
 ### Manual Verification
 
-1. **Schema verification**: After Phase 3.1, initialise a fresh `authority.db` and verify
+1. **Schema verification**: After Phase 3.1, initialise a fresh database and verify
    that the legacy tables no longer exist:
    ```sql
-   SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+   SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
    ```
    Expected: No `authority_records`, `authority_identifiers`, `authority_agents`,
    `wikidata_authors`, `vector_mappings`, or `authority_fts`.
@@ -1078,7 +1078,7 @@ silently, and worst for the smallest sources. All three now over-fetch
 
 ### 13.3 `reconcile_corpus.db` folded into `authority.db`
 
-Staged corpus records and authority records lived in separate SQLite files, so a
+Staged corpus records and authority records originally lived in separate databases, so a
 cluster could not be joined to the works it resolved to, and `reset` left corpus
 rows behind that leaked into the next run. `init_authority_db` now creates the
 corpus tables, `get_corpus_connection()` returns the authority connection, and
@@ -1876,8 +1876,8 @@ returns per-table counts, so a caller reports what it removed rather than
 claiming a clean slate it did not verify. Five tables carry `record_origin`;
 everything else hangs off them by id, and the three polymorphic tables
 (`identifiers`, `entity_keys`, `contributions`) carry no foreign key — their
-`entity_type`/`entity_id` can name any tier, which SQLite cannot express as one
-constraint — so their rows are deleted explicitly or they outlive their owners.
+`entity_type`/`entity_id` can name any tier and cannot be expressed as a single
+foreign key constraint — so their rows are deleted explicitly or they outlive their owners.
 
 ```
 before        {'works': 3, 'agents': 6, 'identifiers': 3, 'entity_keys': 15, ...}

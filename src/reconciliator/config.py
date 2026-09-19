@@ -343,12 +343,12 @@ class VectorEngineConfig(BaseModel):
 
 
 class RepositoryFTSConfig(BaseModel):
-    """Configuration for SQLite FTS5 lexical database search & ranking in WEMIRepository."""
+    """Configuration for PostgreSQL full-text search (tsvector/tsquery) ranking in WEMIRepository."""
 
     ranking_function: str = Field(
         default="bm25",
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
-        description="SQLite FTS5 ranking function (e.g. bm25 or registered auxiliary function)",
+        description="Text search ranking function (e.g. ts_rank or ts_rank_cd)",
     )
     column_weights: Optional[list[float]] = None
     default_limit: int = Field(default=20, ge=1)
@@ -1601,7 +1601,7 @@ class AgentClusterConfig(BaseModel):
 
 
 class ReconcileFTSFallbackConfig(BaseModel):
-    """Configuration for WorkMatcher Tier 3 SQLite FTS5 fallback during reconciliation."""
+    """Configuration for WorkMatcher Tier 3 PostgreSQL full-text search fallback during reconciliation."""
 
     enabled: bool = True
     limit: int = 5

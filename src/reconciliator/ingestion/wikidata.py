@@ -269,7 +269,7 @@ def _lookup_entity_name(
     qid: str,
     store: Optional[WEMIRepository],
 ) -> Optional[str]:
-    """Look up an entity name from SQLite agents table by QID."""
+    """Look up an entity name from agents table by QID."""
     if not store or not qid:
         return None
     author = store.get_wikidata_author(qid)
@@ -286,7 +286,7 @@ def parse_wikidata_entity(
 ) -> Optional[dict[str, Any]]:
     """Parse a Wikidata entity into raw bibliographic dictionary format.
 
-    Author/publisher/subject names are hydrated from the SQLite agents/identifiers tables
+    Author/publisher/subject names are hydrated from the database agents/identifiers tables
     via the store parameter, achieving O(1) memory usage.
     """
     qid = entity.get("id", "")
@@ -369,7 +369,7 @@ def parse_wikidata_entity(
             if m:
                 year_str = m.group(1)
 
-    # Publisher: first check qualifier (P1810 / P1932 'stated as'), then SQLite lookup
+    # Publisher: first check qualifier (P1810 / P1932 'stated as'), then database lookup
     publisher = extract_claim_qualifier_string(claims, "P123")
     if not publisher:
         pub_qids = get_claim_qids(claims, "P123")
@@ -378,7 +378,7 @@ def parse_wikidata_entity(
     if publisher and re.match(r"^Q\d+$", publisher.strip()):
         publisher = None
 
-    # Publication Place: first check qualifier, then SQLite lookup
+    # Publication Place: first check qualifier, then database lookup
     publication_place = extract_claim_qualifier_string(claims, "P291")
     if not publication_place:
         place_qids = get_claim_qids(claims, "P291")
@@ -494,7 +494,7 @@ def parse_wikidata_entity(
     for d in dois:
         other_ids.append(f"doi:{d}")
 
-    # Agents — hydrate from SQLite
+    # Agents — hydrate from database
     agents: list[dict[str, Any]] = []
     for prop, role in _AUTHOR_PROPERTIES:
         for a_qid in get_claim_qids(claims, prop):
@@ -539,7 +539,7 @@ def parse_wikidata_entity(
                     }
                 )
 
-    # Subjects — hydrate names from SQLite
+    # Subjects — hydrate names from database
     cat_defaults = get_category_default_field_map()
     field_to_cat = get_subject_field_category_map()
     subjects: dict[str, list[dict[str, Any]]] = {cat: [] for cat in field_to_cat.values()}
@@ -635,7 +635,7 @@ def _prescan_authors(
     tracker: Optional[ProgressTracker],
     config: Optional[WikidataIngestConfig] = None,
 ) -> int:
-    """Pass 1: Stream the Wikidata dump and persist all author/org/place entities to SQLite.
+    """Pass 1: Stream the Wikidata dump and persist all author/org/place entities to PostgreSQL.
 
     Processes line-by-line in O(1) memory — no in-memory author dict is maintained.
     Returns the number of author entities persisted.
@@ -686,7 +686,7 @@ def _prescan_authors(
         total_authors += len(author_batch)
         author_batch.clear()
 
-    logger.info("Pass 1 complete: %d author entities persisted to SQLite", total_authors)
+    logger.info("Pass 1 complete: %d author entities persisted to database", total_authors)
     return total_authors
 
 
@@ -697,7 +697,7 @@ def _stream_bibliographic_entities(
 ) -> Iterator[dict[str, Any]]:
     """Pass 2: Stream the Wikidata dump and yield bibliographic entities.
 
-    Author names are hydrated from the SQLite agents/identifiers tables (populated in Pass 1),
+    Author names are hydrated from the database agents/identifiers tables (populated in Pass 1),
     achieving true O(1) memory consumption.
     """
     with gzip.open(path, "rb") as f:
@@ -732,12 +732,12 @@ def stream_wikidata_dump(
     tracker: Optional[ProgressTracker] = None,
     config: Optional[WikidataIngestConfig] = None,
 ) -> Iterator[dict[str, Any]]:
-    """Two-pass Wikidata streaming: pre-scan authors into SQLite, then extract books.
+    """Two-pass Wikidata streaming: pre-scan authors into PostgreSQL, then extract books.
 
     Pass 1: Scans the entire dump to collect all human/organization/place entities
-            and persists them to the SQLite wikidata_authors table.
+            and persists them to the PostgreSQL wikidata_authors table.
     Pass 2: Scans the dump again to process bibliographic entities, hydrating
-            author/publisher/subject names from SQLite instead of in-memory state.
+            author/publisher/subject names from the database instead of in-memory state.
 
     This achieves true O(1) memory consumption regardless of dump size.
     """
@@ -748,14 +748,14 @@ def stream_wikidata_dump(
     total_bytes = os.path.getsize(path)
 
     # Pass 1: Pre-scan all human/org entities into wikidata_authors
-    logger.info("Pass 1/2: Pre-scanning author entities into SQLite...")
+    logger.info("Pass 1/2: Pre-scanning author entities into database...")
     if tracker:
         tracker.start_task(stage="wikidata_prescan", bytes_total=total_bytes)
     _prescan_authors(path, store, tracker, config=config)
     if tracker:
         tracker.complete_task(metadata={"stage": "prescan"})
 
-    # Pass 2: Stream bibliographic entities, hydrating authors from SQLite
+    # Pass 2: Stream bibliographic entities, hydrating authors from database
     logger.info("Pass 2/2: Streaming bibliographic entities...")
     if tracker:
         tracker.start_task(stage="streaming_wikidata", bytes_total=total_bytes)
@@ -782,7 +782,7 @@ def decompose_wikidata_entity(
     """Decompose a raw Wikidata entity dictionary into normalized WEMI domain entities.
 
     Distinguishes Abstract Works from Editions/Manifestations (P629).
-    Hydrates author/creator names from SQLite for O(1) memory consumption.
+    Hydrates author/creator names from database for O(1) memory consumption.
     """
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
@@ -1217,8 +1217,8 @@ def ingest_wikidata_wemi_pipeline(
 
     total_bytes = os.path.getsize(path)
 
-    # Pass 1: Scan author entities into SQLite wikidata_authors & agents
-    logger.info("Pass 1/2: Pre-scanning author entities into SQLite...")
+    # Pass 1: Scan author entities into PostgreSQL wikidata_authors & agents
+    logger.info("Pass 1/2: Pre-scanning author entities into database...")
     if tracker:
         tracker.start_task(stage="wikidata_prescan", bytes_total=total_bytes)
     _prescan_authors(path, wemi_repo, tracker, config=config)

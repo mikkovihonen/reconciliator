@@ -381,7 +381,7 @@ def check_homonym_ambiguity(
     """Detect if multiple candidates share near-identical names without distinguishing metadata.
 
     Tier 1 (In-Memory Footprint): Evaluates dates, ORCID, qualifier counts, affiliation counts, and language counts.
-    Tier 2 (Relational SQLite Graph): Executes targeted SQL queries on contributions/agents/manifestations to evaluate
+    Tier 2 (Relational PostgreSQL Graph): Executes targeted SQL queries on contributions/agents/manifestations to evaluate
     co-author graph overlap, publisher history, and scheme-agnostic classification overlap.
     """
     if len(top_candidates) <= 1:
@@ -485,7 +485,7 @@ def check_homonym_ambiguity(
         if len(matching_s_cands) == 1:
             return True, "ambiguity_resolved_by_subjects"
 
-    # --- Tier 2 Relational Deep Disambiguation (On-Demand SQLite Graph Query) ---
+    # --- Tier 2 Relational Deep Disambiguation (On-Demand PostgreSQL Graph Query) ---
     if authority_store and hasattr(authority_store, "get_relational_disambiguation_evidence"):
         cand_ids = [c.get("id") for c in close_candidates if c.get("id") is not None]
         if cand_ids:

@@ -1,4 +1,4 @@
-"""Unit tests for VocabStore and SQLite indexed queries."""
+"""Unit tests for VocabStore and PostgreSQL indexed queries."""
 
 from pathlib import Path
 

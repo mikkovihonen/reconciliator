@@ -2,7 +2,7 @@
 
 Tier 1 resolves a standard identifier. Tier 2 matches on an author key plus title
 stem, filtered by the work type its funnel declares. Tier 3 falls back to dense
-vector search, then to SQLite FTS5.
+vector search, then to PostgreSQL full-text search.
 
 The engine names a specific backend nowhere: the dense tier searches whatever
 vector index the repository was constructed with, and the CLI currently
@@ -438,10 +438,10 @@ class WorkMatcher:
                     confidence_score=float(verdict.match_score),
                 )
 
-        # 2. FTS5 Lexical Search (Tier 3 Fallback)
+        # 2. PostgreSQL Full-Text Search (Tier 3 Fallback)
         # Architectural distinction:
-        # This fallback performs database-level candidate retrieval against SQLite FTS5 virtual tables
-        # using SQLite's native C-level BM25 ranking function. It is completely independent of the
+        # This fallback performs database-level candidate retrieval against PostgreSQL full-text indexes
+        # using tsvector and tsquery ranking. It is completely independent of the
         # in-memory sparse reranking (rank-bm25 / CandidateEvaluator) performed during scoring.
         fts_cfg = (
             self.config.fts_fallback
@@ -858,7 +858,7 @@ class WorkMatcher:
         """Tier 3: resolve target agents left unlinked by coupled work matching.
 
         Queries the standalone agent vector index, hydrates candidate profiles from
-        SQLite, and lets AgentFallbackResolver arbitrate with chronology and homonym
+        the database, and lets AgentFallbackResolver arbitrate with chronology and homonym
         guards before any URI is accepted.
         """
         cfg = self.config

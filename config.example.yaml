@@ -90,10 +90,10 @@ storage:
       nprobe: 16                  # Number of Voronoi partitions checked per query (for IVF indexes)
       nlist: 2048                 # Number of Voronoi partitions (for IVF indexes)
 
-  # Database-level SQLite FTS5 lexical candidate retrieval in WEMIRepository
+  # Database-level PostgreSQL full-text search lexical candidate retrieval in WEMIRepository
   fts:
-    ranking_function: "bm25"      # SQLite FTS5 ranking function (e.g. bm25 or registered auxiliary function)
-    column_weights: null          # Optional column weights for bm25(table, w1, ...)
+    ranking_function: "bm25"      # Text search ranking function (e.g. ts_rank or ts_rank_cd)
+    column_weights: null          # Optional column weights for ranking
     default_limit: 20             # Default candidate limit for repository FTS queries
     prefix_search: false          # Append wildcard * to search terms by default
 
@@ -1063,7 +1063,7 @@ reconcile:
     max_year_difference: 5       # Max allowable publication year discrepancy
     year_penalty_threshold: 1    # Year discrepancy after which proximity penalty begins
 
-  # Tier 3 SQLite FTS5 fallback when exact and dense matches fail
+  # Tier 3 PostgreSQL full-text search fallback when exact and dense matches fail
   fts_fallback:
     enabled: true
     limit: 5

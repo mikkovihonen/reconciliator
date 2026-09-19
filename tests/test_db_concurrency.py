@@ -1,4 +1,4 @@
-"""Unit tests verifying SQLite WAL mode concurrent access across threads."""
+"""Unit tests verifying PostgreSQL concurrent access across threads."""
 
 import concurrent.futures
 from pathlib import Path
@@ -11,7 +11,7 @@ from reconciliator.database import (
 )
 
 
-def test_concurrent_wal_writes_and_reads(tmp_path: Path) -> None:
+def test_concurrent_writes_and_reads(tmp_path: Path) -> None:
     db_path = tmp_path / "concurrency_test.db"
 
     # Initialize schema

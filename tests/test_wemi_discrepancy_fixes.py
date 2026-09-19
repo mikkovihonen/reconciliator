@@ -19,8 +19,8 @@ from reconciliator.models import (
 from reconciliator.database import WEMIRepository
 
 
-def test_work_type_hub_sqlite_constraint(tmp_path):
-    """Verify that 'hub' is an accepted work_type under SQLite CHECK constraints."""
+def test_work_type_hub_constraint(tmp_path):
+    """Verify that 'hub' is an accepted work_type under database CHECK constraints."""
     db_path = tmp_path / "test_hub.db"
     with get_db_connection(db_path) as conn:
         init_authority_db(conn)

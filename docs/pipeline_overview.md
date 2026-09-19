@@ -23,28 +23,28 @@ moving-image research see [plans/kavi.md](plans/kavi.md).
    file,          └──────────────┘      contributions, relationships
    ResourceSync)                                    │
                                                     ▼
-                                        ┌───────────────────────┐
-                                        │  authority.db         │
-                                        │  one SQLite database  │
-                                        └───────────────────────┘
-                                          │        │          │
-                          ┌───────────────┘        │          └──────────────┐
-                          ▼                        ▼                         ▼
-                  ┌──────────────┐        ┌─────────────────┐       ┌────────────────┐
-                  │ build-index  │        │ consolidate-    │       │   reconcile    │
-                  │ (embeddings) │        │ works           │       │                │
-                  └──────────────┘        │ (cross-source   │       │ cluster ─►     │
-                          │               │  work identity) │       │ match ─►       │
-                          └──────────────►└─────────────────┘──────►│ resolve agents │
-                                                                    │ ─► enrich      │
-                                                                    └────────────────┘
-                                                                             │
-                                                                             ▼
-                                                                    enriched records
-                                                                    + TSV reports
+                                         ┌───────────────────────┐
+                                         │  PostgreSQL           │
+                                         │  relational database  │
+                                         └───────────────────────┘
+                                           │        │          │
+                           ┌───────────────┘        │          └──────────────┐
+                           ▼                        ▼                         ▼
+                   ┌──────────────┐        ┌─────────────────┐       ┌────────────────┐
+                   │ build-index  │        │ consolidate-    │       │   reconcile    │
+                   │ (embeddings) │        │ works           │       │                │
+                   └──────────────┘        │ (cross-source   │       │ cluster ─►     │
+                           │               │  work identity) │       │ match ─►       │
+                           └──────────────►└─────────────────┘──────►│ resolve agents │
+                                                                     │ ─► enrich      │
+                                                                     └────────────────┘
+                                                                              │
+                                                                              ▼
+                                                                     enriched records
+                                                                     + TSV reports
 ```
 
-Everything lives in **one SQLite database** (`authority.db`, 36 tables). There
+Everything lives in **PostgreSQL** (relational database, 36 tables). There
 used to be a separate corpus-staging database; it was merged so a cluster can be
 joined to the works it resolves to.
 
@@ -139,8 +139,8 @@ Key types the MARC loader emits: `work` (author + title stem), `author`,
 `translators_signature`, `sammelband`, `analytic` and `analytic_title` (MARC
 505/700/710 `$t` constituent works).
 
-Neither table has a foreign key — `entity_type` can name any tier, which SQLite
-cannot express as one constraint — so deleting an owning row does **not** cascade
+Neither table has a foreign key — `entity_type` can name any tier, which cannot
+be expressed as a single foreign key constraint — so deleting an owning row does **not** cascade
 and cleanup has to be explicit. `delete_source()` does that, which is what backs
 `ingest_mode: replace`.
 
@@ -253,7 +253,7 @@ Every funnel runs the same three tiers (`funnels/engine.py`):
 |---|---|
 | 1 | exact standard identifier, trying the spec's `identifier_schemes` first |
 | 2 | author key + title stem, filtered by the spec's `work_types` in order |
-| 3 | dense vector search over the work index, then SQLite FTS5 |
+| 3 | dense vector search over the work index, then PostgreSQL full-text search |
 
 Tiers 2 and 3 **rank** their candidates rather than taking the first. A blocking
 query returns everything sharing an author key and title stem, which for a

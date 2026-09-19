@@ -55,7 +55,7 @@ Extend the Reconciliator engine from a manifestation-level matching tool into a 
    - **Spatial Vector/Raster Geodata & GIS Web Services**: Support dynamic geodata services (Maanmittauslaitos, Syke, INSPIRE) encompassing ESRI Shapefiles, GeoTIFF rasters, and live web endpoints (WMS/WFS/OGC API), with EPSG coordinate reference system codes (`084 $2 epsg`) and geographic bounding polygons.
    - **Numismatics, Philately & Historical Seals**: Support coins, commemorative medals, postal stamps, and sigillography specimens, modeling issuing sovereign states (`110`), monetary face value denominations, engravers (`egr`), and standard numismatic/philatelic catalog numbering systems (Michel, Scott, Krause-Mishler).
    - **3D Cultural Heritage Digital Twins & XR Reconstructions**: Support photogrammetric 3D scans, polygon meshes (glTF/OBJ/USDZ), and virtual reality heritage environments documenting historical architecture, ruins, and museum artifacts, linking 3D spatial models back to physical monument Works via `digital_twin_of`.
-5. **Greenfield Storage**: Implement a pure relational WEMI architecture in SQLite (`authority.db` and ephemeral `reconcile_corpus.db`), discarding legacy single-tier schemas.
+5. **Greenfield Storage**: Implement a pure relational WEMI architecture in PostgreSQL, discarding legacy single-tier schemas.
 
 ---
 
@@ -1701,7 +1701,7 @@ To demonstrate how the mapping matrices operate in practice, this section provid
     ] .
 ```
 
-##### C. Internal SQLite Database Rows Produced by Reconciliator Ingestion:
+##### C. Internal Relational Database Rows Produced by Reconciliator Ingestion:
 
 ```sql
 -- 1. works row (Abstract Conceptual Work)
@@ -1882,7 +1882,7 @@ VALUES
     ] .
 ```
 
-##### C. Internal SQLite Database Rows Produced by Reconciliator Ingestion:
+##### C. Internal Relational Database Rows Produced by Reconciliator Ingestion:
 ```sql
 -- 1. works row (Musical Composition)
 INSERT INTO works (id, work_uri, source, source_id, title, title_normalized, work_type, primary_agent_id, serialized_text)
@@ -2028,7 +2028,7 @@ flowchart TD
         direction TB
         MicroGraph["1. Construct Ephemeral Micro-Graph (rdflib.Graph)"]
         ExtractWEMI["2. Decompose Triples into WEMI Entities (Work, Expression, Manifestation, Item, Agent)"]
-        BatchTx["3. SQLite Batch Transaction Commit (WAL Mode)"]
+        BatchTx["3. PostgreSQL Batch Transaction Commit"]
         FreeRAM["4. Free Ephemeral Graph & Reclaim Memory (Resident RAM <= 50 MB)"]
 
         MicroGraph --> ExtractWEMI --> BatchTx --> FreeRAM
@@ -2041,8 +2041,8 @@ flowchart TD
 
     subgraph Storage["Target Database Routing (OAIIngestConfig.target_database)"]
         direction LR
-        AuthDB[("authority.db: External Authority Hub (works, expressions, manifestations, items, agents)")]
-        CorpusDB[("reconcile_corpus.db: Target Corpus Staging (target_records)")]
+        AuthDB[("authority: External Authority Hub (works, expressions, manifestations, items, agents)")]
+        CorpusDB[("corpus: Target Corpus Staging (target_records)")]
     end
 
     BatchTx --> AuthDB
@@ -2053,11 +2053,11 @@ flowchart TD
 1. **Streaming JSON-LD (`jsonld_stream.py`)**:
    - Uses `ijson` (C-backend iterative JSON parser) to stream top-level array elements or objects within `@graph` without reading the entire JSON file into RAM.
    - Accumulates connected nodes belonging to a single `bf:Instance` (including its nested `bf:Work`, `bf:contribution`, `bf:title`, and `bf:identifiedBy` blank nodes).
-   - Once an instance tree boundary is reached, converts the dictionary payload into an ephemeral `rdflib.Graph`, extracts WEMI records, executes SQLite batch inserts, and immediately destroys the graph.
+   - Once an instance tree boundary is reached, converts the dictionary payload into an ephemeral `rdflib.Graph`, extracts WEMI records, executes database batch inserts, and immediately destroys the graph.
 2. **Streaming N-Triples & N-Quads**:
    - Because N-Triples is serialized line-by-line, a streaming subject-buffer reads triples sequentially.
    - Triples sharing the same subject IRI (and their dependent blank nodes `_:b...`) are buffered into a micro-graph.
-   - Flushes to SQLite upon subject transition, maintaining under 50 MB resident memory.
+   - Flushes to database upon subject transition, maintaining under 50 MB resident memory.
 3. **Streaming RDF/XML**:
    - Uses `lxml.etree.iterparse` with tag-level event triggers on `<rdf:Description>`, `<bf:Instance>`, or `<bffi:Manifestation>`.
    - Clears element trees (`elem.clear()`) after extracting each bibliographic resource.
@@ -2066,7 +2066,7 @@ flowchart TD
 
 ## 4. Greenfield Database Schema Architecture
 
-Both databases run in SQLite WAL mode (`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;`).
+The database runs in PostgreSQL with standard transaction isolation and foreign key enforcement.
 
 ### 4.1 Authority Database (`authority.db`)
 Stores ingested Melinda, Wikidata, and Library of Congress authority catalogs.
@@ -2626,7 +2626,7 @@ To process multi-gigabyte gzipped Wikidata dumps (e.g. `latest-all.json.gz`, ~10
      INSERT OR IGNORE INTO agents (agent_id, agent_uri, name, family_name, given_name, source, wikidata_qid, isni, viaf)
      VALUES (?, ?, ?, ?, ?, 'wikidata', ?, ?, ?);
      ```
-   - Populates an ephemeral SQLite lookup table `wikidata_authors` for fast QID-to-agent resolution during Pass 2.
+   - Populates a database lookup table `wikidata_authors` for fast QID-to-agent resolution during Pass 2.
 
 ##### Pass 2: Bibliographic Entity Ingestion & WEMI Resolution
 1. **Bibliographic Signature Detection**:
@@ -2808,7 +2808,7 @@ Each worker thread executes an independent OAI-PMH `ListRecords` query with its 
 - Enforces polite request delays (`request_delay = 0.1s`).
 
 ##### 4. Persistent Harvest State (`harvest_state`)
-Harvest state is tracked in SQLite to support incremental resuming without duplicate processing:
+Harvest state is tracked in the database to support incremental resuming without duplicate processing:
 ```sql
 CREATE TABLE IF NOT EXISTS harvest_state (
     source_name TEXT PRIMARY KEY,
@@ -2883,8 +2883,8 @@ When harvesting a client or target repository (e.g. university repositories, mun
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
      ```
 2. **Feature Extraction During Ingestion**:
-   - To maximize reconciliation throughput, blocking keys and normalized search signatures across all 35 blocking key families are computed during ingestion and indexed immediately in SQLite.
-   - The original raw payload (`original_xml` or raw RDF string) is preserved untouched in SQLite for subsequent in-place enrichment.
+   - To maximize reconciliation throughput, blocking keys and normalized search signatures across all 35 blocking key families are computed during ingestion and indexed immediately in PostgreSQL.
+   - The original raw payload (`original_xml` or raw RDF string) is preserved untouched in PostgreSQL for subsequent in-place enrichment.
 
 ---
 
@@ -3537,7 +3537,7 @@ flowchart TD
             W_FIELDS["Fields: Preferred & uniform title, Primary creators (aut, cmp), Work type, YSO subjects"]
             W_TXT[("works.serialized_text")]
             W_EMB["SentenceEmbedder"]
-            W_FTS[("works_fts (SQLite BM25)")]
+            W_FTS[("works_fts (PostgreSQL Full-Text Search)")]
             W_IDX[("data/work.index (work_vectors)")]
 
             W_TPL --> W_FIELDS --> W_TXT
@@ -3551,7 +3551,7 @@ flowchart TD
             E_FIELDS["Fields: Expression title, Realization language, Translators, Performers, Content type"]
             E_TXT[("expressions.serialized_text")]
             E_EMB["SentenceEmbedder"]
-            E_FTS[("expressions_fts (SQLite BM25)")]
+            E_FTS[("expressions_fts (PostgreSQL Full-Text Search)")]
             E_IDX[("data/expression.index (expression_vectors)")]
 
             E_TPL --> E_FIELDS --> E_TXT
@@ -3565,7 +3565,7 @@ flowchart TD
             M_FIELDS["Fields: Title as published, Publisher, Year, Edition, Extent, Series"]
             M_TXT[("manifestations.serialized_text")]
             M_EMB["SentenceEmbedder"]
-            M_FTS[("manifestations_fts (SQLite BM25)")]
+            M_FTS[("manifestations_fts (PostgreSQL Full-Text Search)")]
             M_IDX[("data/manifestation.index (manifestation_vectors)")]
 
             M_TPL --> M_FIELDS --> M_TXT
@@ -3617,23 +3617,23 @@ Nimeke: {{ title }}{% if subtitle %} : {{ subtitle }}{% endif %} | Julkaisija: {
 #### 5.3.3 Materialized Serialization Columns & Tripartite FTS5 BM25 Engine
 To eliminate CPU-heavy Jinja2 template rendering during bulk query execution:
 1. Every entity row computes its `serialized_text` string **once** during ingestion/harvesting.
-2. Three SQLite FTS5 virtual tables (`works_fts`, `expressions_fts`, `manifestations_fts`) index `serialized_text` using `unicode61 remove_diacritics 2`.
-3. Ingesting target records into `reconcile_corpus.db` pre-renders `serialized_work`, `serialized_expression`, and `serialized_manifestation`, allowing instant zero-copy access during all reconciliation phases.
+2. Three PostgreSQL full-text search indexes (`idx_works_fts`, `idx_expressions_fts`, `idx_manifestations_fts`) index `serialized_text` using `gin (to_tsvector('simple', ...))`.
+3. Ingesting target records into `target_records` pre-renders `serialized_work`, `serialized_expression`, and `serialized_manifestation`, allowing instant zero-copy access during all reconciliation phases.
 
 #### 5.3.4 Tripartite Vector Spaces & Relational Storage Mapping
 The engine builds and queries three distinct vector spaces, each isolated to its proper FRBR/LRM level of abstraction:
 
 ```mermaid
 flowchart TD
-    V_W["1. Work Vector Space (v_W) | File: data/work.index | Table: authority.db:work_vectors | Conceptual Invariance: Invariant to language, translator, year, format | Neighborhood: 'Hamlet' English ≈ Finnish text"]
-    V_E["2. Expression Vector Space (v_E) | File: data/expression.index | Table: authority.db:expression_vectors | Realization Invariance: Invariant to publisher, print run, binding | Separates: Cajander suom. ≠ Saarikoski"]
-    V_M["3. Manifestation Vector Space (v_M) | File: data/manifestation.index | Table: authority.db:manifestation_vectors | Carrier & Imprint Identity: Invariant to cataloging variations / typos | Separates: 2021 Otava ≠ 1945 WSOY"]
+    V_W["1. Work Vector Space (v_W) | File: data/work.index | Table: work_vectors | Conceptual Invariance: Invariant to language, translator, year, format | Neighborhood: 'Hamlet' English ≈ Finnish text"]
+    V_E["2. Expression Vector Space (v_E) | File: data/expression.index | Table: expression_vectors | Realization Invariance: Invariant to publisher, print run, binding | Separates: Cajander suom. ≠ Saarikoski"]
+    V_M["3. Manifestation Vector Space (v_M) | File: data/manifestation.index | Table: manifestation_vectors | Carrier & Imprint Identity: Invariant to cataloging variations / typos | Separates: 2021 Otava ≠ 1945 WSOY"]
 
     V_W -->|"1:N expresses"| V_E
     V_E -->|"1:N embodies"| V_M
 ```
 
-The database maps the zero-indexed integer rows of each FAISS / PyTorch index directly to the primary keys of the respective SQLite entity tables:
+The database maps the zero-indexed integer rows of each FAISS / PyTorch index directly to the primary keys of the respective entity tables:
 ```sql
 CREATE TABLE work_vectors (
     vector_id INTEGER PRIMARY KEY,               -- Positional row in data/work.index
@@ -4813,7 +4813,7 @@ flowchart LR
 
 ### Milestone 4: Intra-Corpus Graph Clusterer
 - Implement `CorpusClusterer` in `src/reconciliator/clusterer.py`:
-  - Disk-backed SQLite staging in `reconcile_corpus.db`.
+  - Relational storage staging in PostgreSQL.
   - Multi-key blocking generation across all 35 blocking key families (`work`, `citation`, `serial`, `series`, `music`, `music_work`, `cross_format`, `accessible_repro`, `moving_image`, `cartographic`, `standard`, `thesis`, `patent`, `statute`, `game`, `board_game`, `fingerprint`, `swhid`, `drama`, `podcast`, `sammelband_binding`, `web_archive`, `broadcast_timecode`, `oral_history`, `parallel_multilingual`, `preservation_surrogate`, `fragment_codex`, `ephemera_corp`, `exhibition_event`, `critical_edition`, `geodata_spatial`, `numismatic_issue`, `heritage_model`, `archival_fonds`, `still_image`).
   - Graph connected-component clustering with domain-specific edge weights.
   - Content-type-aware expression sub-clustering (see §5.2 Step 3).
@@ -4883,8 +4883,8 @@ flowchart TD
 ##### 1. `StorageConfig`
 ```python
 class StorageConfig(BaseModel):
-    authority_db: Path = Path("data/authority.db")  # Canonical WEMI Authority SQLite DB
-    vocab_db: Path = Path("data/vocab.db")  # Value Vocabularies SQLite DB
+    authority_db: Path = Path("data/authority.db")  # Canonical WEMI Authority Database
+    vocab_db: Path = Path("data/vocab.db")  # Value Vocabularies Database
     progress_db: Path = Path("data/progress.db")  # Task tracking & progress state
     corpus_db: Path = Path(
         "data/reconcile_corpus.db"

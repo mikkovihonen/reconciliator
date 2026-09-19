@@ -561,7 +561,7 @@ class CorpusClusterer:
                     )
                 )
 
-        # Step 7: Batch Persistence to SQLite
+        # Step 7: Batch Persistence to PostgreSQL
         self.corpus_repo.insert_work_clusters_batch(work_clusters)
         self.corpus_repo.insert_expression_clusters_batch(expression_clusters)
         self.corpus_repo.insert_manifestation_clusters_batch(manifestation_clusters)

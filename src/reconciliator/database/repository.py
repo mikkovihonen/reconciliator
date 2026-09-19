@@ -1,4 +1,4 @@
-"""WEMIRepository mediating access to SQLite authority.db, corpus database, and vector index."""
+"""WEMIRepository mediating access to PostgreSQL database and vector index."""
 
 from __future__ import annotations
 
@@ -2171,13 +2171,13 @@ class WEMIRepository:
             return {row for row in conn.execute(stmt).scalars() if row}
 
     # -----------------------------------------------------------------------
-    # Database-Level SQLite FTS5 Lexical Search (Engine-Level BM25 Ranking)
+    # Database-Level PostgreSQL Full-Text Search (tsvector/tsquery Ranking)
     #
     # NOTE ON ARCHITECTURAL DISTINCTION:
-    # This module provides database-level full-text search against SQLite FTS5
-    # virtual tables (works_fts, expressions_fts, manifestations_fts). Ranking is
-    # computed directly inside SQLite using its native C implementation of bm25()
-    # (or configured ranking expression/weights from RepositoryFTSConfig in storage.fts).
+    # This module provides database-level full-text search against PostgreSQL tables
+    # using tsvector, tsquery, and GIN indexes. Ranking is computed directly inside
+    # PostgreSQL using ts_rank_cd (or configured ranking expression/weights from
+    # RepositoryFTSConfig in storage.fts).
     #
     # This is distinct from:
     # 1) ReconcileFTSFallbackConfig (reconcile.fts_fallback in matcher.py):
@@ -2763,7 +2763,7 @@ class WEMIRepository:
         expressions, manifestations, items, agents - and everything else hangs off
         them by id. The polymorphic tables (`identifiers`, `entity_keys`,
         `contributions`) carry no foreign key, because `entity_type`/`entity_id`
-        can name any tier and SQLite cannot express that as one constraint, so
+        can name any tier and cannot be expressed as a single foreign key constraint, so
         their rows have to be deleted explicitly or they outlive their owners.
 
         Returns per-table counts so a caller can report what it removed rather

@@ -1,4 +1,4 @@
-"""Unit tests for ProgressTracker, SQLite heartbeats, and status formatters."""
+"""Unit tests for ProgressTracker, database heartbeats, and status formatters."""
 
 import json
 from pathlib import Path

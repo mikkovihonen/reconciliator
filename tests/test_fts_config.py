@@ -202,7 +202,7 @@ def test_work_matcher_fts_fallback_config(tmp_path: Path):
     # Target has matching title stem "Puhdistus", but different author_key "Virtanen".
     # Tier 1 (IDs) fails.
     # Tier 2 (Author+Title stem) fails because author surname/name does not match Sofi Oksanen.
-    # Tier 3 (FTS5 Lexical Search) matches "Puhdistus" in SQLite FTS5 index.
+    # Tier 3 (FTS Lexical Search) matches "Puhdistus" in PostgreSQL full-text index.
     target = MatchRecord(
         record_id="rec1",
         format="marcxml",
