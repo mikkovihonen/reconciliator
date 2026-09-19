@@ -1,6 +1,6 @@
 """Unit tests for VocabularyManager, namespace detection, allowlist filtering, and link prioritization."""
 
-from reconciliator.vocabularies import VocabularyManager, detect_vocabulary
+from reconciliator.vocab import VocabularyManager, detect_vocabulary
 
 
 def test_detect_vocabulary() -> None:
@@ -63,7 +63,7 @@ def test_all_links_policy() -> None:
 def test_vocabulary_manager_yaml_defaults() -> None:
     """Test that VocabularyManager cleanly defaults all parameters from YAML defaults without hardcoded fallbacks."""
     from reconciliator.config import get_bundled_vocab_defaults
-    from reconciliator.vocabularies import get_vocabulary_patterns
+    from reconciliator.vocab import get_vocabulary_patterns
 
     defaults = get_bundled_vocab_defaults()
     vm = VocabularyManager()
@@ -116,7 +116,7 @@ def test_vocabulary_manager_custom_patterns_and_priorities() -> None:
 
 def test_normalize_concept_id_and_expand() -> None:
     """Test normalize_concept_id across various URI, control number, and CURIE variants."""
-    from reconciliator.vocabularies import concept_id_to_uri, normalize_concept_id
+    from reconciliator.vocab import concept_id_to_uri, normalize_concept_id
 
     # YSO: URL, HTTPS, trailing slash, MARC control number, CURIE
     assert normalize_concept_id("http://www.yso.fi/onto/yso/p2591") == "yso:p2591"
@@ -151,7 +151,7 @@ def test_normalize_concept_id_and_expand() -> None:
 
 def test_concept_id_multiple_id_patterns_and_case_normalization() -> None:
     """Test custom configuration with multiple ordered id_patterns and case normalization."""
-    from reconciliator.vocabularies import normalize_concept_id
+    from reconciliator.vocab import normalize_concept_id
 
     custom_rules = {
         "TEST_ONT": {
@@ -189,7 +189,7 @@ def test_concept_id_multiple_id_patterns_and_case_normalization() -> None:
 
 def test_strip_vocabulary_subcode() -> None:
     """Test strip_vocabulary_subcode helper."""
-    from reconciliator.vocabularies import strip_vocabulary_subcode
+    from reconciliator.vocab import strip_vocabulary_subcode
 
     assert strip_vocabulary_subcode("yso/fin") == "yso"
     assert strip_vocabulary_subcode("slm/swe") == "slm"
@@ -226,7 +226,7 @@ def test_select_subject_uris() -> None:
 
 def test_format_wikidata_uri() -> None:
     """Test format_wikidata_uri function and VocabularyManager integration."""
-    from reconciliator.vocabularies import format_wikidata_uri
+    from reconciliator.vocab import format_wikidata_uri
 
     # Standard QID
     assert format_wikidata_uri("Q273115") == "http://www.wikidata.org/entity/Q273115"

@@ -80,6 +80,7 @@ class AgentClusterer:
         self,
         repo: WEMIRepository,
         config: Optional[AgentClusterConfig] = None,
+        hierarchy_service: Optional[Any] = None,
     ) -> None:
 
         self.repo = repo
@@ -87,6 +88,7 @@ class AgentClusterer:
             self.config = config
         else:
             self.config = AppConfig().agent_clustering
+        self.hierarchy_service = hierarchy_service
 
     def cluster_agents(self) -> AgentClusterResult:
         """Execute full agent clustering pipeline across sources."""
@@ -729,7 +731,16 @@ class AgentClusterer:
 
         # Concept (occupation/field_of_work) score
         if concepts1 and concepts2:
-            concept_score = 1.0 if (concepts1 & concepts2) else 0.0
+            if concepts1 & concepts2:
+                concept_score = 1.0
+            elif (
+                getattr(self.config, "enable_hierarchical_concepts", True)
+                and self.hierarchy_service is not None
+            ):
+                sim = self.hierarchy_service.concepts_similarity(concepts1, concepts2)
+                concept_score = sim * getattr(self.config, "concept_similarity_weight", 0.85)
+            else:
+                concept_score = 0.0
             score_sum += weights.concept_weight * concept_score
             weight_sum += weights.concept_weight
 

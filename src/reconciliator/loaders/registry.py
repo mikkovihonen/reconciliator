@@ -355,7 +355,7 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         derive_domain_keys,
         determine_work_type,
     )
-    from reconciliator.vocabularies import get_vocabulary_patterns
+    from reconciliator.vocab import get_vocabulary_patterns
 
     # Read from the functions rather than transcribed, so a declaration cannot
     # drift from the code it describes.

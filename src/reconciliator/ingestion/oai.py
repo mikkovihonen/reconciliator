@@ -47,7 +47,7 @@ def _get_worker_vocab_store(db_url: Optional[str]) -> Optional[Any]:
     global _worker_vocab_store
     if db_url and _worker_vocab_store is None:
         try:
-            from reconciliator.vocab_store import VocabStore
+            from reconciliator.vocab import VocabStore
 
             _worker_vocab_store = VocabStore(db_url)
         except Exception:

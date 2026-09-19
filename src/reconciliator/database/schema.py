@@ -452,6 +452,20 @@ concept_aliases_table = Table(
     Index("idx_concept_aliases_concept", "vocabulary", "concept_id"),
 )
 
+concept_hierarchy_table = Table(
+    "concept_hierarchy",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("vocabulary", String(64), nullable=False),
+    Column("concept_id", String(128), nullable=False),
+    Column("broader_concept_id", String(128), nullable=False),
+    Column("relation_type", String(32), nullable=False, default="broader", server_default="broader"),
+    UniqueConstraint("vocabulary", "concept_id", "broader_concept_id", name="uq_concept_hierarchy_edge"),
+    Index("idx_concept_hierarchy_child", "vocabulary", "concept_id"),
+    Index("idx_concept_hierarchy_parent", "vocabulary", "broader_concept_id"),
+    Index("idx_concept_hierarchy_vocab", "vocabulary"),
+)
+
 entity_subjects_table = Table(
     "entity_subjects",
     metadata,

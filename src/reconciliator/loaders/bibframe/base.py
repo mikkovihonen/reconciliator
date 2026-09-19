@@ -10,8 +10,8 @@ from reconciliator.config import (
     get_subject_field_category_map,
 )
 from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
+from reconciliator.vocab import get_vocabulary_patterns
 from reconciliator.vocab.bridges import get_mts_role_map
-from reconciliator.vocabularies import get_vocabulary_patterns
 
 
 def normalize_role_uri_or_label(

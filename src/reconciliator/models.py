@@ -199,7 +199,7 @@ class VocabConcept(BaseModel):
         u = format_source_uri(self.vocabulary, self.concept_id)
         if u and not u.startswith(f"{self.vocabulary}:"):
             return u
-        from reconciliator.vocabularies import concept_id_to_uri
+        from reconciliator.vocab import concept_id_to_uri
 
         u_legacy = concept_id_to_uri(self.curie)
         return u_legacy if u_legacy else self.curie
@@ -244,7 +244,7 @@ class ConceptMapping(BaseModel):
     def legacy_uri(self) -> str:
         if self.legacy_id and self.legacy_id.startswith(("http://", "https://", "urn:")):
             return self.legacy_id
-        from reconciliator.vocabularies import concept_id_to_uri
+        from reconciliator.vocab import concept_id_to_uri
 
         u = concept_id_to_uri(self.legacy_curie)
         return u if u else self.legacy_curie
@@ -257,7 +257,7 @@ class ConceptMapping(BaseModel):
     def target_uri(self) -> str:
         if self.target_id and self.target_id.startswith(("http://", "https://", "urn:")):
             return self.target_id
-        from reconciliator.vocabularies import concept_id_to_uri
+        from reconciliator.vocab import concept_id_to_uri
 
         u = concept_id_to_uri(self.target_curie)
         return u if u else self.target_curie

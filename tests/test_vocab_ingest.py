@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from reconciliator.ingestion.vocab import ingest_vocab_file
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabStore, is_language_allowed
 
 
 def test_ingest_vocab_file(tmp_path: Path) -> None:
@@ -35,8 +35,6 @@ def test_ingest_vocab_file(tmp_path: Path) -> None:
 
 def test_is_language_allowed_wildcards() -> None:
     """Test wildcard and list behavior in is_language_allowed."""
-    from reconciliator.vocab_store import is_language_allowed
-
     # Wildcards: None, "*", "all", ["*"], ["all"]
     assert is_language_allowed("fi", None) is True
     assert is_language_allowed("de", "*") is True
@@ -74,7 +72,7 @@ def test_ingest_multilingual_and_filtering(tmp_path: Path) -> None:
     """
 
     # 1. Ingest all (wildcard None / "*")
-    concepts_all, _ = parse_turtle_simple(sample_multilingual_ttl, pref_label_languages="*")
+    concepts_all, _, _ = parse_turtle_simple(sample_multilingual_ttl, pref_label_languages="*")
     assert len(concepts_all) == 1
     c_all = concepts_all[0]
     assert c_all.pref_labels["de"] == "Computer"

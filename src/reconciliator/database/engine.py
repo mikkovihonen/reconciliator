@@ -319,7 +319,7 @@ def reset_all_storage(storage_config: StorageConfig) -> None:
         init_authority_db(engine)
         init_corpus_db(engine)
         from reconciliator.progress import init_progress_db
-        from reconciliator.vocab_store import init_vocab_db
+        from reconciliator.vocab import init_vocab_db
 
         init_vocab_db(engine)
         init_progress_db(engine)

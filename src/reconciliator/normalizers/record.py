@@ -34,8 +34,7 @@ from reconciliator.normalizers.identifiers import (
 from reconciliator.normalizers.linguistic import build_biographical_date_pattern
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.template import RecordTemplateEngine
-from reconciliator.vocab_folding import VocabFolder
-from reconciliator.vocabularies import extract_concept_id, normalize_subject_vocabulary
+from reconciliator.vocab import VocabFolder, extract_concept_id, normalize_subject_vocabulary
 
 
 def clean_title(

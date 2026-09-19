@@ -15,7 +15,7 @@ from reconciliator.database import agents_table, manifestations_table, works_tab
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.database import WEMIRepository
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabStore
 
 SAMPLE_OAI_SOURCE_A = b"""<?xml version="1.0" encoding="UTF-8"?>
 <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">

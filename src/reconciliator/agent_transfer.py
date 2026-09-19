@@ -8,7 +8,7 @@ from rapidfuzz import fuzz
 
 from reconciliator.curie import parse_curie
 from reconciliator.models import Agent, AgentURI, BibliographicRecord, IdentifierEntity
-from reconciliator.vocabularies import detect_vocabulary, extract_concept_id
+from reconciliator.vocab import detect_vocabulary, extract_concept_id
 
 
 class AgentAligner:

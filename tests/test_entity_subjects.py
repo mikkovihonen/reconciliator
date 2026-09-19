@@ -19,7 +19,7 @@ from reconciliator.models import (
     WorkEntity,
 )
 from reconciliator.database import WEMIRepository
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabStore
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
 

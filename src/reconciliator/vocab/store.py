@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 Core store for controlled vocabularies, ontologies, and migration mappings."""
+"""SQLAlchemy 2.0 PostgreSQL store for controlled vocabularies, ontologies, and migration mappings."""
 
 from __future__ import annotations
 
@@ -14,14 +14,16 @@ from sqlalchemy import (
     func,
     insert,
     select,
+    text,
     tuple_,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from reconciliator.config import VocabNormalizationConfig
+from reconciliator.config import VocabulariesConfig
 from reconciliator.curie import extract_wikidata_qid, parse_curie, to_curie
 from reconciliator.database import (
     concept_aliases_table,
+    concept_hierarchy_table,
     concept_labels_table,
     concept_mapping_labels_table,
     concept_mappings_table,
@@ -34,7 +36,8 @@ from reconciliator.database import (
 )
 from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
-from reconciliator.vocabularies import (
+from reconciliator.vocab.detection import (
+    concept_id_to_uri,
     detect_vocabulary,
     extract_concept_id,
     normalize_concept_id,
@@ -60,7 +63,7 @@ def is_language_allowed(lang: str, allowed: Optional[Sequence[str] | str]) -> bo
 
 
 def init_vocab_db(engine: Any) -> None:
-    """Initialize concepts, concept_labels, concept_mappings, concept_mapping_labels, relator_terms, and concept_aliases tables."""
+    """Initialize concepts, concept_labels, concept_mappings, relator_terms, concept_aliases, and concept_hierarchy tables."""
     from reconciliator.database import create_schema_tables
 
     create_schema_tables(engine, vocab_metadata.sorted_tables)
@@ -72,10 +75,10 @@ class VocabStore:
     def __init__(
         self,
         db_path: Path | str | None = None,
-        config: Optional[VocabNormalizationConfig] = None,
+        config: Optional[VocabulariesConfig] = None,
         engine: Optional[Engine] = None,
     ) -> None:
-        self.config = config or VocabNormalizationConfig()
+        self.config = config or VocabulariesConfig()
         if engine is not None:
             self.engine = engine
             self.db_path = engine.url.render_as_string(hide_password=False)
@@ -112,15 +115,18 @@ class VocabStore:
             self.get_relator_code.cache_clear()
         if hasattr(self.find_concept_by_alias, "cache_clear"):
             self.find_concept_by_alias.cache_clear()
+        if hasattr(self.get_broader_concepts, "cache_clear"):
+            self.get_broader_concepts.cache_clear()
+        if hasattr(self.get_narrower_concepts, "cache_clear"):
+            self.get_narrower_concepts.cache_clear()
+        if hasattr(self.load_hierarchy_edges, "cache_clear"):
+            self.load_hierarchy_edges.cache_clear()
 
     def insert_concepts_batch(self, concepts: list[VocabConcept]) -> None:
         """Bulk insert concepts and their multilingual labels with upsert support."""
         if not concepts:
             return
 
-        # Deduplicate concepts by (vocabulary, concept_id)
-        # PostgreSQL ON CONFLICT DO UPDATE cannot affect the same row twice in a single statement.
-        # Merge labels across duplicate concept entries so no multilingual labels are lost.
         deduped: dict[tuple[str, str], VocabConcept] = {}
         for c in concepts:
             key = (c.vocabulary.strip().lower(), c.concept_id.strip())
@@ -162,8 +168,6 @@ class VocabStore:
             for c in concepts
         ]
 
-        # PostgreSQL wire protocol restricts parameters to 65,535 per query.
-        # With 4 parameters per concept row, chunking by 5,000 keeps it at 20,000 parameters.
         batch_size = 5000
 
         with self.engine.begin() as conn:
@@ -179,7 +183,6 @@ class VocabStore:
                 )
                 conn.execute(stmt)
 
-            # Query row IDs for the concepts to link labels
             keys = [(c.vocabulary, c.concept_id) for c in concepts]
             row_id_map: dict[tuple[str, str], int] = {}
             for chunk_start in range(0, len(keys), 500):
@@ -264,6 +267,146 @@ class VocabStore:
                     conn.execute(insert(concept_mapping_labels_table), label_rows)
 
         self.clear_caches()
+
+    def insert_hierarchy_batch(self, edges: list[dict[str, Any]]) -> None:
+        """Bulk insert concept hierarchy edges (skos:broader / skos:narrower).
+
+        Each edge dict must provide:
+          - vocabulary: str
+          - concept_id: str (the narrower concept)
+          - broader_concept_id: str (the broader concept)
+          - relation_type: Optional[str] (default 'broader')
+        """
+        if not edges:
+            return
+
+        # Deduplicate edges by (vocabulary, concept_id, broader_concept_id)
+        seen: set[tuple[str, str, str]] = set()
+        clean_rows: list[dict[str, Any]] = []
+        for e in edges:
+            voc = str(e["vocabulary"]).strip().lower()
+            cid = str(e["concept_id"]).strip()
+            pcid = str(e["broader_concept_id"]).strip()
+            if not voc or not cid or not pcid or cid == pcid:
+                continue
+            key = (voc, cid, pcid)
+            if key not in seen:
+                seen.add(key)
+                clean_rows.append(
+                    {
+                        "vocabulary": voc,
+                        "concept_id": cid,
+                        "broader_concept_id": pcid,
+                        "relation_type": str(e.get("relation_type", "broader")),
+                    }
+                )
+
+        if not clean_rows:
+            return
+
+        batch_size = 5000
+        with self.engine.begin() as conn:
+            for i in range(0, len(clean_rows), batch_size):
+                chunk = clean_rows[i : i + batch_size]
+                stmt = pg_insert(concept_hierarchy_table).values(chunk)
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=["vocabulary", "concept_id", "broader_concept_id"]
+                )
+                conn.execute(stmt)
+
+        self.clear_caches()
+
+    @functools.lru_cache(maxsize=32768)
+    def get_broader_concepts(
+        self, vocabulary: str, concept_id: str, max_depth: Optional[int] = None
+    ) -> list[tuple[str, int]]:
+        """Query broader concepts (ancestors) in a hierarchy using recursive CTE.
+
+        Returns list of (broader_concept_id, depth) sorted by shortest distance.
+        """
+        if not vocabulary or not concept_id:
+            return []
+        clean_voc = str(vocabulary).strip().lower()
+        clean_id = str(concept_id).strip()
+        depth_limit = max_depth or self.config.hierarchy.max_traversal_depth
+
+        query = text(
+            """
+            WITH RECURSIVE broader_tree(concept_id, broader_concept_id, depth) AS (
+                SELECT concept_id, broader_concept_id, 1
+                FROM concept_hierarchy
+                WHERE vocabulary = :vocab AND concept_id = :cid
+              UNION
+                SELECT bt.concept_id, h.broader_concept_id, bt.depth + 1
+                FROM concept_hierarchy h
+                JOIN broader_tree bt ON h.concept_id = bt.broader_concept_id
+                WHERE h.vocabulary = :vocab AND bt.depth < :max_depth
+            )
+            SELECT broader_concept_id, min(depth) as min_depth
+            FROM broader_tree
+            GROUP BY broader_concept_id
+            ORDER BY min_depth ASC;
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                query, {"vocab": clean_voc, "cid": clean_id, "max_depth": depth_limit}
+            ).fetchall()
+            return [(str(r[0]), int(r[1])) for r in rows]
+
+    @functools.lru_cache(maxsize=32768)
+    def get_narrower_concepts(
+        self, vocabulary: str, concept_id: str, max_depth: Optional[int] = None
+    ) -> list[tuple[str, int]]:
+        """Query narrower concepts (descendants) in a hierarchy using recursive CTE.
+
+        Returns list of (narrower_concept_id, depth) sorted by shortest distance.
+        """
+        if not vocabulary or not concept_id:
+            return []
+        clean_voc = str(vocabulary).strip().lower()
+        clean_id = str(concept_id).strip()
+        depth_limit = max_depth or self.config.hierarchy.max_traversal_depth
+
+        query = text(
+            """
+            WITH RECURSIVE narrower_tree(narrower_concept_id, broader_concept_id, depth) AS (
+                SELECT concept_id, broader_concept_id, 1
+                FROM concept_hierarchy
+                WHERE vocabulary = :vocab AND broader_concept_id = :cid
+              UNION
+                SELECT h.concept_id, nt.broader_concept_id, nt.depth + 1
+                FROM concept_hierarchy h
+                JOIN narrower_tree nt ON h.broader_concept_id = nt.narrower_concept_id
+                WHERE h.vocabulary = :vocab AND nt.depth < :max_depth
+            )
+            SELECT narrower_concept_id, min(depth) as min_depth
+            FROM narrower_tree
+            GROUP BY narrower_concept_id
+            ORDER BY min_depth ASC;
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                query, {"vocab": clean_voc, "cid": clean_id, "max_depth": depth_limit}
+            ).fetchall()
+            return [(str(r[0]), int(r[1])) for r in rows]
+
+    @functools.lru_cache(maxsize=32)
+    def load_hierarchy_edges(self, vocabulary: str) -> list[tuple[str, str]]:
+        """Load all (concept_id, broader_concept_id) edges for a vocabulary into memory."""
+        if not vocabulary:
+            return []
+        clean_voc = str(vocabulary).strip().lower()
+        with self.engine.connect() as conn:
+            stmt = select(
+                concept_hierarchy_table.c.concept_id,
+                concept_hierarchy_table.c.broader_concept_id,
+            ).where(concept_hierarchy_table.c.vocabulary == clean_voc)
+            rows = conn.execute(stmt).fetchall()
+            return [(str(r[0]), str(r[1])) for r in rows]
 
     @functools.lru_cache(maxsize=32768)
     def find_concept_by_id(self, vocabulary: str, concept_id: str) -> Optional[VocabConcept]:
@@ -551,8 +694,6 @@ class VocabStore:
                 }
             )
 
-        # Deduplicate by folded_term — PostgreSQL ON CONFLICT DO UPDATE
-        # cannot affect the same row twice in a single statement.
         seen: dict[str, dict[str, Any]] = {}
         for r in rows:
             seen[r["folded_term"]] = r
@@ -714,6 +855,21 @@ class VocabStore:
                 concept = self.find_concept_by_uri(concept_curie)
             wikidata_qid = extract_wikidata_qid(concept_curie) or extract_wikidata_qid(source_val)
             return concept, wikidata_qid
+
+    def resolve_concept_alias(
+        self, label: str, vocabulary: Optional[str] = None, target_field: Optional[str] = None
+    ) -> Optional[dict[str, Any]]:
+        """Resolve a label to concept_id, vocabulary, and wikidata_qid via alias lookup."""
+        concept, qid = self.find_concept_by_alias(
+            label, target_field=target_field, vocabulary=vocabulary
+        )
+        if concept:
+            return {
+                "concept_id": concept.concept_id,
+                "vocabulary": concept.vocabulary,
+                "wikidata_qid": qid,
+            }
+        return None
 
     def find_concepts_by_uris(self, uris: Sequence[str]) -> dict[str, VocabConcept]:
         """Look up multiple concepts by URI or concept ID in batch."""
@@ -937,9 +1093,8 @@ class VocabStore:
             row = conn.execute(stmt).first()
             if row:
                 voc, cid = str(row[0]), str(row[1])
-                from reconciliator.vocabularies import concept_id_to_uri
-
                 uri = concept_id_to_uri(to_curie(voc, cid)) or to_curie(voc, cid)
                 return (voc, cid, uri)
 
         return None
+

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from reconciliator.config import (
     RecordNormalizationConfig,
-    VocabNormalizationConfig,
+    VocabulariesConfig,
     load_config,
 )
 from reconciliator.normalizers.agent import normalize_agent_name, parse_245c_agents
@@ -19,7 +19,7 @@ from reconciliator.normalizers.record import (
     clean_title,
     normalize_volume,
 )
-from reconciliator.vocab_folding import VocabFolder, format_target_vocab
+from reconciliator.vocab import VocabFolder, format_target_vocab
 
 
 def test_linguistic_preserved_diacritics_customization() -> None:
@@ -140,7 +140,7 @@ def test_clean_title_and_volume_options() -> None:
 
 
 def test_vocab_normalization_config_and_folding() -> None:
-    cfg = VocabNormalizationConfig(
+    cfg = VocabulariesConfig(
         legacy_to_modern={"legacy_thes": "modern_ont"},
         thesaurus_languages={"legacy_thes": "sv"},
         default_field_vocabularies={"650": "custom_yso"},

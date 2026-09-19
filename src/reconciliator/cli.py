@@ -90,9 +90,7 @@ from reconciliator.reports import (
 )
 from reconciliator.database import WEMIRepository
 from reconciliator.utils import parse_duration_seconds
-from reconciliator.vocab_folding import VocabFolder
-from reconciliator.vocab_store import VocabStore
-from reconciliator.vocabularies import detect_vocabulary
+from reconciliator.vocab import VocabFolder, VocabStore, detect_vocabulary
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 app = typer.Typer(

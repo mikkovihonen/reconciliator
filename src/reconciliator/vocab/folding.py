@@ -4,25 +4,25 @@ from __future__ import annotations
 
 from typing import Optional
 
-from reconciliator.config import VocabNormalizationConfig
+from reconciliator.config import VocabulariesConfig
 from reconciliator.models import VocabConcept
 from reconciliator.normalizers.linguistic import build_biographical_date_pattern, fold_label
-from reconciliator.vocab_store import VocabStore
-from reconciliator.vocabularies import strip_vocabulary_subcode
+from reconciliator.vocab.detection import strip_vocabulary_subcode
+from reconciliator.vocab.store import VocabStore
 
 
 def format_target_vocab(
     target_vocab: str,
     source_vocab: Optional[str] = None,
     lang: Optional[str] = None,
-    config: Optional[VocabNormalizationConfig] = None,
+    config: Optional[VocabulariesConfig] = None,
 ) -> str:
     """Format vocabulary code with compliant language suffix (e.g. yso/fin, yso/swe).
 
     Returns the bare vocabulary code when ``apply_language_subcode`` is disabled,
     or when the vocabulary is not one that carries a subcode.
     """
-    cfg = config or VocabNormalizationConfig()
+    cfg = config or VocabulariesConfig()
     raw_source = (source_vocab or "").strip().lower()
     base_vocab = strip_vocabulary_subcode(target_vocab)
 
@@ -64,10 +64,10 @@ class VocabFolder:
     def __init__(
         self,
         vocab_store: Optional[VocabStore] = None,
-        config: Optional[VocabNormalizationConfig] = None,
+        config: Optional[VocabulariesConfig] = None,
     ) -> None:
         self.vocab_store = vocab_store
-        self.config = config or VocabNormalizationConfig()
+        self.config = config or VocabulariesConfig()
         self.date_pattern = build_biographical_date_pattern(
             prefixes=self.config.biographical_date_prefixes,
             era_bc=self.config.biographical_era_bc,
@@ -158,7 +158,6 @@ class VocabFolder:
         clean_heading = heading.strip().rstrip(".,; ")
         effective_lang = (lang or self.config.default_language).strip().lower()
         raw_vocab = (source_vocab or "").strip().lower()
-        # Strip language suffix like /fin, /swe, /eng (e.g. yso/fin -> yso, slm/fin -> slm)
         norm_vocab = strip_vocabulary_subcode(raw_vocab)
 
         # If already canonical modern ontology URI/code and no vocab_store
@@ -339,3 +338,4 @@ class VocabFolder:
             default_target_vocab, source_vocab, lang=lang, config=self.config
         )
         return source_field, formatted_default, source_uri or "", clean_heading, "none", None
+

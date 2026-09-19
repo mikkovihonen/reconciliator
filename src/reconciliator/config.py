@@ -182,6 +182,7 @@ _CONSTITUENTS_DEFAULTS = get_bundled_section_defaults("constituents")
 _FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
 _AGENT_CLUSTERING_DEFAULTS = get_bundled_section_defaults("agent_clustering")
 _PG_DEFAULTS = dict(_STORAGE_DEFAULTS.get("postgres") or {})
+_HIERARCHY_DEFAULTS = dict(_VOCAB_DEFAULTS.get("hierarchy") or {})
 
 
 def get_bundled_agent_clustering_defaults() -> dict[str, Any]:
@@ -545,9 +546,46 @@ class SourceConfig(BaseModel):
     subfield: str = "0"
 
 
+class HierarchyConfig(BaseModel):
+    """Configuration for hierarchical vocabulary traversal, reasoning, and semantic similarity."""
+
+    enabled: bool = Field(
+        default_factory=lambda: bool(_HIERARCHY_DEFAULTS.get("enabled", True))
+    )
+    max_traversal_depth: int = Field(
+        default_factory=lambda: int(_HIERARCHY_DEFAULTS.get("max_traversal_depth", 10))
+    )
+    max_expansion_depth: int = Field(
+        default_factory=lambda: int(_HIERARCHY_DEFAULTS.get("max_expansion_depth", 2))
+    )
+    path_decay_factor: float = Field(
+        default_factory=lambda: float(_HIERARCHY_DEFAULTS.get("path_decay_factor", 0.85))
+    )
+    similarity_algorithm: Literal["path_decay", "wu_palmer"] = Field(
+        default_factory=lambda: str(
+            _HIERARCHY_DEFAULTS.get("similarity_algorithm", "path_decay")
+        )  # type: ignore[arg-type]
+    )
+    min_similarity_threshold: float = Field(
+        default_factory=lambda: float(_HIERARCHY_DEFAULTS.get("min_similarity_threshold", 0.60))
+    )
+    cache_graphs: bool = Field(
+        default_factory=lambda: bool(_HIERARCHY_DEFAULTS.get("cache_graphs", True))
+    )
+    hierarchical_vocabularies: list[str] = Field(
+        default_factory=lambda: list(
+            _HIERARCHY_DEFAULTS.get(
+                "hierarchical_vocabularies",
+                ["yso", "yso-aika", "yso-paikat", "kauno", "muso", "slm", "seko"],
+            )
+        )
+    )
+
+
 class VocabulariesConfig(BaseModel):
     """Centralized controlled vocabulary definitions, priorities, and matching policies."""
 
+    hierarchy: HierarchyConfig = Field(default_factory=HierarchyConfig)
     agent_priority: list[str] = Field(
         default_factory=lambda: list(_VOCAB_DEFAULTS.get("agent_priority", []))
     )
@@ -713,8 +751,6 @@ class VocabulariesConfig(BaseModel):
         return None
 
 
-# Alias for backward compatibility
-VocabNormalizationConfig = VocabulariesConfig
 
 
 # ---------------------------------------------------------------------------
@@ -1530,6 +1566,16 @@ class AgentClusterConfig(BaseModel):
     affiliation_fuzzy_score: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_score", 0.85)
+        )
+    )
+    enable_hierarchical_concepts: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_CLUSTERING_DEFAULTS.get("enable_hierarchical_concepts", True)
+        )
+    )
+    concept_similarity_weight: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("concept_similarity_weight", 0.85)
         )
     )
     source_authority_precedence: list[str] = Field(

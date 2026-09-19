@@ -15,7 +15,7 @@ from reconciliator.config import load_config
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file, parse_turtle_simple
 from reconciliator.version import get_version
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabStore
 
 
 def test_skosmos_downloader_user_agent_from_pyproject() -> None:
@@ -212,7 +212,7 @@ def test_parse_turtle_prefixed_and_yso_paikat() -> None:
         skos:prefLabel "Helsinki"@fi ;
         skos:prefLabel "Helsingfors"@sv .
     """
-    concepts, mappings = parse_turtle_simple(content)
+    concepts, mappings, _ = parse_turtle_simple(content)
     assert len(concepts) == 2
 
     # yso concept

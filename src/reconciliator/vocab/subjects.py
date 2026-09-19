@@ -1,16 +1,4 @@
-"""Subject folding, shared by every loader.
-
-A subject heading is only useful for matching once it has been reduced to a
-*vocabulary* and a *concept id*: "Egypti" from one catalogue and "Egyptin
-historia" from another are the same subject when both resolve to `yso:p105710`,
-and nothing else about the string tells you so.
-
-The MARC path did this inline and the BibFrame path did not do it at all - the
-decomposer read no `bf:subject` whatsoever, so a BIBFRAME work reached the
-datastore with no subjects and its agents with an empty subject footprint. This
-module is that logic in one place, taking subjects as already-extracted
-mappings, because extraction is format-specific and folding is not.
-"""
+"""Subject heading extraction, normalization, and footprint folding."""
 
 from __future__ import annotations
 
@@ -19,8 +7,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Optional
 
-from reconciliator.vocabularies import (
-    extract_concept_id,
+from reconciliator.vocab.detection import extract_concept_id
+from reconciliator.vocab.manager import (
     normalize_subject_vocabulary,
     resolve_subject_concept_id,
 )
@@ -49,18 +37,9 @@ class FoldedSubject:
         return f"{self.vocabulary}:{self.concept_id.lower()}"
 
     def as_dict(self) -> dict[str, Optional[str]]:
-        """The stored form.
-
-        `code` and `scheme` are the names `find_classification_evidence` reads
-        out of `entity_subjects`. That reader was written against this shape
-        while both loaders stored a bare list of heading strings, so it matched
-        nothing and failed silently inside its own try/except.
-        """
+        """The stored form."""
         return {
             "heading": self.heading,
-            # `pref_label` is what work_serialization.j2 renders; the same string
-            # under two names because the template speaks the vocabulary's
-            # language and the evidence reader speaks the record's.
             "pref_label": self.heading,
             "field": self.field,
             "vocabulary": self.vocabulary,
@@ -103,11 +82,6 @@ def fold_subjects(
     `vocabulary` (MARC $2, or a BIBFRAME source node's label), `uri` (MARC $0/$1,
     or the subject node's own URI) and `field` (the MARC tag, or the tag the
     BibFrame profile maps the subject type to).
-
-    A heading with no supported vocabulary is kept, without a key: it still
-    belongs in the record, it just cannot be compared. A supported vocabulary
-    with no id in the record is resolved against `vocab_store` by label, which
-    is how a heading catalogued without a `$0` still reaches its concept.
     """
     folded: list[FoldedSubject] = []
     seen: set[tuple[str, Optional[str], Optional[str]]] = set()
@@ -169,10 +143,6 @@ def fold_subjects(
 
 
 def subject_footprint(subjects: Iterable[FoldedSubject]) -> dict[str, int]:
-    """The `vocab:concept` histogram stamped on every agent in the record.
-
-    Per record, not per agent: the evidence is that this person was named on a
-    record about these subjects, and MARC does not say which contributor a
-    subject belongs to.
-    """
+    """The `vocab:concept` histogram stamped on every agent in the record."""
     return dict(Counter(key for s in subjects if (key := s.key)))
+

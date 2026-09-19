@@ -336,6 +336,23 @@ vocabularies:
     selibr: "P906"
     orcid: "P496"
 
+  hierarchy:
+    enabled: true
+    max_traversal_depth: 10
+    max_expansion_depth: 2
+    path_decay_factor: 0.85
+    similarity_algorithm: "path_decay"
+    min_similarity_threshold: 0.60
+    cache_graphs: true
+    hierarchical_vocabularies:
+      - "yso"
+      - "yso-aika"
+      - "yso-paikat"
+      - "kauno"
+      - "muso"
+      - "slm"
+      - "seko"
+
 record_normalization:
   strip_isbd_punctuation: true
   isbd_punctuation: " ./,;:"
@@ -1084,6 +1101,8 @@ agent_clustering:
   token_matching_algorithm: "token_set_ratio"
   affiliation_fuzzy_threshold: 80.0
   affiliation_fuzzy_score: 0.85
+  enable_hierarchical_concepts: true
+  concept_similarity_weight: 0.85
 
   source_authority_precedence:
     - "asteri"

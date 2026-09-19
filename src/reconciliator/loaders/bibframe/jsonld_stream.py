@@ -22,7 +22,7 @@ from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
 )
-from reconciliator.vocabularies import detect_vocabulary
+from reconciliator.vocab import detect_vocabulary
 
 logger = logging.getLogger(__name__)
 

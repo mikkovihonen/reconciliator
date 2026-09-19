@@ -10,7 +10,7 @@ from typing import Any, Optional
 from reconciliator.config import AppConfig, ReconcileConfig, VocabIngestConfig
 from reconciliator.utils.tsv import sanitize_tsv_cell as sanitize_tsv_cell
 from reconciliator.utils.tsv import write_summary_tsv, write_tsv_file
-from reconciliator.vocabularies import strip_vocabulary_subcode
+from reconciliator.vocab import strip_vocabulary_subcode
 
 
 def _get_model_field_default(model_cls: type, field_name: str) -> list[str]:

@@ -42,7 +42,7 @@ from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
 from reconciliator.database import WEMIRepository
 from reconciliator.template import WEMISerializationEngine
-from reconciliator.vocabularies import concept_id_to_uri, format_wikidata_uri
+from reconciliator.vocab import concept_id_to_uri, format_wikidata_uri
 
 logger = logging.getLogger(__name__)
 

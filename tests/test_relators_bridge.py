@@ -16,8 +16,7 @@ from reconciliator.vocab.bridges import (
     get_mts_role_map,
     parse_bridge_turtle,
 )
-from reconciliator.vocab_store import VocabStore
-from reconciliator.vocabularies import concept_id_to_uri, normalize_concept_id
+from reconciliator.vocab import VocabStore, concept_id_to_uri, normalize_concept_id
 
 
 def test_loc_relators_bridge_file_exists_and_parses() -> None:

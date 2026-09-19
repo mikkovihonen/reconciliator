@@ -32,10 +32,6 @@ from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
     detect_profile,
 )
-from reconciliator.loaders.subjects import (
-    fold_subjects,
-    vocabulary_hint_from_uri,
-)
 from reconciliator.models import (
     AgentEntity,
     CarrierType,
@@ -61,7 +57,11 @@ from reconciliator.normalizers.blocking import (
 )
 from reconciliator.template import WEMISerializationEngine
 from reconciliator.utils import to_manifestation_entity_keys
-from reconciliator.vocabularies import detect_vocabulary
+from reconciliator.vocab import (
+    detect_vocabulary,
+    fold_subjects,
+    vocabulary_hint_from_uri,
+)
 
 logger = logging.getLogger(__name__)
 

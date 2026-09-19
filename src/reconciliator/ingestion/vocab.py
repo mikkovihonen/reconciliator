@@ -15,7 +15,8 @@ from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
-from reconciliator.vocab_store import VocabStore, is_language_allowed
+from reconciliator.vocab.detection import extract_concept_id
+from reconciliator.vocab.store import VocabStore, is_language_allowed
 
 
 def parse_turtle_simple(
@@ -23,14 +24,15 @@ def parse_turtle_simple(
     pref_label_languages: Optional[Sequence[str] | str] = None,
     alt_label_languages: Optional[Sequence[str] | str] = None,
     vocab_target_fields: Optional[dict[str, str]] = None,
-) -> tuple[list[VocabConcept], list[ConceptMapping]]:
+) -> tuple[list[VocabConcept], list[ConceptMapping], list[dict[str, Any]]]:
     """
-    Fast regex-based parser for SKOS Turtle (.ttl) concepts and mappings.
-    Extracts skos:Concept, prefLabels, altLabels, exactMatch, and isReplacedBy.
+    Fast regex-based parser for SKOS Turtle (.ttl) concepts, mappings, and hierarchy edges.
+    Extracts skos:Concept, prefLabels, altLabels, exactMatch, isReplacedBy, skos:broader, and skos:narrower.
     Supports both full URIs (<...>) and prefixed IRIs (@prefix ...).
     """
     concepts: list[VocabConcept] = []
     mappings: list[ConceptMapping] = []
+    hierarchy_edges: list[dict[str, Any]] = []
 
     # Extract prefix declarations
     prefixes: dict[str, str] = {}
@@ -134,7 +136,37 @@ def parse_turtle_simple(
                 )
                 mappings.append(mapping)
 
-    return concepts, mappings
+            # Check hierarchical broader / narrower relations
+            cid = concept.concept_id
+            for bm in re.findall(r"skos:broader\s+([^;.]+)", body):
+                for raw_b in re.findall(r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", bm):
+                    parent_uri = _resolve_uri(raw_b)
+                    pcid = extract_concept_id(parent_uri)
+                    if pcid and pcid != cid:
+                        hierarchy_edges.append(
+                            {
+                                "vocabulary": vocab,
+                                "concept_id": cid,
+                                "broader_concept_id": pcid,
+                                "relation_type": "broader",
+                            }
+                        )
+
+            for nm in re.findall(r"skos:narrower\s+([^;.]+)", body):
+                for raw_n in re.findall(r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", nm):
+                    child_uri = _resolve_uri(raw_n)
+                    ncid = extract_concept_id(child_uri)
+                    if ncid and ncid != cid:
+                        hierarchy_edges.append(
+                            {
+                                "vocabulary": vocab,
+                                "concept_id": ncid,
+                                "broader_concept_id": cid,
+                                "relation_type": "broader",
+                            }
+                        )
+
+    return concepts, mappings, hierarchy_edges
 
 
 def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path] = None) -> int:
@@ -312,10 +344,11 @@ def ingest_vocab_file(
 
     total_concepts: list[VocabConcept] = []
     total_mappings: list[ConceptMapping] = []
+    total_hierarchy_edges: list[dict[str, Any]] = []
 
     for file_path in files:
         content = file_path.read_text(encoding="utf-8")
-        concepts, mappings = parse_turtle_simple(
+        concepts, mappings, edges = parse_turtle_simple(
             content,
             pref_label_languages=pref_langs,
             alt_label_languages=alt_langs,
@@ -323,16 +356,19 @@ def ingest_vocab_file(
         )
         total_concepts.extend(concepts)
         total_mappings.extend(mappings)
+        total_hierarchy_edges.extend(edges)
 
     if tracker:
         tracker.update_progress(
             stage="inserting_concepts",
-            items_total=len(total_concepts) + len(total_mappings),
+            items_total=len(total_concepts) + len(total_mappings) + len(total_hierarchy_edges),
             force=True,
         )
 
     vocab_store.insert_concepts(total_concepts)
     vocab_store.insert_mappings(total_mappings)
+    if total_hierarchy_edges:
+        vocab_store.insert_hierarchy_batch(total_hierarchy_edges)
 
     # Ingest MTS contributor roles into relator_terms
     mts_to_code: dict[str, str] = {}

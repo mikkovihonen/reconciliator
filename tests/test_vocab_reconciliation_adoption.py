@@ -34,8 +34,7 @@ from reconciliator.normalizers.linguistic import (
 )
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
-from reconciliator.vocab_folding import VocabFolder, format_target_vocab
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 # ---------------------------------------------------------------------------

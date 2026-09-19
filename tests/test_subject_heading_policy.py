@@ -12,9 +12,8 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from reconciliator.config import VocabNormalizationConfig
-from reconciliator.vocab_folding import VocabFolder, format_target_vocab
-from reconciliator.vocab_store import VocabStore
+from reconciliator.config import VocabulariesConfig
+from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -54,7 +53,7 @@ def vocab_store(tmp_path: Path) -> VocabStore:
 
 
 def _enrich(vocab_store: VocabStore, **cfg_overrides: object) -> etree._Element:
-    cfg = VocabNormalizationConfig(**cfg_overrides)  # type: ignore[arg-type]
+    cfg = VocabulariesConfig(**cfg_overrides)  # type: ignore[arg-type]
     enricher = MARCXMLEnricher(vocab_folder=VocabFolder(vocab_store, config=cfg))
     record = etree.fromstring(RECORD.encode("utf-8"))
     enricher.enrich_record_tree(record, enrich=True, fold_legacy=True)
@@ -114,7 +113,7 @@ def test_no_duplicate_when_heading_already_matches_pref_label(
     vocab_store: VocabStore,
 ) -> None:
     """Nothing is retained when the catalogued form already is the preferred label."""
-    cfg = VocabNormalizationConfig(preserve_original_heading=True)
+    cfg = VocabulariesConfig(preserve_original_heading=True)
     enricher = MARCXMLEnricher(vocab_folder=VocabFolder(vocab_store, config=cfg))
     record = etree.fromstring(RECORD.replace(">tohtorit<", ">lääkärit<").encode("utf-8"))
     enricher.enrich_record_tree(record, enrich=True, fold_legacy=True)
@@ -140,8 +139,8 @@ def test_language_subcode_can_be_disabled(vocab_store: VocabStore) -> None:
 
 
 def test_format_target_vocab_honours_the_toggle() -> None:
-    on = VocabNormalizationConfig()
-    off = VocabNormalizationConfig(apply_language_subcode=False)
+    on = VocabulariesConfig()
+    off = VocabulariesConfig(apply_language_subcode=False)
 
     assert format_target_vocab("yso", "ysa", lang="fi", config=on) == "yso/fin"
     assert format_target_vocab("yso", "ysa", lang="fi", config=off) == "yso"

@@ -4,10 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from reconciliator.config import VocabNormalizationConfig
+from reconciliator.config import VocabulariesConfig
 from reconciliator.models import ConceptMapping, VocabConcept
-from reconciliator.vocab_folding import VocabFolder, format_target_vocab
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 
 
 @pytest.fixture
@@ -164,7 +163,7 @@ def test_fold_existing_canonical_uri(populated_vocab_store: VocabStore) -> None:
 
 
 def test_format_target_vocab_custom_config() -> None:
-    custom_cfg = VocabNormalizationConfig(
+    custom_cfg = VocabulariesConfig(
         language_subcode_vocabularies={"custom_onto": "fin"},
         thesaurus_languages={"sv_thes": "sv"},
     )
@@ -180,7 +179,7 @@ def test_format_target_vocab_custom_config() -> None:
 
 def test_vocab_folding_fully_custom_configuration(tmp_path: Path) -> None:
     store = VocabStore(tmp_path / "custom_vocab.db")
-    custom_cfg = VocabNormalizationConfig(
+    custom_cfg = VocabulariesConfig(
         legacy_to_modern={"old_thes": "new_ont", "old_genre_thes": "genre_ont"},
         vocab_target_fields={"genre_ont": "655", "perf_ont": "382"},
         default_field_vocabularies={
@@ -308,7 +307,7 @@ def test_language_subcode_suffixes_configuration() -> None:
     assert format_target_vocab("yso", lang="fin") == "yso/fin"
 
     # Custom language_subcode_suffixes
-    cfg = VocabNormalizationConfig(
+    cfg = VocabulariesConfig(
         language_subcode_suffixes={"de": "ger", "deu": "ger"},
     )
     assert format_target_vocab("yso", lang="de", config=cfg) == "yso/ger"
@@ -381,7 +380,7 @@ def test_preferred_label_languages_custom_fallback(tmp_path: Path) -> None:
     assert label_default == "kirjat"
 
     # Custom fallback priority: sv -> fi -> en
-    cfg_custom = VocabNormalizationConfig(
+    cfg_custom = VocabulariesConfig(
         preferred_label_languages=["sv", "fi", "en"],
     )
     folder_custom = VocabFolder(store, config=cfg_custom)
@@ -421,7 +420,7 @@ def test_dynamic_default_vocab_target_field() -> None:
     assert t_field == "650"
 
     # 2. Custom config overriding default_vocab_target_field dynamically
-    custom_cfg = VocabNormalizationConfig(
+    custom_cfg = VocabulariesConfig(
         default_vocab_target_field="699",
         default_field_vocabularies={"699": "yso"},
     )

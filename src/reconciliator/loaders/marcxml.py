@@ -28,7 +28,6 @@ from reconciliator.curie import to_curie
 # still strip as they parse, because the cleaned title feeds key derivation
 # before `finalise` ever sees the record.
 from reconciliator.loaders.base import DEFAULT_ISBD_PUNCTUATION, strip_isbd
-from reconciliator.loaders.subjects import fold_subjects, subject_footprint
 from reconciliator.models import (
     AgentEntity,
     CarrierType,
@@ -58,9 +57,11 @@ from reconciliator.normalizers.blocking import (
 from reconciliator.normalizers.relators import normalize_role
 from reconciliator.template import WEMISerializationEngine
 from reconciliator.utils import to_manifestation_entity_keys
-from reconciliator.vocabularies import (
+from reconciliator.vocab import (
     detect_vocabulary,
     extract_concept_id,
+    fold_subjects,
+    subject_footprint,
 )
 
 logger = logging.getLogger(__name__)

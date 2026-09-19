@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from reconciliator.models import ConceptMapping, VocabConcept
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabStore
 
 
 @pytest.fixture
@@ -137,9 +137,9 @@ def test_multilingual_concept_storage_and_query(vocab_store: VocabStore) -> None
 
 def test_language_filtering_on_insert(tmp_path: Path) -> None:
     """Test restricting ingested languages via configuration."""
-    from reconciliator.config import VocabNormalizationConfig
+    from reconciliator.config import VocabulariesConfig
 
-    cfg = VocabNormalizationConfig(
+    cfg = VocabulariesConfig(
         ingest_pref_label_languages=["fi", "sv"],
         ingest_alt_label_languages=["fi"],
     )

@@ -13,8 +13,7 @@ from reconciliator.models import (
     VocabConcept,
 )
 from reconciliator.normalizers.record import RecordNormalizer
-from reconciliator.vocab_folding import VocabFolder
-from reconciliator.vocab_store import VocabStore
+from reconciliator.vocab import VocabFolder, VocabStore
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 
@@ -249,7 +248,7 @@ def test_parse_turtle_simple_detects_yso_aika() -> None:
         skos:prefLabel "1800-luku"@fi ;
         skos:prefLabel "1800-talet"@sv .
     """
-    concepts, mappings = parse_turtle_simple(ttl)
+    concepts, mappings, _ = parse_turtle_simple(ttl)
     assert len(concepts) == 1
     c = concepts[0]
     assert c.vocabulary == "yso-aika"
@@ -404,13 +403,13 @@ def test_bibframe_custom_subject_type_fields() -> None:
 def test_bibframe_dynamic_default_subject_field() -> None:
     from rdflib import Graph
 
-    from reconciliator.config import RecordNormalizationConfig, VocabNormalizationConfig
+    from reconciliator.config import RecordNormalizationConfig, VocabulariesConfig
     from reconciliator.loaders.bibframe import get_profile, parse_bibframe_graph
 
     rec_cfg = RecordNormalizationConfig()
     assert rec_cfg.default_subject_field == "650"
 
-    vocab_cfg = VocabNormalizationConfig()
+    vocab_cfg = VocabulariesConfig()
     assert vocab_cfg.default_vocab_target_field == "650"
 
     ttl = """

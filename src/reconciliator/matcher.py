@@ -47,7 +47,7 @@ from reconciliator.rerank import CandidateEvaluator
 from reconciliator.utils import (
     extract_identifiers_from_target,
 )
-from reconciliator.vocabularies import (
+from reconciliator.vocab import (
     VocabularyManager,
     format_wikidata_uri,
     normalize_subject_vocabulary,
@@ -872,7 +872,7 @@ class WorkMatcher:
             return
 
         from reconciliator.template import WEMISerializationEngine
-        from reconciliator.vocabularies import detect_vocabulary
+        from reconciliator.vocab import detect_vocabulary
 
         wemi_engine = WEMISerializationEngine()
         for idx, target_agent in enumerate(target_record.agents):

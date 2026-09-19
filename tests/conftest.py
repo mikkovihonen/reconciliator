@@ -20,7 +20,7 @@ import yaml
 from reconciliator.config import StorageConfig
 from reconciliator.database import get_engine, init_authority_db, init_corpus_db
 from reconciliator.progress import init_progress_db
-from reconciliator.vocab_store import init_vocab_db
+from reconciliator.vocab import init_vocab_db
 
 logger = logging.getLogger(__name__)
 
