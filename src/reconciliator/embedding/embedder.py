@@ -8,9 +8,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from reconciliator.config import EmbeddingConfig
-from reconciliator.device import configure_mixed_precision, get_optimal_batch_size, resolve_device
+from reconciliator.utils.device import configure_mixed_precision, get_optimal_batch_size, resolve_device
 from reconciliator.models import BibliographicRecord
-from reconciliator.template import RecordTemplateEngine
+from reconciliator.embedding.template import RecordTemplateEngine
 
 
 class SentenceEmbedder:
@@ -19,7 +19,12 @@ class SentenceEmbedder:
     def __init__(self, config: EmbeddingConfig) -> None:
         self.config = config
         self.device = resolve_device(config.device)
-        self.batch_size = get_optimal_batch_size(config.batch_size, self.device)
+        self.batch_size = get_optimal_batch_size(
+            config.batch_size,
+            self.device,
+            cuda_batch_scale=config.cuda_batch_scale,
+            mps_batch_scale=config.mps_batch_scale,
+        )
         self.use_fp16 = configure_mixed_precision(self.device)
 
         self.template_engine = RecordTemplateEngine(config.template_path)
@@ -76,3 +81,4 @@ class SentenceEmbedder:
         """Serialize and encode a batch of BibliographicRecord models."""
         texts = [self.serialize_record(r) for r in records]
         return self.embed_texts(texts, batch_size=batch_size)
+

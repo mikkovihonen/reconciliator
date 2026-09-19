@@ -13,6 +13,11 @@ from reconciliator.reconciliation.agents import (
     verify_qualifiers,
     verify_subjects,
 )
+from reconciliator.reconciliation.consolidation import (
+    ConsolidationResult,
+    WorkConsolidator,
+    WorkSignature,
+)
 from reconciliator.reconciliation.matcher import WorkMatcher, _merge_funnel_specs
 from reconciliator.reconciliation.results import (
     ConstituentWorkMatch,
@@ -37,5 +42,9 @@ __all__ = [
     "verify_qualifier",
     "verify_qualifiers",
     "verify_subjects",
+    # consolidation
+    "ConsolidationResult",
+    "WorkConsolidator",
+    "WorkSignature",
 ]
 

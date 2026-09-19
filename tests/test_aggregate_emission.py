@@ -34,7 +34,7 @@ from reconciliator.loaders.registry import (
     load_record,
 )
 from reconciliator.database import WEMIRepository
-from reconciliator.template import WEMISerializationEngine
+from reconciliator.embedding.template import WEMISerializationEngine
 
 SRC = "fono"
 

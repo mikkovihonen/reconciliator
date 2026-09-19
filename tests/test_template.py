@@ -12,7 +12,7 @@ from reconciliator.models import (
     SubjectItem,
     SubjectsContainer,
 )
-from reconciliator.template import (
+from reconciliator.embedding.template import (
     RecordTemplateEngine,
     collapse_ws,
     join_classifications,
@@ -127,7 +127,7 @@ def test_custom_filters() -> None:
 
 def test_wemi_serialization_engine() -> None:
     from reconciliator.models import ExpressionEntity, ManifestationEntity, WorkEntity
-    from reconciliator.template import WEMISerializationEngine
+    from reconciliator.embedding.template import WEMISerializationEngine
 
     engine = WEMISerializationEngine()
 

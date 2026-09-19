@@ -11,6 +11,12 @@ from reconciliator.utils.curie import (
     parse_curie,
     to_curie,
 )
+from reconciliator.utils.device import (
+    configure_execution_threads,
+    configure_mixed_precision,
+    get_optimal_batch_size,
+    resolve_device,
+)
 from reconciliator.utils.durations import parse_duration_seconds
 from reconciliator.utils.entity_keys import to_manifestation_entity_keys
 from reconciliator.utils.metrics import compute_jaccard_overlap
@@ -53,6 +59,11 @@ __all__ = [
     "format_wikidata_uri",
     "parse_curie",
     "to_curie",
+    # device
+    "configure_execution_threads",
+    "configure_mixed_precision",
+    "get_optimal_batch_size",
+    "resolve_device",
     # module_ref
     "ModuleRefError",
     "is_path_reference",

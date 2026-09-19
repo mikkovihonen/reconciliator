@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from reconciliator.cli import app
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
 from reconciliator.database import agents_table, manifestations_table, works_table
-from reconciliator.embedder import SentenceEmbedder
+from reconciliator.embedding.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.database import WEMIRepository
 from reconciliator.vocab import VocabStore
@@ -98,7 +98,7 @@ def test_multi_source_ingestion_pipeline(tmp_path: Path) -> None:
         / "default_serialization.j2"
     )
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_model):
         from reconciliator.config import EmbeddingConfig
 
         emb_cfg = EmbeddingConfig(template_path=template_path, device="cpu", batch_size=10)
@@ -222,7 +222,7 @@ ingest_oai:
     mock_resp.content = SAMPLE_OAI_SOURCE_A
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_model):
         with patch("httpx2.AsyncClient.get", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_resp
             # Test specifying unknown source raises error

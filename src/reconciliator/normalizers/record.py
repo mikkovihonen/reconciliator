@@ -33,7 +33,7 @@ from reconciliator.normalizers.identifiers import (
 )
 from reconciliator.normalizers.linguistic import build_biographical_date_pattern
 from reconciliator.normalizers.relators import RelatorRegistry
-from reconciliator.template import RecordTemplateEngine
+from reconciliator.embedding.template import RecordTemplateEngine
 from reconciliator.vocab import VocabFolder, extract_concept_id, normalize_subject_vocabulary
 
 

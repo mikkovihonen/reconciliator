@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
 from reconciliator.database import WEMIRepository
-from reconciliator.embedder import SentenceEmbedder
+from reconciliator.embedding.embedder import SentenceEmbedder
 from reconciliator.funnels import (
     BUILTIN_SPECS,
     FunnelContext,
@@ -833,7 +833,7 @@ class WorkMatcher:
         ):
             return
 
-        from reconciliator.template import WEMISerializationEngine
+        from reconciliator.embedding.template import WEMISerializationEngine
         from reconciliator.vocab import detect_vocabulary
 
         wemi_engine = WEMISerializationEngine()

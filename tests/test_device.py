@@ -1,6 +1,6 @@
 """Unit tests for device detection and configuration."""
 
-from reconciliator.device import (
+from reconciliator.utils.device import (
     configure_execution_threads,
     configure_mixed_precision,
     get_optimal_batch_size,

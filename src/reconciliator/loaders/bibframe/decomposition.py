@@ -55,7 +55,7 @@ from reconciliator.normalizers.blocking import (
     compute_title_stem,
     compute_work_blocking_key,
 )
-from reconciliator.template import WEMISerializationEngine
+from reconciliator.embedding.template import WEMISerializationEngine
 from reconciliator.utils import to_manifestation_entity_keys
 from reconciliator.vocab import (
     detect_vocabulary,

@@ -166,7 +166,7 @@ telemetry:
 
     mock_model.encode.side_effect = mock_encode
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_model):
         reconcile_cmd(config=config_file)
 
     # Verify enriched XML output
@@ -339,7 +339,7 @@ telemetry:
 
     mock_model.encode.side_effect = mock_encode
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_model):
         reconcile_cmd(config=config_file)
 
     # Assert native Turtle output contains owl:sameAs and WEMI links

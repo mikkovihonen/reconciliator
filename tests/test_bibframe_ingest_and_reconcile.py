@@ -99,7 +99,7 @@ telemetry:
 
     mock_model.encode.side_effect = mock_encode
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_model):
         reset_cmd(config=config_file, yes=True)
 
         # 1. Test Ingestion of BIBFRAME into authority store
@@ -231,7 +231,7 @@ telemetry:
 
     mock_model.encode.side_effect = mock_encode
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=mock_model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_model):
         reset_cmd(config=config_file, yes=True)
         ingest_oai_cmd(config=config_file)
         reconcile_cmd(config=config_file)

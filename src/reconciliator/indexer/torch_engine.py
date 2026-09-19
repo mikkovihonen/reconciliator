@@ -11,7 +11,7 @@ import safetensors
 import safetensors.torch
 import torch
 
-from reconciliator.device import resolve_device
+from reconciliator.utils.device import resolve_device
 
 
 class TorchVectorEngine:

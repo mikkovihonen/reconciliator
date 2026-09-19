@@ -143,7 +143,7 @@ telemetry:
         encoding="utf-8",
     )
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=_mock_transformer()):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=_mock_transformer()):
         reset_cmd(config=cfg, yes=True)
         ingest_vocab_cmd(config=cfg)
         ingest_oai_cmd(config=cfg)
@@ -286,7 +286,7 @@ def test_reconcile_is_idempotent(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=_mock_transformer()):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=_mock_transformer()):
         reconcile_cmd(config=cfg2)
 
     once, twice = _fields(out_xml), _fields(second_out)

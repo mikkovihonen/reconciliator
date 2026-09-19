@@ -17,9 +17,9 @@ from reconciliator.config import (
 
 def test_template_set_paths_config():
     paths = TemplateSetPathsConfig()
-    assert paths.work == Path("reconciliator/templates/work_serialization.j2")
-    assert paths.expression == Path("reconciliator/templates/expression_serialization.j2")
-    assert paths.manifestation == Path("reconciliator/templates/manifestation_serialization.j2")
+    assert paths.work == Path("reconciliator/embedding/templates/work_serialization.j2")
+    assert paths.expression == Path("reconciliator/embedding/templates/expression_serialization.j2")
+    assert paths.manifestation == Path("reconciliator/embedding/templates/manifestation_serialization.j2")
 
     custom = TemplateSetPathsConfig(
         work=Path("custom/work.j2"),
@@ -105,7 +105,7 @@ def test_reconcile_config_with_wemi():
         enrichment_toggles=EnrichmentTogglesConfig(),
     )
     assert cfg.templates is not None
-    assert cfg.templates.work == Path("reconciliator/templates/work_serialization.j2")
+    assert cfg.templates.work == Path("reconciliator/embedding/templates/work_serialization.j2")
     assert cfg.cluster.thresholds.work == 0.85
     assert cfg.enrichment_toggles.inject_work_links is True
     assert cfg.work_reports is None

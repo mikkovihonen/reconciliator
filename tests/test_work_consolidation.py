@@ -23,7 +23,7 @@ from reconciliator.cli import (
     reset_cmd,
 )
 from reconciliator.config import VectorEngineConfig, WorkConsolidationConfig, load_config
-from reconciliator.consolidation import WorkConsolidator
+from reconciliator.reconciliation.consolidation import WorkConsolidator
 from reconciliator.database import works_table
 from reconciliator.models import (
     AgentEntity,
@@ -452,7 +452,7 @@ telemetry:
     model.get_sentence_embedding_dimension.return_value = 128
     model.encode.side_effect = lambda t, **k: np.zeros((len(t), 128), dtype=np.float32)
 
-    with patch("reconciliator.embedder.SentenceTransformer", return_value=model):
+    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=model):
         reset_cmd(config=cfg, yes=True)
         ingest_vocab_cmd(config=cfg)
         ingest_oai_cmd(config=cfg, all_sources=True)

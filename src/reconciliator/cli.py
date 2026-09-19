@@ -31,7 +31,7 @@ from reconciliator.database import (
     start_postgres_container,
     stop_postgres_container,
 )
-from reconciliator.embedder import SentenceEmbedder
+from reconciliator.embedding.embedder import SentenceEmbedder
 from reconciliator.indexer.ipc.client import DaemonLifecycleManager
 from reconciliator.indexer.ipc.protocol import get_default_socket_path
 from reconciliator.ingestion.oai import ingest_oai_pipeline
@@ -1772,7 +1772,7 @@ def consolidate_works_cmd(
     same_work_as edges explaining why. Nothing is deleted, and the run is
     repeatable after ingesting further sources.
     """
-    from reconciliator.consolidation import WorkConsolidator
+    from reconciliator.reconciliation.consolidation import WorkConsolidator
 
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)

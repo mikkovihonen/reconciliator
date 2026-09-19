@@ -35,23 +35,35 @@ def resolve_device(device_str: Literal["auto", "cuda", "mps", "cpu"] = "auto") -
 
 
 def configure_execution_threads(num_threads: Optional[int] = None) -> int:
-    """Configure intra-op parallelism threads for CPU fallback operations."""
+    """Configure intra-op parallelism threads for CPU fallback operations.
+
+    When ``num_threads`` is ``None`` the thread count is taken from
+    ``os.cpu_count()``.  Pass an explicit value (from ``EmbeddingConfig.num_cpu_threads``)
+    to override.
+    """
     if num_threads is None:
-        cpu_count = os.cpu_count() or 4
-        num_threads = max(1, cpu_count)
+        num_threads = os.cpu_count() or 1
     torch.set_num_threads(num_threads)
     return num_threads
 
 
-def get_optimal_batch_size(base_batch_size: int, device: str) -> int:
+def get_optimal_batch_size(
+    base_batch_size: int,
+    device: str,
+    *,
+    cuda_batch_scale: int = 4,
+    mps_batch_scale: int = 2,
+) -> int:
     """Return batch size scaled for available hardware.
 
-    Scales up for GPU/Metal when suitable to exploit hardware parallelism.
+    Scale factors are configurable via ``EmbeddingConfig.cuda_batch_scale`` and
+    ``EmbeddingConfig.mps_batch_scale`` so they can be tuned without touching
+    source code.
     """
     if device == "cuda":
-        return base_batch_size * 4
+        return base_batch_size * cuda_batch_scale
     elif device == "mps":
-        return base_batch_size * 2
+        return base_batch_size * mps_batch_scale
     return base_batch_size
 
 
@@ -64,3 +76,4 @@ def configure_mixed_precision(device: str) -> bool:
         logger.info("Enabling CUDA automatic mixed precision (fp16)")
         return True
     return False
+

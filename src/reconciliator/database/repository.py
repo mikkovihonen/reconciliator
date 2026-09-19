@@ -90,7 +90,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
     from reconciliator.config import RepositoryFTSConfig, VectorEngineConfig
-    from reconciliator.embedder import SentenceEmbedder
+    from reconciliator.embedding.embedder import SentenceEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -2958,7 +2958,7 @@ class WEMIRepository:
         template_path: Optional[Path | str] = None,
     ) -> int:
         """Build dedicated agent vector index (agent.index) using concise essential serialization."""
-        from reconciliator.template import WEMISerializationEngine
+        from reconciliator.embedding.template import WEMISerializationEngine
 
         wemi_engine = WEMISerializationEngine(agent_template_path=template_path)
 

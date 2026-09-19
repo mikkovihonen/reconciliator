@@ -20,7 +20,7 @@ from typing import Any, Literal, Optional
 import numpy as np
 
 from reconciliator.config import AppConfig, VectorEngineConfig, load_config
-from reconciliator.device import resolve_device
+from reconciliator.utils.device import resolve_device
 from reconciliator.indexer.base import VectorIndex
 from reconciliator.indexer.faiss_engine import FAISSIndexEngine
 from reconciliator.indexer.ipc.protocol import (

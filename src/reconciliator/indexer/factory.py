@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
-from reconciliator.device import resolve_device
+from reconciliator.utils.device import resolve_device
 from reconciliator.indexer.base import VectorIndex
 from reconciliator.indexer.faiss_engine import FAISSIndexEngine
 from reconciliator.indexer.torch_engine import TorchVectorEngine

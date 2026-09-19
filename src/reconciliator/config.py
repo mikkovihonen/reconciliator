@@ -464,9 +464,12 @@ class EmbeddingConfig(BaseModel):
     """Embedding model and hardware acceleration configuration."""
 
     model_name: str = "TurkuNLP/sbert-cased-finnish-paraphrase"
-    template_path: Path = Path("reconciliator/templates/default_serialization.j2")
+    template_path: Path = Path("reconciliator/embedding/templates/default_serialization.j2")
     device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
     batch_size: int = 64
+    cuda_batch_scale: int = 4
+    mps_batch_scale: int = 2
+    num_cpu_threads: Optional[int] = None  # None → os.cpu_count()
     force_template: bool = False
 
     @model_validator(mode="after")
@@ -474,6 +477,7 @@ class EmbeddingConfig(BaseModel):
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be a positive integer, got {self.batch_size}")
         return self
+
 
 
 # ---------------------------------------------------------------------------
@@ -1242,10 +1246,11 @@ class WikidataIngestConfig(BaseModel):
 class TemplateSetPathsConfig(BaseModel):
     """File paths for the WEMI and agent serialization templates."""
 
-    work: Path = Path("reconciliator/templates/work_serialization.j2")
-    expression: Path = Path("reconciliator/templates/expression_serialization.j2")
-    manifestation: Path = Path("reconciliator/templates/manifestation_serialization.j2")
-    agent: Path = Path("reconciliator/templates/agent_serialization.j2")
+    work: Path = Path("reconciliator/embedding/templates/work_serialization.j2")
+    expression: Path = Path("reconciliator/embedding/templates/expression_serialization.j2")
+    manifestation: Path = Path("reconciliator/embedding/templates/manifestation_serialization.j2")
+    agent: Path = Path("reconciliator/embedding/templates/agent_serialization.j2")
+
 
 
 class ShortCircuitConfig(BaseModel):
@@ -2231,11 +2236,12 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
             if candidate.exists():
                 config.embedding.template_path = candidate
             else:
-                pkg_template = Path(__file__).parent / "templates" / t_path.name
+                pkg_template = Path(__file__).parent / "embedding" / "templates" / t_path.name
                 if pkg_template.exists():
                     config.embedding.template_path = pkg_template
                 else:
                     config.embedding.template_path = candidate
+
 
     # Download configs
     for skos_cfg in config.download_skosmos.values():

@@ -312,10 +312,10 @@ def test_reconcile_config_defaults():
 
     # M-02: Concrete default for templates
     assert cfg.templates is not None
-    assert cfg.templates.work == Path("reconciliator/templates/work_serialization.j2")
-    assert cfg.templates.expression == Path("reconciliator/templates/expression_serialization.j2")
+    assert cfg.templates.work == Path("reconciliator/embedding/templates/work_serialization.j2")
+    assert cfg.templates.expression == Path("reconciliator/embedding/templates/expression_serialization.j2")
     assert cfg.templates.manifestation == Path(
-        "reconciliator/templates/manifestation_serialization.j2"
+        "reconciliator/embedding/templates/manifestation_serialization.j2"
     )
 
     # Work/expression reports remain opt-in
@@ -466,7 +466,7 @@ def test_marc_predicate_profiles_default():
 def test_render_work_original_title():
     """Verify M-23: render_work dynamically includes original_title."""
     from reconciliator.models import WorkEntity
-    from reconciliator.template import WEMISerializationEngine
+    from reconciliator.embedding.template import WEMISerializationEngine
 
     engine = WEMISerializationEngine()
     work = WorkEntity(

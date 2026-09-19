@@ -55,7 +55,7 @@ from reconciliator.normalizers.blocking import (
     compute_work_blocking_key,
 )
 from reconciliator.normalizers.relators import normalize_role
-from reconciliator.template import WEMISerializationEngine
+from reconciliator.embedding.template import WEMISerializationEngine
 from reconciliator.utils import to_manifestation_entity_keys
 from reconciliator.vocab import (
     detect_vocabulary,

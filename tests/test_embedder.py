@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from reconciliator.config import EmbeddingConfig
-from reconciliator.embedder import SentenceEmbedder
+from reconciliator.embedding.embedder import SentenceEmbedder
 from reconciliator.models import BibliographicRecord
 
 
@@ -21,7 +21,7 @@ def mock_sentence_transformer() -> MagicMock:
 
 def test_embedder_dimension_discovery(mock_sentence_transformer: MagicMock) -> None:
     with patch(
-        "reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer
+        "reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_sentence_transformer
     ):
         config = EmbeddingConfig(device="cpu")
         embedder = SentenceEmbedder(config)
@@ -42,7 +42,7 @@ def test_embedder_dimension_discovery(mock_sentence_transformer: MagicMock) -> N
 
 def test_embedder_empty_list(mock_sentence_transformer: MagicMock) -> None:
     with patch(
-        "reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer
+        "reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_sentence_transformer
     ):
         config = EmbeddingConfig(device="cpu")
         embedder = SentenceEmbedder(config)
@@ -53,7 +53,7 @@ def test_embedder_empty_list(mock_sentence_transformer: MagicMock) -> None:
 
 def test_embedder_fp16_flag(mock_sentence_transformer: MagicMock) -> None:
     with patch(
-        "reconciliator.embedder.SentenceTransformer", return_value=mock_sentence_transformer
+        "reconciliator.embedding.embedder.SentenceTransformer", return_value=mock_sentence_transformer
     ):
         config = EmbeddingConfig(device="cpu", batch_size=32)
         embedder = SentenceEmbedder(config)

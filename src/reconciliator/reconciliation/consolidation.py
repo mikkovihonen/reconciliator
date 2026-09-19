@@ -393,3 +393,4 @@ class WorkConsolidator:
             return {
                 (r["source_work_id"], r["target_work_id"]) for r in conn.execute(stmt).mappings()
             }
+
