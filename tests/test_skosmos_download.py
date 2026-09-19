@@ -14,7 +14,7 @@ from reconciliator.cli import download_skosmos_cmd
 from reconciliator.config import load_config
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file, parse_turtle_simple
-from reconciliator.version import get_version
+from reconciliator.utils.version import get_version
 from reconciliator.vocab import VocabStore
 
 

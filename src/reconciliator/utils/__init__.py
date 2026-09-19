@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from reconciliator.utils.curie import (
+    clear_curie_cache,
+    extract_source_identifier,
+    extract_wikidata_qid,
+    format_source_uri,
+    format_wikidata_uri,
+    parse_curie,
+    to_curie,
+)
 from reconciliator.utils.durations import parse_duration_seconds
 from reconciliator.utils.entity_keys import to_manifestation_entity_keys
 from reconciliator.utils.metrics import compute_jaccard_overlap
+from reconciliator.utils.module_ref import (
+    ModuleRefError,
+    is_path_reference,
+    resolve_module_ref,
+)
 from reconciliator.utils.strings import clean_alphanumeric
 from reconciliator.utils.target_extraction import (
     extract_identifiers_from_target,
@@ -13,6 +27,11 @@ from reconciliator.utils.target_extraction import (
 )
 from reconciliator.utils.tsv import sanitize_tsv_cell, write_summary_tsv, write_tsv_file
 from reconciliator.utils.union_find import UnionFind
+from reconciliator.utils.version import (
+    __version__,
+    get_default_user_agent,
+    get_version,
+)
 
 __all__ = [
     "UnionFind",
@@ -26,4 +45,20 @@ __all__ = [
     "to_manifestation_entity_keys",
     "write_summary_tsv",
     "write_tsv_file",
+    # curie
+    "clear_curie_cache",
+    "extract_source_identifier",
+    "extract_wikidata_qid",
+    "format_source_uri",
+    "format_wikidata_uri",
+    "parse_curie",
+    "to_curie",
+    # module_ref
+    "ModuleRefError",
+    "is_path_reference",
+    "resolve_module_ref",
+    # version
+    "__version__",
+    "get_default_user_agent",
+    "get_version",
 ]

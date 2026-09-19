@@ -15,7 +15,7 @@ from rapidfuzz import fuzz, utils
 from sqlalchemy import select
 
 from reconciliator.config import AgentClusterConfig, AppConfig
-from reconciliator.curie import to_curie
+from reconciliator.utils.curie import to_curie
 from reconciliator.database import (
     WEMIRepository,
     agent_attributes_table,

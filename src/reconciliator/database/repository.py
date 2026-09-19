@@ -26,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from reconciliator.curie import parse_curie, to_curie
+from reconciliator.utils.curie import parse_curie, to_curie
 from reconciliator.database.engine import get_engine, init_authority_db
 from reconciliator.database.ops import insert_batch, upsert_batch
 from reconciliator.database.schema import (

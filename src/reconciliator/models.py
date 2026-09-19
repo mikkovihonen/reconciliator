@@ -7,7 +7,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from reconciliator.curie import parse_curie, to_curie
+from reconciliator.utils.curie import parse_curie, to_curie
 
 
 class ClassificationItem(BaseModel):
@@ -194,7 +194,7 @@ class VocabConcept(BaseModel):
     def uri(self) -> str:
         if self.concept_id and self.concept_id.startswith(("http://", "https://", "urn:")):
             return self.concept_id
-        from reconciliator.curie import format_source_uri
+        from reconciliator.utils.curie import format_source_uri
 
         u = format_source_uri(self.vocabulary, self.concept_id)
         if u and not u.startswith(f"{self.vocabulary}:"):

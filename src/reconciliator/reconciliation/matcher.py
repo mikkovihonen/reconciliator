@@ -932,7 +932,7 @@ class WorkMatcher:
             c_sid = best_cand.get("source_id")
             if c_src and c_sid and not str(c_src).startswith(("urn", "unknown")):
                 c_src_l = str(c_src).lower()
-                from reconciliator.curie import _get_sources_registry, format_source_uri
+                from reconciliator.utils.curie import _get_sources_registry, format_source_uri
 
                 formatted_uri = format_source_uri(c_src_l, str(c_sid))
                 src_info = _get_sources_registry().get(c_src_l, {})
@@ -961,7 +961,7 @@ class WorkMatcher:
                         _accept(str(item), subfield, default_vocab)
 
             if best_cand.get("wikidata_qid"):
-                from reconciliator.curie import format_source_uri
+                from reconciliator.utils.curie import format_source_uri
 
                 _accept(
                     format_source_uri("wikidata", str(best_cand["wikidata_qid"])), "1", "WIKIDATA"

@@ -28,7 +28,7 @@ from reconciliator.constituents.spec import (
     ConstituentProfile,
     ConstituentShape,
 )
-from reconciliator.module_ref import ModuleRefError, is_path_reference, resolve_module_ref
+from reconciliator.utils.module_ref import ModuleRefError, is_path_reference, resolve_module_ref
 
 __all__ = [
     "BUILTIN_EXTRACTORS",

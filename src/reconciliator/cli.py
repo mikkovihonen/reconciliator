@@ -23,7 +23,7 @@ from reconciliator.config import (
     configure_logging,
     load_config,
 )
-from reconciliator.curie import extract_wikidata_qid
+from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.database import (
     is_container_present,
     is_container_running,

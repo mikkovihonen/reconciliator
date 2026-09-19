@@ -87,7 +87,7 @@ def test_harvest_partition_mocked() -> None:
 
 def test_oai_pmh_user_agent() -> None:
     """Test that OAIPMHHarvester uses default canonical User-Agent from version.py."""
-    from reconciliator.version import get_default_user_agent
+    from reconciliator.utils.version import get_default_user_agent
 
     expected_ua = get_default_user_agent()
     harvester = OAIPMHHarvester(endpoint_url="http://example.org/oai")

@@ -8,7 +8,7 @@ from typing import Any, Optional
 from rdflib import RDF, RDFS, Graph, IdentifiedNode, URIRef
 
 from reconciliator.config import EnrichmentTogglesConfig
-from reconciliator.curie import extract_wikidata_qid, format_wikidata_uri
+from reconciliator.utils.curie import extract_wikidata_qid, format_wikidata_uri
 from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
 from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (

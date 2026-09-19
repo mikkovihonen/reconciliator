@@ -6,7 +6,7 @@ from typing import Any, Iterable, Optional
 
 from rapidfuzz import fuzz
 
-from reconciliator.curie import parse_curie
+from reconciliator.utils.curie import parse_curie
 from reconciliator.models import Agent, AgentURI, BibliographicRecord, IdentifierEntity
 from reconciliator.vocab import detect_vocabulary, extract_concept_id
 
@@ -334,7 +334,7 @@ def verify_subjects(
 
     # 3. Check normalized concept mapping in vocab_store
     if vocab_store is not None and hasattr(vocab_store, "find_legacy_mapping_by_uri"):
-        from reconciliator.curie import format_source_uri
+        from reconciliator.utils.curie import format_source_uri
 
         for k in target_subjects:
             v_prefix, _, cid = k.partition(":")

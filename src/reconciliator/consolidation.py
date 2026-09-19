@@ -22,7 +22,7 @@ from rapidfuzz import fuzz
 from sqlalchemy import and_, func, select
 
 from reconciliator.config import WorkConsolidationConfig
-from reconciliator.curie import to_curie
+from reconciliator.utils.curie import to_curie
 from reconciliator.database import (
     WEMIRepository,
     agents_table,

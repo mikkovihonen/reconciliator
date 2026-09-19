@@ -148,7 +148,7 @@ class ConstituentProfile(BaseModel):
 
     #: A built-in name or a path to a Python file, for a source whose
     #: constituents cannot be described declaratively. Same rule as a funnel's
-    #: `handler`; see reconciliator.module_ref.
+    #: `handler`; see reconciliator.utils.module_ref.
     extractor: Optional[str] = None
 
     def shape_of(self, field: ConstituentField) -> ConstituentShape:

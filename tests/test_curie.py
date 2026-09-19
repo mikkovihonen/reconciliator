@@ -1,6 +1,6 @@
 """Unit tests for CURIE utility module."""
 
-from reconciliator.curie import (
+from reconciliator.utils.curie import (
     extract_wikidata_qid,
     format_wikidata_uri,
     parse_curie,
@@ -48,3 +48,20 @@ def test_extract_wikidata_qid() -> None:
 def test_format_wikidata_uri() -> None:
     assert format_wikidata_uri("wikidata:Q42") == "http://www.wikidata.org/entity/Q42"
     assert format_wikidata_uri("Q42") == "http://www.wikidata.org/entity/Q42"
+
+
+def test_utils_reexports() -> None:
+    from reconciliator.utils import (
+        clear_curie_cache,
+        extract_source_identifier,
+        extract_wikidata_qid,
+        format_source_uri,
+        format_wikidata_uri,
+        parse_curie,
+        to_curie,
+    )
+
+    assert to_curie("wikidata", "Q42") == "wikidata:Q42"
+    assert parse_curie("wikidata:Q42") == ("wikidata", "Q42")
+    assert extract_wikidata_qid("Q42") == "Q42"
+

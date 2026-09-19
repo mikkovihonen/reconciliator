@@ -9,7 +9,7 @@ from typing import Any, Optional
 import httpx2
 
 from reconciliator.progress import ProgressTracker
-from reconciliator.version import get_default_user_agent
+from reconciliator.utils.version import get_default_user_agent
 
 
 class SkosmosDownloader:

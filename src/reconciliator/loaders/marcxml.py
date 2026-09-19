@@ -20,7 +20,7 @@ from reconciliator.config import (
 from reconciliator.constituents import ConstituentProfile, get_constituent_profile
 from reconciliator.constituents.record import Constituent
 from reconciliator.constituents.record import finalise as finalise_constituents
-from reconciliator.curie import to_curie
+from reconciliator.utils.curie import to_curie
 
 # ISBD presentation punctuation and the stripper live with the loader contract:
 # the charset had a second declaration here, and two copies of a normalisation

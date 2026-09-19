@@ -53,7 +53,7 @@ def vocabulary_hint_from_uri(uri: Optional[str]) -> Optional[str]:
     """The vocabulary a URI names in its own path or CURIE prefix."""
     if not uri:
         return None
-    from reconciliator.curie import parse_curie
+    from reconciliator.utils.curie import parse_curie
 
     src, _ = parse_curie(uri)
     if src and src != "unknown":

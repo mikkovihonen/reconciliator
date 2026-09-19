@@ -15,7 +15,7 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
-from reconciliator.curie import extract_wikidata_qid
+from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.loaders.marcxml import (
     MARC_NS,
     _get_controlfield,

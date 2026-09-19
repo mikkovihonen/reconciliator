@@ -10,7 +10,7 @@ from typing import Iterator, Optional
 import httpx2
 from lxml import etree
 
-from reconciliator.version import get_default_user_agent
+from reconciliator.utils.version import get_default_user_agent
 
 logger = logging.getLogger(__name__)
 

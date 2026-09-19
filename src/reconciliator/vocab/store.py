@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.config import VocabulariesConfig
-from reconciliator.curie import extract_wikidata_qid, parse_curie, to_curie
+from reconciliator.utils.curie import extract_wikidata_qid, parse_curie, to_curie
 from reconciliator.database import (
     concept_aliases_table,
     concept_hierarchy_table,

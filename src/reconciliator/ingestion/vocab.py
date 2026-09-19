@@ -62,7 +62,7 @@ def parse_turtle_simple(
 
             # Detect vocabulary from URI
             def _detect_vocab(u: str) -> str:
-                from reconciliator.curie import parse_curie
+                from reconciliator.utils.curie import parse_curie
 
                 src, _ = parse_curie(u)
                 if src and src != "unknown":
@@ -199,7 +199,7 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
         for b in bridges:
             source_uri = b["source_uri"]
             target_uri = b["target_uri"]
-            from reconciliator.curie import parse_curie
+            from reconciliator.utils.curie import parse_curie
 
             t_src, _ = parse_curie(target_uri)
             target_v = t_src if t_src and t_src != "unknown" else default_topical_vocab

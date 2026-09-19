@@ -698,10 +698,10 @@ def test_version_resolution_exception_handling():
     """Verify H-33: get_version catches (PackageNotFoundError, Exception) without shadowing."""
     from unittest.mock import patch
 
-    from reconciliator.version import get_version
+    from reconciliator.utils.version import get_version
 
-    with patch("reconciliator.version.Path.is_file", return_value=False):
-        with patch("reconciliator.version.version", side_effect=Exception("Metadata corrupted")):
+    with patch("reconciliator.utils.version.Path.is_file", return_value=False):
+        with patch("reconciliator.utils.version.version", side_effect=Exception("Metadata corrupted")):
             v = get_version()
             assert v == "0.1.0"
 

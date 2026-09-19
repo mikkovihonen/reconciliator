@@ -26,7 +26,7 @@ from typing import Optional
 from reconciliator.funnels.builtin import BUILTIN_SPECS, build_builtin_specs
 from reconciliator.funnels.engine import FunnelContext, default_tier2, run_funnel
 from reconciliator.funnels.spec import FunnelSpec, FunnelWhen
-from reconciliator.module_ref import resolve_module_ref
+from reconciliator.utils.module_ref import resolve_module_ref
 
 __all__ = [
     "BUILTIN_HANDLERS",
@@ -60,7 +60,7 @@ def resolve_handler(
 ) -> Optional[ModuleType]:
     """Resolve a handler reference to a module, or None when there is none.
 
-    The reference rule itself lives in `reconciliator.module_ref`, shared with the
+    The reference rule itself lives in `reconciliator.utils.module_ref`, shared with the
     `extractor` on a constituent profile: a user who has learned one of the two
     has learned the other, so they must not drift.
     """
