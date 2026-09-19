@@ -326,7 +326,7 @@ def test_reconcile_config_defaults():
 def test_funnels_dispatch_anthology_conference_government(tmp_path):
     """Verify H-25: match_target dispatches to anthology, conference, and government funnels."""
     from reconciliator.database import get_db_connection, init_authority_db
-    from reconciliator.matcher import WorkMatcher
+    from reconciliator.reconciliation import WorkMatcher
     from reconciliator.models import MatchRecord
     from reconciliator.database import WEMIRepository
 
@@ -486,7 +486,7 @@ def test_render_work_original_title():
 def test_translator_alignment_via_agent_aligner(tmp_path):
     """Verify H-31: _align_expression uses AgentAligner to match translators."""
     from reconciliator.database import get_db_connection, init_authority_db
-    from reconciliator.matcher import WorkMatcher
+    from reconciliator.reconciliation import WorkMatcher
     from reconciliator.models import AgentEntity, ContributionEntity, ExpressionEntity, WorkEntity
     from reconciliator.database import WEMIRepository
 

@@ -28,8 +28,8 @@ class AgentAligner:
         target_agents: list[Agent],
         candidate_records: list[BibliographicRecord],
     ) -> dict[int, list[AgentURI]]:
-        """
-        Align each target agent against agents across all accepted candidate records.
+        """Align each target agent against agents across all accepted candidate records.
+
         Returns a mapping of target_agent_index -> list of discovered AgentURIs.
         """
         discovered: dict[int, list[AgentURI]] = {i: [] for i in range(len(target_agents))}
@@ -94,20 +94,21 @@ def verify_life_dates(
     candidate_birth: Optional[int],
     target_death: Optional[int],
     candidate_death: Optional[int],
+    tolerance_years: int = 1,
 ) -> tuple[bool, str]:
     """Verify consistency between target agent life dates and candidate authority life dates.
 
     Returns (passed, reason).
     """
     if target_birth is not None and candidate_birth is not None:
-        if abs(target_birth - candidate_birth) > 1:
+        if abs(target_birth - candidate_birth) > tolerance_years:
             return (
                 False,
                 f"birth_year_mismatch: target {target_birth} vs candidate {candidate_birth}",
             )
 
     if target_death is not None and candidate_death is not None:
-        if abs(target_death - candidate_death) > 1:
+        if abs(target_death - candidate_death) > tolerance_years:
             return (
                 False,
                 f"death_year_mismatch: target {target_death} vs candidate {candidate_death}",
@@ -169,6 +170,7 @@ def verify_publication_chronology(
 def verify_qualifier(
     target_qualifier: Optional[str],
     candidate_qualifier: Optional[str],
+    threshold: float = 80.0,
 ) -> tuple[bool, str]:
     """Verify compatibility of agent qualifiers (scalar helper).
 
@@ -184,7 +186,7 @@ def verify_qualifier(
         return True, "qualifier_matched"
 
     sim = fuzz.token_set_ratio(t_norm, c_norm)
-    if sim >= 80.0:
+    if sim >= threshold:
         return True, "qualifier_similar"
 
     return False, "qualifier_mismatch"
@@ -261,18 +263,19 @@ def _verify_distribution_match(
 def verify_qualifiers(
     target_qualifiers: Iterable[str] | dict[str, Any],
     candidate_qualifiers: Iterable[str] | dict[str, Any],
+    threshold: float = 80.0,
 ) -> tuple[bool, str]:
     """Verify compatibility of empirical agent qualifier distributions or lists."""
-    return _verify_distribution_match(target_qualifiers, candidate_qualifiers, "qualifier")
+    return _verify_distribution_match(target_qualifiers, candidate_qualifiers, "qualifier", threshold=threshold)
 
 
 def verify_affiliations(
     target_affiliations: Iterable[str] | dict[str, Any],
     candidate_affiliations: Iterable[str] | dict[str, Any],
+    threshold: float = 80.0,
 ) -> tuple[bool, str]:
     """Verify compatibility of agent affiliations (e.g. universities, institutes)."""
-    return _verify_distribution_match(target_affiliations, candidate_affiliations, "affiliation")
-
+    return _verify_distribution_match(target_affiliations, candidate_affiliations, "affiliation", threshold=threshold)
 
 
 def verify_languages(
@@ -377,6 +380,8 @@ def check_homonym_ambiguity(
     target_publisher: Optional[str] = None,
     target_classifications: Optional[list[tuple[str, str]]] = None,
     vocab_store: Optional[Any] = None,
+    life_date_tolerance_years: int = 1,
+    distribution_match_threshold: float = 80.0,
 ) -> tuple[bool, str]:
     """Detect if multiple candidates share near-identical names without distinguishing metadata.
 
@@ -437,7 +442,9 @@ def check_homonym_ambiguity(
         for c in close_candidates:
             cb = c.get("birth_year")
             cd = c.get("death_year")
-            passed, _ = verify_life_dates(target_birth, cb, target_death, cd)
+            passed, _ = verify_life_dates(
+                target_birth, cb, target_death, cd, tolerance_years=life_date_tolerance_years
+            )
             if passed and (cb is not None or cd is not None):
                 matching_date_cands.append(c)
         if len(matching_date_cands) == 1:
@@ -448,7 +455,7 @@ def check_homonym_ambiguity(
         matching_q_cands = []
         for c in close_candidates:
             c_q_dict = c.get("qualifiers") or {}
-            if c_q_dict and verify_qualifiers(effective_qualifiers, c_q_dict)[0]:
+            if c_q_dict and verify_qualifiers(effective_qualifiers, c_q_dict, threshold=distribution_match_threshold)[0]:
                 matching_q_cands.append(c)
         if len(matching_q_cands) == 1:
             return True, "ambiguity_resolved_by_qualifier"
@@ -458,7 +465,7 @@ def check_homonym_ambiguity(
         matching_a_cands = []
         for c in close_candidates:
             c_a_dict = c.get("affiliations") or {}
-            if c_a_dict and verify_affiliations(effective_affiliations, c_a_dict)[0]:
+            if c_a_dict and verify_affiliations(effective_affiliations, c_a_dict, threshold=distribution_match_threshold)[0]:
                 matching_a_cands.append(c)
         if len(matching_a_cands) == 1:
             return True, "ambiguity_resolved_by_affiliation"
@@ -531,12 +538,22 @@ class AgentFallbackResolver:
         min_author_age: int = 12,
         max_posthumous_years: int = 70,
         strict_homonym_guard: bool = True,
+        life_date_tolerance_years: int = 1,
+        homonym_score_margin: float = 0.03,
+        surname_match_threshold: float = 85.0,
+        qualifier_similarity_threshold: float = 80.0,
+        distribution_match_threshold: float = 80.0,
     ) -> None:
         self.similarity_threshold = similarity_threshold
         self.verify_chronology = verify_chronology
         self.min_author_age = min_author_age
         self.max_posthumous_years = max_posthumous_years
         self.strict_homonym_guard = strict_homonym_guard
+        self.life_date_tolerance_years = life_date_tolerance_years
+        self.homonym_score_margin = homonym_score_margin
+        self.surname_match_threshold = surname_match_threshold
+        self.qualifier_similarity_threshold = qualifier_similarity_threshold
+        self.distribution_match_threshold = distribution_match_threshold
 
     def evaluate_candidates(
         self,
@@ -569,17 +586,19 @@ class AgentFallbackResolver:
         if self.strict_homonym_guard:
             passed, homonym_reason = check_homonym_ambiguity(
                 viable,
+                score_margin=self.homonym_score_margin,
                 target_birth=target_agent.birth_year,
                 target_death=target_agent.death_year,
                 target_identifiers=target_agent.identifiers,
                 target_qualifiers=target_agent.qualifiers,
                 target_affiliations=getattr(target_agent, "affiliations", None) or [],
                 authority_store=authority_store,
-
                 target_coauthors=target_coauthors,
                 target_publisher=target_publisher,
                 target_classifications=target_classifications,
                 vocab_store=vocab_store,
+                life_date_tolerance_years=self.life_date_tolerance_years,
+                distribution_match_threshold=self.distribution_match_threshold,
             )
             if not passed:
                 return None, homonym_reason
@@ -602,6 +621,7 @@ class AgentFallbackResolver:
                 cand_birth,
                 target_agent.death_year,
                 cand_death,
+                tolerance_years=self.life_date_tolerance_years,
             )
             if not date_ok:
                 continue
@@ -622,13 +642,15 @@ class AgentFallbackResolver:
             if target_agent.surname and cand.get("surname"):
                 s_target = target_agent.surname.strip().lower()
                 s_cand = str(cand["surname"]).strip().lower()
-                if s_target != s_cand and fuzz.ratio(s_target, s_cand) < 85.0:
+                if s_target != s_cand and fuzz.ratio(s_target, s_cand) < self.surname_match_threshold:
                     continue
 
             # Qualifier distribution guard
             cand_q = cand.get("qualifiers") or {}
             if target_agent.qualifiers and cand_q:
-                q_ok, _ = verify_qualifiers(target_agent.qualifiers, cand_q)
+                q_ok, _ = verify_qualifiers(
+                    target_agent.qualifiers, cand_q, threshold=self.qualifier_similarity_threshold
+                )
                 if not q_ok:
                     continue
 
@@ -636,12 +658,14 @@ class AgentFallbackResolver:
             cand_a = cand.get("affiliations") or []
             target_aff = getattr(target_agent, "affiliations", None) or []
             if target_aff and cand_a:
-                a_ok, _ = verify_affiliations(target_aff, cand_a)
+                a_ok, _ = verify_affiliations(
+                    target_aff, cand_a, threshold=self.distribution_match_threshold
+                )
                 if not a_ok:
                     continue
-
 
             # Candidate passed all active dynamic selective guards!
             return cand, "accepted_via_selective_guards"
 
         return None, "all_candidates_rejected_by_guards"
+

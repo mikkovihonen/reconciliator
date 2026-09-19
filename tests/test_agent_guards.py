@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from reconciliator.agent_transfer import (
+from reconciliator.reconciliation import (
     AgentFallbackResolver,
     check_homonym_ambiguity,
     verify_affiliations,

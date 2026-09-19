@@ -17,7 +17,7 @@ from reconciliator.loaders.bibframe.enricher import (
     enrich_bibframe_graph,
     enrich_bibframe_jsonld,
 )
-from reconciliator.matcher import ConstituentWorkMatch, WEMIMatchResult
+from reconciliator.reconciliation import ConstituentWorkMatch, WEMIMatchResult
 from reconciliator.models import (
     ExpressionEntity,
     MatchRecord,

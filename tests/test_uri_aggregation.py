@@ -1,6 +1,6 @@
 """Unit tests verifying multi-candidate authority URI aggregation."""
 
-from reconciliator.agent_transfer import AgentAligner
+from reconciliator.reconciliation import AgentAligner
 from reconciliator.models import Agent, BibliographicRecord
 
 

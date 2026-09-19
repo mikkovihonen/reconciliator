@@ -3,7 +3,7 @@
 from lxml import etree
 
 from reconciliator.loaders.marcxml import _get_subfields
-from reconciliator.matcher import ReconciliationResult
+from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.xml_enricher import MARCXMLEnricher
 

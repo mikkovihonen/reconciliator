@@ -20,7 +20,7 @@ from reconciliator.funnels import (
     resolve_specs,
 )
 from reconciliator.funnels.spec import FunnelSpec, FunnelWhen
-from reconciliator.matcher import _merge_funnel_specs
+from reconciliator.reconciliation import _merge_funnel_specs
 from reconciliator.models import MatchRecord
 
 
@@ -474,7 +474,7 @@ def test_audiobook_custom_config_fields():
     from reconciliator.funnels.audiobook import tier2
     from reconciliator.funnels.engine import FunnelContext
     from reconciliator.funnels.spec import FunnelSpec
-    from reconciliator.matcher import WEMIMatchResult
+    from reconciliator.reconciliation import WEMIMatchResult
     from reconciliator.models import WorkEntity
 
     spec = FunnelSpec(

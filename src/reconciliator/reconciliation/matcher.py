@@ -17,8 +17,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from reconciliator.agent_transfer import AgentAligner, AgentFallbackResolver
 from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.funnels import (
     BUILTIN_SPECS,
@@ -42,7 +42,12 @@ from reconciliator.models import (
     WorkRelationship,
 )
 from reconciliator.normalizers.blocking import compute_author_key
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation.agents import AgentAligner, AgentFallbackResolver
+from reconciliator.reconciliation.results import (
+    ConstituentWorkMatch,
+    ReconciliationResult,
+    WEMIMatchResult,
+)
 from reconciliator.rerank import CandidateEvaluator
 from reconciliator.utils import (
     extract_identifiers_from_target,
@@ -52,68 +57,6 @@ from reconciliator.vocab import (
     format_wikidata_uri,
     normalize_subject_vocabulary,
 )
-
-
-@dataclass
-class ReconciliationResult:
-    """Consolidated reconciliation result for a single target record."""
-
-    target_record: BibliographicRecord
-    matches: list[ReconciliationMatch] = field(default_factory=list)
-    accepted_candidates: list[BibliographicRecord] = field(default_factory=list)
-    discovered_agent_uris: dict[int, list[AgentURI]] = field(default_factory=dict)
-    selected_agent_uris: dict[int, list[str]] = field(default_factory=dict)
-    suppressed_agent_uris: dict[int, list[str]] = field(default_factory=dict)
-    corpus_linkage: Optional[CorpusLinkage] = None
-
-
-@dataclass
-class ConstituentWorkMatch:
-    """Represents a matched constituent work within an aggregate or collection."""
-
-    title: str
-    matched_work: Optional[WorkEntity] = None
-    work_uri: Optional[str] = None
-    expression_uri: Optional[str] = None
-    relationship_type: Optional[str] = None
-    confidence_score: float = 1.0
-
-
-@dataclass
-class WEMIMatchResult:
-    """Consolidated match result for a target record resolved by WorkMatcher."""
-
-    target_record_id: str
-    matched_work: Optional[WorkEntity] = None
-    matched_expression: Optional[ExpressionEntity] = None
-    matched_manifestation: Optional[ManifestationEntity] = None
-    work_curie: Optional[str] = None
-    expression_curie: Optional[str] = None
-    manifestation_curie: Optional[str] = None
-    work_uri: Optional[str] = None
-    expression_uri: Optional[str] = None
-    manifestation_uri: Optional[str] = None
-    match_tier: str = "unmatched"
-    funnel_used: str = "unknown"
-    confidence_score: float = 0.0
-    constituent_matches: list[ConstituentWorkMatch] = field(default_factory=list)
-    relationships: list[WorkRelationship] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        if not self.work_curie and self.work_uri:
-            self.work_curie = self.work_uri
-        elif not self.work_uri and self.work_curie:
-            self.work_uri = self.work_curie
-
-        if not self.expression_curie and self.expression_uri:
-            self.expression_curie = self.expression_uri
-        elif not self.expression_uri and self.expression_curie:
-            self.expression_uri = self.expression_curie
-
-        if not self.manifestation_curie and self.manifestation_uri:
-            self.manifestation_curie = self.manifestation_uri
-        elif not self.manifestation_uri and self.manifestation_curie:
-            self.manifestation_uri = self.manifestation_curie
 
 
 def _merge_funnel_specs(overrides: Optional[list[FunnelSpec]]) -> list[FunnelSpec]:
@@ -156,10 +99,9 @@ def _merge_funnel_specs(overrides: Optional[list[FunnelSpec]]) -> list[FunnelSpe
     return merged
 
 
-# How many of a work's manifestations are compared before giving up. A work with
-# hundreds of editions would otherwise turn one candidate into hundreds of
-# evaluations; the discriminators only need to find one compatible edition.
-MAX_EDITIONS_COMPARED = 25
+# Default maximum manifestations of a work compared during candidate evaluation.
+# Configurable via ReconcileConfig.max_editions_compared.
+DEFAULT_MAX_EDITIONS_COMPARED = 25
 
 
 class WorkMatcher:
@@ -185,7 +127,12 @@ class WorkMatcher:
         self.authoritative_only = authoritative_only
         self.agent_indexer = agent_indexer
         self._equivalence_cache: Optional[dict[int, int]] = None
-        self.agent_aligner = AgentAligner()
+        aligner_thresh = (
+            getattr(self.config, "agent_aligner_threshold", 85.0)
+            if self.config
+            else 85.0
+        )
+        self.agent_aligner = AgentAligner(similarity_threshold=aligner_thresh)
         # Funnels are resolved once, here, so an unknown handler name or a bad
         # handler path fails at construction naming the funnel, rather than
         # degrading silently to the generic template mid-corpus.
@@ -218,6 +165,11 @@ class WorkMatcher:
                 min_author_age=config.chronology_min_author_age,
                 max_posthumous_years=config.chronology_max_posthumous_years,
                 strict_homonym_guard=config.strict_homonym_guard,
+                life_date_tolerance_years=getattr(config, "life_date_tolerance_years", 1),
+                homonym_score_margin=getattr(config, "homonym_score_margin", 0.03),
+                surname_match_threshold=getattr(config, "surname_similarity_threshold", 85.0),
+                qualifier_similarity_threshold=getattr(config, "qualifier_similarity_threshold", 80.0),
+                distribution_match_threshold=getattr(config, "distribution_match_threshold", 80.0),
             )
 
     # -----------------------------------------------------------------------
@@ -277,7 +229,12 @@ class WorkMatcher:
                     if score > best_score:
                         best_score = score
                         best_match = e
-            if best_match and best_score >= 0.70:
+            trans_thresh = (
+                getattr(self.config, "translator_alignment_threshold", 0.70)
+                if self.config
+                else 0.70
+            )
+            if best_match and best_score >= trans_thresh:
                 return best_match
 
         return filtered[0]
@@ -717,7 +674,12 @@ class WorkMatcher:
             # "do not penalise" - so they silently never fired.
             manifestations = self.repo.get_manifestations_for_work(work.id) if work.id else []
             best: Optional[ReconciliationMatch] = None
-            for manifestation in (manifestations or [None])[:MAX_EDITIONS_COMPARED]:
+            max_editions = (
+                getattr(self.config, "max_editions_compared", DEFAULT_MAX_EDITIONS_COMPARED)
+                if self.config
+                else DEFAULT_MAX_EDITIONS_COMPARED
+            )
+            for manifestation in (manifestations or [None])[:max_editions]:
                 candidate = self._hydrate_candidate_record(work, None, manifestation)
                 if candidate is None:
                     continue

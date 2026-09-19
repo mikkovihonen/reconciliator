@@ -264,7 +264,7 @@ def test_constituents_are_reported_from_every_tier(store: WEMIRepository, tmp_pa
     from reconciliator.loaders.base import LoadContext
     from reconciliator.loaders.marcxml import build_target_record_from_marc
     from reconciliator.loaders.registry import load_record
-    from reconciliator.matcher import WorkMatcher
+    from reconciliator.reconciliation import WorkMatcher
     from reconciliator.template import WEMISerializationEngine
 
     anthology = """<record xmlns="http://www.loc.gov/MARC21/slim">

@@ -4766,7 +4766,7 @@ flowchart LR
   - Route harvested payloads to either Authority Ingestion (`authority.db`) or Target Corpus Staging (`reconcile_corpus.db`).
 
 ### Milestone 3: External Reconciliation Funnels
-- Implement `WorkMatcher` in `src/reconciliator/matcher.py` with specialized domain funnels (A through PP):
+- Implement `WorkMatcher` in `src/reconciliator/reconciliation/` with specialized domain funnels (A through PP):
   - **Funnel A (Monographs)**: ISBN/URN exact → Work vector fallback → Expression alignment.
   - **Funnel B (Recorded Sound)**: Publisher number/ISRC/EAN exact → Album title + performer alignment → Jaccard tracklist.
   - **Funnel C (Articles / Serial Components)**: DOI/URN exact → Host Citation Key → Host-restricted semantic search.

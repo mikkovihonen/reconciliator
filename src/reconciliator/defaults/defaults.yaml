@@ -1066,6 +1066,14 @@ reconcile:
     enabled: false
     threshold: 0.70
     min_word_len: 3
+  max_editions_compared: 25
+  translator_alignment_threshold: 0.70
+  agent_aligner_threshold: 85.0
+  life_date_tolerance_years: 1
+  homonym_score_margin: 0.03
+  qualifier_similarity_threshold: 80.0
+  distribution_match_threshold: 80.0
+  surname_similarity_threshold: 85.0
 
 consolidation:
   enabled: true

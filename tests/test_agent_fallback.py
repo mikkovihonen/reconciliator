@@ -11,7 +11,7 @@ import pytest
 
 from reconciliator.config import ReconcileConfig, VectorEngineConfig
 from reconciliator.indexer import create_vector_engine
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     Agent,
     AgentEntity,

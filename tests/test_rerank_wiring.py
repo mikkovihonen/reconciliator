@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from reconciliator.config import ReconcileConfig, RerankConfig
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,

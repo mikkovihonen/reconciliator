@@ -56,7 +56,7 @@ from reconciliator.loaders.marcxml import (
     iter_marc_record_elements,
     parse_marc_record_elem,
 )
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,

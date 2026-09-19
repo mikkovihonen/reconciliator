@@ -20,7 +20,7 @@ from rdflib import Graph, URIRef
 from reconciliator.cli import reconcile_cmd, reset_cmd
 from reconciliator.clustering import CorpusClusterer
 from reconciliator.config import AppConfig
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     ExpressionEntity,
     IdentifierEntity,

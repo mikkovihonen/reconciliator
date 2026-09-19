@@ -3,7 +3,7 @@ from pathlib import Path
 from lxml import etree
 
 from reconciliator.loaders.marcxml import _get_subfields
-from reconciliator.matcher import ReconciliationResult
+from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.xml_enricher import MARCXMLEnricher
 
@@ -355,7 +355,7 @@ def test_ephemera_enrichment_configurable_terms() -> None:
     </record>
     """
     elem = etree.fromstring(xml_str.strip())
-    from reconciliator.matcher import WEMIMatchResult
+    from reconciliator.reconciliation import WEMIMatchResult
 
     wemi_res = WEMIMatchResult(
         target_record_id="ephem1",

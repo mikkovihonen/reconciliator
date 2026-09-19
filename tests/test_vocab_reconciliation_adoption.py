@@ -17,12 +17,11 @@ from unittest.mock import MagicMock, patch
 
 from lxml import etree
 
-from reconciliator.agent_transfer import AgentAligner
+from reconciliator.reconciliation import AgentAligner, ReconciliationResult
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_bridge_files
 from reconciliator.ingestion.wikidata import extract_wikidata_yso_aliases
 from reconciliator.loaders.marcxml import parse_marc_record_elem
-from reconciliator.matcher import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord, VocabConcept
 from reconciliator.normalizers.agent import (
     strip_agent_dates,

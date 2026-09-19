@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from reconciliator.indexer import TorchVectorEngine
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     AgentEntity,
     ExpressionEntity,

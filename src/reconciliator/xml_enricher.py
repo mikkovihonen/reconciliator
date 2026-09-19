@@ -22,7 +22,7 @@ from reconciliator.loaders.marcxml import (
     _get_datafields,
     _get_subfields,
 )
-from reconciliator.matcher import ReconciliationResult, WEMIMatchResult
+from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,

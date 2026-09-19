@@ -18,7 +18,7 @@ from reconciliator.loaders.bibra import (
     iter_bibra_records,
 )
 from reconciliator.loaders.marcxml import _get_subfields
-from reconciliator.matcher import ReconciliationResult
+from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.normalizers.record import RecordNormalizer
 

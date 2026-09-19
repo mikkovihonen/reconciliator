@@ -10,7 +10,7 @@ from rdflib import RDF, RDFS, Graph, IdentifiedNode, URIRef
 from reconciliator.config import EnrichmentTogglesConfig
 from reconciliator.curie import extract_wikidata_qid, format_wikidata_uri
 from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
-from reconciliator.matcher import ReconciliationResult, WEMIMatchResult
+from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (
     BibliographicRecord,
     CorpusLinkage,

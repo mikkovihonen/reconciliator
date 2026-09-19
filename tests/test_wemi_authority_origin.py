@@ -6,7 +6,7 @@ from reconciliator.loaders.marcxml import (
     decompose_marc_authority,
     is_marc_authority_record,
 )
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     AgentEntity,
     ExpressionEntity,

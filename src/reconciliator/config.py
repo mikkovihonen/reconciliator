@@ -1786,6 +1786,38 @@ class ReconcileConfig(BaseModel):
     chronology_min_author_age: int = 12
     chronology_max_posthumous_years: int = 70
     strict_homonym_guard: bool = True
+    max_editions_compared: int = Field(
+        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("max_editions_compared", 25))
+    )
+    translator_alignment_threshold: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("translator_alignment_threshold", 0.70)
+        )
+    )
+    agent_aligner_threshold: float = Field(
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("agent_aligner_threshold", 85.0))
+    )
+    life_date_tolerance_years: int = Field(
+        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("life_date_tolerance_years", 1))
+    )
+    homonym_score_margin: float = Field(
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("homonym_score_margin", 0.03))
+    )
+    qualifier_similarity_threshold: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("qualifier_similarity_threshold", 80.0)
+        )
+    )
+    distribution_match_threshold: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("distribution_match_threshold", 80.0)
+        )
+    )
+    surname_similarity_threshold: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("surname_similarity_threshold", 85.0)
+        )
+    )
 
     vocabularies: list[str] = Field(default_factory=list)
     agent_priority: list[str] = Field(default_factory=list)

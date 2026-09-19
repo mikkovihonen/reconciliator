@@ -10,7 +10,7 @@ from lxml import etree
 from pydantic import BaseModel, ConfigDict, Field
 
 from reconciliator.curie import parse_curie
-from reconciliator.matcher import ReconciliationResult
+from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.models import BibliographicRecord
 
 

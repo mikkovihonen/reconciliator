@@ -18,7 +18,7 @@ from rapidfuzz import fuzz
 
 from reconciliator.config import ClusterConfig
 from reconciliator.database import WEMIRepository
-from reconciliator.matcher import WorkMatcher
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     ClusterEdge,
     CorpusLinkage,
