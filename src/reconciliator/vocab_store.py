@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.config import VocabNormalizationConfig
 from reconciliator.curie import extract_wikidata_qid, parse_curie, to_curie
-from reconciliator.db import (
+from reconciliator.database import (
     concept_aliases_table,
     concept_labels_table,
     concept_mapping_labels_table,
@@ -29,7 +29,7 @@ from reconciliator.db import (
     get_engine,
     relator_terms_table,
 )
-from reconciliator.db import (
+from reconciliator.database import (
     metadata as vocab_metadata,
 )
 from reconciliator.models import ConceptMapping, VocabConcept
@@ -61,7 +61,7 @@ def is_language_allowed(lang: str, allowed: Optional[Sequence[str] | str]) -> bo
 
 def init_vocab_db(engine: Any) -> None:
     """Initialize concepts, concept_labels, concept_mappings, concept_mapping_labels, relator_terms, and concept_aliases tables."""
-    from reconciliator.db import create_schema_tables
+    from reconciliator.database import create_schema_tables
 
     create_schema_tables(engine, vocab_metadata.sorted_tables)
 

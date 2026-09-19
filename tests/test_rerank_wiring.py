@@ -27,7 +27,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 @pytest.fixture

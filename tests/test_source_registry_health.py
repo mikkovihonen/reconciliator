@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from reconciliator.models import WorkEntity
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 @pytest.fixture

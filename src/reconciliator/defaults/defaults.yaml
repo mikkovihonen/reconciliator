@@ -893,7 +893,14 @@ storage:
     synchronous_commit: "off"
     container_name: "reconciliator-pg"
     container_image: "docker.io/library/postgres:16-alpine"
+    container_timeout_seconds: 30.0
     auto_start_container: true
+    locale: null
+    lc_collate: null
+    lc_ctype: null
+    initdb_args: null
+    max_parameters_per_batch: 32767
+    default_chunk_size: null
   vector_engine:
     backend: "auto"
     device: "auto"

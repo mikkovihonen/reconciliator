@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from reconciliator.db import expressions_table, manifestation_expressions_table
+from reconciliator.database import expressions_table, manifestation_expressions_table
 from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.models import (
     ExpressionEntity,
@@ -29,7 +29,7 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 SRC = "fono"
 TRACKS = 20

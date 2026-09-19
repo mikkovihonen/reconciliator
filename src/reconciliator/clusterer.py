@@ -26,7 +26,7 @@ from reconciliator.models import (
     SammelbandBinding,
     WorkCluster,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.utils import (
     UnionFind,
     clean_alphanumeric,

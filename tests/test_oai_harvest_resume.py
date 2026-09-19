@@ -11,9 +11,9 @@ import pytest
 from sqlalchemy import select
 
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
-from reconciliator.db import works_table
+from reconciliator.database import works_table
 from reconciliator.ingestion.oai import _resolve_harvest_window, ingest_oai_pipeline
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from tests.test_oai_pmh import make_marc_record
 
 

@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from sqlalchemy import or_, select
 
-from reconciliator.db import concept_mappings_table
+from reconciliator.database import concept_mappings_table
 
 _BRIDGES_DIR = Path(__file__).resolve().parent
 

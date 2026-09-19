@@ -16,7 +16,8 @@ from sqlalchemy import select
 
 from reconciliator.config import AgentClusterConfig, AppConfig
 from reconciliator.curie import to_curie
-from reconciliator.db import (
+from reconciliator.database import (
+    WEMIRepository,
     agent_attributes_table,
     agent_relationships_table,
     agents_table,
@@ -31,7 +32,6 @@ from reconciliator.models import (
     AgentClusterResult,
 )
 from reconciliator.normalizers.linguistic import fold_diacritics
-from reconciliator.repository import WEMIRepository
 
 logger = logging.getLogger(__name__)
 

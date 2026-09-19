@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from reconciliator.config import StorageConfig
-from reconciliator.db import get_engine, init_authority_db, init_corpus_db
+from reconciliator.database import get_engine, init_authority_db, init_corpus_db
 from reconciliator.progress import init_progress_db
 from reconciliator.vocab_store import init_vocab_db
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(scope="session", autouse=True)
 def ensure_postgres_container():
     """Ensure PostgreSQL container or instance is running."""
-    from reconciliator.db_container import start_postgres_container, wait_for_postgres
+    from reconciliator.database import start_postgres_container, wait_for_postgres
 
     if not wait_for_postgres(timeout_seconds=0.5):
         try:

@@ -7,7 +7,7 @@ import orjson
 
 from reconciliator.config import VectorEngineConfig
 from reconciliator.ingestion.wikidata import stream_wikidata_dump
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def _make_store(tmp_path: Path) -> WEMIRepository:

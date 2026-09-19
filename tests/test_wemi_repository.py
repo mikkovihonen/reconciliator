@@ -22,7 +22,7 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from tests.conftest import persist_match_records
 
 
@@ -718,7 +718,7 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
     and idempotently without count pollution, and identifiers are stored in identifiers_table.
     """
     from reconciliator.models import IdentifierEntity
-    from reconciliator.repository import WEMIRepository
+    from reconciliator.database import WEMIRepository
 
     repo = WEMIRepository(
         db_path=tmp_storage.database_url,

@@ -20,7 +20,7 @@ from reconciliator.config import OAIIngestConfig
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.loaders.marcxml import decompose_marc_wemi
 from reconciliator.models import HarvestState
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from tests.test_oai_harvest_resume import FakeEndpoint, make_repo, oai_config, stored_ids
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"

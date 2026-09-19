@@ -18,7 +18,7 @@ from lxml import etree
 from sqlalchemy import delete, func, nulls_first, select
 
 from reconciliator.constituents import resolve_for_source
-from reconciliator.db import (
+from reconciliator.database import (
     expressions_table,
     manifestation_expressions_table,
     manifestations_table,
@@ -33,7 +33,7 @@ from reconciliator.loaders.registry import (
     MarcBibliographicLoader,
     load_record,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.template import WEMISerializationEngine
 
 SRC = "fono"

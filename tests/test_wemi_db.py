@@ -1,7 +1,7 @@
 """Unit tests for WEMI database schema DDL, full-text indexes, and foreign keys in PostgreSQL."""
 
 from reconciliator.config import StorageConfig
-from reconciliator.db import (
+from reconciliator.database import (
     get_db_connection,
     reset_all_storage,
 )

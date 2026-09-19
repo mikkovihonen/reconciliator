@@ -7,7 +7,7 @@ import pytest
 
 from reconciliator.config import VectorEngineConfig
 from reconciliator.indexer import FAISSIndexEngine, TorchVectorEngine
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def test_faiss_index_engine_explicit_ids(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from reconciliator.db import get_engine, task_progress_table
+from reconciliator.database import get_engine, task_progress_table
 from reconciliator.models import TaskProgress, TaskStatus, TaskType
 from reconciliator.utils.durations import parse_duration_seconds as parse_duration_seconds
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def init_progress_db(engine: Any) -> None:
     """Initialize task_progress table in progress.db."""
-    from reconciliator.db import create_schema_tables, task_progress_table
+    from reconciliator.database import create_schema_tables, task_progress_table
 
     create_schema_tables(engine, [task_progress_table])
 

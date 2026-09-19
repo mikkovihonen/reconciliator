@@ -27,7 +27,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.curie import parse_curie, to_curie
-from reconciliator.db import (
+from reconciliator.database.engine import get_engine, init_authority_db
+from reconciliator.database.ops import insert_batch, upsert_batch
+from reconciliator.database.schema import (
     agent_attributes_table,
     agent_relationships_table,
     agents_table,
@@ -42,10 +44,8 @@ from reconciliator.db import (
     entity_keys_table,
     entity_subjects_table,
     expressions_table,
-    get_engine,
     harvest_state_table,
     identifiers_table,
-    init_authority_db,
     items_table,
     manifestation_expressions_table,
     manifestation_vectors_table,
@@ -833,35 +833,17 @@ class WEMIRepository:
         """Insert simple entity records in batch and return their assigned IDs."""
         if not entities:
             return []
-        col_names = {c.name for c in table.c} - {"id", "created_at"}
-        rows: list[dict[str, Any]] = []
-        for e in entities:
-            d = e.model_dump(mode="python") if hasattr(e, "model_dump") else dict(e)
-            row = {}
-            for k, v in d.items():
-                if k in col_names:
-                    row[k] = bool(v) if isinstance(v, bool) else v
-            rows.append(row)
-
-        ids: list[int] = []
-        batch_size = chunk_size or max(1, 10000 // max(1, len(col_names)))
-
-        def _exec(c: Any) -> None:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(table).values(chunk)
-                if conflict_index_elements:
-                    stmt = stmt.on_conflict_do_nothing(index_elements=conflict_index_elements)
-                stmt = stmt.returning(table.c.id)
-                res = c.execute(stmt).fetchall()
-                ids.extend(r[0] for r in res)
-
-        if conn is not None:
-            _exec(conn)
-        else:
-            with self.get_connection() as c:
-                _exec(c)
-        return ids
+        target = conn if conn is not None else self.get_connection()
+        res = insert_batch(
+            bind=target,
+            table=table,
+            rows=entities,
+            on_conflict_do_nothing=bool(conflict_index_elements),
+            conflict_index_elements=conflict_index_elements,
+            return_ids=True,
+            batch_size=chunk_size,
+        )
+        return res or []
 
     def insert_items_batch(
         self,
@@ -897,7 +879,7 @@ class WEMIRepository:
         self,
         keys: list[EntityKey],
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> None:
         """Insert derived domain blocking keys in batch.
 
@@ -915,25 +897,15 @@ class WEMIRepository:
             }
             for k in keys
         }
-        rows = list(deduped.values())
-
-        def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
-                stmt = (
-                    pg_insert(entity_keys_table)
-                    .values(chunk)
-                    .on_conflict_do_nothing(
-                        index_elements=["entity_type", "entity_id", "key_type", "key_value"]
-                    )
-                )
-                c.execute(stmt)
-
-        if conn is not None:
-            _exec(conn)
-        else:
-            with self.get_connection() as c:
-                _exec(c)
+        target = conn if conn is not None else self.get_connection()
+        insert_batch(
+            bind=target,
+            table=entity_keys_table,
+            rows=list(deduped.values()),
+            on_conflict_do_nothing=True,
+            conflict_index_elements=["entity_type", "entity_id", "key_type", "key_value"],
+            batch_size=chunk_size,
+        )
 
     def get_entity_keys(self, entity_type: str, entity_id: int) -> dict[str, list[str]]:
         """Return the key bag for one entity, shaped as the funnels consume it."""
@@ -3246,24 +3218,12 @@ class WEMIRepository:
             for c in clusters
         }
         rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_manifestation_clusters_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[corpus_manifestation_clusters_table.c.cluster_id],
-                    set_={
-                        "canonical_record_id": stmt.excluded.canonical_record_id,
-                        "publisher": stmt.excluded.publisher,
-                        "publication_year": stmt.excluded.publication_year,
-                        "edition_statement": stmt.excluded.edition_statement,
-                        "extent": stmt.excluded.extent,
-                        "carrier_type": stmt.excluded.carrier_type,
-                        "member_record_count": stmt.excluded.member_record_count,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_manifestation_clusters_table,
+            rows=rows,
+            conflict_index_elements=["cluster_id"],
+        )
 
     def insert_work_clusters_batch(self, clusters: list[WorkCluster]) -> None:
         """Batch insert or replace work family clusters."""
@@ -3280,23 +3240,12 @@ class WEMIRepository:
             }
             for c in clusters
         }
-        rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_work_clusters_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[corpus_work_clusters_table.c.cluster_id],
-                    set_={
-                        "work_type": stmt.excluded.work_type,
-                        "canonical_work_source": stmt.excluded.canonical_work_source,
-                        "canonical_work_source_id": stmt.excluded.canonical_work_source_id,
-                        "canonical_title": stmt.excluded.canonical_title,
-                        "canonical_author": stmt.excluded.canonical_author,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_work_clusters_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["cluster_id"],
+        )
 
     def insert_expression_clusters_batch(self, clusters: list[ExpressionCluster]) -> None:
         """Batch insert or replace expression realization clusters."""
@@ -3314,24 +3263,12 @@ class WEMIRepository:
             }
             for c in clusters
         }
-        rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_expression_clusters_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[corpus_expression_clusters_table.c.cluster_id],
-                    set_={
-                        "work_cluster_id": stmt.excluded.work_cluster_id,
-                        "canonical_expression_source": stmt.excluded.canonical_expression_source,
-                        "canonical_expression_source_id": stmt.excluded.canonical_expression_source_id,
-                        "content_type": stmt.excluded.content_type,
-                        "language": stmt.excluded.language,
-                        "version_designation": stmt.excluded.version_designation,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_expression_clusters_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["cluster_id"],
+        )
 
     def insert_corpus_linkages_batch(self, linkages: list[CorpusLinkage]) -> None:
         """Batch insert or replace final record-to-cluster linkages."""
@@ -3350,25 +3287,12 @@ class WEMIRepository:
             }
             for lnk in linkages
         }
-        rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_linkages_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[corpus_linkages_table.c.record_id],
-                    set_={
-                        "manifestation_cluster_id": stmt.excluded.manifestation_cluster_id,
-                        "work_cluster_id": stmt.excluded.work_cluster_id,
-                        "expression_cluster_id": stmt.excluded.expression_cluster_id,
-                        "final_work_source": stmt.excluded.final_work_source,
-                        "final_work_source_id": stmt.excluded.final_work_source_id,
-                        "final_expression_source": stmt.excluded.final_expression_source,
-                        "final_expression_source_id": stmt.excluded.final_expression_source_id,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_linkages_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["record_id"],
+        )
 
     def insert_sammelband_bindings_batch(self, bindings: list[SammelbandBinding]) -> None:
         """Batch insert or replace sammelband item-level composite bindings."""
@@ -3383,23 +3307,12 @@ class WEMIRepository:
             }
             for b in bindings
         }
-        rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(sammelband_bindings_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[
-                        sammelband_bindings_table.c.binding_id,
-                        sammelband_bindings_table.c.record_id,
-                    ],
-                    set_={
-                        "sequence_in_binding": stmt.excluded.sequence_in_binding,
-                        "binding_notes": stmt.excluded.binding_notes,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=sammelband_bindings_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["binding_id", "record_id"],
+        )
 
     def insert_agent_clusters_batch(self, clusters: list[AgentCluster]) -> None:
         """Batch insert or replace agent identity clusters."""
@@ -3423,30 +3336,12 @@ class WEMIRepository:
             }
             for c in clusters
         }
-        rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_agent_clusters_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[corpus_agent_clusters_table.c.cluster_id],
-                    set_={
-                        "canonical_agent_id": stmt.excluded.canonical_agent_id,
-                        "canonical_agent_source": stmt.excluded.canonical_agent_source,
-                        "canonical_agent_source_id": stmt.excluded.canonical_agent_source_id,
-                        "canonical_name": stmt.excluded.canonical_name,
-                        "canonical_surname": stmt.excluded.canonical_surname,
-                        "canonical_uri": stmt.excluded.canonical_uri,
-                        "birth_year": stmt.excluded.birth_year,
-                        "death_year": stmt.excluded.death_year,
-                        "member_count": stmt.excluded.member_count,
-                        "work_count": stmt.excluded.work_count,
-                        "manifestation_count": stmt.excluded.manifestation_count,
-                        "confidence_score": stmt.excluded.confidence_score,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_agent_clusters_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["cluster_id"],
+        )
 
     def insert_agent_cluster_members_batch(self, members: list[AgentClusterMember]) -> None:
         """Batch insert or replace agent cluster members."""
@@ -3463,23 +3358,12 @@ class WEMIRepository:
             }
             for m in members
         }
-        rows = list(deduped.values())
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_agent_cluster_members_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[corpus_agent_cluster_members_table.c.agent_id],
-                    set_={
-                        "cluster_id": stmt.excluded.cluster_id,
-                        "source": stmt.excluded.source,
-                        "source_id": stmt.excluded.source_id,
-                        "link_method": stmt.excluded.link_method,
-                        "confidence": stmt.excluded.confidence,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_agent_cluster_members_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["agent_id"],
+        )
 
     def insert_agent_cluster_attributes_batch(
         self, attributes: list[AgentClusterAttribute]
@@ -3498,20 +3382,12 @@ class WEMIRepository:
             }
             for a in attributes
         ]
-        batch_size = 5000
-        with self.get_corpus_connection() as conn:
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
-                stmt = pg_insert(corpus_agent_cluster_attributes_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["cluster_id", "attribute_type", "value"],
-                    set_={
-                        "concept_id": stmt.excluded.concept_id,
-                        "frequency": stmt.excluded.frequency,
-                        "is_canonical": stmt.excluded.is_canonical,
-                    },
-                )
-                conn.execute(stmt)
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_agent_cluster_attributes_table,
+            rows=rows,
+            conflict_index_elements=["cluster_id", "attribute_type", "value"],
+        )
 
     def get_agent_cluster(self, cluster_id: str) -> Optional[AgentCluster]:
         """Fetch agent cluster by cluster_id with members and aggregated attributes."""

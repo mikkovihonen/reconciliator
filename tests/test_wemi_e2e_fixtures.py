@@ -35,7 +35,7 @@ from reconciliator.reports import (
     ReportGenerator,
     WorkReportRow,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.xml_enricher import MARCXMLEnricher
 from tests.conftest import persist_match_records
 

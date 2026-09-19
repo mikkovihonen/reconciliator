@@ -24,7 +24,7 @@ from reconciliator.models import (
     WorkEntity,
 )
 from reconciliator.normalizers.blocking import compute_title_stem
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 class MockDeterministicEmbedder:

@@ -15,7 +15,7 @@ from reconciliator.agent_transfer import (
     verify_subjects,
 )
 from reconciliator.models import Agent
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def test_verify_life_dates() -> None:

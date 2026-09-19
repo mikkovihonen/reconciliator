@@ -24,10 +24,10 @@ from reconciliator.config import (
     load_config,
 )
 from reconciliator.curie import extract_wikidata_qid
-from reconciliator.db import reset_all_storage
-from reconciliator.db_container import (
+from reconciliator.database import (
     is_container_present,
     is_container_running,
+    reset_all_storage,
     start_postgres_container,
     stop_postgres_container,
 )
@@ -88,7 +88,7 @@ from reconciliator.reports import (
     SubjectReportRow,
     WorkReportRow,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.utils import parse_duration_seconds
 from reconciliator.vocab_folding import VocabFolder
 from reconciliator.vocab_store import VocabStore

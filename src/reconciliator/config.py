@@ -181,6 +181,7 @@ _LOGGING_DEFAULTS = get_bundled_section_defaults("logging")
 _CONSTITUENTS_DEFAULTS = get_bundled_section_defaults("constituents")
 _FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
 _AGENT_CLUSTERING_DEFAULTS = get_bundled_section_defaults("agent_clustering")
+_PG_DEFAULTS = dict(_STORAGE_DEFAULTS.get("postgres") or {})
 
 
 def get_bundled_agent_clustering_defaults() -> dict[str, Any]:
@@ -191,6 +192,27 @@ def get_bundled_agent_clustering_defaults() -> dict[str, Any]:
 def get_bundled_funnels_defaults() -> dict[str, Any]:
     """Get bundled default funnels settings dictionary."""
     return dict(_FUNNELS_DEFAULTS)
+
+
+def get_bundled_postgres_defaults() -> dict[str, Any]:
+    """Get bundled default PostgreSQL storage settings dictionary."""
+    return dict(_PG_DEFAULTS)
+
+
+def get_default_database_url() -> str:
+    """Get default PostgreSQL database URL constructed from bundled configuration defaults."""
+    env_url = os.environ.get("RECONCILIATOR_DATABASE_URL")
+    if env_url:
+        return env_url
+    cfg_url = _PG_DEFAULTS.get("database_url")
+    if cfg_url:
+        return cfg_url
+    user = _PG_DEFAULTS.get("user", "postgres")
+    password = _PG_DEFAULTS.get("password", "postgres")
+    host = _PG_DEFAULTS.get("host", "localhost")
+    port = _PG_DEFAULTS.get("port", 5432)
+    database = _PG_DEFAULTS.get("database", "reconciliator")
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
 
 DEFAULT_LANGUAGE: str = str(_LING_DEFAULTS.get("default_language") or "")
@@ -335,36 +357,48 @@ class RepositoryFTSConfig(BaseModel):
 class PostgresConfig(BaseModel):
     """PostgreSQL connection, engine tuning, and container configuration."""
 
-    host: str = "localhost"
-    port: int = 5432
-    database: str = "reconciliator"
-    user: str = "postgres"
-    password: str = "postgres"
-    database_url: Optional[str] = None
+    host: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("host", "localhost")))
+    port: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("port", 5432)))
+    database: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("database", "reconciliator")))
+    user: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("user", "postgres")))
+    password: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("password", "postgres")))
+    database_url: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("database_url"))
 
     # Connection pooling & timeouts
-    pool_size: int = 10
-    max_overflow: int = 20
-    pool_timeout: float = 30.0
-    pool_recycle: int = 1800
-    pool_pre_ping: bool = True
+    pool_size: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("pool_size", 10)))
+    max_overflow: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("max_overflow", 20)))
+    pool_timeout: float = Field(default_factory=lambda: float(_PG_DEFAULTS.get("pool_timeout", 30.0)))
+    pool_recycle: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("pool_recycle", 1800)))
+    pool_pre_ping: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS.get("pool_pre_ping", True)))
 
     # Performance tuning parameters
-    shared_buffers: str = "1GB"
-    work_mem: str = "64MB"
-    maintenance_work_mem: str = "256MB"
-    effective_cache_size: str = "3GB"
-    random_page_cost: float = 1.1
-    synchronous_commit: str = "off"
+    shared_buffers: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("shared_buffers", "1GB")))
+    work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("work_mem", "64MB")))
+    maintenance_work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("maintenance_work_mem", "256MB")))
+    effective_cache_size: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("effective_cache_size", "3GB")))
+    random_page_cost: float = Field(default_factory=lambda: float(_PG_DEFAULTS.get("random_page_cost", 1.1)))
+    synchronous_commit: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("synchronous_commit", "off")))
 
     # Container settings
-    container_name: str = "reconciliator-pg"
-    container_image: str = "docker.io/library/postgres:16-alpine"
-    auto_start_container: bool = True
+    container_name: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("container_name", "reconciliator-pg")))
+    container_image: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("container_image", "docker.io/library/postgres:16-alpine")))
+    container_timeout_seconds: float = Field(default_factory=lambda: float(_PG_DEFAULTS.get("container_timeout_seconds", 30.0)))
+    auto_start_container: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS.get("auto_start_container", True)))
+    locale: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("locale"))
+    lc_collate: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("lc_collate"))
+    lc_ctype: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("lc_ctype"))
+    initdb_args: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("initdb_args"))
+
+    # Batch execution limits
+    max_parameters_per_batch: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("max_parameters_per_batch", 32767)))
+    default_chunk_size: Optional[int] = Field(default_factory=lambda: _PG_DEFAULTS.get("default_chunk_size"))
 
     def get_database_url(self) -> str:
         if self.database_url:
             return self.database_url
+        env_url = os.environ.get("RECONCILIATOR_DATABASE_URL")
+        if env_url:
+            return env_url
         return f"postgresql+psycopg://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
 

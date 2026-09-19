@@ -21,7 +21,7 @@ from reconciliator.loaders.bibframe import (
     get_profile,
 )
 from reconciliator.models import EntitySubject, MatchRecord
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

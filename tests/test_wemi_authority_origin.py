@@ -16,7 +16,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def test_record_origin_names_the_ingest_source():

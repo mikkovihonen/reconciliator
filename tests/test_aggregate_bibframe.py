@@ -19,7 +19,7 @@ from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.loaders.base import LoadContext
 from reconciliator.loaders.bibframe.profiles import get_profile
 from reconciliator.loaders.registry import load_record
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 SRC = "bffi"
 

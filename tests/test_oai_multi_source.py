@@ -11,10 +11,10 @@ from typer.testing import CliRunner
 
 from reconciliator.cli import app
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
-from reconciliator.db import agents_table, manifestations_table, works_table
+from reconciliator.database import agents_table, manifestations_table, works_table
 from reconciliator.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.vocab_store import VocabStore
 
 SAMPLE_OAI_SOURCE_A = b"""<?xml version="1.0" encoding="UTF-8"?>

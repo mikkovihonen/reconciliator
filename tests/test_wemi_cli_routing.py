@@ -6,7 +6,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from reconciliator.cli import app
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def test_cli_ingest_wikidata_wemi_routing(tmp_path: Path) -> None:

@@ -23,7 +23,8 @@ from sqlalchemy import and_, func, select
 
 from reconciliator.config import WorkConsolidationConfig
 from reconciliator.curie import to_curie
-from reconciliator.db import (
+from reconciliator.database import (
+    WEMIRepository,
     agents_table,
     contributions_table,
     identifiers_table,
@@ -32,7 +33,6 @@ from reconciliator.db import (
     works_table,
 )
 from reconciliator.models import WorkRelationship
-from reconciliator.repository import WEMIRepository
 from reconciliator.utils import UnionFind, clean_alphanumeric
 
 logger = logging.getLogger(__name__)

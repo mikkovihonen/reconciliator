@@ -20,7 +20,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.utils import UnionFind, extract_identifiers_from_target
 from tests.conftest import persist_match_records
 

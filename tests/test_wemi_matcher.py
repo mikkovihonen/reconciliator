@@ -19,7 +19,7 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.utils import compute_jaccard_overlap, extract_identifiers_from_target
 
 

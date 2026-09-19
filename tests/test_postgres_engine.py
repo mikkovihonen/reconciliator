@@ -5,14 +5,14 @@ from pathlib import Path
 from sqlalchemy import text
 
 from reconciliator.config import PostgresConfig
-from reconciliator.db import (
+from reconciliator.database import (
     concepts_table,
     entity_subjects_table,
     get_db_connection,
     get_engine,
     metadata,
 )
-from reconciliator.db_container import get_podman_path, is_container_running
+from reconciliator.database import get_podman_path, is_container_running
 
 
 def test_postgres_config_defaults():

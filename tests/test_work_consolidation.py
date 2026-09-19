@@ -24,7 +24,7 @@ from reconciliator.cli import (
 )
 from reconciliator.config import VectorEngineConfig, WorkConsolidationConfig, load_config
 from reconciliator.consolidation import WorkConsolidator
-from reconciliator.db import works_table
+from reconciliator.database import works_table
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
@@ -33,7 +33,7 @@ from reconciliator.models import (
     ManifestationEntity,
     WorkEntity,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC = "{http://www.loc.gov/MARC21/slim}"

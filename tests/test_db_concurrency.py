@@ -3,7 +3,7 @@
 import concurrent.futures
 from pathlib import Path
 
-from reconciliator.db import (
+from reconciliator.database import (
     get_db_connection,
     get_metadata,
     init_authority_db,

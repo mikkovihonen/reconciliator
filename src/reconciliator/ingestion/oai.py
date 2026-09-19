@@ -31,7 +31,7 @@ from reconciliator.loaders.marcxml import (
 from reconciliator.loaders.registry import load_record
 from reconciliator.models import HarvestState
 from reconciliator.progress import ProgressTracker
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 logger = logging.getLogger(__name__)
 

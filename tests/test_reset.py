@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 from reconciliator.cli import app
 from reconciliator.config import StorageConfig
-from reconciliator.db import get_db_connection, init_authority_db, reset_all_storage
+from reconciliator.database import get_db_connection, init_authority_db, reset_all_storage
 
 
 def test_reset_all_storage(tmp_path: Path) -> None:
@@ -116,7 +116,7 @@ def test_corpus_staging_shares_the_authority_database(tmp_path: Path) -> None:
     record_origin, with its blocking keys in `entity_keys`.
     """
     from reconciliator.config import StorageConfig
-    from reconciliator.repository import WEMIRepository
+    from reconciliator.database import WEMIRepository
 
     storage = StorageConfig(data_dir=tmp_path)
     repo = WEMIRepository(storage.database_url)

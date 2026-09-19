@@ -42,7 +42,7 @@ from reconciliator.models import (
     WorkRelationship,
 )
 from reconciliator.normalizers.blocking import compute_author_key
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 from reconciliator.rerank import CandidateEvaluator
 from reconciliator.utils import (
     extract_identifiers_from_target,

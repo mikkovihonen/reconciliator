@@ -11,7 +11,7 @@ from reconciliator.ingestion.wikidata import (
     decompose_wikidata_entity,
     ingest_wikidata_wemi_pipeline,
 )
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def test_wikidata_author_prescan(tmp_path: Path):

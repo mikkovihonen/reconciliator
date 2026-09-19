@@ -20,7 +20,7 @@ from reconciliator.loaders.marcxml import (
     extract_marc_analytics,
 )
 from reconciliator.models import EntityKey
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
 

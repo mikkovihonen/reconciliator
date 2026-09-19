@@ -355,7 +355,7 @@ class VectorDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
                 return
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-            from reconciliator.db import get_engine, task_progress_table
+            from reconciliator.database import get_engine, task_progress_table
 
             now_iso = datetime.now(timezone.utc).isoformat()
             status_data = self.get_telemetry_dict()

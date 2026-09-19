@@ -299,7 +299,7 @@ def test_prune_tasks_filtering(progress_db: Path) -> None:
 def test_prune_tasks_older_than_and_keep_last(progress_db: Path) -> None:
     from datetime import datetime, timedelta, timezone
 
-    from reconciliator.db import get_db_connection
+    from reconciliator.database import get_db_connection
 
     # Insert 4 completed tasks with manual timestamps
     now = datetime.now(timezone.utc)

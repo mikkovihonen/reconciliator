@@ -15,7 +15,7 @@ from reconciliator.config import (
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.matcher import WorkMatcher
 from reconciliator.models import AgentEntity, ExpressionEntity, MatchRecord, WorkEntity
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 
 def test_fts_config_defaults_and_validation():

@@ -11,7 +11,7 @@ import numpy as np
 from rdflib import Graph, URIRef
 
 from reconciliator.cli import ingest_oai_cmd, reconcile_cmd, reset_cmd
-from reconciliator.repository import WEMIRepository
+from reconciliator.database import WEMIRepository
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
