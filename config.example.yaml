@@ -905,6 +905,13 @@ ingest_oai:
     request_delay: 0.1           # Pause between pagination requests
     timeout: 60.0
 
+    # Overlong string value truncation
+    truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
+    truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
+    default_max_field_length: null # Global fallback cap for unconstrained String columns
+    field_length_overrides: {}     # Explicit overrides, e.g. {"entity_subjects.raw_label": 500}
+
+
 # ==============================================================================
 # 10. Wikidata Authority Ingestion
 # ==============================================================================

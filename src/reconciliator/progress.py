@@ -76,14 +76,40 @@ class ProgressTracker:
         self._status: TaskStatus = "running"
         self._metadata: dict[str, Any] = {}
         self._error_message: Optional[str] = None
+        self._error_count = 0
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._live: Optional[Live] = None
 
+    @property
+    def error_count(self) -> int:
+        """Current number of errors recorded for this task."""
+        with self._lock:
+            return self._error_count
+
     def close(self) -> None:
         """Dispose SQLAlchemy engine and release connection pool."""
         self.engine.dispose()
+
+    def record_error(
+        self,
+        message: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        force: bool = True,
+    ) -> None:
+        """Record an error event against this task and update error metrics."""
+        with self._lock:
+            self._error_count += 1
+            if message:
+                self._error_message = message
+            self._metadata["errors"] = self._error_count
+            self._metadata["error_count"] = self._error_count
+            if metadata:
+                self._metadata.update(metadata)
+            now_sec = time.time()
+            if force or (now_sec - self._last_heartbeat_sec >= self.heartbeat_interval):
+                self._commit_heartbeat(now_sec)
 
     def start(
         self,
@@ -119,6 +145,7 @@ class ProgressTracker:
                     start_time=now,
                     last_heartbeat=now,
                     error_message=None,
+                    error_count=self._error_count,
                     metadata_json=meta_json,
                 )
                 stmt = stmt.on_conflict_do_update(
@@ -129,6 +156,7 @@ class ProgressTracker:
                         "items_total": stmt.excluded.items_total,
                         "bytes_total": stmt.excluded.bytes_total,
                         "last_heartbeat": stmt.excluded.last_heartbeat,
+                        "error_count": stmt.excluded.error_count,
                         "metadata_json": stmt.excluded.metadata_json,
                     },
                 )
@@ -201,6 +229,7 @@ class ProgressTracker:
                     percentage=round(percentage, 1),
                     last_heartbeat=now_iso,
                     error_message=self._error_message,
+                    error_count=self._error_count,
                     metadata_json=meta_json,
                 )
             )
@@ -253,6 +282,7 @@ def get_task_progress(db_path: Path | str, task_id: str) -> Optional[TaskProgres
                 start_time=row["start_time"],
                 last_heartbeat=row["last_heartbeat"],
                 error_message=row["error_message"],
+                error_count=row.get("error_count", 0) or 0,
                 metadata_json=row["metadata_json"],
             )
     finally:
@@ -285,10 +315,12 @@ def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
                     start_time=r["start_time"],
                     last_heartbeat=r["last_heartbeat"],
                     error_message=r["error_message"],
+                    error_count=r.get("error_count", 0) or 0,
                     metadata_json=r["metadata_json"],
                 )
                 for r in rows
             ]
+
     finally:
         engine.dispose()
 
@@ -356,6 +388,7 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
     table.add_column("Progress", justify="right")
     table.add_column("Processed / Total", justify="right")
     table.add_column("Rate", justify="right")
+    table.add_column("Errors", justify="right")
     table.add_column("Last Heartbeat", style="dim")
 
     pipeline_tasks = [t for t in tasks if t.task_type != "system"]
@@ -388,6 +421,7 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
             pct_val = min(100.0, (meta.get("slices_done", 0) / meta["slices_total"]) * 100.0)
         pct_str = f"{pct_val:.1f}%"
         rate_str = f"{t.rate_per_sec:.1f}/s"
+        err_str = f"[red]{t.error_count:,}[/red]" if t.error_count > 0 else "0"
 
         table.add_row(
             t.task_id,
@@ -397,6 +431,7 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
             pct_str,
             count_str,
             rate_str,
+            err_str,
             t.last_heartbeat[:19].replace("T", " "),
         )
     return table
@@ -563,6 +598,7 @@ def render_telemetry_tui(
         table.add_column("Progress", justify="right")
         table.add_column("Items / Bytes", justify="right")
         table.add_column("Throughput", justify="right")
+        table.add_column("Errors", justify="right")
         table.add_column("Last Heartbeat", style="dim", justify="right")
 
         for t in pipeline_tasks:
@@ -609,6 +645,7 @@ def render_telemetry_tui(
 
             rate_str = f"{t.rate_per_sec:,.1f} items/s" if t.rate_per_sec > 0 else "-"
             hb_str = t.last_heartbeat[:19].replace("T", " ") if t.last_heartbeat else "-"
+            err_str = f"[bold red]{t.error_count:,}[/]" if t.error_count > 0 else "[dim]0[/]"
 
             table.add_row(
                 t.task_id,
@@ -618,6 +655,7 @@ def render_telemetry_tui(
                 pct_str,
                 counts_str,
                 rate_str,
+                err_str,
                 hb_str,
             )
         task_view: RenderableType = table
@@ -634,7 +672,9 @@ def render_telemetry_tui(
         )
 
     total_skipped = 0
+    total_errors = 0
     for t in pipeline_tasks:
+        total_errors += t.error_count
         if t.metadata_json:
             try:
                 m = json.loads(t.metadata_json)
@@ -653,9 +693,12 @@ def render_telemetry_tui(
         f"Failed: {failed_count}  ", style="bold red" if failed_count > 0 else "dim"
     )
     summary_text.append(f"| Total Tasks: {len(pipeline_tasks)}  ", style="dim")
+    if total_errors > 0:
+        summary_text.append(f"| Errors: {total_errors:,}  ", style="bold red")
     if total_skipped > 0:
         summary_text.append(f"| Skipped: {total_skipped:,}  ", style="bold cyan")
     summary_text.append(f"| Aggregate Throughput: {total_rate:,.1f} items/s", style="bold cyan")
+
 
     summary = Panel(summary_text, title="Telemetry Summary", style="dim")
 

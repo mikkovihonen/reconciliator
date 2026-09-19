@@ -523,6 +523,7 @@ task_progress_table = Table(
     Column("start_time", String(64), nullable=False),
     Column("last_heartbeat", String(64), nullable=False),
     Column("error_message", Text, nullable=True),
+    Column("error_count", Integer, default=0, server_default="0"),
     Column("metadata_json", Text, nullable=True),
     Index("idx_progress_type", "task_type"),
     Index("idx_progress_status", "status"),
@@ -684,8 +685,19 @@ PG_SEARCH_DDL_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_manifestations_fts ON manifestations USING gin (to_tsvector('simple', coalesce(serialized_text, '')));",
 ]
 
+
+def get_table_string_limits(table: Table) -> dict[str, int]:
+    """Introspect explicit character limits for String columns directly from table schema definition."""
+    return {
+        col.name: col.type.length
+        for col in table.columns
+        if isinstance(col.type, String) and col.type.length is not None
+    }
+
+
 __all__ = [
     "metadata",
+    "get_table_string_limits",
     "db_metadata_table",
     "sources_table",
     "agents_table",
@@ -722,4 +734,5 @@ __all__ = [
     "corpus_agent_cluster_attributes_table",
     "PG_SEARCH_DDL_STATEMENTS",
 ]
+
 

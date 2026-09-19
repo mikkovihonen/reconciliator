@@ -25,3 +25,9 @@ melinda:
   from_date: null
   until_date: null
   slice_days: 30
+  # Overlong string value truncation
+  truncate_overlong_values: true # Truncate fields exceeding PostgreSQL schema limits and log error with task_id
+  truncation_marker: ""          # Optional suffix appended to truncated values (e.g. "..." or empty string)
+  default_max_field_length: null # Global fallback cap for unconstrained String columns (null = no fallback cap)
+  field_length_overrides: {}     # Explicit per-column ("table.column") or per-field ("column") overrides
+

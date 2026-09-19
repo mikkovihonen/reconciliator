@@ -51,6 +51,7 @@ from reconciliator.database.schema import (
     entity_keys_table,
     entity_subjects_table,
     expressions_table,
+    get_table_string_limits,
     harvest_state_table,
     identifiers_table,
     items_table,
@@ -71,6 +72,7 @@ from reconciliator.database.schema import (
 __all__ = [
     # Schema & Tables
     "metadata",
+    "get_table_string_limits",
     "db_metadata_table",
     "sources_table",
     "agents_table",

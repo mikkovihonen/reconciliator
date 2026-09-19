@@ -299,7 +299,9 @@ class TaskProgress(BaseModel):
     start_time: str = ""
     last_heartbeat: str = ""
     error_message: Optional[str] = None
+    error_count: int = 0
     metadata_json: Optional[str] = None
+
 
 
 # ---------------------------------------------------------------------------

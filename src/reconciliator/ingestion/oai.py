@@ -20,6 +20,7 @@ from rdflib import Graph
 from reconciliator.config import OAIIngestConfig
 from reconciliator.constituents import resolve_for_source
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
+from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.loaders.base import DecomposedRecord, LoadContext
 from reconciliator.loaders.bibframe import (
     get_profile,
@@ -258,8 +259,14 @@ def write_wemi_batch(
     repo: WEMIRepository,
     payload: dict[str, Any],
     chunk_size: int = 1000,
+    config: Optional[OAIIngestConfig] = None,
+    task_id: str = "",
+    tracker: Optional[ProgressTracker] = None,
 ) -> int:
     """Persist a batch detached by `_WEMIBatchAccumulator.take()` using multi-row bulk upserts."""
+    if config is not None and config.truncate_overlong_values:
+        sanitize_batch_payload(payload, config=config, task_id=task_id, tracker=tracker)
+
     record_count = int(payload.get("record_count") or 0)
     record_origin = str(payload.get("record_origin") or "unknown")
 
@@ -269,21 +276,40 @@ def write_wemi_batch(
     expressions = payload.get("expressions") or []
     if not (works or agents or manifestations or expressions):
         return 0
-    repo.insert_wemi_batch(
-        works=works,
-        expressions=payload.get("expressions") or [],
-        manifestations=payload.get("manifestations") or [],
-        items=payload.get("items") or [],
-        agents=agents,
-        relationships=payload.get("relationships") or [],
-        identifiers=payload.get("identifiers") or [],
-        manifestation_expressions=payload.get("associations") or [],
-        contributions=payload.get("contributions") or [],
-        entity_keys=payload.get("entity_keys") or [],
-        entity_subjects=payload.get("entity_subjects") or [],
-        record_origin=record_origin,
-        chunk_size=chunk_size,
-    )
+
+    try:
+        repo.insert_wemi_batch(
+            works=works,
+            expressions=payload.get("expressions") or [],
+            manifestations=payload.get("manifestations") or [],
+            items=payload.get("items") or [],
+            agents=agents,
+            relationships=payload.get("relationships") or [],
+            identifiers=payload.get("identifiers") or [],
+            manifestation_expressions=payload.get("associations") or [],
+            contributions=payload.get("contributions") or [],
+            entity_keys=payload.get("entity_keys") or [],
+            entity_subjects=payload.get("entity_subjects") or [],
+            record_origin=record_origin,
+            chunk_size=chunk_size,
+        )
+    except Exception as exc:
+        from sqlalchemy.exc import DataError
+
+        if isinstance(exc, DataError) and config is not None and config.truncate_overlong_values:
+            logger.error(
+                "Task %s: DataError during batch insert (%s). Skipping batch to allow harvesting to continue.",
+                task_id or "unknown",
+                exc,
+            )
+            if tracker is not None and hasattr(tracker, "record_error"):
+                tracker.record_error(
+                    message=f"DataError during batch write for task {task_id}: {exc}",
+                    metadata={"error_type": "DataError", "task_id": task_id},
+                )
+            return 0
+        raise
+
     return record_count or (len(works) or len(agents))
 
 
@@ -501,6 +527,7 @@ async def ingest_oai_pipeline(
             "indexed": total_ingested,
             "skipped": skipped_count,
             "source": source_name,
+            "errors": tracker.error_count if tracker else 0,
         }
         if partitioned:
             data["slices_done"] = len(finished_slices)
@@ -589,12 +616,16 @@ async def ingest_oai_pipeline(
                             metadata=_telemetry(),
                         )
                 elif "batch" in payload:
+                    task_id = tracker.task_id if tracker else f"oai-ingest-{source_name}"
                     written = await loop.run_in_executor(
                         None,
                         write_wemi_batch,
                         store,
                         payload["batch"],
                         effective_config.db_batch_chunk_size,
+                        effective_config,
+                        task_id,
+                        tracker,
                     )
                     total_ingested += written
                     snapshot = _telemetry()

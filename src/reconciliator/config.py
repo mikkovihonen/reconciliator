@@ -1172,6 +1172,12 @@ class OAIIngestConfig(BaseModel):
     # What ingest does with them: off | keys_only | entities. None inherits the
     # global default.
     constituents_mode: Optional[Literal["off", "keys_only", "entities"]] = None
+    # Overlong value truncation
+    truncate_overlong_values: bool = True
+    truncation_marker: str = ""
+    default_max_field_length: Optional[int] = None
+    field_length_overrides: dict[str, int] = Field(default_factory=dict)
+
 
     @model_validator(mode="after")
     def validate_workers_and_queues(self) -> OAIIngestConfig:
