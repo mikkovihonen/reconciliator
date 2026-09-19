@@ -1,9 +1,11 @@
 """Intra-corpus co-reference resolution and 3-tier WEMI multiplex graph clusterer.
 
 Discovers shared Works, Expressions, and Manifestations within staged MatchRecords
-in reconcile_corpus.db using multi-key blocking, pairwise similarity scoring,
+in PostgreSQL database using multi-key blocking, pairwise similarity scoring,
 connected-component graph clustering, and external authority URI hoisting.
 """
+
+from __future__ import annotations
 
 import hashlib
 import json
@@ -15,6 +17,7 @@ from typing import Optional
 from rapidfuzz import fuzz
 
 from reconciliator.config import ClusterConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
     ClusterEdge,
@@ -26,7 +29,6 @@ from reconciliator.models import (
     SammelbandBinding,
     WorkCluster,
 )
-from reconciliator.database import WEMIRepository
 from reconciliator.utils import (
     UnionFind,
     clean_alphanumeric,
@@ -122,27 +124,7 @@ class CorpusClusterer:
     ) -> tuple[float, str]:
         """Compute composite pairwise similarity score and evidence between two records."""
         # 1. Exact standard identifier match
-        common_schemes = (
-            "isbn",
-            "issn",
-            "doi",
-            "urn",
-            "ismn",
-            "isrc",
-            "ean",
-            "upc",
-            "publisher_number",
-            "plate_number",
-            "patent_number",
-            "swhid",
-            "fingerprint",
-            "bgg",
-            "guid_rss",
-            "fragmenta",
-            "michel",
-            "scott",
-            "km",
-        )
+        common_schemes = self.config.common_schemes
         for scheme in common_schemes:
             if scheme in ids1 and scheme in ids2:
                 v1_set = {clean_alphanumeric(x) for x in ids1[scheme]}
@@ -153,21 +135,7 @@ class CorpusClusterer:
                     return 1.0, f"identifier:{scheme}"
 
         # 2. Identical specialized domain key match
-        domain_key_types = {
-            "patent",
-            "statute",
-            "swhid",
-            "fingerprint",
-            "game",
-            "board_game",
-            "podcast",
-            "citation",
-            "music_work",
-            "fragment_codex",
-            "numismatic",
-            "numismatic_issue",
-            "heritage_model",
-        }
+        domain_key_types = set(self.config.domain_key_types)
         for k_type in domain_key_types:
             if k_type in r1.keys and k_type in r2.keys:
                 s1 = {v.strip().lower() for v in r1.keys[k_type] if v and v.strip()}
@@ -325,7 +293,7 @@ class CorpusClusterer:
         # the groups being clustered rather than some unrelated manifestation.
         rep_by_source = {groups[k][0].record_id: k for k in keys}
 
-        uf = UnionFind(keys)
+        uf: UnionFind[str] = UnionFind(keys)
         for key in keys:
             rep = groups[key][0]
             text = rep.serialized_manifestation or rep.title
@@ -354,11 +322,6 @@ class CorpusClusterer:
     def cluster_corpus(self) -> MultiplexClusterResult:
         """Execute full intra-corpus co-reference clustering pipeline across staged records."""
         start_time = time.time()
-        # Projected out of WEMI rows rather than read from a staging table: a
-        # corpus is stored like any other source, so it is queried like one.
-        # Scoped to the non-authoritative sources, because the authority data now
-        # lives in the same database and must not be clustered as if it were the
-        # corpus. With no source registry at all, everything is the corpus.
         origins = self.corpus_origins or self.corpus_repo.non_authoritative_sources() or None
         records = self.corpus_repo.get_all_match_records(origins=origins)
         if not records:
@@ -377,7 +340,7 @@ class CorpusClusterer:
                 blocks[bk].append(r.record_id)
 
         # Step 2: Work Graph Clustering & Pairwise Scoring
-        uf = UnionFind([r.record_id for r in records])
+        uf: UnionFind[str] = UnionFind([r.record_id for r in records])
         edges: list[ClusterEdge] = []
         candidate_pairs: set[tuple[str, str]] = set()
 
@@ -510,10 +473,6 @@ class CorpusClusterer:
                     m_key = self.extract_manifestation_key(rec)
                     manif_groups[m_key].append(rec)
 
-                # Records of one edition that share no standard number and spell
-                # their volume differently never meet in a key group, so the
-                # manifestation index gets consulted to merge groups the keys
-                # left apart. Additive only: it joins groups, never splits them.
                 manif_groups = self._merge_manifestation_groups_by_vector(manif_groups)
 
                 for _, m_recs in manif_groups.items():
@@ -577,3 +536,4 @@ class CorpusClusterer:
             records_clustered=len(records),
             elapsed_seconds=round(elapsed, 4),
         )
+

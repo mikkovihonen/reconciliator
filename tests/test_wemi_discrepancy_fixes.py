@@ -597,7 +597,7 @@ def test_translator_alignment_via_agent_aligner(tmp_path):
 
 def test_blocking_key_families_coverage(tmp_path):
     """Verify H-29: generate_blocking_keys covers material-specific blocking families."""
-    from reconciliator.clusterer import CorpusClusterer
+    from reconciliator.clustering import CorpusClusterer
     from reconciliator.models import MatchRecord
     from reconciliator.database import WEMIRepository
 

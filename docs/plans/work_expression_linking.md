@@ -4812,7 +4812,7 @@ flowchart LR
   - Deploy Work-level vector search fallback for uncataloged editions across all textual, musical, and artistic domains.
 
 ### Milestone 4: Intra-Corpus Graph Clusterer
-- Implement `CorpusClusterer` in `src/reconciliator/clusterer.py`:
+- Implement `CorpusClusterer` in `src/reconciliator/clustering/corpus.py`:
   - Relational storage staging in PostgreSQL.
   - Multi-key blocking generation across all 35 blocking key families (`work`, `citation`, `serial`, `series`, `music`, `music_work`, `cross_format`, `accessible_repro`, `moving_image`, `cartographic`, `standard`, `thesis`, `patent`, `statute`, `game`, `board_game`, `fingerprint`, `swhid`, `drama`, `podcast`, `sammelband_binding`, `web_archive`, `broadcast_timecode`, `oral_history`, `parallel_multilingual`, `preservation_surrogate`, `fragment_codex`, `ephemera_corp`, `exhibition_event`, `critical_edition`, `geodata_spatial`, `numismatic_issue`, `heritage_model`, `archival_fonds`, `still_image`).
   - Graph connected-component clustering with domain-specific edge weights.

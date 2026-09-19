@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from reconciliator.clusterer import CorpusClusterer
+from reconciliator.clustering import CorpusClusterer
 from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
     ExpressionEntity,

@@ -221,7 +221,7 @@ def test_manifestation_vector_merge_joins_groups_the_keys_left_apart(tmp_path: P
     one edition that share no standard number never meet in a key group, so the
     index is consulted to union them.
     """
-    from reconciliator.clusterer import CorpusClusterer
+    from reconciliator.clustering import CorpusClusterer
     from reconciliator.models import ManifestationEntity, MatchRecord
 
     store = WEMIRepository(
@@ -280,7 +280,7 @@ def test_manifestation_vector_merge_joins_groups_the_keys_left_apart(tmp_path: P
 
 def test_manifestation_vector_merge_is_a_no_op_without_an_index(tmp_path: Path):
     """Clustering must still work before build-index has ever run."""
-    from reconciliator.clusterer import CorpusClusterer
+    from reconciliator.clustering import CorpusClusterer
     from reconciliator.models import MatchRecord
 
     store = WEMIRepository(db_path=tmp_path / "authority.db", dimension=DIM)
@@ -298,7 +298,7 @@ def test_manifestation_vector_merge_is_a_no_op_without_an_index(tmp_path: Path):
 
 def test_manifestation_vector_merge_keeps_distinct_editions_apart(tmp_path: Path):
     """Additive only: it joins groups, and must not join unrelated ones."""
-    from reconciliator.clusterer import CorpusClusterer
+    from reconciliator.clustering import CorpusClusterer
     from reconciliator.models import ManifestationEntity, MatchRecord
 
     store = WEMIRepository(

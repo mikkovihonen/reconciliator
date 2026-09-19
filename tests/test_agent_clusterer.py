@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from reconciliator.agent_clusterer import AgentClusterer
+from reconciliator.clustering import AgentClusterer
 from reconciliator.config import AgentClusterConfig, AppConfig
 from reconciliator.models import (
     AgentEntity,
@@ -39,6 +39,9 @@ def test_agent_clustering_configuration_integrity() -> None:
     assert cfg.major_date_discrepancy_veto_years == 2
     assert cfg.require_corroboration_for_date_discrepancy is True
     assert cfg.token_matching_algorithm == "token_set_ratio"
+    assert cfg.max_blocking_bucket_size == 200
+    assert cfg.date_tolerance_score == 0.70
+    assert cfg.date_missing_score == 0.50
     assert "asteri" in cfg.source_authority_precedence
     assert "isni" in cfg.override_identifiers
     assert "name_normalized" in cfg.blocking_keys

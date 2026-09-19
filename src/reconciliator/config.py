@@ -1444,6 +1444,52 @@ class ClusterConfig(BaseModel):
             **_CLUSTER_DEFAULTS.get("music_score", {})
         )
     )
+    common_schemes: list[str] = Field(
+        default_factory=lambda: list(
+            _CLUSTER_DEFAULTS.get("common_schemes")
+            or [
+                "isbn",
+                "issn",
+                "doi",
+                "urn",
+                "ismn",
+                "isrc",
+                "ean",
+                "upc",
+                "publisher_number",
+                "plate_number",
+                "patent_number",
+                "swhid",
+                "fingerprint",
+                "bgg",
+                "guid_rss",
+                "fragmenta",
+                "michel",
+                "scott",
+                "km",
+            ]
+        )
+    )
+    domain_key_types: list[str] = Field(
+        default_factory=lambda: list(
+            _CLUSTER_DEFAULTS.get("domain_key_types")
+            or [
+                "patent",
+                "statute",
+                "swhid",
+                "fingerprint",
+                "game",
+                "board_game",
+                "podcast",
+                "citation",
+                "music_work",
+                "fragment_codex",
+                "numismatic",
+                "numismatic_issue",
+                "heritage_model",
+            ]
+        )
+    )
 
 
 class WorkConsolidationConfig(BaseModel):
@@ -1576,6 +1622,21 @@ class AgentClusterConfig(BaseModel):
     concept_similarity_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("concept_similarity_weight", 0.85)
+        )
+    )
+    max_blocking_bucket_size: int = Field(
+        default_factory=lambda: int(
+            _AGENT_CLUSTERING_DEFAULTS.get("max_blocking_bucket_size", 200)
+        )
+    )
+    date_tolerance_score: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_score", 0.70)
+        )
+    )
+    date_missing_score: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("date_missing_score", 0.50)
         )
     )
     source_authority_precedence: list[str] = Field(

@@ -15,7 +15,7 @@ from rdflib import Graph
 from rich.console import Console
 from rich.table import Table
 
-from reconciliator.clusterer import CorpusClusterer
+from reconciliator.clustering import CorpusClusterer
 from reconciliator.config import (
     AppConfig,
     OAIIngestConfig,
@@ -1838,7 +1838,7 @@ def cluster_agents_cmd(
     ),
 ) -> None:
     """Cluster agent entities across sources into canonical agent clusters."""
-    from reconciliator.agent_clusterer import AgentClusterer
+    from reconciliator.clustering import AgentClusterer
 
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)

@@ -1028,6 +1028,40 @@ reconcile:
       standard_key_terms:
         - "ismn"
         - "plate"
+    common_schemes:
+      - "isbn"
+      - "issn"
+      - "doi"
+      - "urn"
+      - "ismn"
+      - "isrc"
+      - "ean"
+      - "upc"
+      - "publisher_number"
+      - "plate_number"
+      - "patent_number"
+      - "swhid"
+      - "fingerprint"
+      - "bgg"
+      - "guid_rss"
+      - "fragmenta"
+      - "michel"
+      - "scott"
+      - "km"
+    domain_key_types:
+      - "patent"
+      - "statute"
+      - "swhid"
+      - "fingerprint"
+      - "game"
+      - "board_game"
+      - "podcast"
+      - "citation"
+      - "music_work"
+      - "fragment_codex"
+      - "numismatic"
+      - "numismatic_issue"
+      - "heritage_model"
   fts_fallback:
     enabled: false
     threshold: 0.70
@@ -1103,6 +1137,9 @@ agent_clustering:
   affiliation_fuzzy_score: 0.85
   enable_hierarchical_concepts: true
   concept_similarity_weight: 0.85
+  max_blocking_bucket_size: 200
+  date_tolerance_score: 0.70
+  date_missing_score: 0.50
 
   source_authority_precedence:
     - "asteri"

@@ -32,45 +32,9 @@ from reconciliator.models import (
     AgentClusterResult,
 )
 from reconciliator.normalizers.linguistic import fold_diacritics
+from reconciliator.utils import UnionFind
 
 logger = logging.getLogger(__name__)
-
-
-class UnionFind:
-    """Disjoint-set forest data structure with path compression and union by rank."""
-
-    def __init__(self) -> None:
-        self.parent: dict[int, int] = {}
-        self.rank: dict[int, int] = {}
-
-    def find(self, item: int) -> int:
-        if item not in self.parent:
-            self.parent[item] = item
-            self.rank[item] = 0
-            return item
-        if self.parent[item] != item:
-            self.parent[item] = self.find(self.parent[item])
-        return self.parent[item]
-
-    def union(self, a: int, b: int) -> None:
-        root_a = self.find(a)
-        root_b = self.find(b)
-        if root_a == root_b:
-            return
-        if self.rank[root_a] < self.rank[root_b]:
-            self.parent[root_a] = root_b
-        elif self.rank[root_a] > self.rank[root_b]:
-            self.parent[root_b] = root_a
-        else:
-            self.parent[root_b] = root_a
-            self.rank[root_a] += 1
-
-    def get_components(self, elements: set[int]) -> dict[int, list[int]]:
-        components: dict[int, list[int]] = defaultdict(list)
-        for elem in elements:
-            root = self.find(elem)
-            components[root].append(elem)
-        return components
 
 
 class AgentClusterer:
@@ -82,7 +46,6 @@ class AgentClusterer:
         config: Optional[AgentClusterConfig] = None,
         hierarchy_service: Optional[Any] = None,
     ) -> None:
-
         self.repo = repo
         if config is not None:
             self.config = config
@@ -98,9 +61,9 @@ class AgentClusterer:
 
         logger.info("Starting agent clustering...")
 
-        # 1. Load agent records and supporting metadata
+        # 1. Fetch all agents from database
         with self.repo.get_connection() as conn:
-            agents_stmt = select(
+            stmt = select(
                 agents_table.c.id,
                 agents_table.c.source,
                 agents_table.c.source_id,
@@ -112,41 +75,48 @@ class AgentClusterer:
                 agents_table.c.death_year,
                 agents_table.c.is_personal,
             )
-            agent_rows = conn.execute(agents_stmt).mappings().fetchall()
+            agent_rows = conn.execute(stmt).mappings().fetchall()
 
         if not agent_rows:
             logger.info("No agent records found for clustering.")
             return AgentClusterResult()
 
         agents: dict[int, dict[str, Any]] = {r["id"]: dict(r) for r in agent_rows}
-        agent_ids = list(agents.keys())
-        all_agent_id_set = set(agent_ids)
+        for a in agents.values():
+            if not a.get("name_normalized") and a.get("name"):
+                a["name_normalized"] = a["name"].lower()
 
-        # 2. Load supporting evidence: identifiers, attributes, affiliations, concepts, contributions
-        identifiers_by_agent = self._load_identifiers(agent_ids)
-        attributes_by_agent = self._load_attributes(agent_ids)
-        affiliations_by_agent = self._load_affiliations(agent_ids)
-        concepts_by_agent = self._load_concepts(agent_ids)
-        works_by_agent, coauthors_by_agent, roles_by_agent = self._load_contributions(agent_ids)
+        total_agents = len(agents)
+        if total_agents == 0:
+            logger.info("No agents found in database to cluster.")
+            return AgentClusterResult()
 
-        # 3. Stage 1: Deterministic Linking via Override Identifiers
-        uf = UnionFind()
+        all_agent_ids = list(agents.keys())
+        all_agent_id_set = set(all_agent_ids)
+
+        # 2. Bulk load agent metadata (identifiers, attributes, relationships, concepts, works)
+        logger.info("Loading agent identifiers, attributes, and relationships...")
+        identifiers_by_agent = self._load_identifiers(all_agent_ids)
+        attributes_by_agent = self._load_attributes(all_agent_ids)
+        affiliations_by_agent = self._load_affiliations(all_agent_ids)
+        concepts_by_agent = self._load_concepts(all_agent_ids)
+        works_by_agent, coauthors_by_agent, roles_by_agent = self._load_contributions(
+            all_agent_ids
+        )
+
+        # 3. Initialize UnionFind Disjoint-Set Structure
+        uf: UnionFind[int] = UnionFind(all_agent_ids)
         link_methods: dict[tuple[int, int], str] = {}
         link_confidences: dict[tuple[int, int], float] = {}
 
+        # 4. Stage 1: Deterministic Linking via Standard Identifiers
         self._link_by_identifiers(
-            agent_ids=agent_ids,
-            identifiers_by_agent=identifiers_by_agent,
-            uf=uf,
-            link_methods=link_methods,
-            link_confidences=link_confidences,
+            all_agent_ids, identifiers_by_agent, uf, link_methods, link_confidences
         )
 
-        # 4. Stage 2: Multi-Key Blocking
-        candidate_pairs = self._generate_blocking_candidates(
-            agents=agents,
-            attributes_by_agent=attributes_by_agent,
-        )
+        # 5. Stage 2: Multi-Key Candidate Generation
+        candidate_pairs = self._generate_blocking_candidates(agents, attributes_by_agent)
+        logger.info("Generated %d candidate pairs for scoring.", len(candidate_pairs))
 
         # 5. Stage 3: Tolerant Scoring & Corroboration
         for aid1, aid2 in candidate_pairs:
@@ -348,43 +318,43 @@ class AgentClusterer:
                         )
                     )
 
-            # Roles
-            for val, freq in role_counts.items():
-                cluster_attributes.append(
-                    AgentClusterAttribute(
-                        cluster_id=cluster_id,
-                        attribute_type="role",
-                        value=val,
-                        frequency=freq,
-                        is_canonical=False,
+            # Relator Roles
+            if role_counts:
+                most_common_role = role_counts.most_common(1)[0][0]
+                for val, freq in role_counts.items():
+                    cluster_attributes.append(
+                        AgentClusterAttribute(
+                            cluster_id=cluster_id,
+                            attribute_type="role",
+                            value=val,
+                            frequency=freq,
+                            is_canonical=(val == most_common_role),
+                        )
                     )
-                )
 
-        # 8. Stage 6: Batch Persistence
-        logger.info(
-            "Persisting %d agent clusters (%d members, %d attributes)...",
-            len(clusters),
-            len(cluster_members),
-            len(cluster_attributes),
-        )
+        # 8. Stage 6: Database Persistence (Batch)
+        logger.info("Persisting %d agent clusters to database...", len(clusters))
         self.repo.insert_agent_clusters_batch(clusters)
+        logger.info("Persisting %d cluster members to database...", len(cluster_members))
         self.repo.insert_agent_cluster_members_batch(cluster_members)
+        logger.info("Persisting %d cluster attributes to database...", len(cluster_attributes))
         self.repo.insert_agent_cluster_attributes_batch(cluster_attributes)
 
-        result = AgentClusterResult(
-            total_agents=len(agent_ids),
-            total_clusters=len(clusters),
-            singletons=singletons,
-            multi_member_clusters=multi_member,
-            max_cluster_size=max_size,
-            link_method_counts=dict(method_counts),
-        )
         logger.info(
-            "Agent clustering finished: %d agents -> %d clusters (multi=%d, max_size=%d)",
-            result.total_agents,
-            result.total_clusters,
-            result.multi_member_clusters,
-            result.max_cluster_size,
+            "Agent clustering complete: %d total agents partitioned into %d clusters (%d multi-member, %d singletons).",
+            total_agents,
+            len(clusters),
+            multi_member,
+            singletons,
+        )
+
+        result = AgentClusterResult(
+            total_agents=total_agents,
+            total_clusters=len(clusters),
+            multi_member_clusters=multi_member,
+            singleton_clusters=singletons,
+            max_cluster_size=max_size,
+            link_methods_breakdown=dict(method_counts),
         )
         return result
 
@@ -527,7 +497,7 @@ class AgentClusterer:
         self,
         agent_ids: list[int],
         identifiers_by_agent: dict[int, list[tuple[str, str]]],
-        uf: UnionFind,
+        uf: UnionFind[int],
         link_methods: dict[tuple[int, int], str],
         link_confidences: dict[tuple[int, int], float],
     ) -> None:
@@ -592,8 +562,9 @@ class AgentClusterer:
                     if vn:
                         buckets[f"var_name:{vn.strip().lower()}"].append(aid)
 
+        max_bucket = self.config.max_blocking_bucket_size
         for _, aids in buckets.items():
-            if 1 < len(aids) <= 200:  # Protect against massive uninformative buckets
+            if 1 < len(aids) <= max_bucket:  # Protect against massive uninformative buckets
                 for i in range(len(aids)):
                     for j in range(i + 1, len(aids)):
                         candidates.add((min(aids[i], aids[j]), max(aids[i], aids[j])))
@@ -678,13 +649,13 @@ class AgentClusterer:
             if b1 == b2:
                 date_score = 1.0
             elif abs(b1 - b2) <= self.config.date_tolerance_years:
-                date_score = 0.70
+                date_score = self.config.date_tolerance_score
             else:
                 date_score = 0.0
         elif (b1 is None and b2 is not None) or (b1 is not None and b2 is None):
-            date_score = 0.50  # Neutral missing date
+            date_score = self.config.date_missing_score  # Neutral missing date
         else:
-            date_score = 0.50
+            date_score = self.config.date_missing_score
         score_sum += weights.dates_weight * date_score
         weight_sum += weights.dates_weight
 

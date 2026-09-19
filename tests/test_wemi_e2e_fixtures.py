@@ -18,7 +18,7 @@ from lxml import etree
 from rdflib import Graph, URIRef
 
 from reconciliator.cli import reconcile_cmd, reset_cmd
-from reconciliator.clusterer import CorpusClusterer
+from reconciliator.clustering import CorpusClusterer
 from reconciliator.config import AppConfig
 from reconciliator.matcher import WorkMatcher
 from reconciliator.models import (
