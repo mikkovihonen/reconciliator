@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import re
 from typing import Any, Optional
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 
 @functools.lru_cache(maxsize=1)
@@ -66,13 +66,27 @@ def clear_curie_cache() -> None:
     _get_bare_identifier_patterns.cache_clear()
 
 
+def encode_curie_reference(reference: str) -> str:
+    """Percent-encode curly braces, spaces, controls, and RFC 3986 unwise characters in a CURIE reference.
+
+    W3C CURIE Syntax 1.0 (and RFC 3986 / RFC 3987) disallows raw curly braces ({ and }),
+    spaces, and unwise characters (<, >, ", \\, ^, `, |).
+    """
+    if not reference:
+        return ""
+    safe_chars = "/:~-._@!$&'()*+,;=?"
+    return quote(str(reference).strip(), safe=safe_chars)
+
+
 def to_curie(source: str, source_id: str) -> str:
     """Format a source and identifier into standard CURIE format (source:source_id)."""
     src = str(source or "").strip().lower()
     sid = str(source_id or "").strip()
     if not src or src == "unknown":
-        return sid
-    return f"{src}:{sid}"
+        return encode_curie_reference(sid)
+    clean_src = re.sub(r"[^\w\-]", "", src)
+    encoded_ref = encode_curie_reference(sid)
+    return f"{clean_src}:{encoded_ref}"
 
 
 def parse_curie(curie_or_uri: str, default_source: str = "") -> tuple[str, str]:
@@ -150,12 +164,13 @@ def format_source_uri(source: str, identifier: str) -> str:
     clean_id = str(identifier or "").strip()
     registry = _get_sources_registry()
     src_data = registry.get(clean_src)
+    encoded_id = encode_curie_reference(clean_id)
     if isinstance(src_data, dict):
         template = src_data.get("canonical_uri_template")
         if template:
             if src_data.get("uppercase_identifier"):
-                clean_id = clean_id.upper()
-            return template.format(identifier=clean_id)
+                encoded_id = encoded_id.upper()
+            return template.format(identifier=encoded_id)
     return to_curie(clean_src, clean_id)
 
 

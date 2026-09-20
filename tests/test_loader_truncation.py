@@ -76,7 +76,8 @@ def test_vocab_concepts_truncation(caplog: pytest.LogCaptureFixture) -> None:
     assert concept.alt_labels["fi"][1] == "Valid Alt"
 
     # Verify task_id telemetry
-    assert "Task test-vocab-task-1" in caplog.text
+    assert "[sanitization] truncate" in caplog.text
+    assert any(getattr(r, "task_id", None) == "test-vocab-task-1" for r in caplog.records)
     assert tracker.record_error.call_count == 5
 
 
@@ -112,7 +113,8 @@ def test_vocab_mappings_truncation(caplog: pytest.LogCaptureFixture) -> None:
     assert len(mapping.target_field) == 32
     assert len(mapping.legacy_labels["fi"]) == 512
 
-    assert "Task vocab-map-task" in caplog.text
+    assert "[sanitization] truncate" in caplog.text
+    assert any(getattr(r, "task_id", None) == "vocab-map-task" for r in caplog.records)
     assert tracker.record_error.call_count == 6
 
 

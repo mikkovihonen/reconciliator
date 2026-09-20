@@ -1254,6 +1254,7 @@ class WEMIRepository:
             # 3. Expressions
             expr_key_to_id: dict[Any, int] = {}
             if expressions:
+                valid_expressions: list[ExpressionEntity] = []
                 for exp in expressions:
                     if not exp.work_id or exp.work_id <= 0:
                         cand_id = _resolve(work_key_to_id, exp.work_curie)
@@ -1263,18 +1264,32 @@ class WEMIRepository:
                             cand_id = works[0].id
                         if cand_id:
                             exp.work_id = cand_id
-                e_ids = self.insert_expressions_batch(expressions, conn=c, chunk_size=chunk_size)
-                for exp, eid in zip(expressions, e_ids):
-                    exp.id = eid
-                    expr_key_to_id[exp.curie] = eid
-                    expr_key_to_id[(exp.source, exp.source_id)] = eid
-                    expr_key_to_id[exp.source_id] = eid
-                    expr_key_to_id[f"{exp.source}:{exp.source_id}:{exp.language}"] = eid
-                    expr_key_to_id[(exp.source, f"{exp.source_id}:{exp.language}")] = eid
+                    if exp.work_id and exp.work_id > 0:
+                        valid_expressions.append(exp)
+                    else:
+                        from reconciliator.logging import log_validation
+
+                        log_validation(
+                            logger,
+                            action="quarantine",
+                            entity="expressions.work_id",
+                            source_id=exp.curie or f"{exp.source}:{exp.source_id}",
+                            reason=f"Expression cannot resolve parent work_id (work_curie={exp.work_curie})",
+                        )
+                if valid_expressions:
+                    e_ids = self.insert_expressions_batch(valid_expressions, conn=c, chunk_size=chunk_size)
+                    for exp, eid in zip(valid_expressions, e_ids):
+                        exp.id = eid
+                        expr_key_to_id[exp.curie] = eid
+                        expr_key_to_id[(exp.source, exp.source_id)] = eid
+                        expr_key_to_id[exp.source_id] = eid
+                        expr_key_to_id[f"{exp.source}:{exp.source_id}:{exp.language}"] = eid
+                        expr_key_to_id[(exp.source, f"{exp.source_id}:{exp.language}")] = eid
 
             # 4. Manifestations, containers before components
             manif_key_to_id: dict[Any, int] = {}
             if manifestations:
+                valid_manifestations: list[ManifestationEntity] = []
                 for m in manifestations:
                     if not m.work_id or m.work_id <= 0:
                         cand_id = _resolve(work_key_to_id, m.work_curie)
@@ -1284,6 +1299,28 @@ class WEMIRepository:
                             cand_id = works[0].id
                         if cand_id:
                             m.work_id = cand_id
+                    if m.work_id is not None and m.work_id <= 0:
+                        from reconciliator.logging import log_validation
+
+                        log_validation(
+                            logger,
+                            action="quarantine",
+                            entity="manifestations.work_id",
+                            source_id=m.curie or f"{m.source}:{m.source_id}",
+                            reason=f"Manifestation has invalid parent work_id ({m.work_id})",
+                        )
+                    elif m.work_curie and not m.work_id:
+                        from reconciliator.logging import log_validation
+
+                        log_validation(
+                            logger,
+                            action="quarantine",
+                            entity="manifestations.work_id",
+                            source_id=m.curie or f"{m.source}:{m.source_id}",
+                            reason=f"Manifestation cannot resolve parent work_id (work_curie={m.work_curie})",
+                        )
+                    else:
+                        valid_manifestations.append(m)
 
                 def _insert_manifestations(rows: list[ManifestationEntity], idx: list[int]) -> None:
                     if not rows:
@@ -1302,18 +1339,18 @@ class WEMIRepository:
                         manif_key_to_id[(row.source, row.source_id)] = row_id
                         manif_key_to_id[row.source_id] = row_id
 
-                component_idx = [i for i, m in enumerate(manifestations) if m.container_curie]
+                component_idx = [i for i, m in enumerate(valid_manifestations) if m.container_curie]
                 if not component_idx:
-                    _insert_manifestations(manifestations, list(range(len(manifestations))))
+                    _insert_manifestations(valid_manifestations, list(range(len(valid_manifestations))))
                 else:
                     container_idx = [
-                        i for i, m in enumerate(manifestations) if not m.container_curie
+                        i for i, m in enumerate(valid_manifestations) if not m.container_curie
                     ]
                     _insert_manifestations(
-                        [manifestations[i] for i in container_idx], container_idx
+                        [valid_manifestations[i] for i in container_idx], container_idx
                     )
                     for i in component_idx:
-                        component = manifestations[i]
+                        component = valid_manifestations[i]
                         resolved = _resolve(manif_key_to_id, component.container_curie)
                         if not resolved and component.container_curie:
                             existing = self.get_manifestation_by_curie(component.container_curie)
@@ -1329,7 +1366,7 @@ class WEMIRepository:
                                 component.container_curie,
                             )
                     _insert_manifestations(
-                        [manifestations[i] for i in component_idx], component_idx
+                        [valid_manifestations[i] for i in component_idx], component_idx
                     )
 
             # 5. Manifestation-Expression Associations
@@ -1346,22 +1383,18 @@ class WEMIRepository:
                         not assoc.expression_id or assoc.expression_id <= 0
                     ) and assoc.expression_curie:
                         assoc.expression_id = _resolve(expr_key_to_id, assoc.expression_curie) or 0
-                    if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and len(
-                        manifestations
-                    ) == 1:
+                    if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and manifestations:
                         assoc.manifestation_id = manifestations[0].id or 0
-                    if (not assoc.expression_id or assoc.expression_id <= 0) and len(
-                        expressions
-                    ) == 1:
+                    if (not assoc.expression_id or assoc.expression_id <= 0) and expressions:
                         assoc.expression_id = expressions[0].id or 0
                     if assoc.manifestation_id > 0 and assoc.expression_id > 0:
                         bound_assocs.append(assoc)
                     else:
                         logger.warning(
-                            "Dropping manifestation-expression association that binds "
-                            "to no row: manifestation=%s expression=%s",
-                            assoc.manifestation_curie,
-                            assoc.expression_curie,
+                            "Dropping manifestation-expression link with an unbound endpoint: "
+                            "manifestation=%s expression=%s",
+                            assoc.manifestation_curie or assoc.manifestation_id,
+                            assoc.expression_curie or assoc.expression_id,
                         )
                 if bound_assocs:
                     self.insert_manifestation_expressions_batch(
@@ -1370,6 +1403,7 @@ class WEMIRepository:
 
             # 6. Items
             if items:
+                valid_items: list[ItemEntity] = []
                 for item in items:
                     if not item.manifestation_id or item.manifestation_id <= 0:
                         cand_id = manif_key_to_id.get((item.source, item.source_id))
@@ -1377,7 +1411,20 @@ class WEMIRepository:
                             cand_id = manifestations[0].id
                         if cand_id:
                             item.manifestation_id = cand_id
-                self.insert_items_batch(items, conn=c, chunk_size=chunk_size)
+                    if item.manifestation_id and item.manifestation_id > 0:
+                        valid_items.append(item)
+                    else:
+                        from reconciliator.logging import log_validation
+
+                        log_validation(
+                            logger,
+                            action="quarantine",
+                            entity="items.manifestation_id",
+                            source_id=item.curie or f"{item.source}:{item.source_id}",
+                            reason="Item cannot resolve parent manifestation_id",
+                        )
+                if valid_items:
+                    self.insert_items_batch(valid_items, conn=c, chunk_size=chunk_size)
 
             # 7. Identifiers
             if identifiers:

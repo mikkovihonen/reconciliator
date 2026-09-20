@@ -170,13 +170,34 @@ def parse_and_decompose_page(
     skip_ids: Optional[set[str]],
     format: str = "marcxml",
     constituents: Optional[Any] = None,
-) -> tuple[dict[str, Any], int, int]:
+    task_id: Optional[str] = None,
+) -> tuple[dict[str, Any], int, int, int]:
     """Parse raw XML page bytes and decompose MARCXML/BibFrame records in a worker process.
 
     Returns:
-        (batch_payload_dict, decomposed_records_count, skipped_records_count)
+        (batch_payload_dict, decomposed_records_count, skipped_records_count, error_count)
     """
-    root = etree.fromstring(page_bytes)
+    if task_id:
+        from reconciliator.logging import init_worker_logging
+        init_worker_logging(task_id)
+
+    from reconciliator.logging import log_validation
+
+    parser = etree.XMLParser(recover=True, resolve_entities=False)
+    error_count = 0
+    try:
+        root = etree.fromstring(page_bytes, parser=parser)
+    except Exception as exc:
+        log_validation(
+            logger,
+            action="skip_page",
+            entity="oai_page_xml",
+            source_id=source_name,
+            reason=f"XMLSyntaxError in OAI page: {exc}",
+            task_id=task_id,
+        )
+        return {}, 0, 0, 1
+
     records = root.findall(".//oai:record", OAI_NS)
     if not records:
         records = root.findall(".//record")
@@ -240,19 +261,30 @@ def parse_and_decompose_page(
                 skipped_count += 1
                 continue
 
-        if format == "bibframe":
-            raw_xml = etree.tostring(target_elem, encoding="utf-8")
-            g = Graph()
-            g.parse(data=raw_xml.decode("utf-8"), format="xml")
-            item_to_load = g
-        else:
-            item_to_load = target_elem
+        try:
+            if format == "bibframe":
+                raw_xml = etree.tostring(target_elem, encoding="utf-8")
+                g = Graph()
+                g.parse(data=raw_xml.decode("utf-8"), format="xml")
+                item_to_load = g
+            else:
+                item_to_load = target_elem
 
-        rec_decomp = load_record(item_to_load, ctx)
-        acc.add_record(rec_decomp)
-        decomposed_count += 1
+            rec_decomp = load_record(item_to_load, ctx)
+            acc.add_record(rec_decomp)
+            decomposed_count += 1
+        except Exception as exc:
+            error_count += 1
+            log_validation(
+                logger,
+                action="skip_record",
+                entity="oai_record",
+                source_id=header_id or "unknown",
+                reason=f"Failed to decompose record: {exc}",
+                task_id=task_id,
+            )
 
-    return acc.take(), decomposed_count, skipped_count
+    return acc.take(), decomposed_count, skipped_count, error_count
 
 
 def write_wemi_batch(
@@ -297,16 +329,17 @@ def write_wemi_batch(
         from sqlalchemy.exc import DataError
 
         if isinstance(exc, DataError) and config is not None and config.truncate_overlong_values:
-            logger.error(
-                "Task %s: DataError during batch insert (%s). Skipping batch to allow harvesting to continue.",
-                task_id or "unknown",
-                exc,
+            from reconciliator.logging import log_validation
+
+            log_validation(
+                logger,
+                action="skip_batch",
+                entity="wemi_batch",
+                source_id=record_origin,
+                reason=f"database DataError: {exc}",
+                task_id=task_id,
+                tracker=tracker,
             )
-            if tracker is not None and hasattr(tracker, "record_error"):
-                tracker.record_error(
-                    message=f"DataError during batch write for task {task_id}: {exc}",
-                    metadata={"error_type": "DataError", "task_id": task_id},
-                )
             return 0
         raise
 
@@ -728,7 +761,8 @@ async def ingest_oai_pipeline(
                     resumption_token=initial_token if not partitioned else None,
                     semaphore=semaphore,
                 ):
-                    batch_payload, dec_cnt, sk_cnt = await loop.run_in_executor(
+                    task_id = tracker.task_id if tracker else f"oai-ingest-{source_name}"
+                    batch_payload, dec_cnt, sk_cnt, err_cnt = await loop.run_in_executor(
                         process_pool,
                         parse_and_decompose_page,
                         page_bytes,
@@ -742,7 +776,10 @@ async def ingest_oai_pipeline(
                         existing_ids if existing_ids else None,
                         effective_config.format,
                         source_constituents,
+                        task_id,
                     )
+                    if err_cnt > 0 and tracker:
+                        tracker.record_error(n=err_cnt)
                     harvested_count += dec_cnt + sk_cnt
                     skipped_count += sk_cnt
                     delivered += dec_cnt

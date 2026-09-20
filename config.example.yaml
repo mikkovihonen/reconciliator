@@ -1197,7 +1197,10 @@ telemetry:
 # ==============================================================================
 logging:
   level: "INFO"                   # "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
-  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  format: "%(asctime)s [%(levelname)s] [task_id=%(task_id)s] %(name)s: %(message)s"
   date_format: "%Y-%m-%d %H:%M:%S"
   log_file: null                  # Optional destination path (e.g. "data/reconciliator.log")
   capture_warnings: false         # Redirect Python standard warnings to logging
+  task_id_default: "-"            # Fallback task_id when no active task context is present
+  enable_telemetry_handler: true  # Automatically feed ERROR log records into active task error metrics
+  sanitization_log_level: "ERROR" # Default log level for data sanitization events ("ERROR", "WARNING", "INFO")

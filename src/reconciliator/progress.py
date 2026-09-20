@@ -82,6 +82,11 @@ class ProgressTracker:
         self._stop_event = threading.Event()
         self._live: Optional[Live] = None
 
+        if self.task_id:
+            from reconciliator.logging import register_task_tracker, set_current_task_id
+            register_task_tracker(self.task_id, self)
+            set_current_task_id(self.task_id)
+
     @property
     def error_count(self) -> int:
         """Current number of errors recorded for this task."""
@@ -90,17 +95,33 @@ class ProgressTracker:
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine and release connection pool."""
+        if self.task_id:
+            from reconciliator.logging import (
+                get_current_task_id,
+                set_current_task_id,
+                unregister_task_tracker,
+            )
+            unregister_task_tracker(self.task_id)
+            if get_current_task_id() == self.task_id:
+                set_current_task_id(None)
         self.engine.dispose()
+
+    def __enter__(self) -> ProgressTracker:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
 
     def record_error(
         self,
         message: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
         force: bool = True,
+        n: int = 1,
     ) -> None:
         """Record an error event against this task and update error metrics."""
         with self._lock:
-            self._error_count += 1
+            self._error_count += max(1, n)
             if message:
                 self._error_message = message
             self._metadata["errors"] = self._error_count
@@ -111,7 +132,7 @@ class ProgressTracker:
             if force or (now_sec - self._last_heartbeat_sec >= self.heartbeat_interval):
                 self._commit_heartbeat(now_sec)
 
-    def start(
+    def start_task(
         self,
         stage: str = "init",
         items_total: Optional[int] = None,
@@ -119,6 +140,10 @@ class ProgressTracker:
         metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """Start tracking and emit the initial status entry in progress.db."""
+        if self.task_id:
+            from reconciliator.logging import register_task_tracker, set_current_task_id
+            register_task_tracker(self.task_id, self)
+            set_current_task_id(self.task_id)
         with self._lock:
             self._start_time_sec = time.time()
             self._current_stage = stage
@@ -151,20 +176,17 @@ class ProgressTracker:
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["task_id"],
                     set_={
+                        "task_type": stmt.excluded.task_type,
                         "status": stmt.excluded.status,
                         "current_stage": stmt.excluded.current_stage,
                         "items_total": stmt.excluded.items_total,
                         "bytes_total": stmt.excluded.bytes_total,
                         "last_heartbeat": stmt.excluded.last_heartbeat,
-                        "error_count": stmt.excluded.error_count,
                         "metadata_json": stmt.excluded.metadata_json,
                     },
                 )
                 conn.execute(stmt)
             self._last_heartbeat_sec = time.time()
-
-    # Alias for backward compatibility
-    start_task = start
 
     def update_progress(
         self,
@@ -247,6 +269,11 @@ class ProgressTracker:
             if metadata:
                 self._metadata.update(metadata)
             self._commit_heartbeat(time.time())
+        if self.task_id:
+            from reconciliator.logging import get_current_task_id, set_current_task_id
+
+            if get_current_task_id() == self.task_id:
+                set_current_task_id(None)
 
     def fail_task(self, error_message: str, metadata: Optional[dict[str, Any]] = None) -> None:
         """Mark task failed with error details."""
@@ -257,6 +284,11 @@ class ProgressTracker:
             if metadata:
                 self._metadata.update(metadata)
             self._commit_heartbeat(time.time())
+        if self.task_id:
+            from reconciliator.logging import get_current_task_id, set_current_task_id
+
+            if get_current_task_id() == self.task_id:
+                set_current_task_id(None)
 
 
 def get_task_progress(db_path: Path | str, task_id: str) -> Optional[TaskProgress]:

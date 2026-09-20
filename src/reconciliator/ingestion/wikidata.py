@@ -209,14 +209,14 @@ def _extract_author_data(
     birth_year: Optional[int] = None
     b_val = get_claim_snak_value(claims, "P569")
     if isinstance(b_val, dict) and "time" in b_val:
-        m_b = re.search(r"[+-]?(\d{4})", str(b_val["time"]))
+        m_b = re.search(r"([+-]?\d{4})", str(b_val["time"]))
         if m_b:
             birth_year = int(m_b.group(1))
 
     death_year: Optional[int] = None
     d_val = get_claim_snak_value(claims, "P570")
     if isinstance(d_val, dict) and "time" in d_val:
-        m_d = re.search(r"[+-]?(\d{4})", str(d_val["time"]))
+        m_d = re.search(r"([+-]?\d{4})", str(d_val["time"]))
         if m_d:
             death_year = int(m_d.group(1))
 
@@ -673,16 +673,17 @@ def _prescan_authors(
             store.insert_wikidata_authors(batch)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
-                logger.error(
-                    "Database DataError (string length violation) during Wikidata author insert: %s [task_id=%s]",
-                    err,
-                    task_id,
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logger,
+                    action="skip_batch",
+                    entity="wikidata_authors",
+                    source_id="wikidata",
+                    reason=f"database DataError: {err}",
+                    task_id=task_id,
+                    tracker=tracker,
                 )
-                if tracker:
-                    tracker.record_error(
-                        message=f"Wikidata author insert failed with DataError: {err}",
-                        metadata={"last_error_task_id": task_id},
-                    )
             else:
                 raise
 
@@ -1317,16 +1318,17 @@ def ingest_wikidata_wemi_pipeline(
                 )
             except DataError as err:
                 if config and getattr(config, "truncate_overlong_values", True):
-                    logger.error(
-                        "Database DataError (string length violation) during Wikidata WEMI insert: %s [task_id=%s]",
-                        err,
-                        task_id,
+                    from reconciliator.logging import log_validation
+
+                    log_validation(
+                        logger,
+                        action="skip_batch",
+                        entity="wikidata_wemi",
+                        source_id="wikidata",
+                        reason=f"database DataError: {err}",
+                        task_id=task_id,
+                        tracker=tracker,
                     )
-                    if tracker:
-                        tracker.record_error(
-                            message=f"Wikidata WEMI insert failed with DataError: {err}",
-                            metadata={"last_error_task_id": task_id},
-                        )
                 else:
                     raise
             total_ingested += len(works_batch)

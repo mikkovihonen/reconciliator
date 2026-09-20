@@ -82,7 +82,20 @@ class ResourceSyncHarvester:
     def _parse_urlset_or_index(self, client: httpx2.Client, url: str) -> Iterator[ResourceSyncItem]:
         """Parse a ResourceSync urlset or sitemapindex document."""
         resp = self._get_with_retry(client, url)
-        root = etree.fromstring(resp.content)
+        parser = etree.XMLParser(recover=True, resolve_entities=False)
+        try:
+            root = etree.fromstring(resp.content, parser=parser)
+        except Exception as exc:
+            from reconciliator.logging import log_validation
+
+            log_validation(
+                logger,
+                action="skip_urlset",
+                entity="resourcesync_sitemap",
+                source_id=url,
+                reason=f"XMLSyntaxError parsing ResourceSync sitemap: {exc}",
+            )
+            return
 
         # Check if sitemapindex (collection of lists)
         sitemaps = root.findall(".//sitemap:sitemap", RS_NAMESPACES)

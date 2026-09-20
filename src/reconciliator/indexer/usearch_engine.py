@@ -122,6 +122,19 @@ class USearchVectorEngine:
             vectors = np.expand_dims(vectors, axis=0)
 
         vectors = np.ascontiguousarray(vectors, dtype=np.float32)
+        if not np.all(np.isfinite(vectors)):
+            import logging
+            from reconciliator.logging import log_validation
+
+            log_validation(
+                logging.getLogger("reconciliator.indexer.usearch"),
+                action="sanitize_vectors",
+                entity="usearch_index",
+                reason=f"Found non-finite values (NaN/Inf) in input vector matrix of shape {vectors.shape}; replacing with zeros",
+                level="WARNING",
+            )
+            vectors = np.nan_to_num(vectors, nan=0.0, posinf=0.0, neginf=0.0)
+
         if vectors.shape[1] != self.dimension:
             raise ValueError(
                 f"Vector dimension mismatch: expected {self.dimension}, got {vectors.shape[1]}"

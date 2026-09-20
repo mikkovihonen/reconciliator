@@ -88,7 +88,8 @@ def test_write_wemi_batch_data_error_recovery(caplog: pytest.LogCaptureFixture) 
 
     # Must return 0 without raising
     assert result == 0
-    assert "Task task-recovering-1: DataError during batch insert" in caplog.text
+    assert "[validation] skip_batch wemi_batch" in caplog.text
+    assert any(getattr(r, "task_id", None) == "task-recovering-1" for r in caplog.records)
     tracker.record_error.assert_called_once()
 
 

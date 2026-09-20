@@ -70,11 +70,23 @@ class Agent(BaseModel):
                 from reconciliator.normalizers.agent import format_agent_dates
 
                 data["dates"] = format_agent_dates(birth_year, death_year)
-            # Assert birth_year <= death_year
+            # Assert birth_year <= death_year, swapping if inverted
             if birth_year is not None and death_year is not None:
                 if birth_year > death_year:
-                    raise ValueError(
-                        f"birth_year ({birth_year}) must be <= death_year ({death_year})"
+                    b_orig, d_orig = birth_year, death_year
+                    birth_year, death_year = d_orig, b_orig
+                    data["birth_year"] = birth_year
+                    data["death_year"] = death_year
+                    import logging
+                    from reconciliator.logging import log_sanitization
+
+                    log_sanitization(
+                        logging.getLogger("reconciliator.models"),
+                        action="swap_inverted_dates",
+                        entity="agent_dates",
+                        source_id=str(data.get("source_id") or data.get("name") or "agent"),
+                        reason=f"birth_year ({b_orig}) > death_year ({d_orig}); swapped values",
+                        level="WARNING",
                     )
         return data
 
@@ -532,11 +544,23 @@ class AgentEntity(BaseModel):
                 from reconciliator.normalizers.agent import format_agent_dates
 
                 data["dates"] = format_agent_dates(birth_year, death_year)
-            # Assert birth_year <= death_year
+            # Assert birth_year <= death_year, swapping if inverted
             if birth_year is not None and death_year is not None:
                 if birth_year > death_year:
-                    raise ValueError(
-                        f"birth_year ({birth_year}) must be <= death_year ({death_year})"
+                    b_orig, d_orig = birth_year, death_year
+                    birth_year, death_year = d_orig, b_orig
+                    data["birth_year"] = birth_year
+                    data["death_year"] = death_year
+                    import logging
+                    from reconciliator.logging import log_sanitization
+
+                    log_sanitization(
+                        logging.getLogger("reconciliator.models"),
+                        action="swap_inverted_dates",
+                        entity="agent_entity_dates",
+                        source_id=str(data.get("source_id") or data.get("name") or "agent"),
+                        reason=f"birth_year ({b_orig}) > death_year ({d_orig}); swapped values",
+                        level="WARNING",
                     )
         return data
 

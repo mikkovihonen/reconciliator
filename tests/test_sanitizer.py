@@ -88,10 +88,10 @@ def test_sanitize_entity_subject_overlong_label(caplog: pytest.LogCaptureFixture
     assert len(subject.raw_label) == 512
     assert subject.raw_label == "X" * 512
 
-    # Check logger error with task_id
-    assert "Task oai-harvest-task-42" in caplog.text
-    assert "entity_subjects.raw_label" in caplog.text
+    # Check logger error with task_id and centralized prefix
+    assert "[sanitization] truncate entity_subjects.raw_label" in caplog.text
     assert "len=700 > max=512" in caplog.text
+    assert any(getattr(r, "task_id", None) == "oai-harvest-task-42" for r in caplog.records)
 
     # Check tracker was called
     tracker.record_error.assert_called_once()

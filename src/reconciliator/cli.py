@@ -955,16 +955,17 @@ def _ingest_corpus_as_wemi(
             from sqlalchemy.exc import DataError
 
             if isinstance(exc, DataError) and config is not None and config.truncate_overlong_values:
-                logging.getLogger(__name__).error(
-                    "Task %s: DataError during corpus batch insert (%s). Skipping batch to allow reconciliation to continue.",
-                    task_id,
-                    exc,
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logging.getLogger(__name__),
+                    action="skip_batch",
+                    entity="corpus_wemi_batch",
+                    source_id=source_name,
+                    reason=f"database DataError: {exc}",
+                    task_id=task_id,
+                    tracker=tracker,
                 )
-                if tracker is not None and hasattr(tracker, "record_error"):
-                    tracker.record_error(
-                        message=f"DataError during corpus batch write for task {task_id}: {exc}",
-                        metadata={"error_type": "DataError", "task_id": task_id},
-                    )
                 batch.clear()
                 return
             raise

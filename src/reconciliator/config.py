@@ -1946,10 +1946,13 @@ class LoggingConfig(BaseModel):
     """Logging subsystem configuration surface."""
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format: str = "%(asctime)s [%(levelname)s] [task_id=%(task_id)s] %(name)s: %(message)s"
     date_format: str = "%Y-%m-%d %H:%M:%S"
     log_file: Optional[Path] = None
     capture_warnings: bool = False
+    task_id_default: str = "-"
+    enable_telemetry_handler: bool = True
+    sanitization_log_level: Literal["ERROR", "WARNING", "INFO"] = "ERROR"
 
     @field_validator("level", mode="before")
     @classmethod
@@ -2332,6 +2335,8 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
 
 def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -> None:
     """Configure standard logging handlers, formatters, and root level based on configuration."""
+    from reconciliator.logging import TaskLogFilter, TelemetryLogHandler
+
     if isinstance(logging_cfg, AppConfig):
         cfg = logging_cfg.logging
     elif isinstance(logging_cfg, LoggingConfig):
@@ -2342,6 +2347,12 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
     root_logger = logging.getLogger()
     level_num = getattr(logging, cfg.level, logging.INFO)
     root_logger.setLevel(level_num)
+
+    # Attach TaskLogFilter to ensure record.task_id is always present
+    for f in list(root_logger.filters):
+        if isinstance(f, TaskLogFilter):
+            root_logger.removeFilter(f)
+    root_logger.addFilter(TaskLogFilter(default_task_id=cfg.task_id_default))
 
     formatter = logging.Formatter(fmt=cfg.format, datefmt=cfg.date_format)
 
@@ -2367,6 +2378,10 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
         file_handler.setLevel(level_num)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
+
+    if cfg.enable_telemetry_handler:
+        telemetry_handler = TelemetryLogHandler()
+        root_logger.addHandler(telemetry_handler)
 
     logging.captureWarnings(cfg.capture_warnings)
 

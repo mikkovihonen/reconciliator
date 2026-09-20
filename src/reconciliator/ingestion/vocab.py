@@ -322,12 +322,17 @@ def ingest_bridge_files(
             vocab_store.insert_mappings(total_bridge_mappings)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
-                logger.error("Database DataError during bridge mappings insert: %s [task_id=%s]", err, task_id)
-                if tracker:
-                    tracker.record_error(
-                        message=f"Bridge mappings insert failed with DataError: {err}",
-                        metadata={"last_error_task_id": task_id},
-                    )
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logger,
+                    action="skip_batch",
+                    entity="bridge_mappings",
+                    source_id="bridge_files",
+                    reason=f"database DataError: {err}",
+                    task_id=task_id,
+                    tracker=tracker,
+                )
             else:
                 raise
 
@@ -336,12 +341,17 @@ def ingest_bridge_files(
             vocab_store.insert_aliases(total_bridge_aliases)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
-                logger.error("Database DataError during bridge aliases insert: %s [task_id=%s]", err, task_id)
-                if tracker:
-                    tracker.record_error(
-                        message=f"Bridge aliases insert failed with DataError: {err}",
-                        metadata={"last_error_task_id": task_id},
-                    )
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logger,
+                    action="skip_batch",
+                    entity="bridge_aliases",
+                    source_id="bridge_files",
+                    reason=f"database DataError: {err}",
+                    task_id=task_id,
+                    tracker=tracker,
+                )
             else:
                 raise
 
@@ -350,12 +360,17 @@ def ingest_bridge_files(
             vocab_store.insert_relators(total_bridge_relators)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
-                logger.error("Database DataError during bridge relators insert: %s [task_id=%s]", err, task_id)
-                if tracker:
-                    tracker.record_error(
-                        message=f"Bridge relators insert failed with DataError: {err}",
-                        metadata={"last_error_task_id": task_id},
-                    )
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logger,
+                    action="skip_batch",
+                    entity="bridge_relators",
+                    source_id="bridge_files",
+                    reason=f"database DataError: {err}",
+                    task_id=task_id,
+                    tracker=tracker,
+                )
             else:
                 raise
 
@@ -445,12 +460,17 @@ def ingest_vocab_file(
         vocab_store.insert_concepts(total_concepts)
     except DataError as err:
         if config and getattr(config, "truncate_overlong_values", True):
-            logger.error("Database DataError during vocab concepts insert: %s [task_id=%s]", err, task_id)
-            if tracker:
-                tracker.record_error(
-                    message=f"Vocab concepts insert failed with DataError: {err}",
-                    metadata={"last_error_task_id": task_id},
-                )
+            from reconciliator.logging import log_validation
+
+            log_validation(
+                logger,
+                action="skip_batch",
+                entity="vocab_concepts",
+                source_id="vocab_file",
+                reason=f"database DataError: {err}",
+                task_id=task_id,
+                tracker=tracker,
+            )
         else:
             raise
 
@@ -458,12 +478,17 @@ def ingest_vocab_file(
         vocab_store.insert_mappings(total_mappings)
     except DataError as err:
         if config and getattr(config, "truncate_overlong_values", True):
-            logger.error("Database DataError during vocab mappings insert: %s [task_id=%s]", err, task_id)
-            if tracker:
-                tracker.record_error(
-                    message=f"Vocab mappings insert failed with DataError: {err}",
-                    metadata={"last_error_task_id": task_id},
-                )
+            from reconciliator.logging import log_validation
+
+            log_validation(
+                logger,
+                action="skip_batch",
+                entity="vocab_mappings",
+                source_id="vocab_file",
+                reason=f"database DataError: {err}",
+                task_id=task_id,
+                tracker=tracker,
+            )
         else:
             raise
 
@@ -472,12 +497,17 @@ def ingest_vocab_file(
             vocab_store.insert_hierarchy_batch(total_hierarchy_edges)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
-                logger.error("Database DataError during vocab hierarchy insert: %s [task_id=%s]", err, task_id)
-                if tracker:
-                    tracker.record_error(
-                        message=f"Vocab hierarchy insert failed with DataError: {err}",
-                        metadata={"last_error_task_id": task_id},
-                    )
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logger,
+                    action="skip_batch",
+                    entity="vocab_hierarchy",
+                    source_id="vocab_file",
+                    reason=f"database DataError: {err}",
+                    task_id=task_id,
+                    tracker=tracker,
+                )
             else:
                 raise
 
@@ -523,12 +553,17 @@ def ingest_vocab_file(
             vocab_store.insert_relators(mts_roles)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
-                logger.error("Database DataError during vocab relators insert: %s [task_id=%s]", err, task_id)
-                if tracker:
-                    tracker.record_error(
-                        message=f"Vocab relators insert failed with DataError: {err}",
-                        metadata={"last_error_task_id": task_id},
-                    )
+                from reconciliator.logging import log_validation
+
+                log_validation(
+                    logger,
+                    action="skip_batch",
+                    entity="vocab_relators",
+                    source_id="vocab_file",
+                    reason=f"database DataError: {err}",
+                    task_id=task_id,
+                    tracker=tracker,
+                )
             else:
                 raise
 

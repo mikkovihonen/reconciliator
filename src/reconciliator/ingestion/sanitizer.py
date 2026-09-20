@@ -145,25 +145,21 @@ def sanitize_entities(
 
                 truncations += 1
 
-                logger.error(
-                    "Task %s: Value too long for %s.%s (source=%s, source_id=%s, len=%d > max=%d). Truncating value.",
-                    task_id or "unknown",
-                    table.name,
-                    col_name,
-                    source,
-                    source_id,
-                    orig_len,
-                    limit,
+                full_source_id = (
+                    f"{source}:{source_id}" if source and source != "unknown" else source_id
                 )
+                from reconciliator.logging import log_sanitization
 
-                if tracker is not None and hasattr(tracker, "record_error"):
-                    tracker.record_error(
-                        message=f"Truncated {table.name}.{col_name} (len {orig_len} > {limit}) for task {task_id}",
-                        metadata={
-                            "last_truncated_field": f"{table.name}.{col_name}",
-                            "last_truncated_task_id": task_id,
-                        },
-                    )
+                log_sanitization(
+                    logger,
+                    action="truncate",
+                    entity=f"{table.name}.{col_name}",
+                    source_id=full_source_id,
+                    reason=f"length exceeded limit (len={orig_len} > max={limit})",
+                    task_id=task_id,
+                    tracker=tracker,
+                    level=getattr(config, "sanitization_log_level", "ERROR"),
+                )
 
     return truncations
 
@@ -241,23 +237,18 @@ def sanitize_vocab_concepts(
         else:
             res = val[:limit]
         truncations += 1
-        logger.error(
-            "Task %s: Value too long for %s.%s (source_id=%s, len=%d > max=%d). Truncating value.",
-            task_id or "unknown",
-            table_name,
-            col_name,
-            source_id,
-            orig_len,
-            limit,
+        from reconciliator.logging import log_sanitization
+
+        log_sanitization(
+            logger,
+            action="truncate",
+            entity=f"{table_name}.{col_name}",
+            source_id=source_id,
+            reason=f"length exceeded limit (len={orig_len} > max={limit})",
+            task_id=task_id,
+            tracker=tracker,
+            level=getattr(config, "sanitization_log_level", "ERROR"),
         )
-        if tracker is not None and hasattr(tracker, "record_error"):
-            tracker.record_error(
-                message=f"Truncated {table_name}.{col_name} (len {orig_len} > {limit}) for task {task_id}",
-                metadata={
-                    "last_truncated_field": f"{table_name}.{col_name}",
-                    "last_truncated_task_id": task_id,
-                },
-            )
         return res
 
     for c in concepts:
@@ -339,23 +330,18 @@ def sanitize_vocab_mappings(
         else:
             res = val[:limit]
         truncations += 1
-        logger.error(
-            "Task %s: Value too long for %s.%s (source_id=%s, len=%d > max=%d). Truncating value.",
-            task_id or "unknown",
-            table_name,
-            col_name,
-            source_id,
-            orig_len,
-            limit,
+        from reconciliator.logging import log_sanitization
+
+        log_sanitization(
+            logger,
+            action="truncate",
+            entity=f"{table_name}.{col_name}",
+            source_id=source_id,
+            reason=f"length exceeded limit (len={orig_len} > max={limit})",
+            task_id=task_id,
+            tracker=tracker,
+            level=getattr(config, "sanitization_log_level", "ERROR"),
         )
-        if tracker is not None and hasattr(tracker, "record_error"):
-            tracker.record_error(
-                message=f"Truncated {table_name}.{col_name} (len {orig_len} > {limit}) for task {task_id}",
-                metadata={
-                    "last_truncated_field": f"{table_name}.{col_name}",
-                    "last_truncated_task_id": task_id,
-                },
-            )
         return res
 
     for m in mappings:

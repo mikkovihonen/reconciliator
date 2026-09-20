@@ -200,16 +200,39 @@ class WorkConsolidator:
 
     @staticmethod
     def _add_identifier(sig: WorkSignature, scheme: Any, value: Any) -> None:
-        norm = clean_alphanumeric(str(value or ""))
-        if not norm:
+        val_str = str(value or "").strip()
+        if not val_str:
             return
         scheme_l = str(scheme or "").strip().lower()
         if scheme_l == "wikidata_qid":
             scheme_l = "wikidata"
         # A bare source-minted URI is not shared identity; skip it.
-        if scheme_l in ("urn", "uri") and str(value).startswith(_LOCAL_URI_PREFIXES):
+        if scheme_l in ("urn", "uri") and val_str.startswith(_LOCAL_URI_PREFIXES):
             return
-        sig.identifiers.add(f"{scheme_l}:{norm}")
+
+        from reconciliator.normalizers.identifiers import (
+            normalize_doi,
+            normalize_isbn,
+            normalize_issn,
+            normalize_urn,
+        )
+
+        if scheme_l == "isbn":
+            norm = normalize_isbn(val_str)
+        elif scheme_l == "issn":
+            norm = normalize_issn(val_str)
+        elif scheme_l == "doi":
+            norm = normalize_doi(val_str)
+        elif scheme_l == "urn":
+            norm = normalize_urn(val_str)
+        else:
+            norm = clean_alphanumeric(val_str)
+
+        if not norm:
+            norm = clean_alphanumeric(val_str)
+
+        if norm:
+            sig.identifiers.add(f"{scheme_l}:{norm}")
 
     # ------------------------------------------------------------------
     # Equivalence
