@@ -41,8 +41,11 @@ from reconciliator.normalizers.blocking import compute_title_stem
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
 from reconciliator.database import WEMIRepository
+from reconciliator.database.schema import agents_table
 from reconciliator.embedding.template import WEMISerializationEngine
+from reconciliator.ingestion.sanitizer import sanitize_batch_payload, sanitize_entities
 from reconciliator.vocab import concept_id_to_uri, format_wikidata_uri
+from sqlalchemy.exc import DataError
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +256,7 @@ def _extract_author_data(
             "qid": qid,
             "name": name_val,
             "family_name": fam_name,
+            "surname": fam_name,
             "identifiers": identifiers,
             "birth_year": birth_year,
             "death_year": death_year,
@@ -649,6 +653,39 @@ def _prescan_authors(
         else tuple(config.author_authority_properties)
     )
 
+    def _flush_author_batch(batch: list[dict[str, Any]]) -> None:
+        if not batch or store is None:
+            return
+        task_id = tracker.task_id if tracker and tracker.task_id else "wikidata-prescan"
+        if config and getattr(config, "truncate_overlong_values", True):
+            sanitize_entities(
+                batch,
+                agents_table,
+                config=config,
+                task_id=task_id,
+                tracker=tracker,
+                record_origin="wikidata",
+            )
+            for a in batch:
+                if "surname" in a and "family_name" in a and a["family_name"] != a["surname"]:
+                    a["family_name"] = a["surname"]
+        try:
+            store.insert_wikidata_authors(batch)
+        except DataError as err:
+            if config and getattr(config, "truncate_overlong_values", True):
+                logger.error(
+                    "Database DataError (string length violation) during Wikidata author insert: %s [task_id=%s]",
+                    err,
+                    task_id,
+                )
+                if tracker:
+                    tracker.record_error(
+                        message=f"Wikidata author insert failed with DataError: {err}",
+                        metadata={"last_error_task_id": task_id},
+                    )
+            else:
+                raise
+
     with gzip.open(path, "rb") as f:
         for line in f:
             if not _has_author_indicator(line):
@@ -671,8 +708,7 @@ def _prescan_authors(
             if author_data:
                 author_batch.append(author_data)
                 if len(author_batch) >= 500:
-                    if store is not None:
-                        store.insert_wikidata_authors(author_batch)
+                    _flush_author_batch(author_batch)
                     total_authors += len(author_batch)
                     author_batch.clear()
 
@@ -681,8 +717,8 @@ def _prescan_authors(
                 tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
 
     # Flush remaining batch
-    if author_batch and store is not None:
-        store.insert_wikidata_authors(author_batch)
+    if author_batch:
+        _flush_author_batch(author_batch)
         total_authors += len(author_batch)
         author_batch.clear()
 
@@ -1248,17 +1284,51 @@ def ingest_wikidata_wemi_pipeline(
     def _flush_batch() -> None:
         nonlocal total_ingested
         if works_batch:
-            wemi_repo.insert_wemi_batch(
-                works=works_batch,
-                expressions=expressions_batch,
-                manifestations=manifestations_batch,
-                items=items_batch,
-                agents=agents_batch,
-                relationships=relationships_batch,
-                identifiers=identifiers_batch,
-                manifestation_expressions=associations_batch,
-                contributions=contributions_batch,
-            )
+            task_id = tracker.task_id if tracker and tracker.task_id else "wikidata-wemi"
+            payload = {
+                "works": works_batch,
+                "expressions": expressions_batch,
+                "manifestations": manifestations_batch,
+                "items": items_batch,
+                "agents": agents_batch,
+                "relationships": relationships_batch,
+                "identifiers": identifiers_batch,
+                "manifestation_expressions": associations_batch,
+                "contributions": contributions_batch,
+            }
+            if config and getattr(config, "truncate_overlong_values", True):
+                sanitize_batch_payload(
+                    payload,
+                    config=config,
+                    task_id=task_id,
+                    tracker=tracker,
+                )
+            try:
+                wemi_repo.insert_wemi_batch(
+                    works=works_batch,
+                    expressions=expressions_batch,
+                    manifestations=manifestations_batch,
+                    items=items_batch,
+                    agents=agents_batch,
+                    relationships=relationships_batch,
+                    identifiers=identifiers_batch,
+                    manifestation_expressions=associations_batch,
+                    contributions=contributions_batch,
+                )
+            except DataError as err:
+                if config and getattr(config, "truncate_overlong_values", True):
+                    logger.error(
+                        "Database DataError (string length violation) during Wikidata WEMI insert: %s [task_id=%s]",
+                        err,
+                        task_id,
+                    )
+                    if tracker:
+                        tracker.record_error(
+                            message=f"Wikidata WEMI insert failed with DataError: {err}",
+                            metadata={"last_error_task_id": task_id},
+                        )
+                else:
+                    raise
             total_ingested += len(works_batch)
             works_batch.clear()
             expressions_batch.clear()
@@ -1271,6 +1341,7 @@ def ingest_wikidata_wemi_pipeline(
             contributions_batch.clear()
             if tracker:
                 tracker.update_progress(stage="wikidata_wemi", items_processed=total_ingested)
+
 
     with gzip.open(path, "rb") as f:
         for line in f:

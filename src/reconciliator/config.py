@@ -1118,6 +1118,11 @@ class VocabIngestConfig(BaseModel):
     pref_label_languages: Optional[list[str] | str] = None
     alt_label_languages: Optional[list[str] | str] = None
     normalization: Optional[VocabulariesConfig] = None
+    truncate_overlong_values: bool = True
+    truncation_marker: str = ""
+    default_max_field_length: Optional[int] = None
+    field_length_overrides: dict[str, int] = Field(default_factory=dict)
+
 
 
 class OAIIngestConfig(BaseModel):
@@ -1242,6 +1247,11 @@ class WikidataIngestConfig(BaseModel):
             get_bundled_defaults().get("wikidata", {}).get("subject_mappings", {})
         )
     )
+    truncate_overlong_values: bool = True
+    truncation_marker: str = ""
+    default_max_field_length: Optional[int] = None
+    field_length_overrides: dict[str, int] = Field(default_factory=dict)
+
 
 
 # ---------------------------------------------------------------------------
@@ -1836,6 +1846,11 @@ class ReconcileConfig(BaseModel):
     supported_subject_vocabularies: list[str] = Field(default_factory=list)
     entity_vocabularies: list[str] = Field(default_factory=list)
     vocabulary_patterns: dict[str, list[str]] = Field(default_factory=dict)
+    truncate_overlong_values: bool = True
+    truncation_marker: str = ""
+    default_max_field_length: Optional[int] = None
+    field_length_overrides: dict[str, int] = Field(default_factory=dict)
+
 
     @property
     def enrichment_toggles(self) -> EnrichmentConfig:

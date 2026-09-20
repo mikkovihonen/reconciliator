@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, Optional, Sequence
+
+from sqlalchemy.exc import DataError
 
 from reconciliator.config import (
     VocabIngestConfig,
     get_bundled_vocab_defaults,
     get_category_default_field_map,
+)
+from reconciliator.database.schema import (
+    concept_aliases_table,
+    concept_hierarchy_table,
+    relator_terms_table,
+)
+from reconciliator.ingestion.sanitizer import (
+    sanitize_entities,
+    sanitize_vocab_concepts,
+    sanitize_vocab_mappings,
 )
 from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
@@ -17,6 +30,9 @@ from reconciliator.progress import ProgressTracker
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
 from reconciliator.vocab.detection import extract_concept_id
 from reconciliator.vocab.store import VocabStore, is_language_allowed
+
+logger = logging.getLogger(__name__)
+
 
 
 def parse_turtle_simple(
@@ -169,7 +185,12 @@ def parse_turtle_simple(
     return concepts, mappings, hierarchy_edges
 
 
-def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path] = None) -> int:
+def ingest_bridge_files(
+    vocab_store: VocabStore,
+    extra_bridge_dir: Optional[Path] = None,
+    config: Optional[VocabIngestConfig] = None,
+    tracker: Optional[ProgressTracker] = None,
+) -> int:
     """Ingest bundled and optional custom bridge files into concept_mappings and concept_aliases."""
     bridge_files = get_bundled_bridge_files()
     if extra_bridge_dir and extra_bridge_dir.is_dir():
@@ -290,14 +311,56 @@ def ingest_bridge_files(vocab_store: VocabStore, extra_bridge_dir: Optional[Path
                     }
                 )
 
+    task_id = tracker.task_id if tracker and tracker.task_id else "vocab-bridge-ingest"
+    if config and getattr(config, "truncate_overlong_values", True):
+        sanitize_vocab_mappings(total_bridge_mappings, config=config, task_id=task_id, tracker=tracker)
+        sanitize_entities(total_bridge_aliases, concept_aliases_table, config=config, task_id=task_id, tracker=tracker)
+        sanitize_entities(total_bridge_relators, relator_terms_table, config=config, task_id=task_id, tracker=tracker)
+
     if total_bridge_mappings:
-        vocab_store.insert_mappings(total_bridge_mappings)
+        try:
+            vocab_store.insert_mappings(total_bridge_mappings)
+        except DataError as err:
+            if config and getattr(config, "truncate_overlong_values", True):
+                logger.error("Database DataError during bridge mappings insert: %s [task_id=%s]", err, task_id)
+                if tracker:
+                    tracker.record_error(
+                        message=f"Bridge mappings insert failed with DataError: {err}",
+                        metadata={"last_error_task_id": task_id},
+                    )
+            else:
+                raise
+
     if total_bridge_aliases:
-        vocab_store.insert_aliases(total_bridge_aliases)
+        try:
+            vocab_store.insert_aliases(total_bridge_aliases)
+        except DataError as err:
+            if config and getattr(config, "truncate_overlong_values", True):
+                logger.error("Database DataError during bridge aliases insert: %s [task_id=%s]", err, task_id)
+                if tracker:
+                    tracker.record_error(
+                        message=f"Bridge aliases insert failed with DataError: {err}",
+                        metadata={"last_error_task_id": task_id},
+                    )
+            else:
+                raise
+
     if total_bridge_relators:
-        vocab_store.insert_relators(total_bridge_relators)
+        try:
+            vocab_store.insert_relators(total_bridge_relators)
+        except DataError as err:
+            if config and getattr(config, "truncate_overlong_values", True):
+                logger.error("Database DataError during bridge relators insert: %s [task_id=%s]", err, task_id)
+                if tracker:
+                    tracker.record_error(
+                        message=f"Bridge relators insert failed with DataError: {err}",
+                        metadata={"last_error_task_id": task_id},
+                    )
+            else:
+                raise
 
     return len(total_bridge_mappings)
+
 
 
 def ingest_vocab_file(
@@ -365,10 +428,58 @@ def ingest_vocab_file(
             force=True,
         )
 
-    vocab_store.insert_concepts(total_concepts)
-    vocab_store.insert_mappings(total_mappings)
+    task_id = tracker.task_id if tracker and tracker.task_id else "vocab-ingest"
+    if config and getattr(config, "truncate_overlong_values", True):
+        sanitize_vocab_concepts(total_concepts, config=config, task_id=task_id, tracker=tracker)
+        sanitize_vocab_mappings(total_mappings, config=config, task_id=task_id, tracker=tracker)
+        if total_hierarchy_edges:
+            sanitize_entities(
+                total_hierarchy_edges,
+                concept_hierarchy_table,
+                config=config,
+                task_id=task_id,
+                tracker=tracker,
+            )
+
+    try:
+        vocab_store.insert_concepts(total_concepts)
+    except DataError as err:
+        if config and getattr(config, "truncate_overlong_values", True):
+            logger.error("Database DataError during vocab concepts insert: %s [task_id=%s]", err, task_id)
+            if tracker:
+                tracker.record_error(
+                    message=f"Vocab concepts insert failed with DataError: {err}",
+                    metadata={"last_error_task_id": task_id},
+                )
+        else:
+            raise
+
+    try:
+        vocab_store.insert_mappings(total_mappings)
+    except DataError as err:
+        if config and getattr(config, "truncate_overlong_values", True):
+            logger.error("Database DataError during vocab mappings insert: %s [task_id=%s]", err, task_id)
+            if tracker:
+                tracker.record_error(
+                    message=f"Vocab mappings insert failed with DataError: {err}",
+                    metadata={"last_error_task_id": task_id},
+                )
+        else:
+            raise
+
     if total_hierarchy_edges:
-        vocab_store.insert_hierarchy_batch(total_hierarchy_edges)
+        try:
+            vocab_store.insert_hierarchy_batch(total_hierarchy_edges)
+        except DataError as err:
+            if config and getattr(config, "truncate_overlong_values", True):
+                logger.error("Database DataError during vocab hierarchy insert: %s [task_id=%s]", err, task_id)
+                if tracker:
+                    tracker.record_error(
+                        message=f"Vocab hierarchy insert failed with DataError: {err}",
+                        metadata={"last_error_task_id": task_id},
+                    )
+            else:
+                raise
 
     # Ingest MTS contributor roles into relator_terms
     mts_to_code: dict[str, str] = {}
@@ -400,10 +511,30 @@ def ingest_vocab_file(
                             }
                         )
     if mts_roles:
-        vocab_store.insert_relators(mts_roles)
+        if config and getattr(config, "truncate_overlong_values", True):
+            sanitize_entities(
+                mts_roles,
+                relator_terms_table,
+                config=config,
+                task_id=task_id,
+                tracker=tracker,
+            )
+        try:
+            vocab_store.insert_relators(mts_roles)
+        except DataError as err:
+            if config and getattr(config, "truncate_overlong_values", True):
+                logger.error("Database DataError during vocab relators insert: %s [task_id=%s]", err, task_id)
+                if tracker:
+                    tracker.record_error(
+                        message=f"Vocab relators insert failed with DataError: {err}",
+                        metadata={"last_error_task_id": task_id},
+                    )
+            else:
+                raise
 
     # Ingest bundled bridge vocabularies
-    ingest_bridge_files(vocab_store)
+    ingest_bridge_files(vocab_store, config=config, tracker=tracker)
+
 
     # Rebuild normalized aliases index
     vocab_store.rebuild_aliases_from_concepts()

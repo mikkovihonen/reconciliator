@@ -804,6 +804,13 @@ ingest_vocab:
   # vocabularies: null (automatically uses vocabularies.download_list)
   # legacy_thesauri: null (automatically uses vocabularies.legacy_to_modern keys)
 
+  # Overlong string value truncation
+  truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
+  truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
+  default_max_field_length: null # Global fallback cap for unconstrained String columns
+  field_length_overrides: {}     # Explicit overrides, e.g. {"concept_labels.label": 500}
+
+
 # ==============================================================================
 # 8b. Constituent extraction (albums, anthologies, articles)
 # ==============================================================================
@@ -921,6 +928,13 @@ ingest_wikidata:
   require_author_authority_id: true # Filter out entities without library authority IDs
   # author_authority_properties: null (automatically uses vocabularies.wikidata_author_properties)
 
+  # Overlong string value truncation
+  truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
+  truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
+  default_max_field_length: null # Global fallback cap for unconstrained String columns
+  field_length_overrides: {}     # Explicit overrides, e.g. {"agents.name": 255}
+
+
 # ==============================================================================
 # 11. Cross-Source Work Consolidation
 # ==============================================================================
@@ -980,6 +994,13 @@ reconcile:
   # corpus's WEMI rows, registered non-authoritative, so the corpus is ingested
   # like any other source. Defaults to the target file's stem.
   corpus_source_name: null
+
+  # Overlong string value truncation for corpus ingestion
+  truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
+  truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
+  default_max_field_length: null # Global fallback cap for unconstrained String columns
+  field_length_overrides: {}     # Explicit overrides, e.g. {"works.title": 500}
+
 
   # ---------------------------------------------------------------------------
   # Domain funnels

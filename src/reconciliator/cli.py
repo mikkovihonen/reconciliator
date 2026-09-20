@@ -19,10 +19,12 @@ from reconciliator.clustering import CorpusClusterer
 from reconciliator.config import (
     AppConfig,
     OAIIngestConfig,
+    ReconcileConfig,
     SkosmosDownloadConfig,
     configure_logging,
     load_config,
 )
+from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.database import (
     is_container_present,
@@ -910,6 +912,8 @@ def _ingest_corpus_as_wemi(
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = " ./,;:",
     batch_size: int = 500,
+    config: Optional[ReconcileConfig] = None,
+    tracker: Optional[Any] = None,
 ) -> int:
     """Persist the corpus being reconciled as ordinary WEMI rows.
 
@@ -927,19 +931,44 @@ def _ingest_corpus_as_wemi(
     def _flush() -> None:
         if not batch.get("works"):
             return
-        repo.insert_wemi_batch(
-            works=batch.get("works") or [],
-            expressions=batch.get("expressions") or [],
-            manifestations=batch.get("manifestations") or [],
-            agents=batch.get("agents") or [],
-            relationships=batch.get("relationships") or [],
-            identifiers=batch.get("identifiers") or [],
-            manifestation_expressions=batch.get("associations") or [],
-            contributions=batch.get("contributions") or [],
-            entity_keys=batch.get("entity_keys") or [],
-            entity_subjects=batch.get("entity_subjects") or [],
-            record_origin=source_name,
-        )
+
+        task_id = getattr(tracker, "task_id", "") or f"corpus-ingest-{source_name}"
+        if config is not None and config.truncate_overlong_values:
+            batch["record_origin"] = source_name
+            sanitize_batch_payload(batch, config=config, task_id=task_id, tracker=tracker)
+
+        try:
+            repo.insert_wemi_batch(
+                works=batch.get("works") or [],
+                expressions=batch.get("expressions") or [],
+                manifestations=batch.get("manifestations") or [],
+                agents=batch.get("agents") or [],
+                relationships=batch.get("relationships") or [],
+                identifiers=batch.get("identifiers") or [],
+                manifestation_expressions=batch.get("associations") or [],
+                contributions=batch.get("contributions") or [],
+                entity_keys=batch.get("entity_keys") or [],
+                entity_subjects=batch.get("entity_subjects") or [],
+                record_origin=source_name,
+            )
+        except Exception as exc:
+            from sqlalchemy.exc import DataError
+
+            if isinstance(exc, DataError) and config is not None and config.truncate_overlong_values:
+                logging.getLogger(__name__).error(
+                    "Task %s: DataError during corpus batch insert (%s). Skipping batch to allow reconciliation to continue.",
+                    task_id,
+                    exc,
+                )
+                if tracker is not None and hasattr(tracker, "record_error"):
+                    tracker.record_error(
+                        message=f"DataError during corpus batch write for task {task_id}: {exc}",
+                        metadata={"error_type": "DataError", "task_id": task_id},
+                    )
+                batch.clear()
+                return
+            raise
+
         batch.clear()
 
     def _stage(key: str, values: Any) -> None:
@@ -1334,6 +1363,8 @@ def reconcile_cmd(
             bf_profile,
             strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
             isbd_punctuation=cfg.record_normalization.isbd_punctuation,
+            config=r_cfg,
+            tracker=tracker,
         )
 
         if staged:
