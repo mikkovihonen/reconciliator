@@ -72,6 +72,9 @@ def get_task_tracker(task_id: str) -> Optional[ProgressTracker]:
         return _active_trackers.get(task_id)
 
 
+
+
+
 class TaskLogFilter(logging.Filter):
     """Logging filter that injects the current task_id into all LogRecords."""
 
@@ -81,7 +84,7 @@ class TaskLogFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         task_id = getattr(record, "task_id", None)
-        if not task_id:
+        if not task_id or task_id == _DEFAULT_TASK_ID:
             ctx_id = get_current_task_id()
             record.task_id = ctx_id if ctx_id != _DEFAULT_TASK_ID else self.default_task_id
         return True
@@ -208,12 +211,13 @@ def init_worker_logging(
         set_current_task_id(task_id)
 
     root = logging.getLogger()
-    # Add TaskLogFilter if not already attached
+    task_filter = TaskLogFilter(default_task_id=default_task_id)
     if not any(isinstance(f, TaskLogFilter) for f in root.filters):
-        root.addFilter(TaskLogFilter(default_task_id=default_task_id))
+        root.addFilter(task_filter)
 
     if queue is not None:
         # Route worker logs to parent process Queue
         qh = logging.handlers.QueueHandler(queue)
+        qh.addFilter(task_filter)
         root.handlers.clear()
         root.addHandler(qh)

@@ -2348,11 +2348,12 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
     level_num = getattr(logging, cfg.level, logging.INFO)
     root_logger.setLevel(level_num)
 
+    task_filter = TaskLogFilter(default_task_id=cfg.task_id_default)
     # Attach TaskLogFilter to ensure record.task_id is always present
     for f in list(root_logger.filters):
         if isinstance(f, TaskLogFilter):
             root_logger.removeFilter(f)
-    root_logger.addFilter(TaskLogFilter(default_task_id=cfg.task_id_default))
+    root_logger.addFilter(task_filter)
 
     formatter = logging.Formatter(fmt=cfg.format, datefmt=cfg.date_format)
 
@@ -2369,6 +2370,7 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
     stream_handler = logging.StreamHandler(sys.stderr)
     stream_handler.setLevel(level_num)
     stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(task_filter)
     root_logger.addHandler(stream_handler)
 
     if cfg.log_file:
@@ -2377,6 +2379,7 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
         file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
         file_handler.setLevel(level_num)
         file_handler.setFormatter(formatter)
+        file_handler.addFilter(task_filter)
         root_logger.addHandler(file_handler)
 
     if cfg.enable_telemetry_handler:

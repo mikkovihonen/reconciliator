@@ -52,6 +52,32 @@ def test_progress_lifecycle(progress_db: Path) -> None:
     assert task.status == "completed"
 
 
+def test_progress_large_byte_totals(progress_db: Path) -> None:
+    """Verify bytes_total and bytes_processed exceeding 32-bit signed integer (>2.14GB, e.g. 156GB) do not overflow."""
+    dump_size_156gb = 156_008_813_215
+    tracker = ProgressTracker(
+        db_path=progress_db,
+        task_id="task-large-dump",
+        task_type="wikidata_ingest",
+        heartbeat_interval=0.01,
+    )
+
+    tracker.start_task(stage="wikidata_prescan", bytes_total=dump_size_156gb)
+    task = get_task_progress(progress_db, "task-large-dump")
+    assert task is not None
+    assert task.bytes_total == dump_size_156gb
+
+    tracker.update_progress(bytes_processed=50_000_000_000, force=True)
+    task = get_task_progress(progress_db, "task-large-dump")
+    assert task is not None
+    assert task.bytes_processed == 50_000_000_000
+
+    tracker.complete_task()
+    task = get_task_progress(progress_db, "task-large-dump")
+    assert task is not None
+    assert task.status == "completed"
+
+
 def test_table_and_json_rendering(progress_db: Path) -> None:
     tracker = ProgressTracker(
         db_path=progress_db,

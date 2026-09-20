@@ -18,7 +18,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool, QueuePool
 
 from reconciliator.config import PostgresConfig, StorageConfig, get_default_database_url
 from reconciliator.database.schema import (
@@ -105,16 +105,29 @@ def get_engine(
             pass
         connect_args["options"] = f"-csearch_path={schema},public"
 
-    engine = create_engine(
-        target_str,
-        poolclass=QueuePool,
-        pool_size=effective_pool_size,
-        max_overflow=effective_max_overflow,
-        pool_timeout=effective_pool_timeout,
-        pool_recycle=effective_pool_recycle,
-        pool_pre_ping=effective_pool_pre_ping,
-        connect_args=connect_args,
+    use_null_pool = (
+        effective_pool_size == 0
+        or os.environ.get("RECONCILIATOR_NULL_POOL", "").lower() in ("1", "true", "yes")
     )
+
+    if use_null_pool:
+        engine = create_engine(
+            target_str,
+            poolclass=NullPool,
+            pool_pre_ping=effective_pool_pre_ping,
+            connect_args=connect_args,
+        )
+    else:
+        engine = create_engine(
+            target_str,
+            poolclass=QueuePool,
+            pool_size=effective_pool_size,
+            max_overflow=effective_max_overflow,
+            pool_timeout=effective_pool_timeout,
+            pool_recycle=effective_pool_recycle,
+            pool_pre_ping=effective_pool_pre_ping,
+            connect_args=connect_args,
+        )
     return engine
 
 

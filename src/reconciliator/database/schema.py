@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -514,10 +515,10 @@ task_progress_table = Table(
     Column("task_type", String(64), nullable=False),
     Column("status", String(32), nullable=False),
     Column("current_stage", String(64), nullable=False),
-    Column("items_processed", Integer, default=0, server_default="0"),
-    Column("items_total", Integer, nullable=True),
-    Column("bytes_processed", Integer, default=0, server_default="0"),
-    Column("bytes_total", Integer, nullable=True),
+    Column("items_processed", BigInteger, default=0, server_default="0"),
+    Column("items_total", BigInteger, nullable=True),
+    Column("bytes_processed", BigInteger, default=0, server_default="0"),
+    Column("bytes_total", BigInteger, nullable=True),
     Column("rate_per_sec", Float, default=0.0, server_default="0.0"),
     Column("percentage", Float, default=0.0, server_default="0.0"),
     Column("start_time", String(64), nullable=False),

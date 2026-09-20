@@ -37,6 +37,17 @@ def init_progress_db(engine: Any) -> None:
     from reconciliator.database import create_schema_tables, task_progress_table
 
     create_schema_tables(engine, [task_progress_table])
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("""
+                ALTER TABLE task_progress
+                    ALTER COLUMN bytes_total TYPE BIGINT,
+                    ALTER COLUMN bytes_processed TYPE BIGINT,
+                    ALTER COLUMN items_total TYPE BIGINT,
+                    ALTER COLUMN items_processed TYPE BIGINT;
+            """)
+    except Exception:
+        pass
 
 
 def _now_iso() -> str:

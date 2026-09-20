@@ -133,3 +133,28 @@ def test_multiprocess_worker_logging() -> None:
         worker_task_id, err_cnt = future.result()
     assert worker_task_id == "mp-task-999"
     assert err_cnt == 1
+
+
+def test_child_logger_formatting_with_task_id() -> None:
+    """Verify child loggers format without KeyError('task_id') after configure_logging."""
+    import io
+
+    stream = io.StringIO()
+    cfg = LoggingConfig(format="[task_id=%(task_id)s] %(message)s")
+    configure_logging(cfg)
+
+    root = logging.getLogger()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter(fmt=cfg.format))
+    handler.addFilter(TaskLogFilter())
+    root.addHandler(handler)
+
+    try:
+        child_logger = logging.getLogger("reconciliator.ingestion.wikidata")
+        with task_context("wikidata-test-task"):
+            child_logger.info("Pass 1/2: Pre-scanning author entities...")
+
+        output = stream.getvalue()
+        assert "[task_id=wikidata-test-task] Pass 1/2: Pre-scanning author entities..." in output
+    finally:
+        root.removeHandler(handler)
