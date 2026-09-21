@@ -884,6 +884,32 @@ wikidata:
     geographic: "yso"
     medium_of_performance: "seko"
 
+ingest_wikidata:
+  dump_path: "dumps/latest-all.json.gz"
+  batch_size: 5000
+  pass1_only: false
+  extract_works: true
+  require_author_authority_id: true
+  author_authority_properties:
+    - "P3595"
+    - "P213"
+    - "P214"
+    - "P227"
+    - "P244"
+    - "P906"
+    - "P496"
+  use_pigz: true
+  pigz_path: null
+  pigz_threads: 0
+  workers: 0
+  lru_cache_size: 500000
+  progress_throttle_interval: 32768
+  use_synchronous_commit_off: true
+  truncate_overlong_values: true
+  truncation_marker: ""
+  default_max_field_length: null
+  field_length_overrides: {}
+
 compute:
   device: "auto"
   threads: null

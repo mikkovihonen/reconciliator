@@ -924,15 +924,26 @@ ingest_oai:
 # ==============================================================================
 ingest_wikidata:
   dump_path: "dumps/latest-all.json.gz"
-  batch_size: 1000
-  require_author_authority_id: true # Filter out entities without library authority IDs
-  # author_authority_properties: null (automatically uses vocabularies.wikidata_author_properties)
+  batch_size: 5000                   # Chunk and transaction batch size for Pass 1 and Pass 2
+  pass1_only: false                  # Pre-scan and persist author/agent entities only
+  extract_works: true                # Extract works, expressions, and manifestations
+  require_author_authority_id: true  # Filter out human entities lacking library authority IDs
+  # author_authority_properties: null # Uses default library authority properties (P3595, P213, etc.)
+
+  # Performance and Parallelism
+  use_pigz: true                     # Use pigz (parallel gzip) if available on host
+  pigz_path: null                    # Custom path to pigz binary (null = auto-discover)
+  pigz_threads: 0                    # Decompression threads (0 = auto-allocate cores)
+  workers: 0                         # Parsing worker processes (0 = auto-allocate cores, 1 = synchronous)
+  lru_cache_size: 500000             # Maximum in-memory LRU cache entries for hydrated QIDs
+  progress_throttle_interval: 32768  # Frequency of progress heartbeat calculations in lines
+  use_synchronous_commit_off: true   # Transaction-local synchronous_commit = 'off' for faster bulk writes
 
   # Overlong string value truncation
-  truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
-  truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
-  default_max_field_length: null # Global fallback cap for unconstrained String columns
-  field_length_overrides: {}     # Explicit overrides, e.g. {"agents.name": 255}
+  truncate_overlong_values: true     # Truncate values exceeding schema limits and log error with task_id
+  truncation_marker: ""              # Suffix appended to truncated values (e.g. "..." or empty string)
+  default_max_field_length: null     # Global fallback cap for unconstrained String columns
+  field_length_overrides: {}         # Explicit overrides, e.g. {"agents.name": 255}
 
 
 # ==============================================================================

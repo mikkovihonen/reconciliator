@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import gzip
 import logging
+import multiprocessing as mp
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import IO, Any, Iterator, Optional
 
 import orjson
 
@@ -88,6 +91,24 @@ AUTHOR_INDICATORS = (
 
 _HUMAN_AND_ENTITY_TYPES = {"Q5", "Q2085381", "Q4830453", "Q43229", "Q515", "Q6256"}
 _BOOK_TYPES = {"Q571", "Q7725634", "Q47461344", "Q3331189"}
+_CREATIVE_WORK_TYPES = {
+    "Q7725634",   # literary work
+    "Q571",       # book
+    "Q47461344",  # written work
+    "Q2188189",   # musical work
+    "Q7366",      # song
+    "Q105543609", # musical composition
+    "Q134556",    # single
+    "Q11424",     # film
+    "Q5398426",   # television series
+    "Q40063",     # drama / play
+    "Q1004",      # comics
+    "Q8274",      # manga
+    "Q131569",    # statute
+    "Q3284440",   # act of parliament
+    "Q7889",      # video game
+    "Q131436",    # board game
+}
 _AUTHOR_PROPERTIES = (
     ("P50", "aut"),
     ("P98", "edt"),
@@ -136,14 +157,282 @@ def extract_claim_qualifier_string(
     return None
 
 
+BIB_INDICATORS_RE = re.compile(
+    b'"(?:P212|P957|P3595|P213|Q571|Q7725634|Q47461344|Q2085381|P1476)"'
+)
+
+AUTHOR_INDICATORS_RE = re.compile(
+    b'"(?:Q5|Q170574|Q2085381|Q4830453|Q43229|Q515|Q6256|P3595|P213|P214|P227|P244|P906|P496|P98|P86)"'
+)
+
+
+def find_pigz_binary(custom_path: Optional[str] = None) -> Optional[str]:
+    """Find pigz binary on system or custom path."""
+    if custom_path:
+        if Path(custom_path).is_file() and os.access(custom_path, os.X_OK):
+            return str(custom_path)
+        return None
+    which_path = shutil.which("pigz")
+    if which_path:
+        return which_path
+    for candidate in ("/opt/homebrew/bin/pigz", "/usr/local/bin/pigz", "/usr/bin/pigz"):
+        if Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def open_dump_stream(
+    path: Path | str,
+    config: Optional[WikidataIngestConfig] = None,
+) -> tuple[Any, Optional[subprocess.Popen]]:
+    """Open gzipped dump via pigz, gzip -dc subprocess, or gzip.open fallback."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Wikidata dump not found: {p}")
+
+    use_pigz = True if config is None else config.use_pigz
+    pigz_path = None if config is None else config.pigz_path
+    pigz_threads = 0 if config is None else config.pigz_threads
+
+    if use_pigz:
+        pigz_bin = find_pigz_binary(pigz_path)
+        if pigz_bin:
+            threads = pigz_threads if pigz_threads > 0 else max(1, (os.cpu_count() or 2) // 2)
+            cmd = [pigz_bin, "-dc", "-p", str(threads), str(p)]
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=16 * 1024 * 1024,
+                )
+                if proc.stdout:
+                    logger.info(
+                        "Decompressing %s via pigz (%s) with %d threads",
+                        p.name,
+                        pigz_bin,
+                        threads,
+                    )
+                    return proc.stdout, proc
+            except Exception as e:
+                logger.warning("Failed to launch pigz subprocess (%s): %s", pigz_bin, e)
+
+        # Fallback to standard gzip -dc subprocess
+        gzip_bin = shutil.which("gzip") or "/usr/bin/gzip"
+        if Path(gzip_bin).is_file() and os.access(gzip_bin, os.X_OK):
+            try:
+                proc = subprocess.Popen(
+                    [gzip_bin, "-dc", str(p)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=16 * 1024 * 1024,
+                )
+                if proc.stdout:
+                    logger.info(
+                        "Decompressing %s via %s -dc (install pigz for multi-threaded decompression)",
+                        p.name,
+                        gzip_bin,
+                    )
+                    return proc.stdout, proc
+            except Exception as e:
+                logger.debug("Failed to launch gzip -dc subprocess: %s", e)
+
+    # Standard library gzip fallback
+    logger.info("Decompressing %s via standard library gzip.open", p.name)
+    return gzip.open(p, "rb"), None
+
+
+class AuthorLRUCache:
+    """Bounded in-memory LRU cache for hydrated Wikidata author/agent entity metadata."""
+
+    def __init__(self, maxsize: int = 500000) -> None:
+        self.maxsize = max(1, maxsize)
+        self._cache: dict[str, Optional[dict[str, Any]]] = {}
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+    def get(self, qid: str) -> Optional[dict[str, Any]]:
+        if qid in self._cache:
+            val = self._cache.pop(qid)
+            self._cache[qid] = val
+            return val
+        return None
+
+    def __contains__(self, qid: str) -> bool:
+        return qid in self._cache
+
+    def set(self, qid: str, data: Optional[dict[str, Any]]) -> None:
+        if qid in self._cache:
+            self._cache.pop(qid)
+        elif len(self._cache) >= self.maxsize:
+            next_key = next(iter(self._cache))
+            del self._cache[next_key]
+        self._cache[qid] = data
+
+    def update(self, mapping: dict[str, Optional[dict[str, Any]]]) -> None:
+        for k, v in mapping.items():
+            self.set(k, v)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+_HYDRATION_PROPERTIES = (
+    "P50",
+    "P86",
+    "P57",
+    "P170",
+    "P287",
+    "P178",
+    "P84",
+    "P655",
+    "P110",
+    "P98",
+    "P175",
+    "P345",
+    "P123",
+    "P291",
+    "P179",
+    "P921",
+    "P136",
+    "P840",
+    "P870",
+)
+
+
+def extract_referenced_qids(entity: dict[str, Any]) -> set[str]:
+    """Collect all entity QIDs requiring author/name hydration."""
+    qids: set[str] = set()
+    claims = entity.get("claims", {})
+    for prop in _HYDRATION_PROPERTIES:
+        for stmt in claims.get(prop, []):
+            mainsnak = stmt.get("mainsnak", {})
+            datavalue = mainsnak.get("datavalue", {})
+            val = datavalue.get("value")
+            if isinstance(val, dict) and "id" in val:
+                qid = val["id"]
+                if isinstance(qid, str) and qid.startswith("Q"):
+                    qids.add(qid)
+    return qids
+
+
+def prefetch_batch_qids(
+    entities: list[dict[str, Any]],
+    store: Optional[WEMIRepository],
+    cache: AuthorLRUCache,
+) -> None:
+    """Pre-fetch all referenced QIDs for a batch in single database round-trips."""
+    if not store:
+        return
+    needed_qids: set[str] = set()
+    for ent in entities:
+        needed_qids.update(extract_referenced_qids(ent))
+
+    missing = [qid for qid in needed_qids if qid not in cache]
+    if not missing:
+        return
+
+    chunk_size = 5000
+    for i in range(0, len(missing), chunk_size):
+        chunk = missing[i : i + chunk_size]
+        results = store.get_wikidata_authors_batch(chunk)
+        cache.update(results)
+        for qid in chunk:
+            if qid not in cache:
+                cache.set(qid, None)
+
+
+def _worker_parse_authors_chunk(
+    chunk_data: tuple[list[bytes], bool, tuple[str, ...]],
+) -> list[dict[str, Any]]:
+    """Worker process function: parses a chunk of raw JSON lines for author entities."""
+    lines, require_auth_id, auth_props = chunk_data
+    batch: list[dict[str, Any]] = []
+    for line in lines:
+        if not _has_author_indicator(line):
+            continue
+        clean = line.strip().rstrip(b",")
+        if not clean or clean in (b"[", b"]"):
+            continue
+        try:
+            ent = orjson.loads(clean)
+        except Exception:
+            continue
+        data = _extract_author_data(
+            ent,
+            require_authority_id=require_auth_id,
+            authority_properties=auth_props,
+        )
+        if data:
+            batch.append(data)
+    return batch
+
+
+def _worker_parse_raw_bib_chunk(
+    lines: list[bytes],
+) -> list[dict[str, Any]]:
+    """Worker process function: parses a chunk of raw JSON lines for candidate bibliographic entities."""
+    batch: list[dict[str, Any]] = []
+    for line in lines:
+        if not _has_bib_indicator(line):
+            continue
+        clean = line.strip().rstrip(b",")
+        if not clean or clean in (b"[", b"]"):
+            continue
+        try:
+            ent = orjson.loads(clean)
+        except Exception:
+            continue
+        claims = ent.get("claims", {})
+        instance_of = get_claim_qids(claims, "P31")
+        is_human = "Q5" in instance_of
+        is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
+        if is_human or is_org_or_place:
+            continue
+        is_book = any(k in instance_of for k in _BOOK_TYPES)
+        has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
+        has_p629 = bool(get_claim_qids(claims, "P629"))
+        is_edition = has_p629 or "Q3331189" in instance_of
+        is_creative_work = is_book or any(
+            k in instance_of
+            for k in {
+                "Q7725634",
+                "Q571",
+                "Q47461344",
+                "Q2188189",
+                "Q11424",
+                "Q40063",
+                "Q1004",
+                "Q7889",
+                "Q131436",
+            }
+        )
+        if is_edition or is_creative_work or has_bib_ids:
+            batch.append(ent)
+    return batch
+
+
+def _chunk_stream_lines(stream: Any, chunk_size: int = 5000) -> Iterator[list[bytes]]:
+    """Yield buffered chunks of raw lines from a decompressed stream."""
+    chunk: list[bytes] = []
+    for line in stream:
+        chunk.append(line)
+        if len(chunk) >= chunk_size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
 def _has_bib_indicator(line: bytes) -> bool:
-    """Fast byte-level pre-filter for lines likely containing bibliographic or author entities."""
-    return any(indicator in line for indicator in BIB_INDICATORS)
+    """Fast byte-level pre-filter for lines likely containing bibliographic entities."""
+    return bool(BIB_INDICATORS_RE.search(line))
 
 
 def _has_author_indicator(line: bytes) -> bool:
     """Fast byte-level pre-filter for lines likely containing author, contributor, or agent entities."""
-    return any(indicator in line for indicator in AUTHOR_INDICATORS)
+    return bool(AUTHOR_INDICATORS_RE.search(line))
 
 
 def _extract_author_data(
@@ -170,7 +459,16 @@ def _extract_author_data(
     instance_of = get_claim_qids(claims, "P31")
     is_human = "Q5" in instance_of
     is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
-    has_auth_ids = any(prop in claims for prop in authority_properties)
+    auth_props = authority_properties or (
+        "P3595",
+        "P213",
+        "P214",
+        "P227",
+        "P244",
+        "P906",
+        "P496",
+    )
+    has_auth_ids = any(prop in claims for prop in auth_props)
 
     if require_authority_id and is_human:
         if not has_auth_ids:
@@ -272,11 +570,23 @@ def _extract_author_data(
 def _lookup_entity_name(
     qid: str,
     store: Optional[WEMIRepository],
+    cache: Optional[AuthorLRUCache] = None,
 ) -> Optional[str]:
-    """Look up an entity name from agents table by QID."""
-    if not store or not qid:
+    """Look up an entity name from agents table by QID with LRU cache support."""
+    if not qid:
+        return None
+    if cache is not None and qid in cache:
+        author = cache.get(qid)
+        if author:
+            name = author.get("name")
+            if name and not re.match(r"^Q\d+$", str(name)):
+                return str(name)
+        return None
+    if not store:
         return None
     author = store.get_wikidata_author(qid)
+    if cache is not None:
+        cache.set(qid, author)
     if author:
         name = author.get("name")
         if name and not re.match(r"^Q\d+$", str(name)):
@@ -287,11 +597,12 @@ def _lookup_entity_name(
 def parse_wikidata_entity(
     entity: dict[str, Any],
     store: Optional[WEMIRepository] = None,
+    cache: Optional[AuthorLRUCache] = None,
 ) -> Optional[dict[str, Any]]:
     """Parse a Wikidata entity into raw bibliographic dictionary format.
 
     Author/publisher/subject names are hydrated from the database agents/identifiers tables
-    via the store parameter, achieving O(1) memory usage.
+    via the store parameter, with LRU cache support for O(1) in-memory resolution.
     """
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
@@ -378,7 +689,7 @@ def parse_wikidata_entity(
     if not publisher:
         pub_qids = get_claim_qids(claims, "P123")
         if pub_qids:
-            publisher = _lookup_entity_name(pub_qids[0], store)
+            publisher = _lookup_entity_name(pub_qids[0], store, cache=cache)
     if publisher and re.match(r"^Q\d+$", publisher.strip()):
         publisher = None
 
@@ -387,7 +698,7 @@ def parse_wikidata_entity(
     if not publication_place:
         place_qids = get_claim_qids(claims, "P291")
         if place_qids:
-            publication_place = _lookup_entity_name(place_qids[0], store)
+            publication_place = _lookup_entity_name(place_qids[0], store, cache=cache)
     if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
         publication_place = None
 
@@ -436,7 +747,7 @@ def parse_wikidata_entity(
     if not series_title:
         series_qids = get_claim_qids(claims, "P179")
         if series_qids:
-            series_title = _lookup_entity_name(series_qids[0], store)
+            series_title = _lookup_entity_name(series_qids[0], store, cache=cache)
     if series_title and re.match(r"^Q\d+$", series_title.strip()):
         series_title = None
 
@@ -498,13 +809,17 @@ def parse_wikidata_entity(
     for d in dois:
         other_ids.append(f"doi:{d}")
 
-    # Agents — hydrate from database
+    # Agents — hydrate from database or cache
     agents: list[dict[str, Any]] = []
     for prop, role in _AUTHOR_PROPERTIES:
         for a_qid in get_claim_qids(claims, prop):
             author_info: dict[str, Any] = {}
-            if store:
+            if cache is not None and a_qid in cache:
+                author_info = cache.get(a_qid) or {}
+            elif store:
                 author_info = store.get_wikidata_author(a_qid) or {}
+                if cache is not None:
+                    cache.set(a_qid, author_info)
             qual_name = extract_claim_qualifier_string(claims, prop)
             name = author_info.get("name") or qual_name or a_qid
             u0: list[str] = []
@@ -543,7 +858,7 @@ def parse_wikidata_entity(
                     }
                 )
 
-    # Subjects — hydrate names from database
+    # Subjects — hydrate names from database or cache
     cat_defaults = get_category_default_field_map()
     field_to_cat = get_subject_field_category_map()
     subjects: dict[str, list[dict[str, Any]]] = {cat: [] for cat in field_to_cat.values()}
@@ -563,7 +878,7 @@ def parse_wikidata_entity(
     )
 
     for s_qid in get_claim_qids(claims, "P921"):
-        s_heading = _lookup_entity_name(s_qid, store) or s_qid
+        s_heading = _lookup_entity_name(s_qid, store, cache=cache) or s_qid
         subjects["topical"].append(
             {
                 "heading": s_heading,
@@ -573,7 +888,7 @@ def parse_wikidata_entity(
             }
         )
     for g_qid in get_claim_qids(claims, "P136"):
-        g_heading = _lookup_entity_name(g_qid, store) or g_qid
+        g_heading = _lookup_entity_name(g_qid, store, cache=cache) or g_qid
         subjects["genre_form"].append(
             {
                 "heading": g_heading,
@@ -583,7 +898,7 @@ def parse_wikidata_entity(
             }
         )
     for geo_qid in get_claim_qids(claims, "P840"):
-        geo_heading = _lookup_entity_name(geo_qid, store) or geo_qid
+        geo_heading = _lookup_entity_name(geo_qid, store, cache=cache) or geo_qid
         subjects["geographic"].append(
             {
                 "heading": geo_heading,
@@ -593,7 +908,7 @@ def parse_wikidata_entity(
             }
         )
     for mus_qid in get_claim_qids(claims, "P870"):
-        mus_heading = _lookup_entity_name(mus_qid, store) or mus_qid
+        mus_heading = _lookup_entity_name(mus_qid, store, cache=cache) or mus_qid
         subjects["medium_of_performance"].append(
             {
                 "heading": mus_heading,
@@ -641,7 +956,7 @@ def _prescan_authors(
 ) -> int:
     """Pass 1: Stream the Wikidata dump and persist all author/org/place entities to PostgreSQL.
 
-    Processes line-by-line in O(1) memory — no in-memory author dict is maintained.
+    Processes line-by-line or in chunks via multiprocess worker pool with O(1) memory.
     Returns the number of author entities persisted.
     """
     author_batch: list[dict[str, Any]] = []
@@ -652,6 +967,12 @@ def _prescan_authors(
         if config is None
         else tuple(config.author_authority_properties)
     )
+    batch_size = config.batch_size if config else 5000
+    sync_off = config.use_synchronous_commit_off if config else True
+    throttle_interval = config.progress_throttle_interval if config else 32768
+    num_workers = config.workers if config else 0
+    if num_workers <= 0:
+        num_workers = max(1, min(8, (os.cpu_count() or 2) - 1))
 
     def _flush_author_batch(batch: list[dict[str, Any]]) -> None:
         if not batch or store is None:
@@ -670,7 +991,7 @@ def _prescan_authors(
                 if "surname" in a and "family_name" in a and a["family_name"] != a["surname"]:
                     a["family_name"] = a["surname"]
         try:
-            store.insert_wikidata_authors(batch)
+            store.insert_wikidata_authors(batch, use_synchronous_commit_off=sync_off)
         except DataError as err:
             if config and getattr(config, "truncate_overlong_values", True):
                 from reconciliator.logging import log_validation
@@ -687,41 +1008,99 @@ def _prescan_authors(
             else:
                 raise
 
-    with gzip.open(path, "rb") as f:
-        for line in f:
-            if not _has_author_indicator(line):
-                continue
+    stream, proc = open_dump_stream(path, config=config)
+    lines_processed = 0
+    last_tracked_lines = 0
 
-            clean_line = line.strip().rstrip(b",")
-            if not clean_line or clean_line in (b"[", b"]"):
-                continue
+    try:
+        if num_workers > 1:
+            with mp.Pool(processes=num_workers) as pool:
+                chunk_gen = (
+                    (chunk, require_auth_id, auth_props)
+                    for chunk in _chunk_stream_lines(stream, chunk_size=batch_size)
+                )
+                for parsed_chunk in pool.imap_unordered(
+                    _worker_parse_authors_chunk, chunk_gen, chunksize=1
+                ):
+                    lines_processed += batch_size
+                    if parsed_chunk:
+                        author_batch.extend(parsed_chunk)
+                        if len(author_batch) >= batch_size:
+                            _flush_author_batch(author_batch)
+                            total_authors += len(author_batch)
+                            author_batch.clear()
+                            if tracker:
+                                tracker.update_progress(
+                                    stage="wikidata_prescan", items_processed=total_authors
+                                )
 
+                    if tracker and (lines_processed - last_tracked_lines >= throttle_interval):
+                        last_tracked_lines = lines_processed
+                        curr_bytes = None
+                        if hasattr(stream, "fileobj") and hasattr(stream.fileobj, "tell"):
+                            try:
+                                curr_bytes = int(stream.fileobj.tell())
+                            except Exception:
+                                pass
+                        tracker.update_progress(
+                            stage="wikidata_prescan",
+                            bytes_processed=curr_bytes,
+                            items_processed=total_authors,
+                        )
+        else:
+            for chunk in _chunk_stream_lines(stream, chunk_size=batch_size):
+                lines_processed += len(chunk)
+                parsed_chunk = _worker_parse_authors_chunk((chunk, require_auth_id, auth_props))
+                if parsed_chunk:
+                    author_batch.extend(parsed_chunk)
+                    if len(author_batch) >= batch_size:
+                        _flush_author_batch(author_batch)
+                        total_authors += len(author_batch)
+                        author_batch.clear()
+                        if tracker:
+                            tracker.update_progress(
+                                stage="wikidata_prescan", items_processed=total_authors
+                            )
+
+                if tracker and (lines_processed - last_tracked_lines >= throttle_interval):
+                    last_tracked_lines = lines_processed
+                    curr_bytes = None
+                    if hasattr(stream, "fileobj") and hasattr(stream.fileobj, "tell"):
+                        try:
+                            curr_bytes = int(stream.fileobj.tell())
+                        except Exception:
+                            pass
+                    tracker.update_progress(
+                        stage="wikidata_prescan",
+                        bytes_processed=curr_bytes,
+                        items_processed=total_authors,
+                    )
+
+        # Flush remaining batch
+        if author_batch:
+            _flush_author_batch(author_batch)
+            total_authors += len(author_batch)
+            author_batch.clear()
+            if tracker:
+                tracker.update_progress(
+                    stage="wikidata_prescan", items_processed=total_authors
+                )
+
+    finally:
+        if hasattr(stream, "close"):
             try:
-                entity = orjson.loads(clean_line)
+                stream.close()
             except Exception:
-                continue
-
-            author_data = _extract_author_data(
-                entity,
-                require_authority_id=require_auth_id,
-                authority_properties=auth_props,
-            )
-            if author_data:
-                author_batch.append(author_data)
-                if len(author_batch) >= 500:
-                    _flush_author_batch(author_batch)
-                    total_authors += len(author_batch)
-                    author_batch.clear()
-
-            if tracker and hasattr(f, "fileobj") and f.fileobj and hasattr(f.fileobj, "tell"):
-                curr_bytes = int(getattr(f.fileobj, "tell")())
-                tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
-
-    # Flush remaining batch
-    if author_batch:
-        _flush_author_batch(author_batch)
-        total_authors += len(author_batch)
-        author_batch.clear()
+                pass
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     logger.info("Pass 1 complete: %d author entities persisted to database", total_authors)
     return total_authors
@@ -731,36 +1110,81 @@ def _stream_bibliographic_entities(
     path: Path,
     store: Optional[WEMIRepository],
     tracker: Optional[ProgressTracker],
+    config: Optional[WikidataIngestConfig] = None,
+    cache: Optional[AuthorLRUCache] = None,
 ) -> Iterator[dict[str, Any]]:
-    """Pass 2: Stream the Wikidata dump and yield bibliographic entities.
+    """Pass 2: Stream the Wikidata dump and yield bibliographic entities with LRU cache."""
+    batch_size = config.batch_size if config else 5000
+    author_cache = cache or AuthorLRUCache(maxsize=config.lru_cache_size if config else 500000)
+    throttle_interval = config.progress_throttle_interval if config else 32768
+    num_workers = config.workers if config else 0
+    if num_workers <= 0:
+        num_workers = max(1, min(8, (os.cpu_count() or 2) - 1))
 
-    Author names are hydrated from the database agents/identifiers tables (populated in Pass 1),
-    achieving true O(1) memory consumption.
-    """
-    with gzip.open(path, "rb") as f:
-        for line in f:
-            if not _has_bib_indicator(line):
-                continue
+    stream, proc = open_dump_stream(path, config=config)
+    lines_processed = 0
+    last_tracked_lines = 0
 
-            clean_line = line.strip().rstrip(b",")
-            if not clean_line or clean_line in (b"[", b"]"):
-                continue
+    try:
+        if num_workers > 1:
+            with mp.Pool(processes=num_workers) as pool:
+                chunk_gen = _chunk_stream_lines(stream, chunk_size=batch_size)
+                for candidate_chunk in pool.imap_unordered(
+                    _worker_parse_raw_bib_chunk, chunk_gen, chunksize=1
+                ):
+                    lines_processed += batch_size
+                    if not candidate_chunk:
+                        continue
+                    prefetch_batch_qids(candidate_chunk, store=store, cache=author_cache)
+                    for entity in candidate_chunk:
+                        parsed = parse_wikidata_entity(entity, store=store, cache=author_cache)
+                        if parsed:
+                            yield parsed
 
+                    if tracker and (lines_processed - last_tracked_lines >= throttle_interval):
+                        last_tracked_lines = lines_processed
+                        curr_bytes = None
+                        if hasattr(stream, "fileobj") and hasattr(stream.fileobj, "tell"):
+                            try:
+                                curr_bytes = int(stream.fileobj.tell())
+                            except Exception:
+                                pass
+                        tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
+        else:
+            for chunk in _chunk_stream_lines(stream, chunk_size=batch_size):
+                lines_processed += len(chunk)
+                candidate_chunk = _worker_parse_raw_bib_chunk(chunk)
+                if candidate_chunk:
+                    prefetch_batch_qids(candidate_chunk, store=store, cache=author_cache)
+                    for entity in candidate_chunk:
+                        parsed = parse_wikidata_entity(entity, store=store, cache=author_cache)
+                        if parsed:
+                            yield parsed
+
+                if tracker and (lines_processed - last_tracked_lines >= throttle_interval):
+                    last_tracked_lines = lines_processed
+                    curr_bytes = None
+                    if hasattr(stream, "fileobj") and hasattr(stream.fileobj, "tell"):
+                        try:
+                            curr_bytes = int(stream.fileobj.tell())
+                        except Exception:
+                            pass
+                    tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
+    finally:
+        if hasattr(stream, "close"):
             try:
-                entity = orjson.loads(clean_line)
+                stream.close()
             except Exception:
-                continue
-
-            parsed = parse_wikidata_entity(entity, store=store)
-            if parsed:
-                yield parsed
-
-            if tracker and hasattr(f, "fileobj") and f.fileobj and hasattr(f.fileobj, "tell"):
-                curr_bytes = int(getattr(f.fileobj, "tell")())
-                tracker.update_progress(
-                    bytes_processed=curr_bytes,
-                    items_increment=1 if parsed else 0,
-                )
+                pass
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
 
 def stream_wikidata_dump(
@@ -771,10 +1195,10 @@ def stream_wikidata_dump(
 ) -> Iterator[dict[str, Any]]:
     """Two-pass Wikidata streaming: pre-scan authors into PostgreSQL, then extract books.
 
-    Pass 1: Scans the entire dump to collect all human/organization/place entities
-            and persists them to the PostgreSQL wikidata_authors table.
-    Pass 2: Scans the dump again to process bibliographic entities, hydrating
-            author/publisher/subject names from the database instead of in-memory state.
+    Pass 1: Scans the dump to collect all human/organization/place entities
+            and persists them to the PostgreSQL agents table.
+    Pass 2: Scans the dump to process bibliographic entities, hydrating
+            author/publisher/subject names from the database with LRU cache.
 
     This achieves true O(1) memory consumption regardless of dump size.
     """
@@ -784,7 +1208,7 @@ def stream_wikidata_dump(
 
     total_bytes = os.path.getsize(path)
 
-    # Pass 1: Pre-scan all human/org entities into wikidata_authors
+    # Pass 1: Pre-scan all human/org entities into agents
     logger.info("Pass 1/2: Pre-scanning author entities into database...")
     if tracker:
         tracker.start_task(stage="wikidata_prescan", bytes_total=total_bytes)
@@ -796,13 +1220,14 @@ def stream_wikidata_dump(
     logger.info("Pass 2/2: Streaming bibliographic entities...")
     if tracker:
         tracker.start_task(stage="streaming_wikidata", bytes_total=total_bytes)
-    yield from _stream_bibliographic_entities(path, store, tracker)
+    yield from _stream_bibliographic_entities(path, store, tracker, config=config)
 
 
 def decompose_wikidata_entity(
     entity: dict[str, Any],
     store: Optional[WEMIRepository] = None,
     serialization_engine: Optional[WEMISerializationEngine] = None,
+    cache: Optional[AuthorLRUCache] = None,
 ) -> Optional[
     tuple[
         WorkEntity,
@@ -819,7 +1244,7 @@ def decompose_wikidata_entity(
     """Decompose a raw Wikidata entity dictionary into normalized WEMI domain entities.
 
     Distinguishes Abstract Works from Editions/Manifestations (P629).
-    Hydrates author/creator names from database for O(1) memory consumption.
+    Hydrates author/creator names from database or LRU cache for O(1) memory consumption.
     """
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
@@ -837,20 +1262,7 @@ def decompose_wikidata_entity(
     has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
     has_p629 = bool(get_claim_qids(claims, "P629"))
     is_edition = has_p629 or "Q3331189" in instance_of
-    is_creative_work = is_book or any(
-        k in instance_of
-        for k in {
-            "Q7725634",
-            "Q571",
-            "Q47461344",
-            "Q2188189",
-            "Q11424",
-            "Q40063",
-            "Q1004",
-            "Q7889",
-            "Q131436",
-        }
-    )
+    is_creative_work = is_book or any(k in instance_of for k in _CREATIVE_WORK_TYPES)
 
     if not (is_edition or is_creative_work or has_bib_ids):
         return None
@@ -899,7 +1311,7 @@ def decompose_wikidata_entity(
     if not publisher:
         pub_qids = get_claim_qids(claims, "P123")
         if pub_qids:
-            publisher = _lookup_entity_name(pub_qids[0], store)
+            publisher = _lookup_entity_name(pub_qids[0], store, cache=cache)
     if publisher and re.match(r"^Q\d+$", publisher.strip()):
         publisher = None
 
@@ -908,7 +1320,7 @@ def decompose_wikidata_entity(
     if not publication_place:
         place_qids = get_claim_qids(claims, "P291")
         if place_qids:
-            publication_place = _lookup_entity_name(place_qids[0], store)
+            publication_place = _lookup_entity_name(place_qids[0], store, cache=cache)
     if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
         publication_place = None
 
@@ -936,9 +1348,9 @@ def decompose_wikidata_entity(
     elif any(k in instance_of for k in {"Q1004", "Q8274"}):
         work_type = "comic"
     elif any(k in instance_of for k in {"Q131569", "Q3284440"}):
-        work_type = "statute"
+        work_type = "legal"
     elif "Q7889" in instance_of:
-        work_type = "game"
+        work_type = "interactive_game"
     elif "Q131436" in instance_of:
         work_type = "board_game"
 
@@ -995,10 +1407,16 @@ def decompose_wikidata_entity(
     primary_creator_name: Optional[str] = None
     for prop, role in creator_props:
         for c_qid in get_claim_qids(claims, prop):
-            c_name = _lookup_entity_name(c_qid, store) or c_qid
+            c_name = _lookup_entity_name(c_qid, store, cache=cache) or c_qid
             if not primary_creator_name and not re.match(r"^Q\d+$", c_name):
                 primary_creator_name = c_name
-            author_data = store.get_wikidata_author(c_qid) if store else None
+            author_data: Optional[dict[str, Any]] = None
+            if cache is not None and c_qid in cache:
+                author_data = cache.get(c_qid)
+            elif store:
+                author_data = store.get_wikidata_author(c_qid)
+                if cache is not None:
+                    cache.set(c_qid, author_data)
             author_idents: list[IdentifierEntity] = []
             if author_data and author_data.get("identifiers"):
                 for s_name, s_val in author_data["identifiers"].items():
@@ -1049,8 +1467,14 @@ def decompose_wikidata_entity(
 
     for prop, role in realizer_props:
         for r_qid in get_claim_qids(claims, prop):
-            r_name = _lookup_entity_name(r_qid, store) or r_qid
-            author_data = store.get_wikidata_author(r_qid) if store else None
+            r_name = _lookup_entity_name(r_qid, store, cache=cache) or r_qid
+            author_data = None
+            if cache is not None and r_qid in cache:
+                author_data = cache.get(r_qid)
+            elif store:
+                author_data = store.get_wikidata_author(r_qid)
+                if cache is not None:
+                    cache.set(r_qid, author_data)
             author_idents = []
             if author_data and author_data.get("identifiers"):
                 for s_name, s_val in author_data["identifiers"].items():
@@ -1315,6 +1739,7 @@ def ingest_wikidata_wemi_pipeline(
                     identifiers=identifiers_batch,
                     manifestation_expressions=associations_batch,
                     contributions=contributions_batch,
+                    use_synchronous_commit_off=getattr(config, "use_synchronous_commit_off", True),
                 )
             except DataError as err:
                 if config and getattr(config, "truncate_overlong_values", True):
@@ -1344,36 +1769,114 @@ def ingest_wikidata_wemi_pipeline(
             if tracker:
                 tracker.update_progress(stage="wikidata_wemi", items_processed=total_ingested)
 
+    author_cache = AuthorLRUCache(maxsize=config.lru_cache_size)
+    batch_size = config.batch_size
+    throttle_interval = config.progress_throttle_interval
+    num_workers = config.workers
+    if num_workers <= 0:
+        num_workers = max(1, min(8, (os.cpu_count() or 2) - 1))
 
-    with gzip.open(path, "rb") as f:
-        for line in f:
-            if not _has_bib_indicator(line):
-                continue
-            clean_line = line.strip().rstrip(b",")
-            if not clean_line or clean_line in (b"[", b"]"):
-                continue
+    stream, proc = open_dump_stream(path, config=config)
+    lines_processed = 0
+    last_tracked_lines = 0
+
+    try:
+        if num_workers > 1:
+            with mp.Pool(processes=num_workers) as pool:
+                chunk_gen = _chunk_stream_lines(stream, chunk_size=batch_size)
+                for candidate_chunk in pool.imap_unordered(
+                    _worker_parse_raw_bib_chunk, chunk_gen, chunksize=1
+                ):
+                    lines_processed += batch_size
+                    if not candidate_chunk:
+                        continue
+                    prefetch_batch_qids(candidate_chunk, store=wemi_repo, cache=author_cache)
+                    for entity in candidate_chunk:
+                        decomp = decompose_wikidata_entity(
+                            entity,
+                            store=wemi_repo,
+                            serialization_engine=engine,
+                            cache=author_cache,
+                        )
+                        if decomp:
+                            w, e, m, itms, agts, rels, idents, assoc, contribs = decomp
+                            works_batch.append(w)
+                            expressions_batch.append(e)
+                            manifestations_batch.append(m)
+                            items_batch.extend(itms)
+                            agents_batch.extend(agts)
+                            relationships_batch.extend(rels)
+                            identifiers_batch.extend(idents)
+                            associations_batch.extend(assoc)
+                            contributions_batch.extend(contribs)
+
+                            if len(works_batch) >= batch_size:
+                                _flush_batch()
+
+                    if tracker and (lines_processed - last_tracked_lines >= throttle_interval):
+                        last_tracked_lines = lines_processed
+                        curr_bytes = None
+                        if hasattr(stream, "fileobj") and hasattr(stream.fileobj, "tell"):
+                            try:
+                                curr_bytes = int(stream.fileobj.tell())
+                            except Exception:
+                                pass
+                        tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
+        else:
+            for chunk in _chunk_stream_lines(stream, chunk_size=batch_size):
+                lines_processed += len(chunk)
+                candidate_chunk = _worker_parse_raw_bib_chunk(chunk)
+                if candidate_chunk:
+                    prefetch_batch_qids(candidate_chunk, store=wemi_repo, cache=author_cache)
+                    for entity in candidate_chunk:
+                        decomp = decompose_wikidata_entity(
+                            entity,
+                            store=wemi_repo,
+                            serialization_engine=engine,
+                            cache=author_cache,
+                        )
+                        if decomp:
+                            w, e, m, itms, agts, rels, idents, assoc, contribs = decomp
+                            works_batch.append(w)
+                            expressions_batch.append(e)
+                            manifestations_batch.append(m)
+                            items_batch.extend(itms)
+                            agents_batch.extend(agts)
+                            relationships_batch.extend(rels)
+                            identifiers_batch.extend(idents)
+                            associations_batch.extend(assoc)
+                            contributions_batch.extend(contribs)
+
+                            if len(works_batch) >= batch_size:
+                                _flush_batch()
+
+                if tracker and (lines_processed - last_tracked_lines >= throttle_interval):
+                    last_tracked_lines = lines_processed
+                    curr_bytes = None
+                    if hasattr(stream, "fileobj") and hasattr(stream.fileobj, "tell"):
+                        try:
+                            curr_bytes = int(stream.fileobj.tell())
+                        except Exception:
+                            pass
+                    tracker.update_progress(bytes_processed=curr_bytes, items_increment=0)
+
+        _flush_batch()
+
+    finally:
+        if hasattr(stream, "close"):
             try:
-                entity = orjson.loads(clean_line)
+                stream.close()
             except Exception:
-                continue
-
-            decomp = decompose_wikidata_entity(entity, store=wemi_repo, serialization_engine=engine)
-            if decomp:
-                w, e, m, itms, agts, rels, idents, assoc, contribs = decomp
-                works_batch.append(w)
-                expressions_batch.append(e)
-                manifestations_batch.append(m)
-                items_batch.extend(itms)
-                agents_batch.extend(agts)
-                relationships_batch.extend(rels)
-                identifiers_batch.extend(idents)
-                associations_batch.extend(assoc)
-                contributions_batch.extend(contribs)
-
-                if len(works_batch) >= config.batch_size:
-                    _flush_batch()
-
-    _flush_batch()
+                pass
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     if tracker:
         tracker.complete_task(metadata={"total_ingested": total_ingested})

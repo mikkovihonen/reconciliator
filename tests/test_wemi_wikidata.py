@@ -239,3 +239,104 @@ def test_ingest_wikidata_wemi_pipeline_e2e(tmp_path: Path):
     assert len(matches) == 1
     assert matches[0][0] == "manifestation"
     assert matches[0][1] == manif.id
+
+
+def test_ingest_wikidata_wemi_pipeline_multiprocess(tmp_path: Path):
+    """Verify ingest_wikidata_wemi_pipeline with workers=2, synchronous_commit off, and LRU cache."""
+    author_entity = {
+        "id": "Q800",
+        "labels": {"fi": {"value": "Minna Canth"}},
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+            "P213": [{"mainsnak": {"datavalue": {"value": "0000 0001 0888 8888"}}}],
+        },
+    }
+    work_entity = {
+        "id": "Q801",
+        "labels": {"fi": {"value": "Työmiehen vaimo"}},
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q7725634"}}}}],
+            "P50": [{"mainsnak": {"datavalue": {"value": {"id": "Q800"}}}}],
+            "P407": [{"mainsnak": {"datavalue": {"value": {"id": "Q1412"}}}}],
+            "P577": [{"mainsnak": {"datavalue": {"value": {"time": "+1885-01-01T00:00:00Z"}}}}],
+            "P212": [{"mainsnak": {"datavalue": {"value": "978-951-0-88888-8"}}}],
+        },
+    }
+
+    dump_path = tmp_path / "mp_wemi_test.json.gz"
+    with gzip.open(dump_path, "wb") as f:
+        f.write(orjson.dumps(author_entity) + b"\n")
+        f.write(orjson.dumps(work_entity) + b"\n")
+
+    auth_db = tmp_path / "mp_authority.db"
+    w_repo = WEMIRepository(db_path=auth_db)
+
+    config = WikidataIngestConfig(
+        dump_path=str(dump_path),
+        batch_size=10,
+        workers=2,
+        use_pigz=False,
+        use_synchronous_commit_off=True,
+        lru_cache_size=1000,
+        progress_throttle_interval=10,
+    )
+
+    total = ingest_wikidata_wemi_pipeline(config, w_repo)
+    assert total == 1
+
+    work = w_repo.get_work_by_source("wikidata", "Q801")
+    assert work is not None
+    assert work.title == "Työmiehen vaimo"
+
+    manif = w_repo.get_manifestation_by_source("wikidata", "Q801")
+    assert manif is not None
+    assert manif.publication_year == 1885
+
+
+def test_decompose_wikidata_entity_diverse_work_types(tmp_path: Path):
+    """Verify decompose_wikidata_entity assigns valid canonical WorkType literals."""
+    auth_db = tmp_path / "types_authority.db"
+    w_repo = WEMIRepository(db_path=auth_db)
+
+    test_cases = [
+        ("Q101", "Q131569", "legal"),           # statute
+        ("Q102", "Q3284440", "legal"),          # act of parliament
+        ("Q103", "Q7889", "interactive_game"),   # video game
+        ("Q104", "Q131436", "board_game"),      # board game
+        ("Q105", "Q40063", "drama"),            # drama
+        ("Q106", "Q2188189", "music"),          # musical work
+        ("Q107", "Q11424", "moving_image"),     # film
+        ("Q108", "Q1004", "comic"),             # comic
+    ]
+
+    for qid, instance_qid, expected_work_type in test_cases:
+        entity = {
+            "id": qid,
+            "labels": {"fi": {"value": f"Entity {qid}"}},
+            "claims": {
+                "P31": [{"mainsnak": {"datavalue": {"value": {"id": instance_qid}}}}],
+            },
+        }
+        res = decompose_wikidata_entity(entity, store=w_repo)
+        assert res is not None, f"Failed to decompose {qid}"
+        work = res[0]
+        assert work.work_type == expected_work_type, f"Expected {expected_work_type} for {instance_qid}, got {work.work_type}"
+
+
+def test_work_entity_type_strict_validation():
+    """Verify WorkEntity strictly enforces canonical WorkType literals and rejects invalid types."""
+    import pytest
+    from pydantic import ValidationError
+    from reconciliator.models import WorkEntity
+
+    # Valid canonical type works
+    w = WorkEntity(source="wikidata", source_id="Q1", title="Test Law", title_normalized="test law", work_type="legal")
+    assert w.work_type == "legal"
+
+    # Non-canonical / invalid types must raise ValidationError
+    for invalid in ("statute", "video_game", "something_completely_invalid"):
+        with pytest.raises(ValidationError):
+            WorkEntity(source="wikidata", source_id="Q2", title="Invalid", title_normalized="invalid", work_type=invalid)  # type: ignore
+
+
+

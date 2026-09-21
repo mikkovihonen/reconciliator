@@ -90,6 +90,26 @@ class TaskLogFilter(logging.Filter):
         return True
 
 
+class TaskLogFormatter(logging.Formatter):
+    """Logging formatter ensuring record.task_id exists to prevent KeyError in format strings."""
+
+    def __init__(
+        self,
+        fmt: Optional[str] = None,
+        datefmt: Optional[str] = None,
+        default_task_id: str = _DEFAULT_TASK_ID,
+    ) -> None:
+        super().__init__(fmt=fmt, datefmt=datefmt)
+        self.default_task_id = default_task_id
+
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "task_id") or not getattr(record, "task_id", None):
+            ctx_id = get_current_task_id()
+            record.task_id = ctx_id if ctx_id != _DEFAULT_TASK_ID else self.default_task_id
+        return super().format(record)
+
+
+
 class TelemetryLogHandler(logging.Handler):
     """Logging handler that intercepts ERROR+ records and feeds active task telemetry."""
 

@@ -201,3 +201,228 @@ def test_wikidata_author_authority_filtering(tmp_path: Path) -> None:
     res = _extract_author_data(athlete, require_authority_id=False)
     assert res is not None
     assert res["name"] == "Random Athlete"
+
+
+def test_author_lru_cache() -> None:
+    from reconciliator.ingestion.wikidata import AuthorLRUCache
+
+    cache = AuthorLRUCache(maxsize=3)
+    assert len(cache) == 0
+
+    cache.set("Q1", {"name": "Author 1"})
+    cache.set("Q2", {"name": "Author 2"})
+    cache.set("Q3", {"name": "Author 3"})
+
+    assert len(cache) == 3
+    assert "Q1" in cache
+    assert "Q2" in cache
+    assert "Q3" in cache
+    assert "Q4" not in cache
+
+    # Access Q1 to make it most recently used
+    assert cache.get("Q1") == {"name": "Author 1"}
+
+    # Insert Q4 -> Q2 should be evicted (oldest)
+    cache.set("Q4", {"name": "Author 4"})
+    assert len(cache) == 3
+    assert "Q2" not in cache
+    assert "Q1" in cache
+    assert "Q3" in cache
+    assert "Q4" in cache
+
+    # Missing lookup returns None
+    assert cache.get("Q999") is None
+
+
+def test_find_pigz_binary(tmp_path: Path) -> None:
+    from reconciliator.ingestion.wikidata import find_pigz_binary
+
+    fake_pigz = tmp_path / "fake_pigz"
+    fake_pigz.touch(mode=0o755)
+
+    assert find_pigz_binary(str(fake_pigz)) == str(fake_pigz)
+    assert find_pigz_binary(str(tmp_path / "non_existent")) is None
+
+
+def test_open_dump_stream_fallback(tmp_path: Path) -> None:
+    from reconciliator.config import WikidataIngestConfig
+    from reconciliator.ingestion.wikidata import open_dump_stream
+
+    data_file = tmp_path / "test.json.gz"
+    payload = b'{"id": "Q1"}\n{"id": "Q2"}\n'
+    with gzip.open(data_file, "wb") as f:
+        f.write(payload)
+
+    # 1. Test fallback with use_pigz=False (uses gzip.open directly)
+    cfg_no_pigz = WikidataIngestConfig(dump_path=str(data_file), use_pigz=False)
+    stream, proc = open_dump_stream(data_file, config=cfg_no_pigz)
+    try:
+        assert proc is None
+        lines = [line.strip() for line in stream]
+        assert lines == [b'{"id": "Q1"}', b'{"id": "Q2"}']
+    finally:
+        stream.close()
+
+    # 2. Test with default config (pigz or gzip -dc subprocess)
+    cfg_default = WikidataIngestConfig(dump_path=str(data_file), use_pigz=True)
+    stream2, proc2 = open_dump_stream(data_file, config=cfg_default)
+    try:
+        lines2 = [line.strip() for line in stream2]
+        assert lines2 == [b'{"id": "Q1"}', b'{"id": "Q2"}']
+    finally:
+        stream2.close()
+        if proc2 is not None:
+            try:
+                proc2.terminate()
+                proc2.wait(timeout=1.0)
+            except Exception:
+                pass
+
+
+def test_chunk_stream_lines() -> None:
+    import io
+    from reconciliator.ingestion.wikidata import _chunk_stream_lines
+
+    stream = io.BytesIO(b"line1\nline2\nline3\nline4\nline5\n")
+    chunks = list(_chunk_stream_lines(stream, chunk_size=2))
+    assert len(chunks) == 3
+    assert chunks[0] == [b"line1\n", b"line2\n"]
+    assert chunks[1] == [b"line3\n", b"line4\n"]
+    assert chunks[2] == [b"line5\n"]
+
+
+def test_worker_parse_authors_and_raw_bib_chunks() -> None:
+    from reconciliator.ingestion.wikidata import (
+        _worker_parse_authors_chunk,
+        _worker_parse_raw_bib_chunk,
+    )
+
+    author_line = orjson.dumps({
+        "id": "Q10",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+            "P213": [{"mainsnak": {"datavalue": {"value": "0000 0001 2345 6789"}}}],
+        },
+        "labels": {"fi": {"value": "Kirjailija"}},
+    }) + b"\n"
+
+    book_line = orjson.dumps({
+        "id": "Q20",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q571"}}}}],
+            "P1476": [{"mainsnak": {"datavalue": {"value": {"text": "Kirja"}}}}],
+            "P212": [{"mainsnak": {"datavalue": {"value": "978-951-0-12345-6"}}}],
+        },
+        "labels": {"fi": {"value": "Kirja"}},
+    }) + b"\n"
+
+    chunk = [b"[\n", author_line, book_line, b"]\n"]
+
+    authors = _worker_parse_authors_chunk((chunk, True, None))
+    assert len(authors) == 1
+    assert authors[0]["qid"] == "Q10"
+    assert authors[0]["name"] == "Kirjailija"
+
+    bibs = _worker_parse_raw_bib_chunk(chunk)
+    assert len(bibs) == 1
+    assert bibs[0]["id"] == "Q20"
+
+
+def test_prefetch_batch_qids(tmp_path: Path) -> None:
+    from reconciliator.ingestion.wikidata import AuthorLRUCache, prefetch_batch_qids
+
+    store = _make_store(tmp_path)
+    store.insert_wikidata_authors([
+        {"qid": "Q101", "name": "Author 101", "identifiers": {"viaf": "101"}},
+        {"qid": "Q102", "name": "Author 102", "identifiers": {"viaf": "102"}},
+    ])
+
+    cache = AuthorLRUCache(maxsize=100)
+    entities = [
+        {
+            "id": "Q201",
+            "claims": {
+                "P50": [{"mainsnak": {"datavalue": {"value": {"id": "Q101"}}}}],
+                "P123": [{"mainsnak": {"datavalue": {"value": {"id": "Q102"}}}}],
+            },
+        }
+    ]
+
+    prefetch_batch_qids(entities, store=store, cache=cache)
+    assert "Q101" in cache
+    assert "Q102" in cache
+    assert cache.get("Q101")["name"] == "Author 101"
+    assert cache.get("Q102")["name"] == "Author 102"
+
+
+def test_stream_wikidata_dump_multiprocess(tmp_path: Path) -> None:
+    from reconciliator.config import WikidataIngestConfig
+
+    gz_path = tmp_path / "test_mp.json.gz"
+    store = _make_store(tmp_path)
+
+    author = {
+        "id": "Q555",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+            "P213": [{"mainsnak": {"datavalue": {"value": "0000 0001 0000 0000"}}}],
+        },
+        "labels": {"fi": {"value": "Moniprosessi Kirjailija"}},
+    }
+    book = {
+        "id": "Q666",
+        "claims": {
+            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q571"}}}}],
+            "P1476": [{"mainsnak": {"datavalue": {"value": {"text": "Rinnakkainen Teos"}}}}],
+            "P212": [{"mainsnak": {"datavalue": {"value": "978-951-0-99999-9"}}}],
+            "P50": [{"mainsnak": {"datavalue": {"value": {"id": "Q555"}}}}],
+        },
+        "labels": {"fi": {"value": "Rinnakkainen Teos"}},
+    }
+
+    with gzip.open(gz_path, "wb") as f:
+        f.write(orjson.dumps(author) + b"\n")
+        f.write(orjson.dumps(book) + b"\n")
+
+    cfg = WikidataIngestConfig(
+        dump_path=str(gz_path),
+        batch_size=10,
+        workers=2,
+        use_pigz=False,
+    )
+
+    items = list(stream_wikidata_dump(gz_path, store=store, config=cfg))
+    assert len(items) == 1
+    assert items[0]["source_id"] == "Q666"
+    assert items[0]["title"] == "Rinnakkainen Teos"
+    assert items[0]["agents"][0]["name"] == "Moniprosessi Kirjailija"
+
+
+def test_insert_wikidata_authors_large_parameter_batch(tmp_path: Path) -> None:
+    """Verify that batches with more than 65,535 parameters are chunked safely."""
+    store = _make_store(tmp_path)
+
+    # 3,000 authors * 8 variant names/qualifiers = >70,000 parameters for agent_attributes
+    large_batch = []
+    for i in range(2500):
+        large_batch.append({
+            "qid": f"Q999{i}",
+            "name": f"Author {i}",
+            "family_name": f"Family {i}",
+            "birth_year": 1900 + (i % 100),
+            "variant_names": [f"Alias A {i}", f"Alias B {i}", f"Alias C {i}"],
+            "qualifiers": [f"Qual 1 {i}", f"Qual 2 {i}", f"Qual 3 {i}"],
+            "occupations": [f"Occ {i}"],
+            "identifiers": {"isni": f"0000 0001 0000 {i:04d}", "viaf": f"12345{i}"},
+        })
+
+    # This previously failed with:
+    # OperationalError: sending query and params failed: number of parameters must be between 0 and 65535
+    store.insert_wikidata_authors(large_batch, use_synchronous_commit_off=True)
+
+    author = store.get_wikidata_author("Q9990")
+    assert author is not None
+    assert author["name"] == "Author 0"
+    assert "Alias A 0" in author["variant_names"]
+    assert author["identifiers"]["isni"] == "0000 0001 0000 0000"
+

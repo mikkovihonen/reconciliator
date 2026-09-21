@@ -28,7 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.utils.curie import parse_curie, to_curie
 from reconciliator.database.engine import get_engine, init_authority_db
-from reconciliator.database.ops import insert_batch, upsert_batch
+from reconciliator.database.ops import calculate_batch_size, insert_batch, upsert_batch
 from reconciliator.database.schema import (
     agent_attributes_table,
     agent_relationships_table,
@@ -1176,6 +1176,7 @@ class WEMIRepository:
         record_origin: Optional[RecordOrigin | str] = None,
         conn: Optional[Any] = None,
         chunk_size: int = 1000,
+        use_synchronous_commit_off: bool = False,
     ) -> None:
         """Coordinated batch insertion of WEMI domain entities with foreign key binding in a single transaction."""
         if record_origin:
@@ -1227,6 +1228,9 @@ class WEMIRepository:
             return None
 
         def _run_in_txn(c: Any) -> None:
+            if use_synchronous_commit_off:
+                c.exec_driver_sql("SET LOCAL synchronous_commit = 'off'")
+
             # 1. Agents
             agent_key_to_id: dict[Any, int] = {}
             if agents:
@@ -2480,11 +2484,16 @@ class WEMIRepository:
         with self.get_connection() as conn:
             conn.execute(stmt)
 
-    def insert_wikidata_authors(self, authors: list[dict[str, Any]]) -> None:
+    def insert_wikidata_authors(
+        self,
+        authors: list[dict[str, Any]],
+        use_synchronous_commit_off: bool = True,
+    ) -> None:
         """Persist author entity metadata into agents table with relational attributes.
 
         Wikidata-specific fields (occupations, fields_of_work, affiliations) are
         stored in agent_attributes_table. Identifiers go into identifiers_table.
+        Uses RETURNING id, source_id to eliminate secondary SELECT roundtrips.
         """
         if not authors:
             return
@@ -2543,35 +2552,35 @@ class WEMIRepository:
 
         agent_rows = list(deduped_agent_rows.values())
         with self.get_connection() as conn:
+            if use_synchronous_commit_off:
+                conn.exec_driver_sql("SET LOCAL synchronous_commit = 'off'")
+
+            qid_to_agent_id: dict[str, int] = {}
             if agent_rows:
-                stmt = pg_insert(agents_table).values(agent_rows)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[agents_table.c.source, agents_table.c.source_id],
-                    set_={
-                        "name": stmt.excluded.name,
-                        "name_normalized": stmt.excluded.name_normalized,
-                        "surname": func.coalesce(stmt.excluded.surname, agents_table.c.surname),
-                        "birth_year": func.coalesce(
-                            stmt.excluded.birth_year, agents_table.c.birth_year
-                        ),
-                        "death_year": func.coalesce(
-                            stmt.excluded.death_year, agents_table.c.death_year
-                        ),
-                    },
-                )
-                conn.execute(stmt)
+                agent_chunk_size = calculate_batch_size(num_columns=len(agent_rows[0]))
+                for i in range(0, len(agent_rows), agent_chunk_size):
+                    chunk = agent_rows[i : i + agent_chunk_size]
+                    stmt = pg_insert(agents_table).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[agents_table.c.source, agents_table.c.source_id],
+                        set_={
+                            "name": stmt.excluded.name,
+                            "name_normalized": stmt.excluded.name_normalized,
+                            "surname": func.coalesce(stmt.excluded.surname, agents_table.c.surname),
+                            "birth_year": func.coalesce(
+                                stmt.excluded.birth_year, agents_table.c.birth_year
+                            ),
+                            "death_year": func.coalesce(
+                                stmt.excluded.death_year, agents_table.c.death_year
+                            ),
+                        },
+                    ).returning(agents_table.c.id, agents_table.c.source_id)
+                    inserted = conn.execute(stmt).fetchall()
+                    for r in inserted:
+                        qid_to_agent_id[r[1]] = r[0]
 
-            # Get agent IDs after insertion
-            qids_with_attrs = [qid for (qid, _, _) in attr_accum.keys()]
-            if qids_with_attrs and attr_accum:
-                agent_records = conn.execute(
-                    select(agents_table.c.id, agents_table.c.source_id).where(
-                        agents_table.c.source == "wikidata",
-                        agents_table.c.source_id.in_(qids_with_attrs),
-                    )
-                ).fetchall()
-                qid_to_agent_id = {r[1]: r[0] for r in agent_records}
-
+            # Persist relational author attributes into agent_attributes table
+            if qid_to_agent_id and attr_accum:
                 attr_dict: dict[tuple[int, str, str], int] = {}
                 for (qid, attr_type, value), count in attr_accum.items():
                     aid = qid_to_agent_id.get(qid)
@@ -2589,25 +2598,15 @@ class WEMIRepository:
                         }
                         for (aid, atype, val) in attr_dict.keys()
                     ]
-                    stmt = (
-                        pg_insert(agent_attributes_table)
-                        .values(attr_rows)
-                        .on_conflict_do_nothing()
+                    insert_batch(
+                        bind=conn,
+                        table=agent_attributes_table,
+                        rows=attr_rows,
+                        on_conflict_do_nothing=True,
                     )
-                    conn.execute(stmt)
-
 
             # Persist relational author identifiers into identifiers table
-            qids_with_idents = [a["qid"] for a in authors if a.get("qid") and a.get("identifiers")]
-            if qids_with_idents:
-                agent_records = conn.execute(
-                    select(agents_table.c.id, agents_table.c.source_id).where(
-                        agents_table.c.source == "wikidata",
-                        agents_table.c.source_id.in_(qids_with_idents),
-                    )
-                ).fetchall()
-                qid_to_agent_id = {r[1]: r[0] for r in agent_records}
-
+            if qid_to_agent_id:
                 ident_rows = []
                 for a in authors:
                     qid = a.get("qid")
@@ -2638,27 +2637,12 @@ class WEMIRepository:
                                 }
                             )
                 if ident_rows:
-                    agent_id_list = list(qid_to_agent_id.values())
-                    existing_idents = set()
-                    chk_stmt = select(
-                        identifiers_table.c.entity_id,
-                        identifiers_table.c.source,
-                        identifiers_table.c.source_id,
-                    ).where(
-                        identifiers_table.c.entity_type == "agent",
-                        identifiers_table.c.entity_id.in_(agent_id_list),
+                    insert_batch(
+                        bind=conn,
+                        table=identifiers_table,
+                        rows=ident_rows,
+                        on_conflict_do_nothing=True,
                     )
-                    for r in conn.execute(chk_stmt):
-                        existing_idents.add((r[0], r[1], r[2]))
-
-                    to_insert = [
-                        row
-                        for row in ident_rows
-                        if (row["entity_id"], row["source"], row["source_id"])
-                        not in existing_idents
-                    ]
-                    if to_insert:
-                        conn.execute(pg_insert(identifiers_table).values(to_insert))
 
     def get_wikidata_authors_batch(self, qids: list[str]) -> dict[str, dict[str, Any]]:
         """Fetch cached author entities from agents + identifiers + agent_attributes by QIDs."""
@@ -2706,26 +2690,28 @@ class WEMIRepository:
                     agent_attributes_table.c.attribute_type,
                     agent_attributes_table.c.value,
                 ).where(agent_attributes_table.c.agent_id.in_(list(agent_id_map.values())))
-                attr_rows = conn.execute(attr_stmt).fetchall()
+                attr_rows = conn.execute(attr_stmt).mappings().fetchall()
                 rev_map = {aid: qid for qid, aid in agent_id_map.items()}
                 for r in attr_rows:
-                    qid = rev_map.get(r[0])
+                    qid = rev_map.get(r["agent_id"])
                     if qid and qid in results:
-                        if r["attribute_type"] == "occupation":
-                            if r["value"] not in results[qid]["occupations"]:
-                                results[qid]["occupations"].append(r["value"])
-                        elif r["attribute_type"] == "field_of_work":
-                            if r["value"] not in results[qid]["fields_of_work"]:
-                                results[qid]["fields_of_work"].append(r["value"])
-                        elif r["attribute_type"] == "affiliation":
-                            if r["value"] not in results[qid]["affiliations"]:
-                                results[qid]["affiliations"].append(r["value"])
-                        elif r["attribute_type"] == "qualifier":
-                            if r["value"] not in results[qid]["qualifiers"]:
-                                results[qid]["qualifiers"].append(r["value"])
-                        elif r["attribute_type"] == "variant_name":
-                            if r["value"] not in results[qid]["variant_names"]:
-                                results[qid]["variant_names"].append(r["value"])
+                        atype = r["attribute_type"]
+                        val = r["value"]
+                        if atype == "occupation":
+                            if val not in results[qid]["occupations"]:
+                                results[qid]["occupations"].append(val)
+                        elif atype == "field_of_work":
+                            if val not in results[qid]["fields_of_work"]:
+                                results[qid]["fields_of_work"].append(val)
+                        elif atype == "affiliation":
+                            if val not in results[qid]["affiliations"]:
+                                results[qid]["affiliations"].append(val)
+                        elif atype == "qualifier":
+                            if val not in results[qid]["qualifiers"]:
+                                results[qid]["qualifiers"].append(val)
+                        elif atype == "variant_name":
+                            if val not in results[qid]["variant_names"]:
+                                results[qid]["variant_names"].append(val)
 
             # 3. Fetch identifiers for each agent
             if agent_id_map:

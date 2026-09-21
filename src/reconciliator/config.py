@@ -1220,22 +1220,92 @@ class OAIIngestConfig(BaseModel):
 class WikidataIngestConfig(BaseModel):
     """Configuration for streaming Wikidata JSON ingestion."""
 
-    dump_path: Path = Path("data/wikidata/latest-all.json.gz")
-    batch_size: int = 1000
-    pass1_only: bool = False
-    extract_works: bool = True
+    dump_path: Path = Field(
+        default_factory=lambda: Path(
+            get_bundled_defaults().get("ingest_wikidata", {}).get(
+                "dump_path", "dumps/latest-all.json.gz"
+            )
+        )
+    )
+    batch_size: int = Field(
+        default_factory=lambda: int(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("batch_size", 5000)
+        )
+    )
+    pass1_only: bool = Field(
+        default_factory=lambda: bool(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("pass1_only", False)
+        )
+    )
+    extract_works: bool = Field(
+        default_factory=lambda: bool(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("extract_works", True)
+        )
+    )
     normalization: Optional[RecordNormalizationConfig] = None
-    require_author_authority_id: bool = True
+    require_author_authority_id: bool = Field(
+        default_factory=lambda: bool(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get("require_author_authority_id", True)
+        )
+    )
     author_authority_properties: list[str] = Field(
-        default_factory=lambda: [
-            "P3595",
-            "P213",
-            "P214",
-            "P227",
-            "P244",
-            "P906",
-            "P496",
-        ]
+        default_factory=lambda: list(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get(
+                "author_authority_properties",
+                [
+                    "P3595",
+                    "P213",
+                    "P214",
+                    "P227",
+                    "P244",
+                    "P906",
+                    "P496",
+                ],
+            )
+        )
+    )
+    use_pigz: bool = Field(
+        default_factory=lambda: bool(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("use_pigz", True)
+        )
+    )
+    pigz_path: Optional[str] = Field(
+        default_factory=lambda: get_bundled_defaults()
+        .get("ingest_wikidata", {})
+        .get("pigz_path")
+    )
+    pigz_threads: int = Field(
+        default_factory=lambda: int(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("pigz_threads", 0)
+        )
+    )
+    workers: int = Field(
+        default_factory=lambda: int(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("workers", 0)
+        )
+    )
+    lru_cache_size: int = Field(
+        default_factory=lambda: int(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("lru_cache_size", 500000)
+        )
+    )
+    progress_throttle_interval: int = Field(
+        default_factory=lambda: int(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get("progress_throttle_interval", 32768)
+        )
+    )
+    use_synchronous_commit_off: bool = Field(
+        default_factory=lambda: bool(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get("use_synchronous_commit_off", True)
+        )
     )
     languages: dict[str, str] = Field(
         default_factory=lambda: dict(
@@ -1247,10 +1317,30 @@ class WikidataIngestConfig(BaseModel):
             get_bundled_defaults().get("wikidata", {}).get("subject_mappings", {})
         )
     )
-    truncate_overlong_values: bool = True
-    truncation_marker: str = ""
-    default_max_field_length: Optional[int] = None
-    field_length_overrides: dict[str, int] = Field(default_factory=dict)
+    truncate_overlong_values: bool = Field(
+        default_factory=lambda: bool(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get("truncate_overlong_values", True)
+        )
+    )
+    truncation_marker: str = Field(
+        default_factory=lambda: str(
+            get_bundled_defaults().get("ingest_wikidata", {}).get("truncation_marker", "")
+        )
+    )
+    default_max_field_length: Optional[int] = Field(
+        default_factory=lambda: get_bundled_defaults()
+        .get("ingest_wikidata", {})
+        .get("default_max_field_length")
+    )
+    field_length_overrides: dict[str, int] = Field(
+        default_factory=lambda: dict(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get("field_length_overrides", {})
+        )
+    )
 
 
 
@@ -2335,7 +2425,7 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
 
 def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -> None:
     """Configure standard logging handlers, formatters, and root level based on configuration."""
-    from reconciliator.logging import TaskLogFilter, TelemetryLogHandler
+    from reconciliator.logging import TaskLogFilter, TaskLogFormatter, TelemetryLogHandler
 
     if isinstance(logging_cfg, AppConfig):
         cfg = logging_cfg.logging
@@ -2348,6 +2438,9 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
     level_num = getattr(logging, cfg.level, logging.INFO)
     root_logger.setLevel(level_num)
 
+    # Ensure clean default LogRecord factory
+    logging.setLogRecordFactory(logging.LogRecord)
+
     task_filter = TaskLogFilter(default_task_id=cfg.task_id_default)
     # Attach TaskLogFilter to ensure record.task_id is always present
     for f in list(root_logger.filters):
@@ -2355,7 +2448,7 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
             root_logger.removeFilter(f)
     root_logger.addFilter(task_filter)
 
-    formatter = logging.Formatter(fmt=cfg.format, datefmt=cfg.date_format)
+    formatter = TaskLogFormatter(fmt=cfg.format, datefmt=cfg.date_format, default_task_id=cfg.task_id_default)
 
     # Remove existing handlers (preserving pytest LogCaptureHandler if present)
     for handler in list(root_logger.handlers):
