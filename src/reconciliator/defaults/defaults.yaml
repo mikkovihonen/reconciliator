@@ -884,6 +884,13 @@ wikidata:
     geographic: "yso"
     medium_of_performance: "seko"
 
+ingest:
+  target_work_types: []
+  exclude_work_types: []
+  target_languages: []
+  from_year: null
+  until_year: null
+
 ingest_wikidata:
   dump_path: "dumps/latest-all.json.gz"
   batch_size: 5000
@@ -898,6 +905,42 @@ ingest_wikidata:
     - "P244"
     - "P906"
     - "P496"
+  target_work_types: []
+  exclude_work_types: []
+  target_languages: []
+  from_year: null
+  until_year: null
+  creative_work_types:
+    Q7725634: "text"
+    Q571: "text"
+    Q47461344: "text"
+    Q3331189: "text"
+    Q2188189: "music"
+    Q7366: "music"
+    Q105543609: "music"
+    Q134556: "music"
+    Q11424: "moving_image"
+    Q5398426: "moving_image"
+    Q40063: "drama"
+    Q1004: "comic"
+    Q8274: "comic"
+    Q131569: "legal"
+    Q3284440: "legal"
+    Q7889: "interactive_game"
+    Q131436: "board_game"
+    Q11436: "moving_image"
+    Q24856: "still_image"
+    Q125191: "still_image"
+    Q3305213: "still_image"
+    Q40446: "cartography"
+    Q2472587: "podcast"
+  human_and_entity_types:
+    - "Q5"
+    - "Q2085381"
+    - "Q4830453"
+    - "Q43229"
+    - "Q515"
+    - "Q6256"
   use_pigz: true
   pigz_path: null
   pigz_threads: 0
@@ -990,6 +1033,11 @@ embedding:
   max_seq_length: null
 
 reconcile:
+  target_work_types: []
+  exclude_work_types: []
+  target_languages: []
+  from_year: null
+  until_year: null
   threshold: 0.85
   format: "marcxml"
   enrich: true

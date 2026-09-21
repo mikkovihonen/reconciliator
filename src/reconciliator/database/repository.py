@@ -18,6 +18,7 @@ from sqlalchemy import (
     delete,
     distinct,
     func,
+    insert,
     nulls_last,
     or_,
     select,
@@ -50,6 +51,11 @@ from reconciliator.database.schema import (
     manifestation_expressions_table,
     manifestation_vectors_table,
     manifestations_table,
+    review_changesets_table,
+    changeset_operations_table,
+    entity_pins_table,
+    concepts_table,
+    concept_mappings_table,
     sammelband_bindings_table,
     sources_table,
     work_consolidations_table,
@@ -64,9 +70,12 @@ from reconciliator.models import (
     AgentClusterMember,
     AgentEntity,
     AgentRelationshipEntity,
+    ChangesetOperation,
     ContributionEntity,
     CorpusLinkage,
+    DataReadinessSummary,
     EntityKey,
+    EntityPin,
     EntitySubject,
     EntityType,
     ExpressionCluster,
@@ -79,6 +88,7 @@ from reconciliator.models import (
     ManifestationExpressionAssociation,
     MatchRecord,
     RecordOrigin,
+    ReviewChangeset,
     SammelbandBinding,
     WorkCluster,
     WorkEntity,
@@ -206,6 +216,9 @@ class WEMIRepository:
             )
         else:
             self.manifestation_indexer = None
+
+        # Agent indexer
+        self.agent_indexer = None
 
     def get_connection(self) -> Any:
         """Obtain connection with an active transaction."""
@@ -2259,6 +2272,7 @@ class WEMIRepository:
         weights: Optional[list[float]] = None,
         prefix_search: Optional[bool] = None,
         authoritative_only: bool = False,
+        work_type: Optional[str] = None,
     ) -> list[tuple[WorkEntity, float]]:
         """Search works via PostgreSQL full-text search. Returns list of (WorkEntity, rank)."""
         clean_query = query.strip()
@@ -2299,6 +2313,8 @@ class WEMIRepository:
             auth_sources = self.authoritative_sources()
             if auth_sources:
                 stmt = stmt.where(works_table.c.record_origin.in_(auth_sources))
+        if work_type:
+            stmt = stmt.where(works_table.c.work_type == work_type)
 
         stmt = stmt.order_by(rank_col.desc()).limit(eff_limit)
 
@@ -3643,3 +3659,867 @@ class WEMIRepository:
         with self.get_corpus_connection() as conn:
             rows = conn.execute(stmt).mappings().fetchall()
             return [SammelbandBinding.model_validate(dict(r)) for r in rows]
+
+    # =======================================================================
+    # Data Readiness & System State Inspection
+    # =======================================================================
+
+    def get_data_readiness_summary(self) -> DataReadinessSummary:
+        """Inspect and report counts across entities, vocabularies, clusters, and vector indices."""
+        counts: dict[str, int] = {}
+        tables_to_count = {
+            "sources": sources_table,
+            "works": works_table,
+            "expressions": expressions_table,
+            "manifestations": manifestations_table,
+            "items": items_table,
+            "agents": agents_table,
+            "concepts": concepts_table,
+            "concept_mappings": concept_mappings_table,
+            "work_consolidations": work_consolidations_table,
+            "agent_clusters": corpus_agent_clusters_table,
+            "corpus_linkages": corpus_linkages_table,
+            "changesets": review_changesets_table,
+            "pins": entity_pins_table,
+        }
+
+        with self.get_connection() as conn:
+            for name, tbl in tables_to_count.items():
+                try:
+                    c = conn.execute(select(func.count()).select_from(tbl)).scalar() or 0
+                    counts[name] = int(c)
+                except Exception as e:
+                    logger.debug("Failed to count table %s: %s", name, e)
+                    counts[name] = 0
+
+        # Vector store introspection
+        work_idx = getattr(self, "work_indexer", None)
+        manif_idx = getattr(self, "manifestation_indexer", None)
+        agent_idx = getattr(self, "agent_indexer", None)
+
+        work_vecs = work_idx.total_vectors if work_idx else 0
+        manif_vecs = manif_idx.total_vectors if manif_idx else 0
+        agent_vecs = agent_idx.total_vectors if agent_idx else 0
+        has_vectors = (work_vecs + manif_vecs + agent_vecs) > 0
+
+        vector_info = {
+            "available": has_vectors,
+            "work_vectors": work_vecs,
+            "manifestation_vectors": manif_vecs,
+            "agent_vectors": agent_vecs,
+        }
+
+        # Pipeline stages readiness assessment
+        stages: dict[str, dict[str, Any]] = {
+            "vocabularies": {
+                "count": counts.get("concepts", 0),
+                "ready": counts.get("concepts", 0) > 0,
+                "status": "ready" if counts.get("concepts", 0) > 0 else "empty",
+                "message": (
+                    f"{counts.get('concepts', 0):,} concepts loaded"
+                    if counts.get("concepts", 0) > 0
+                    else "0 concepts loaded. Run 'ingest-vocab' to load YSO/SLM."
+                ),
+            },
+            "authorities": {
+                "count": counts.get("works", 0),
+                "ready": counts.get("works", 0) > 0,
+                "status": "ready" if counts.get("works", 0) > 0 else "empty",
+                "message": (
+                    f"{counts.get('works', 0):,} works, {counts.get('agents', 0):,} agents ingested"
+                    if counts.get("works", 0) > 0
+                    else "0 authority records. Run 'ingest-oai' or 'ingest-wikidata'."
+                ),
+            },
+            "vector_index": {
+                "count": work_vecs,
+                "ready": work_vecs > 0,
+                "status": "ready" if work_vecs > 0 else "empty",
+                "message": (
+                    f"{work_vecs:,} works indexed into vector store"
+                    if work_vecs > 0
+                    else "Vector store empty. Run 'build-index' to enable semantic search."
+                ),
+            },
+            "work_consolidation": {
+                "count": counts.get("work_consolidations", 0),
+                "ready": counts.get("work_consolidations", 0) > 0,
+                "status": "ready" if counts.get("work_consolidations", 0) > 0 else "empty",
+                "message": (
+                    f"{counts.get('work_consolidations', 0):,} works consolidated"
+                    if counts.get("work_consolidations", 0) > 0
+                    else "No work consolidations. Run 'consolidate-works' to elect canonical works."
+                ),
+            },
+            "agent_clustering": {
+                "count": counts.get("agent_clusters", 0),
+                "ready": counts.get("agent_clusters", 0) > 0,
+                "status": "ready" if counts.get("agent_clusters", 0) > 0 else "empty",
+                "message": (
+                    f"{counts.get('agent_clusters', 0):,} agent clusters"
+                    if counts.get("agent_clusters", 0) > 0
+                    else "No agent clusters. Run 'cluster-agents' to link cross-source agents."
+                ),
+            },
+            "corpus_reconciliation": {
+                "count": counts.get("corpus_linkages", 0),
+                "ready": counts.get("corpus_linkages", 0) > 0,
+                "status": "ready" if counts.get("corpus_linkages", 0) > 0 else "empty",
+                "message": (
+                    f"{counts.get('corpus_linkages', 0):,} corpus records reconciled"
+                    if counts.get("corpus_linkages", 0) > 0
+                    else "No corpus records reconciled. Run 'reconcile' to process target catalogue."
+                ),
+            },
+        }
+
+        # Determine overall status
+        if counts.get("works", 0) == 0 and counts.get("concepts", 0) == 0:
+            overall = "unpopulated"
+        elif counts.get("corpus_linkages", 0) > 0 and counts.get("work_consolidations", 0) > 0:
+            overall = "ready"
+        else:
+            overall = "partially_populated"
+
+        return DataReadinessSummary(
+            database_connected=True,
+            overall_readiness=overall,
+            entity_counts=counts,
+            vector_store=vector_info,
+            pipeline_readiness=stages,
+        )
+
+    # =======================================================================
+    # Review Changesets & Curation Staging Engine
+    # =======================================================================
+
+    def create_changeset(
+        self,
+        title: str,
+        description: Optional[str],
+        created_by: str,
+        assigned_to: Optional[str] = None,
+    ) -> ReviewChangeset:
+        """Create a new staged review changeset."""
+        stmt = (
+            insert(review_changesets_table)
+            .values(
+                title=title,
+                description=description,
+                status="draft",
+                created_by=created_by,
+                assigned_to=assigned_to,
+            )
+            .returning(review_changesets_table)
+        )
+        with self.get_connection() as conn:
+            row = conn.execute(stmt).mappings().fetchone()
+            return ReviewChangeset.model_validate(_row_to_dict(row))
+
+    def list_changesets(
+        self,
+        status: Optional[str] = None,
+        created_by: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ReviewChangeset], int]:
+        """List review changesets with optional status or author filtering."""
+        stmt = select(review_changesets_table)
+        count_stmt = select(func.count()).select_from(review_changesets_table)
+
+        if status:
+            stmt = stmt.where(review_changesets_table.c.status == status)
+            count_stmt = count_stmt.where(review_changesets_table.c.status == status)
+        if created_by:
+            stmt = stmt.where(review_changesets_table.c.created_by == created_by)
+            count_stmt = count_stmt.where(review_changesets_table.c.created_by == created_by)
+
+        stmt = (
+            stmt.order_by(review_changesets_table.c.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
+        with self.get_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            results: list[ReviewChangeset] = []
+            for r in rows:
+                cs = ReviewChangeset.model_validate(_row_to_dict(r))
+                # Fetch count of operations for this changeset
+                op_count_stmt = select(func.count()).select_from(changeset_operations_table).where(
+                    changeset_operations_table.c.changeset_id == cs.id
+                )
+                cs.operations_count = int(conn.execute(op_count_stmt).scalar() or 0)
+                results.append(cs)
+            return results, int(total)
+
+    def get_changeset(self, changeset_id: int) -> Optional[ReviewChangeset]:
+        """Fetch changeset by ID along with its staged operations."""
+        stmt = select(review_changesets_table).where(review_changesets_table.c.id == changeset_id)
+        with self.get_connection() as conn:
+            row = conn.execute(stmt).mappings().fetchone()
+            if not row:
+                return None
+            cs = ReviewChangeset.model_validate(_row_to_dict(row))
+
+            ops_stmt = (
+                select(changeset_operations_table)
+                .where(changeset_operations_table.c.changeset_id == changeset_id)
+                .order_by(changeset_operations_table.c.sequence.asc())
+            )
+            op_rows = conn.execute(ops_stmt).mappings().fetchall()
+            operations: list[ChangesetOperation] = []
+            for op_r in op_rows:
+                d = _row_to_dict(op_r)
+                if isinstance(d.get("parameters_json"), str):
+                    try:
+                        d["parameters"] = json.loads(d["parameters_json"])
+                    except Exception:
+                        d["parameters"] = {}
+                elif isinstance(d.get("parameters"), dict):
+                    pass
+                else:
+                    d["parameters"] = {}
+
+                if isinstance(d.get("pre_image_json"), str):
+                    try:
+                        d["pre_image"] = json.loads(d["pre_image_json"])
+                    except Exception:
+                        d["pre_image"] = None
+
+                operations.append(ChangesetOperation.model_validate(d))
+
+            cs.operations = operations
+            cs.operations_count = len(operations)
+            return cs
+
+    def add_changeset_operation(
+        self,
+        changeset_id: int,
+        operation_type: str,
+        entity_type: str,
+        entity_id: str,
+        target_id: Optional[str] = None,
+        parameters: Optional[dict[str, Any]] = None,
+        pre_image: Optional[dict[str, Any]] = None,
+        notes: Optional[str] = None,
+    ) -> ChangesetOperation:
+        """Stage an operation inside a review changeset."""
+        params_json = json.dumps(parameters or {}, ensure_ascii=False)
+        pre_img_json = json.dumps(pre_image, ensure_ascii=False) if pre_image is not None else None
+
+        with self.get_connection() as conn:
+            seq_stmt = (
+                select(func.coalesce(func.max(changeset_operations_table.c.sequence), 0))
+                .where(changeset_operations_table.c.changeset_id == changeset_id)
+            )
+            next_seq = int(conn.execute(seq_stmt).scalar() or 0) + 1
+
+            stmt = (
+                insert(changeset_operations_table)
+                .values(
+                    changeset_id=changeset_id,
+                    sequence=next_seq,
+                    operation_type=operation_type,
+                    entity_type=entity_type,
+                    entity_id=str(entity_id),
+                    target_id=str(target_id) if target_id is not None else None,
+                    parameters_json=params_json,
+                    pre_image_json=pre_img_json,
+                    notes=notes,
+                )
+                .returning(changeset_operations_table)
+            )
+            row = conn.execute(stmt).mappings().fetchone()
+            d = _row_to_dict(row)
+            d["parameters"] = parameters or {}
+            d["pre_image"] = pre_image
+            return ChangesetOperation.model_validate(d)
+
+    def delete_changeset_operation(self, operation_id: int) -> bool:
+        """Remove a staged operation from a changeset."""
+        stmt = (
+            delete(changeset_operations_table)
+            .where(changeset_operations_table.c.id == operation_id)
+            .returning(changeset_operations_table.c.id)
+        )
+        with self.get_connection() as conn:
+            row = conn.execute(stmt).fetchone()
+            return row is not None
+
+    def commit_changeset(self, changeset_id: int, committed_by: str) -> ReviewChangeset:
+        """Atomically apply all staged operations in a changeset, pinning decisions."""
+        cs = self.get_changeset(changeset_id)
+        if not cs:
+            raise ValueError(f"Changeset {changeset_id} not found")
+        if cs.status == "committed":
+            raise ValueError(f"Changeset {changeset_id} is already committed")
+
+        def _safe_upsert(c: Any, tbl: Table, keys: list[str], vals: dict[str, Any]) -> None:
+            cond = and_(*[tbl.c[k] == vals[k] for k in keys])
+            existing_val = c.execute(select(tbl.c[keys[0]]).where(cond)).scalar()
+            if existing_val is not None:
+                updates = {k: v for k, v in vals.items() if k not in keys}
+                if updates:
+                    c.execute(update(tbl).where(cond).values(**updates))
+            else:
+                c.execute(insert(tbl).values(**vals))
+
+        with self.get_connection() as conn:
+            for op in cs.operations:
+                op_type = op.operation_type
+                params = op.parameters
+
+                if op_type == "work_merge":
+                    # Merge works into an equivalence group
+                    work_ids = [int(x) for x in params.get("work_ids", [op.entity_id])]
+                    canonical_id = int(params.get("canonical_id", work_ids[0]))
+                    for wid in work_ids:
+                        # Update work_consolidations
+                        _safe_upsert(
+                            conn,
+                            work_consolidations_table,
+                            ["work_id"],
+                            {"work_id": wid, "canonical_work_id": canonical_id, "evidence": "manual_curation"},
+                        )
+                        # Create pin
+                        _safe_upsert(
+                            conn,
+                            entity_pins_table,
+                            ["entity_type", "entity_id"],
+                            {
+                                "entity_type": "work_consolidation",
+                                "entity_id": str(wid),
+                                "changeset_id": changeset_id,
+                                "pinned_by": committed_by,
+                            },
+                        )
+                    # Add symmetric same_work_as relationships between all pairs
+                    for i in range(len(work_ids)):
+                        for j in range(i + 1, len(work_ids)):
+                            for src, tgt in ((work_ids[i], work_ids[j]), (work_ids[j], work_ids[i])):
+                                rel_cond = and_(
+                                    work_relationships_table.c.source_work_id == src,
+                                    work_relationships_table.c.target_work_id == tgt,
+                                    work_relationships_table.c.relationship_type == "same_work_as",
+                                )
+                                if conn.execute(select(work_relationships_table.c.id).where(rel_cond)).scalar() is None:
+                                    conn.execute(
+                                        insert(work_relationships_table).values(
+                                            source_work_id=src,
+                                            target_work_id=tgt,
+                                            relationship_type="same_work_as",
+                                        )
+                                    )
+
+                elif op_type == "work_split":
+                    # Remove a work from an equivalence group
+                    wid = int(op.entity_id)
+                    # Delete same_work_as edges touching this work
+                    conn.execute(
+                        delete(work_relationships_table).where(
+                            and_(
+                                work_relationships_table.c.relationship_type == "same_work_as",
+                                or_(
+                                    work_relationships_table.c.source_work_id == wid,
+                                    work_relationships_table.c.target_work_id == wid,
+                                ),
+                            )
+                        )
+                    )
+                    # Remove from work_consolidations
+                    conn.execute(
+                        delete(work_consolidations_table).where(work_consolidations_table.c.work_id == wid)
+                    )
+                    # Add pin indicating work is pinned as singleton
+                    _safe_upsert(
+                        conn,
+                        entity_pins_table,
+                        ["entity_type", "entity_id"],
+                        {
+                            "entity_type": "work_consolidation",
+                            "entity_id": str(wid),
+                            "changeset_id": changeset_id,
+                            "pinned_by": committed_by,
+                        },
+                    )
+
+                elif op_type == "work_elect_canonical":
+                    # Change canonical work for an existing group
+                    canonical_id = int(op.target_id or op.entity_id)
+                    member_ids = [int(x) for x in params.get("member_ids", [op.entity_id])]
+                    for mid in member_ids:
+                        conn.execute(
+                            update(work_consolidations_table)
+                            .where(work_consolidations_table.c.work_id == mid)
+                            .values(canonical_work_id=canonical_id)
+                        )
+                        _safe_upsert(
+                            conn,
+                            entity_pins_table,
+                            ["entity_type", "entity_id"],
+                            {
+                                "entity_type": "work_consolidation",
+                                "entity_id": str(mid),
+                                "changeset_id": changeset_id,
+                                "pinned_by": committed_by,
+                            },
+                        )
+
+                elif op_type == "agent_cluster_merge":
+                    # Merge agent clusters
+                    target_cluster_id = str(op.target_id or op.entity_id)
+                    source_cluster_id = str(params.get("source_cluster_id", op.entity_id))
+                    # Reassign members to target cluster
+                    conn.execute(
+                        update(corpus_agent_cluster_members_table)
+                        .where(corpus_agent_cluster_members_table.c.cluster_id == source_cluster_id)
+                        .values(cluster_id=target_cluster_id)
+                    )
+                    # Pin target cluster
+                    _safe_upsert(
+                        conn,
+                        entity_pins_table,
+                        ["entity_type", "entity_id"],
+                        {
+                            "entity_type": "agent_cluster",
+                            "entity_id": target_cluster_id,
+                            "changeset_id": changeset_id,
+                            "pinned_by": committed_by,
+                        },
+                    )
+
+                elif op_type == "agent_cluster_split":
+                    # Detach member agent from cluster
+                    agent_id = int(op.entity_id)
+                    conn.execute(
+                        delete(corpus_agent_cluster_members_table).where(
+                            corpus_agent_cluster_members_table.c.agent_id == agent_id
+                        )
+                    )
+                    _safe_upsert(
+                        conn,
+                        entity_pins_table,
+                        ["entity_type", "entity_id"],
+                        {
+                            "entity_type": "agent_cluster_member",
+                            "entity_id": str(agent_id),
+                            "changeset_id": changeset_id,
+                            "pinned_by": committed_by,
+                        },
+                    )
+
+                elif op_type == "reconciliation_relink":
+                    # Relink a target record to a different authority work / manifestation
+                    record_id = str(op.entity_id)
+                    new_work_uri = str(params.get("work_uri", ""))
+                    new_exp_uri = str(params.get("expression_uri", ""))
+                    conn.execute(
+                        update(corpus_linkages_table)
+                        .where(corpus_linkages_table.c.record_id == record_id)
+                        .values(
+                            final_work_source="manual",
+                            final_work_source_id=new_work_uri,
+                            final_expression_source="manual",
+                            final_expression_source_id=new_exp_uri,
+                        )
+                    )
+                    _safe_upsert(
+                        conn,
+                        entity_pins_table,
+                        ["entity_type", "entity_id"],
+                        {
+                            "entity_type": "corpus_linkage",
+                            "entity_id": record_id,
+                            "changeset_id": changeset_id,
+                            "pinned_by": committed_by,
+                        },
+                    )
+
+                elif op_type == "reconciliation_reject":
+                    # Reject match for target record
+                    record_id = str(op.entity_id)
+                    conn.execute(
+                        update(corpus_linkages_table)
+                        .where(corpus_linkages_table.c.record_id == record_id)
+                        .values(
+                            final_work_source="",
+                            final_work_source_id="",
+                            final_expression_source="",
+                            final_expression_source_id="",
+                        )
+                    )
+                    _safe_upsert(
+                        conn,
+                        entity_pins_table,
+                        ["entity_type", "entity_id"],
+                        {
+                            "entity_type": "corpus_linkage",
+                            "entity_id": record_id,
+                            "changeset_id": changeset_id,
+                            "pinned_by": committed_by,
+                        },
+                    )
+
+            # Mark changeset as committed
+            conn.execute(
+                update(review_changesets_table)
+                .where(review_changesets_table.c.id == changeset_id)
+                .values(
+                    status="committed",
+                    committed_by=committed_by,
+                    committed_at=func.current_timestamp(),
+                    updated_at=func.current_timestamp(),
+                )
+            )
+
+        return self.get_changeset(changeset_id) or cs
+
+    def revert_changeset(self, changeset_id: int, reverted_by: str) -> ReviewChangeset:
+        """Rollback a committed changeset using pre-images and release entity pins."""
+        cs = self.get_changeset(changeset_id)
+        if not cs:
+            raise ValueError(f"Changeset {changeset_id} not found")
+        if cs.status != "committed":
+            raise ValueError(f"Changeset {changeset_id} is not committed (status: {cs.status})")
+
+        with self.get_connection() as conn:
+            # Delete pins created by this changeset
+            conn.execute(
+                delete(entity_pins_table).where(entity_pins_table.c.changeset_id == changeset_id)
+            )
+
+            # Restore pre-images in reverse sequence
+            for op in reversed(cs.operations):
+                pre = op.pre_image or {}
+                if not pre:
+                    continue
+                if op.operation_type in ("work_merge", "work_split", "work_elect_canonical"):
+                    # Restore original canonical work ID if available
+                    orig_canon = pre.get("canonical_work_id")
+                    if orig_canon is not None:
+                        conn.execute(
+                            update(work_consolidations_table)
+                            .where(work_consolidations_table.c.work_id == int(op.entity_id))
+                            .values(canonical_work_id=int(orig_canon))
+                        )
+                elif op.operation_type in ("reconciliation_relink", "reconciliation_reject"):
+                    orig_w = pre.get("final_work_source_id", "")
+                    orig_e = pre.get("final_expression_source_id", "")
+                    conn.execute(
+                        update(corpus_linkages_table)
+                        .where(corpus_linkages_table.c.record_id == str(op.entity_id))
+                        .values(
+                            final_work_source_id=orig_w,
+                            final_expression_source_id=orig_e,
+                        )
+                    )
+
+            # Update changeset status
+            conn.execute(
+                update(review_changesets_table)
+                .where(review_changesets_table.c.id == changeset_id)
+                .values(
+                    status="reverted",
+                    updated_at=func.current_timestamp(),
+                )
+            )
+
+        return self.get_changeset(changeset_id) or cs
+
+    def get_pinned_entities(self, entity_type: Optional[str] = None) -> set[str]:
+        """Fetch all entity IDs currently pinned by curators."""
+        stmt = select(entity_pins_table.c.entity_id)
+        if entity_type:
+            stmt = stmt.where(entity_pins_table.c.entity_type == entity_type)
+        with self.get_connection() as conn:
+            return {str(r[0]) for r in conn.execute(stmt)}
+
+    def is_entity_pinned(self, entity_type: str, entity_id: str) -> bool:
+        """Check if an entity is pinned against automated pipeline modification."""
+        stmt = (
+            select(entity_pins_table.c.id)
+            .where(
+                and_(
+                    entity_pins_table.c.entity_type == entity_type,
+                    entity_pins_table.c.entity_id == str(entity_id),
+                )
+            )
+            .limit(1)
+        )
+        with self.get_connection() as conn:
+            return conn.execute(stmt).scalar() is not None
+
+    # =======================================================================
+    # Entity Browsing & Search Helpers for API
+    # =======================================================================
+
+    def get_works_paginated(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        work_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[WorkEntity], int]:
+        """Fetch paginated works with optional text query and source filters."""
+        stmt = select(works_table)
+        count_stmt = select(func.count()).select_from(works_table)
+
+        if source:
+            stmt = stmt.where(works_table.c.record_origin == source)
+            count_stmt = count_stmt.where(works_table.c.record_origin == source)
+        if work_type:
+            stmt = stmt.where(works_table.c.work_type == work_type)
+            count_stmt = count_stmt.where(works_table.c.work_type == work_type)
+
+        if query and query.strip():
+            clean_q = query.strip()
+            # Try fuzzy trigram or title search
+            fuzzy_cond = works_table.c.title_normalized.ilike(f"%{clean_q.lower()}%")
+            stmt = stmt.where(fuzzy_cond)
+            count_stmt = count_stmt.where(fuzzy_cond)
+
+        stmt = stmt.order_by(works_table.c.id.desc()).limit(limit).offset(offset)
+        with self.get_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [_row_to_work(r) for r in rows], int(total)
+
+    def get_manifestations_paginated(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ManifestationEntity], int]:
+        """Fetch paginated manifestations."""
+        stmt = select(manifestations_table)
+        count_stmt = select(func.count()).select_from(manifestations_table)
+
+        if source:
+            stmt = stmt.where(manifestations_table.c.record_origin == source)
+            count_stmt = count_stmt.where(manifestations_table.c.record_origin == source)
+        if query and query.strip():
+            clean_q = query.strip()
+            cond = manifestations_table.c.title_normalized.ilike(f"%{clean_q.lower()}%")
+            stmt = stmt.where(cond)
+            count_stmt = count_stmt.where(cond)
+
+        stmt = stmt.order_by(manifestations_table.c.id.desc()).limit(limit).offset(offset)
+        with self.get_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [_row_to_manifestation(r) for r in rows], int(total)
+
+    def get_agents_paginated(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[AgentEntity], int]:
+        """Fetch paginated agents."""
+        stmt = select(agents_table)
+        count_stmt = select(func.count()).select_from(agents_table)
+
+        if source:
+            stmt = stmt.where(agents_table.c.record_origin == source)
+            count_stmt = count_stmt.where(agents_table.c.record_origin == source)
+        if query and query.strip():
+            clean_q = query.strip()
+            cond = agents_table.c.name_normalized.ilike(f"%{clean_q.lower()}%")
+            stmt = stmt.where(cond)
+            count_stmt = count_stmt.where(cond)
+
+        stmt = stmt.order_by(agents_table.c.id.desc()).limit(limit).offset(offset)
+        with self.get_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [_row_to_agent(r) for r in rows], int(total)
+
+    def get_consolidation_groups_paginated(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Fetch paginated work consolidation equivalence groups."""
+        # Find distinct canonical_work_id groups
+        sub = (
+            select(
+                work_consolidations_table.c.canonical_work_id,
+                func.count(work_consolidations_table.c.work_id).label("member_count"),
+            )
+            .group_by(work_consolidations_table.c.canonical_work_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                sub.c.canonical_work_id,
+                sub.c.member_count,
+                works_table.c.title,
+                works_table.c.source,
+                works_table.c.source_id,
+                works_table.c.work_type,
+            )
+            .join(works_table, sub.c.canonical_work_id == works_table.c.id)
+            .order_by(sub.c.member_count.desc(), sub.c.canonical_work_id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        count_stmt = select(func.count()).select_from(sub)
+
+        with self.get_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            results: list[dict[str, Any]] = []
+            for r in rows:
+                canon_id = int(r["canonical_work_id"])
+                # Fetch members
+                members_stmt = (
+                    select(
+                        works_table.c.id,
+                        works_table.c.title,
+                        works_table.c.source,
+                        works_table.c.source_id,
+                        work_consolidations_table.c.evidence,
+                    )
+                    .join(works_table, work_consolidations_table.c.work_id == works_table.c.id)
+                    .where(work_consolidations_table.c.canonical_work_id == canon_id)
+                )
+                member_rows = conn.execute(members_stmt).mappings().fetchall()
+                results.append(
+                    {
+                        "canonical_work_id": canon_id,
+                        "canonical_title": r["title"],
+                        "canonical_source": r["source"],
+                        "canonical_source_id": r["source_id"],
+                        "work_type": r["work_type"],
+                        "member_count": int(r["member_count"]),
+                        "members": [dict(m) for m in member_rows],
+                    }
+                )
+            return results, int(total)
+
+    def get_consolidation_group_graph(self, canonical_work_id: int) -> dict[str, Any]:
+        """Fetch Cytoscape-formatted graph data for a work consolidation equivalence group."""
+        with self.get_connection() as conn:
+            # Fetch members of this canonical group
+            members_stmt = (
+                select(
+                    works_table.c.id,
+                    works_table.c.title,
+                    works_table.c.source,
+                    works_table.c.source_id,
+                    works_table.c.work_type,
+                    work_consolidations_table.c.evidence,
+                )
+                .join(works_table, work_consolidations_table.c.work_id == works_table.c.id)
+                .where(work_consolidations_table.c.canonical_work_id == canonical_work_id)
+            )
+            member_rows = conn.execute(members_stmt).mappings().fetchall()
+            if not member_rows:
+                # Check if this work exists as a singleton
+                w = self.get_work(canonical_work_id)
+                if not w:
+                    return {"nodes": [], "edges": []}
+                return {
+                    "nodes": [
+                        {
+                            "data": {
+                                "id": str(w.id),
+                                "label": w.title,
+                                "source": w.source,
+                                "source_id": w.source_id,
+                                "is_canonical": True,
+                                "work_type": w.work_type,
+                            }
+                        }
+                    ],
+                    "edges": [],
+                }
+
+            member_ids = [int(m["id"]) for m in member_rows]
+            nodes = [
+                {
+                    "data": {
+                        "id": str(m["id"]),
+                        "label": m["title"],
+                        "source": m["source"],
+                        "source_id": m["source_id"],
+                        "is_canonical": int(m["id"]) == canonical_work_id,
+                        "work_type": m["work_type"],
+                        "evidence": m["evidence"],
+                    }
+                }
+                for m in member_rows
+            ]
+
+            # Fetch same_work_as edges
+            edges_stmt = select(work_relationships_table).where(
+                and_(
+                    work_relationships_table.c.relationship_type == "same_work_as",
+                    work_relationships_table.c.source_work_id.in_(member_ids),
+                    work_relationships_table.c.target_work_id.in_(member_ids),
+                )
+            )
+            edge_rows = conn.execute(edges_stmt).mappings().fetchall()
+            seen_edges: set[tuple[int, int]] = set()
+            edges = []
+            for er in edge_rows:
+                src, tgt = int(er["source_work_id"]), int(er["target_work_id"])
+                edge_key = (min(src, tgt), max(src, tgt))
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                edges.append(
+                    {
+                        "data": {
+                            "id": f"edge_{src}_{tgt}",
+                            "source": str(src),
+                            "target": str(tgt),
+                            "relationship": "same_work_as",
+                        }
+                    }
+                )
+
+            return {"nodes": nodes, "edges": edges}
+
+    def get_agent_clusters_paginated(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[AgentCluster], int]:
+        """Fetch paginated agent clusters."""
+        stmt = (
+            select(corpus_agent_clusters_table)
+            .order_by(corpus_agent_clusters_table.c.member_count.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        count_stmt = select(func.count()).select_from(corpus_agent_clusters_table)
+        with self.get_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [AgentCluster.model_validate(dict(r)) for r in rows], int(total)
+
+    def get_reconciliation_records_paginated(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Fetch paginated reconciled corpus records with their WEMI linkage status."""
+        stmt = (
+            select(corpus_linkages_table)
+            .order_by(corpus_linkages_table.c.record_id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        count_stmt = select(func.count()).select_from(corpus_linkages_table)
+        with self.get_corpus_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [dict(r) for r in rows], int(total)
+

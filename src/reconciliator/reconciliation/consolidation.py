@@ -366,11 +366,21 @@ class WorkConsolidator:
             uf.union(a, b)
             result.evidence[(a, b)] = evidence
 
+        pinned_works = self.repo.get_pinned_entities("work_consolidation")
+        existing_canonicals = self.repo.get_work_equivalence_map() if pinned_works else {}
+
         for members in uf.groups().values():
             if len(members) < 2:
                 continue
             members = sorted(members)
-            canonical = self.elect_canonical(members, sigs)
+            # Check if any member is pinned with an existing canonical work
+            pinned_canonical = None
+            for m in members:
+                if str(m) in pinned_works and m in existing_canonicals:
+                    pinned_canonical = existing_canonicals[m]
+                    break
+
+            canonical = pinned_canonical if pinned_canonical is not None else self.elect_canonical(members, sigs)
             result.groups.append(members)
             for work_id in members:
                 result.canonical_by_work[work_id] = canonical

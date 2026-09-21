@@ -1125,7 +1125,52 @@ class VocabIngestConfig(BaseModel):
 
 
 
-class OAIIngestConfig(BaseModel):
+class IngestFilterConfig(BaseModel):
+    """Universal publication and media type filter configuration."""
+
+    target_work_types: list[str] = Field(
+        default_factory=lambda: list(
+            get_bundled_defaults().get("ingest", {}).get("target_work_types", [])
+        )
+    )
+    exclude_work_types: list[str] = Field(
+        default_factory=lambda: list(
+            get_bundled_defaults().get("ingest", {}).get("exclude_work_types", [])
+        )
+    )
+    target_languages: list[str] = Field(
+        default_factory=lambda: list(
+            get_bundled_defaults().get("ingest", {}).get("target_languages", [])
+        )
+    )
+    from_year: Optional[int] = Field(
+        default_factory=lambda: get_bundled_defaults().get("ingest", {}).get("from_year")
+    )
+    until_year: Optional[int] = Field(
+        default_factory=lambda: get_bundled_defaults().get("ingest", {}).get("until_year")
+    )
+
+    def accepts(
+        self,
+        work_type: Optional[str] = None,
+        language: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> bool:
+        """Evaluate whether a work meets configured ingestion/reconciliation criteria."""
+        if self.target_work_types and work_type and work_type not in self.target_work_types:
+            return False
+        if self.exclude_work_types and work_type and work_type in self.exclude_work_types:
+            return False
+        if self.target_languages and language and language not in self.target_languages:
+            return False
+        if self.from_year is not None and year is not None and year < self.from_year:
+            return False
+        if self.until_year is not None and year is not None and year > self.until_year:
+            return False
+        return True
+
+
+class OAIIngestConfig(IngestFilterConfig):
     """Configuration for an individual OAI-PMH, ResourceSync, or file authority source."""
 
     enabled: bool = True
@@ -1217,9 +1262,26 @@ class OAIIngestConfig(BaseModel):
         return self
 
 
-class WikidataIngestConfig(BaseModel):
+class WikidataIngestConfig(IngestFilterConfig):
     """Configuration for streaming Wikidata JSON ingestion."""
 
+    creative_work_types: dict[str, str] = Field(
+        default_factory=lambda: dict(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get("creative_work_types", {})
+        )
+    )
+    human_and_entity_types: list[str] = Field(
+        default_factory=lambda: list(
+            get_bundled_defaults()
+            .get("ingest_wikidata", {})
+            .get(
+                "human_and_entity_types",
+                ["Q5", "Q2085381", "Q4830453", "Q43229", "Q515", "Q6256"],
+            )
+        )
+    )
     dump_path: Path = Field(
         default_factory=lambda: Path(
             get_bundled_defaults().get("ingest_wikidata", {}).get(
@@ -1850,7 +1912,7 @@ class FunnelsConfig(BaseModel):
 from reconciliator.funnels.spec import FunnelSpec
 
 
-class ReconcileConfig(BaseModel):
+class ReconcileConfig(IngestFilterConfig):
     """Offline reconciliation and enrichment configuration."""
 
     target_file: Path
@@ -2077,6 +2139,25 @@ class ConstituentsConfig(BaseModel):
     index_works: bool = False
 
 
+class EntraAuthConfig(BaseModel):
+    """Configuration for Microsoft Entra ID authentication and local development mode."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    tenant_id: str = ""
+    client_id: str = ""
+    client_secret: Optional[str] = None
+    audience: Optional[str] = None
+    role_claim: str = "roles"
+    admin_roles: list[str] = Field(default_factory=lambda: ["Reconciliator.Admin", "Admin", "admin"])
+    curator_roles: list[str] = Field(default_factory=lambda: ["Reconciliator.Curator", "Curator", "curator"])
+    reader_roles: list[str] = Field(default_factory=lambda: ["Reconciliator.Reader", "Reader", "reader"])
+    dev_default_role: str = "Admin"
+    dev_user_email: str = "dev@localhost"
+    dev_user_name: str = "Local Developer"
+
+
 class AppConfig(BaseModel):
     """Root configuration object combining all subsystems."""
 
@@ -2085,6 +2166,7 @@ class AppConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=lambda: EmbeddingConfig(**_EMBED_DEFAULTS))
     linguistic: LinguisticConfig = Field(default_factory=LinguisticConfig)
     vocabularies: VocabulariesConfig = Field(default_factory=VocabulariesConfig)
+    auth: EntraAuthConfig = Field(default_factory=EntraAuthConfig)
     sources: dict[str, SourceConfig] = Field(
         default_factory=lambda: {
             k: SourceConfig(**v) if isinstance(v, dict) else v
@@ -2100,6 +2182,7 @@ class AppConfig(BaseModel):
     #: Set by `load_config`; anchors every relative path in configuration that
     #: names code or a profile.
     config_dir: Optional[Path] = None
+    ingest: IngestFilterConfig = Field(default_factory=IngestFilterConfig)
     download_skosmos: dict[str, SkosmosDownloadConfig] = Field(default_factory=dict)
     ingest_vocab: Optional[VocabIngestConfig] = None
     ingest_oai: dict[str, OAIIngestConfig] = Field(default_factory=dict)
@@ -2174,6 +2257,42 @@ class AppConfig(BaseModel):
                 self.ingest_wikidata.author_authority_properties = list(
                     self.vocabularies.wikidata_author_properties.values()
                 )
+
+        # Propagate global ingest filter rules to sources if not explicitly defined
+        if self.ingest:
+            for src in self.ingest_oai.values():
+                if not src.target_work_types and self.ingest.target_work_types:
+                    src.target_work_types = list(self.ingest.target_work_types)
+                if not src.exclude_work_types and self.ingest.exclude_work_types:
+                    src.exclude_work_types = list(self.ingest.exclude_work_types)
+                if not src.target_languages and self.ingest.target_languages:
+                    src.target_languages = list(self.ingest.target_languages)
+                if src.from_year is None and self.ingest.from_year is not None:
+                    src.from_year = self.ingest.from_year
+                if src.until_year is None and self.ingest.until_year is not None:
+                    src.until_year = self.ingest.until_year
+            if self.ingest_wikidata is not None:
+                if not self.ingest_wikidata.target_work_types and self.ingest.target_work_types:
+                    self.ingest_wikidata.target_work_types = list(self.ingest.target_work_types)
+                if not self.ingest_wikidata.exclude_work_types and self.ingest.exclude_work_types:
+                    self.ingest_wikidata.exclude_work_types = list(self.ingest.exclude_work_types)
+                if not self.ingest_wikidata.target_languages and self.ingest.target_languages:
+                    self.ingest_wikidata.target_languages = list(self.ingest.target_languages)
+                if self.ingest_wikidata.from_year is None and self.ingest.from_year is not None:
+                    self.ingest_wikidata.from_year = self.ingest.from_year
+                if self.ingest_wikidata.until_year is None and self.ingest.until_year is not None:
+                    self.ingest_wikidata.until_year = self.ingest.until_year
+            if self.reconcile is not None:
+                if not self.reconcile.target_work_types and self.ingest.target_work_types:
+                    self.reconcile.target_work_types = list(self.ingest.target_work_types)
+                if not self.reconcile.exclude_work_types and self.ingest.exclude_work_types:
+                    self.reconcile.exclude_work_types = list(self.ingest.exclude_work_types)
+                if not self.reconcile.target_languages and self.ingest.target_languages:
+                    self.reconcile.target_languages = list(self.ingest.target_languages)
+                if self.reconcile.from_year is None and self.ingest.from_year is not None:
+                    self.reconcile.from_year = self.ingest.from_year
+                if self.reconcile.until_year is None and self.ingest.until_year is not None:
+                    self.reconcile.until_year = self.ingest.until_year
 
         return self
 

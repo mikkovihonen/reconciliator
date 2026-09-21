@@ -89,26 +89,11 @@ AUTHOR_INDICATORS = (
     b'"P86"',
 )
 
-_HUMAN_AND_ENTITY_TYPES = {"Q5", "Q2085381", "Q4830453", "Q43229", "Q515", "Q6256"}
+_DEFAULT_WIKIDATA_CONFIG = WikidataIngestConfig()
+_HUMAN_AND_ENTITY_TYPES = set(_DEFAULT_WIKIDATA_CONFIG.human_and_entity_types)
+_CREATIVE_WORK_TYPES = set(_DEFAULT_WIKIDATA_CONFIG.creative_work_types.keys())
+_CREATIVE_WORK_MAPPING = dict(_DEFAULT_WIKIDATA_CONFIG.creative_work_types)
 _BOOK_TYPES = {"Q571", "Q7725634", "Q47461344", "Q3331189"}
-_CREATIVE_WORK_TYPES = {
-    "Q7725634",   # literary work
-    "Q571",       # book
-    "Q47461344",  # written work
-    "Q2188189",   # musical work
-    "Q7366",      # song
-    "Q105543609", # musical composition
-    "Q134556",    # single
-    "Q11424",     # film
-    "Q5398426",   # television series
-    "Q40063",     # drama / play
-    "Q1004",      # comics
-    "Q8274",      # manga
-    "Q131569",    # statute
-    "Q3284440",   # act of parliament
-    "Q7889",      # video game
-    "Q131436",    # board game
-}
 _AUTHOR_PROPERTIES = (
     ("P50", "aut"),
     ("P98", "edt"),
@@ -598,12 +583,17 @@ def parse_wikidata_entity(
     entity: dict[str, Any],
     store: Optional[WEMIRepository] = None,
     cache: Optional[AuthorLRUCache] = None,
+    config: Optional[WikidataIngestConfig] = None,
 ) -> Optional[dict[str, Any]]:
     """Parse a Wikidata entity into raw bibliographic dictionary format.
 
     Author/publisher/subject names are hydrated from the database agents/identifiers tables
     via the store parameter, with LRU cache support for O(1) in-memory resolution.
     """
+    cfg = config or _DEFAULT_WIKIDATA_CONFIG
+    creative_map = cfg.creative_work_types or _CREATIVE_WORK_MAPPING
+    human_types = set(cfg.human_and_entity_types) if cfg.human_and_entity_types else _HUMAN_AND_ENTITY_TYPES
+
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
     labels = entity.get("labels", {})
@@ -611,16 +601,16 @@ def parse_wikidata_entity(
     # Check if this is a human/org/place entity — skip bibliographic processing
     instance_of = get_claim_qids(claims, "P31")
     is_human = "Q5" in instance_of
-    is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
+    is_org_or_place = any(k in instance_of for k in human_types - {"Q5"})
 
     if is_human or is_org_or_place:
         return None
 
-    # Check if bibliographic work / book
-    is_book = any(k in instance_of for k in _BOOK_TYPES)
+    # Check if creative work or has bibliographic IDs
+    is_creative = any(k in instance_of for k in creative_map)
     has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
 
-    if not (is_book or has_bib_ids):
+    if not (is_creative or has_bib_ids):
         return None
 
     # Title & Subtitle
@@ -918,8 +908,19 @@ def parse_wikidata_entity(
             }
         )
 
+    work_type = "text"
+    for q in instance_of:
+        if q in creative_map:
+            work_type = creative_map[q]
+            break
+
+    parsed_year = int(year_str) if (year_str and year_str.isdigit()) else None
+    if not cfg.accepts(work_type=work_type, language=language, year=parsed_year):
+        return None
+
     return {
         "source_id": qid,
+        "work_type": work_type,
         "source": "wikidata",
         "title": title,
         "subtitle": subtitle,
@@ -1228,6 +1229,7 @@ def decompose_wikidata_entity(
     store: Optional[WEMIRepository] = None,
     serialization_engine: Optional[WEMISerializationEngine] = None,
     cache: Optional[AuthorLRUCache] = None,
+    config: Optional[WikidataIngestConfig] = None,
 ) -> Optional[
     tuple[
         WorkEntity,
@@ -1246,6 +1248,10 @@ def decompose_wikidata_entity(
     Distinguishes Abstract Works from Editions/Manifestations (P629).
     Hydrates author/creator names from database or LRU cache for O(1) memory consumption.
     """
+    cfg = config or _DEFAULT_WIKIDATA_CONFIG
+    creative_map = cfg.creative_work_types or _CREATIVE_WORK_MAPPING
+    human_types = set(cfg.human_and_entity_types) if cfg.human_and_entity_types else _HUMAN_AND_ENTITY_TYPES
+
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
     labels = entity.get("labels", {})
@@ -1253,16 +1259,15 @@ def decompose_wikidata_entity(
     # Check if this is a human/org/place entity — skip bibliographic processing
     instance_of = get_claim_qids(claims, "P31")
     is_human = "Q5" in instance_of
-    is_org_or_place = any(k in instance_of for k in _HUMAN_AND_ENTITY_TYPES - {"Q5"})
+    is_org_or_place = any(k in instance_of for k in human_types - {"Q5"})
     if is_human or is_org_or_place:
         return None
 
     # Check bibliographic / creative work criteria
-    is_book = any(k in instance_of for k in _BOOK_TYPES)
     has_bib_ids = "P212" in claims or "P957" in claims or "P3595" in claims
     has_p629 = bool(get_claim_qids(claims, "P629"))
     is_edition = has_p629 or "Q3331189" in instance_of
-    is_creative_work = is_book or any(k in instance_of for k in _CREATIVE_WORK_TYPES)
+    is_creative_work = any(k in instance_of for k in creative_map)
 
     if not (is_edition or is_creative_work or has_bib_ids):
         return None
@@ -1337,22 +1342,16 @@ def decompose_wikidata_entity(
     if not original_language and language:
         original_language = language
 
-    # Work type
+    # Work type determined dynamically from configured creative_work_types mapping
     work_type: WorkType = "text"
-    if any(k in instance_of for k in {"Q2188189", "Q7366", "Q105543609", "Q134556"}):
-        work_type = "music"
-    elif any(k in instance_of for k in {"Q11424", "Q5398426"}):
-        work_type = "moving_image"
-    elif "Q40063" in instance_of:
-        work_type = "drama"
-    elif any(k in instance_of for k in {"Q1004", "Q8274"}):
-        work_type = "comic"
-    elif any(k in instance_of for k in {"Q131569", "Q3284440"}):
-        work_type = "legal"
-    elif "Q7889" in instance_of:
-        work_type = "interactive_game"
-    elif "Q131436" in instance_of:
-        work_type = "board_game"
+    for inst_qid in instance_of:
+        if inst_qid in creative_map:
+            work_type = creative_map[inst_qid]  # type: ignore[assignment]
+            break
+
+    # Universal ingestion filter check
+    if not cfg.accepts(work_type=work_type, language=language, year=pub_year_int):
+        return None
 
     # Edition statement & extent
     edition_statement: Optional[str] = None
@@ -1797,6 +1796,7 @@ def ingest_wikidata_wemi_pipeline(
                             store=wemi_repo,
                             serialization_engine=engine,
                             cache=author_cache,
+                            config=config,
                         )
                         if decomp:
                             w, e, m, itms, agts, rels, idents, assoc, contribs = decomp
@@ -1834,6 +1834,7 @@ def ingest_wikidata_wemi_pipeline(
                             store=wemi_repo,
                             serialization_engine=engine,
                             cache=author_cache,
+                            config=config,
                         )
                         if decomp:
                             w, e, m, itms, agts, rels, idents, assoc, contribs = decomp

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reconciliator — Authority Reconciliation & Curation</title>
+
+  <!-- Pre-render Theme Check (Eliminate flash of unstyled theme) -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('reconciliator_theme');
+      if (savedTheme === 'light' || (!savedTheme && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+        document.documentElement.classList.remove('dark');
+      } else {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Cytoscape.js for interactive cluster graphs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              teal: {
+                50: '#f0f9f8',
+                100: '#daf0ed',
+                200: '#b8e3dd',
+                300: '#88cbc3',
+                400: '#55a398',
+                500: '#348874',
+                600: '#2c6f6a',
+                700: '#255855',
+                800: '#214745',
+                900: '#1b3a39',
+                950: '#0d2120',
+              },
+              amber: {
+                50: '#fefbf3',
+                100: '#fdf6e7',
+                200: '#fbebc8',
+                300: '#f8dca0',
+                400: '#f3c467',
+                500: '#e3ac55',
+                600: '#c5753a',
+                700: '#934c12',
+                800: '#793e11',
+                900: '#643412',
+                950: '#3a1b07',
+              },
+              parchment: {
+                50: '#fcfcf9',
+                100: '#f9f6ef',
+                200: '#f3efe0',
+                300: '#ece3cc',
+                400: '#dfd2b2',
+                500: '#cfbe95',
+              },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Theme-aware Custom Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    .dark ::-webkit-scrollbar-track { background: #0f172a; }
+    .dark ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    #cy-container {
+      width: 100%;
+      height: 420px;
+      border-radius: 0.5rem;
+      transition: background-color 0.2s ease;
+    }
+    .dark #cy-container { background-color: #0f172a; }
+    #cy-container { background-color: #f8f6f0; }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased overflow-hidden bg-brand-parchment-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-200">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-white/95 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-5 py-3 flex items-center justify-between z-30 shrink-0 shadow-sm dark:shadow-none transition-colors duration-200">
+    <div class="flex items-center space-x-6">
+      <div class="flex items-center space-x-2.5">
+        <!-- Compact Navbar Monogram (Extracted circular emblem from reconciliator_large_logo.svg) -->
+        <img src="/static/assets/reconciliator_emblem.png" alt="Reconciliator Monogram" class="w-8 h-8 rounded-full object-contain shrink-0 drop-shadow-xs" />
+        <div>
+          <span class="font-bold text-lg tracking-tight text-slate-900 dark:text-white">Reconciliator</span>
+          <span class="text-xs text-brand-teal-700 dark:text-brand-teal-300 font-mono ml-1.5 px-1.5 py-0.5 rounded bg-brand-teal-50 dark:bg-brand-teal-950/80 border border-brand-teal-200 dark:border-brand-teal-800/60">v0.1.0</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="flex items-center space-x-1">
+        <button id="nav-search" onclick="switchView('search')" class="nav-btn px-3 py-1.5 rounded-md text-sm font-medium text-white bg-brand-teal-600 transition shadow-sm">
+          Search & Browse
+        </button>
+        <button id="nav-consolidation" onclick="switchView('consolidation')" class="nav-btn px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 transition">
+          Consolidations & Clusters
+        </button>
+        <button id="nav-reconciliation" onclick="switchView('reconciliation')" class="nav-btn px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 transition">
+          Reconciliation Review
+        </button>
+        <button id="nav-changesets" onclick="switchView('changesets')" class="nav-btn px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 transition">
+          Review Changesets
+        </button>
+      </nav>
+    </div>
+
+    <!-- Right Controls: Changeset Pill, Theme Switcher, Dev Role & Admin Pipeline -->
+    <div class="flex items-center space-x-2.5">
+      <!-- Active Changeset Pill -->
+      <div id="active-changeset-pill" class="hidden items-center space-x-2 bg-brand-amber-50 dark:bg-brand-amber-950/70 border border-brand-amber-200 dark:border-brand-amber-700/50 px-3 py-1 rounded-full text-xs text-brand-amber-900 dark:text-brand-amber-200">
+        <span class="w-2 h-2 rounded-full bg-brand-amber-500 animate-pulse"></span>
+        <span id="active-changeset-name">Changeset #1</span>
+        <button onclick="openChangesetDrawer()" class="ml-1 text-brand-amber-700 dark:text-brand-amber-400 hover:underline font-semibold">
+          (<span id="active-changeset-op-count">0</span> ops)
+        </button>
+      </div>
+
+      <!-- Theme Switcher (Light / Dark) -->
+      <button id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Light / Dark Theme"
+              class="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-brand-amber-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition shadow-sm">
+        <svg id="theme-icon-sun" class="w-4 h-4 hidden dark:block text-brand-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+        <svg id="theme-icon-moon" class="w-4 h-4 block dark:hidden text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        </svg>
+      </button>
+
+      <!-- Local Dev Mode Role Switcher -->
+      <div id="dev-role-container" class="relative">
+        <button id="dev-role-btn" onclick="toggleRoleDropdown()" class="flex items-center space-x-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-700/60 text-amber-900 dark:text-amber-300 text-xs font-medium rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/50 transition">
+          <span>Dev Mode:</span>
+          <span id="current-role-badge" class="font-bold underline">Admin</span>
+          <span class="text-[10px]">▼</span>
+        </button>
+        <div id="role-dropdown" class="hidden absolute right-0 mt-1.5 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-xl py-1 z-50 text-xs">
+          <div class="px-3 py-1 text-slate-400 dark:text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-100 dark:border-slate-700/60">Simulate Role</div>
+          <button onclick="setDevRole('Admin')" class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-between">
+            <span>Admin</span>
+            <span class="text-emerald-600 dark:text-emerald-400 text-[10px]">Full Access</span>
+          </button>
+          <button onclick="setDevRole('Curator')" class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-between">
+            <span>Curator</span>
+            <span class="text-sky-600 dark:text-sky-400 text-[10px]">Staging only</span>
+          </button>
+          <button onclick="setDevRole('Reader')" class="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-between">
+            <span>Reader</span>
+            <span class="text-slate-500 dark:text-slate-400 text-[10px]">Read-only</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Admin Pipeline Launcher Button -->
+      <button id="btn-pipeline-drawer" onclick="openPipelineDrawer()" class="px-3 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-medium rounded-md text-slate-700 dark:text-slate-200 transition flex items-center space-x-1.5 shadow-sm">
+        <span>Pipeline Jobs</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Data Readiness & System State Banner -->
+  <div id="readiness-banner" class="bg-brand-parchment-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-5 py-2 flex items-center justify-between text-xs z-20 shrink-0 transition-colors duration-200">
+    <div class="flex items-center space-x-3">
+      <span class="flex items-center space-x-1.5">
+        <span id="readiness-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+        <span class="font-semibold text-slate-700 dark:text-slate-300">System State:</span>
+        <span id="readiness-text" class="text-slate-500 dark:text-slate-400">Inspecting database...</span>
+      </span>
+      <span class="text-slate-300 dark:text-slate-700">|</span>
+      <!-- Readiness Micro Stats -->
+      <div id="readiness-pills" class="flex items-center space-x-2 text-slate-600 dark:text-slate-400 font-mono">
+        <span id="stat-works" class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 shadow-2xs">Works: 0</span>
+        <span id="stat-agents" class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 shadow-2xs">Agents: 0</span>
+        <span id="stat-vocab" class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 shadow-2xs">Concepts: 0</span>
+        <span id="stat-consolidations" class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 shadow-2xs">Consolidated: 0</span>
+        <span id="stat-vector" class="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 shadow-2xs">Vectors: 0</span>
+      </div>
+    </div>
+    <button onclick="toggleReadinessDetails()" class="text-brand-teal-700 dark:text-brand-teal-300 hover:underline flex items-center space-x-1 font-medium">
+      <span>Readiness Checklist</span>
+      <span id="readiness-arrow">▼</span>
+    </button>
+  </div>
+
+  <!-- Expandable Readiness Checklist Drawer -->
+  <div id="readiness-details" class="hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-4 shadow-xl z-20 shrink-0 transition-colors duration-200">
+    <div class="max-w-6xl mx-auto">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-sm text-slate-900 dark:text-slate-200">System Pipeline Readiness & Data Status</h3>
+        <span id="overall-badge" class="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Checking...</span>
+      </div>
+      <div id="readiness-grid" class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+        <!-- Injected via JavaScript -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content View Container with Contextual Watermark -->
+  <main class="flex-1 overflow-y-auto p-6 bg-brand-parchment-50 dark:bg-slate-950 transition-colors duration-200 relative">
+
+    <!-- Contextual Watermark / Background Texture from reconciliator_large_logo.svg -->
+    <div class="pointer-events-none fixed inset-0 flex items-center justify-center overflow-hidden z-0 select-none">
+      <img src="/static/assets/reconciliator_large_logo.svg" 
+           alt="" 
+           class="w-[850px] max-w-[90vw] opacity-[0.035] dark:opacity-[0.045] filter contrast-125 transition-opacity duration-500" />
+    </div>
+
+    <!-- VIEW 1: SEARCH & BROWSE -->
+    <section id="view-search" class="space-y-6 max-w-7xl mx-auto relative z-10">
+      <!-- Search Box & Mode Toggle -->
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl shadow-sm dark:shadow-xl space-y-4 transition-colors duration-200">
+        <div class="flex flex-col md:flex-row items-center gap-3">
+          <div class="relative flex-1 w-full">
+            <input type="text" id="search-input" placeholder="Search works, titles, authors, ISBNs, QIDs..." 
+                   class="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-teal-500 transition"
+                   onkeydown="if(event.key === 'Enter') executeSearch()">
+            <button onclick="executeSearch()" class="absolute right-2.5 top-2 px-3 py-1 bg-brand-teal-600 hover:bg-brand-teal-500 text-white rounded text-xs font-medium transition shadow-sm">
+              Search
+            </button>
+          </div>
+
+          <!-- Mode Selector: Lexical vs Semantic vs Hybrid -->
+          <div class="flex items-center bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-1 rounded-lg text-xs shrink-0">
+            <button id="mode-lexical" onclick="setSearchMode('lexical')" class="px-3 py-1.5 rounded-md font-medium bg-brand-teal-600 text-white transition shadow-xs">
+              Fuzzy / Lexical
+            </button>
+            <button id="mode-semantic" onclick="setSearchMode('semantic')" class="px-3 py-1.5 rounded-md font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
+              Semantic Vector
+            </button>
+            <button id="mode-hybrid" onclick="setSearchMode('hybrid')" class="px-3 py-1.5 rounded-md font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
+              Hybrid (RRF)
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters Bar -->
+        <div class="flex flex-wrap items-center gap-3 text-xs text-slate-700 dark:text-slate-300">
+          <span class="font-medium text-slate-500 dark:text-slate-400">Filter by:</span>
+          <select id="filter-type" onchange="executeSearch()" class="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2.5 py-1 text-slate-800 dark:text-slate-200">
+            <option value="all">All Entities</option>
+            <option value="work">Works</option>
+            <option value="manifestation">Manifestations</option>
+            <option value="agent">Agents</option>
+          </select>
+          <select id="filter-work-type" onchange="executeSearch()" class="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2.5 py-1 text-slate-800 dark:text-slate-200">
+            <option value="">All Media Types</option>
+            <option value="text">Text / Books</option>
+            <option value="music">Notated Music</option>
+            <option value="moving_image">Moving Image / Film</option>
+            <option value="cartography">Cartography / Maps</option>
+            <option value="audio_nonmusic">Audio / Spoken Word</option>
+            <option value="comic">Comics & Graphic Novels</option>
+            <option value="serial">Serials & Periodicals</option>
+            <option value="thesis">Theses & Dissertations</option>
+            <option value="dataset">Datasets</option>
+            <option value="interactive_game">Interactive Games</option>
+            <option value="board_game">Board Games</option>
+            <option value="software">Software</option>
+            <option value="legal">Legal & Statutes</option>
+            <option value="podcast">Podcasts</option>
+          </select>
+          <input type="text" id="filter-source" onkeydown="if(event.key === 'Enter') executeSearch()" placeholder="Source (e.g. melinda, wikidata)" class="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2.5 py-1 text-slate-800 dark:text-slate-200 w-48">
+          <span id="vector-status-badge" class="ml-auto text-[11px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-950/60 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-800">
+            Vector Store: Ready
+          </span>
+        </div>
+      </div>
+
+      <!-- Search Results or Contextual Empty State -->
+      <div id="search-container">
+        <!-- Results injected here -->
+      </div>
+    </section>
+
+    <!-- VIEW 2: CONSOLIDATION & CLUSTERS -->
+    <section id="view-consolidation" class="hidden space-y-6 max-w-7xl mx-auto relative z-10">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-slate-900 dark:text-white">Cross-Source Consolidations & Clusters</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Equivalence groups of identical intellectual works unified across contributing catalogues.</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button id="tab-groups" onclick="setConsolidationTab('groups')" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-brand-teal-600 text-white shadow-xs">
+            Work Groups
+          </button>
+          <button id="tab-agents" onclick="setConsolidationTab('agents')" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:text-white border border-slate-200 dark:border-slate-700 transition">
+            Agent Clusters
+          </button>
+        </div>
+      </div>
+
+      <!-- Work Groups List / Cytoscape Graph Area -->
+      <div id="consolidation-content" class="space-y-6">
+        <!-- Groups Table & Graph injected here -->
+      </div>
+    </section>
+
+    <!-- VIEW 3: RECONCILIATION REVIEW -->
+    <section id="view-reconciliation" class="hidden space-y-6 max-w-7xl mx-auto relative z-10">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-slate-900 dark:text-white">Target Record Reconciliation Review</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Review matched target corpus records, candidate authority links, and agent URIs.</p>
+        </div>
+      </div>
+      <div id="reconciliation-content">
+        <!-- Reconciliation records or empty state injected here -->
+      </div>
+    </section>
+
+    <!-- VIEW 4: REVIEW CHANGESETS -->
+    <section id="view-changesets" class="hidden space-y-6 max-w-7xl mx-auto relative z-10">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-slate-900 dark:text-white">Review Changesets & Manual Curation</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Stage, validate, and atomically commit manual curation overrides.</p>
+        </div>
+        <button onclick="openNewChangesetModal()" class="px-3.5 py-1.5 bg-brand-amber-600 hover:bg-brand-amber-500 text-white rounded-md text-xs font-semibold shadow transition">
+          + New Changeset
+        </button>
+      </div>
+      <div id="changesets-content">
+        <!-- Changesets list injected here -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Cytoscape Graph Modal -->
+  <div id="graph-modal" class="hidden fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90">
+        <div>
+          <h3 id="graph-title" class="font-bold text-sm text-slate-900 dark:text-white">Work Equivalence Graph</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Node-link representation of cross-source same_work_as edges</p>
+        </div>
+        <button onclick="closeGraphModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">✕</button>
+      </div>
+      <div class="p-4 flex-1">
+        <div id="cy-container" class="border border-slate-200 dark:border-slate-800"></div>
+      </div>
+      <div class="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-3 text-slate-600 dark:text-slate-400">
+          <span class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span><span>Canonical</span></span>
+          <span class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded-full bg-brand-teal-500 inline-block"></span><span>Member Work</span></span>
+        </div>
+        <button id="btn-graph-stage" onclick="stageGraphCuration()" class="px-3 py-1.5 bg-brand-amber-600 hover:bg-brand-amber-500 text-white rounded text-xs font-semibold shadow-sm">
+          Stage in Active Changeset
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Changeset Staging Drawer -->
+  <div id="changeset-drawer" class="hidden fixed inset-y-0 right-0 w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col">
+    <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90">
+      <div>
+        <h3 class="font-bold text-sm text-slate-900 dark:text-white">Active Changeset</h3>
+        <p id="drawer-cs-title" class="text-xs text-brand-amber-600 dark:text-brand-amber-400 font-medium">Untitled Changeset</p>
+      </div>
+      <button onclick="closeChangesetDrawer()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
+    </div>
+    <div id="drawer-ops-list" class="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
+      <!-- Staged operations injected here -->
+    </div>
+    <div class="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 space-y-2">
+      <button id="btn-commit-changeset" onclick="commitActiveChangeset()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded transition shadow">
+        ✓ Commit Changeset (Admin)
+      </button>
+      <p id="commit-guard-msg" class="text-[11px] text-amber-600 dark:text-amber-400 text-center hidden">Only Admins can commit changesets to the database.</p>
+    </div>
+  </div>
+
+  <!-- Admin Pipeline Drawer -->
+  <div id="pipeline-drawer" class="hidden fixed inset-y-0 right-0 w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col">
+    <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90">
+      <div>
+        <h3 class="font-bold text-sm text-slate-900 dark:text-white">Pipeline Execution & Telemetry</h3>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Trigger background batch jobs</p>
+      </div>
+      <button onclick="closePipelineDrawer()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
+    </div>
+    <div class="p-4 space-y-4 text-xs">
+      <div class="space-y-2">
+        <h4 class="font-semibold text-slate-800 dark:text-slate-300">Trigger Pipeline Tasks (Admin)</h4>
+        <div class="space-y-2">
+          <div class="p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div>
+              <div class="font-semibold text-slate-900 dark:text-white">Work Consolidation</div>
+              <div class="text-slate-500 dark:text-slate-400 text-[11px]">Find cross-source works and elect canonicals</div>
+            </div>
+            <button onclick="triggerTask('consolidate-works')" class="px-2.5 py-1 bg-brand-teal-600 hover:bg-brand-teal-500 text-white rounded text-xs font-medium shadow-xs">Run</button>
+          </div>
+          <div class="p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div>
+              <div class="font-semibold text-slate-900 dark:text-white">Agent Clustering</div>
+              <div class="text-slate-500 dark:text-slate-400 text-[11px]">Cluster authority agents across sources</div>
+            </div>
+            <button onclick="triggerTask('cluster-agents')" class="px-2.5 py-1 bg-brand-teal-600 hover:bg-brand-teal-500 text-white rounded text-xs font-medium shadow-xs">Run</button>
+          </div>
+          <div class="p-3 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div>
+              <div class="font-semibold text-slate-900 dark:text-white">Build Vector Indexes</div>
+              <div class="text-slate-500 dark:text-slate-400 text-[11px]">Embed works into USearch/FAISS</div>
+            </div>
+            <button onclick="triggerTask('build-index')" class="px-2.5 py-1 bg-brand-teal-600 hover:bg-brand-teal-500 text-white rounded text-xs font-medium shadow-xs">Run</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-4">
+        <div class="flex items-center justify-between">
+          <h4 class="font-semibold text-slate-800 dark:text-slate-300">Active & Recent Tasks</h4>
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        </div>
+        <div id="pipeline-tasks-list" class="space-y-2 max-h-72 overflow-y-auto">
+          <div class="text-slate-400 text-center py-4">No active pipeline tasks.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Changeset Modal -->
+  <div id="new-changeset-modal" class="hidden fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
+      <h3 class="font-bold text-sm text-slate-900 dark:text-white">Create New Review Changeset</h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-700 dark:text-slate-300 mb-1 font-medium">Changeset Title</label>
+          <input type="text" id="new-cs-title" placeholder="e.g. Viola Classical Audiobooks Review Batch 1" class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white">
+        </div>
+        <div>
+          <label class="block text-slate-700 dark:text-slate-300 mb-1 font-medium">Description / Rationale</label>
+          <textarea id="new-cs-desc" placeholder="Scope and purpose of this curation session..." class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white h-20"></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeNewChangesetModal()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs hover:bg-slate-200">Cancel</button>
+        <button onclick="submitNewChangeset()" class="px-3 py-1.5 bg-brand-amber-600 hover:bg-brand-amber-500 text-white rounded text-xs font-semibold shadow-xs">Create Changeset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Core App Logic -->
+  <script src="/static/app.js"></script>
+</body>
+</html>

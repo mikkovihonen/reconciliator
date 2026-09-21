@@ -69,6 +69,7 @@ class _WEMIBatchAccumulator:
         strip_isbd_punctuation: bool = True,
         isbd_punctuation: str = " ./,;:",
         constituents: Optional[Any] = None,
+        filter_config: Optional[Any] = None,
     ) -> None:
         self.source_name = source_name
         self.id_source = id_source
@@ -78,6 +79,7 @@ class _WEMIBatchAccumulator:
         self.relator_mappings = relator_mappings
         self.vocab_store = vocab_store
         self.constituents = constituents
+        self.filter_config = filter_config
         self.staged_records = 0
 
         self.works: list[Any] = []
@@ -96,7 +98,21 @@ class _WEMIBatchAccumulator:
     def pending(self) -> int:
         return self.staged_records
 
-    def add_record(self, record: DecomposedRecord) -> None:
+    def add_record(self, record: DecomposedRecord) -> bool:
+        if self.filter_config is not None and record.works:
+            expr_lang = record.expressions[0].language if record.expressions else None
+            pub_year = record.manifestations[0].publication_year if record.manifestations else None
+            accepted = any(
+                self.filter_config.accepts(
+                    work_type=w.work_type,
+                    language=w.original_language or expr_lang,
+                    year=pub_year,
+                )
+                for w in record.works
+            )
+            if not accepted:
+                return False
+
         self.staged_records += 1
         self.works.extend(record.works)
         self.expressions.extend(record.expressions)
@@ -109,8 +125,9 @@ class _WEMIBatchAccumulator:
         self.associations.extend(record.associations)
         self.entity_keys.extend(record.entity_keys)
         self.entity_subjects.extend(record.entity_subjects)
+        return True
 
-    def add(self, item: Any) -> None:
+    def add(self, item: Any) -> bool:
         ctx = LoadContext(
             source=self.source_name,
             record_origin=self.source_name,
@@ -123,7 +140,7 @@ class _WEMIBatchAccumulator:
             constituents=self.constituents,
         )
         record = load_record(item, ctx)
-        self.add_record(record)
+        return self.add_record(record)
 
     def take(self) -> dict[str, Any]:
         record_count = self.staged_records
@@ -171,6 +188,7 @@ def parse_and_decompose_page(
     format: str = "marcxml",
     constituents: Optional[Any] = None,
     task_id: Optional[str] = None,
+    filter_config: Optional[Any] = None,
 ) -> tuple[dict[str, Any], int, int, int]:
     """Parse raw XML page bytes and decompose MARCXML/BibFrame records in a worker process.
 
@@ -225,6 +243,7 @@ def parse_and_decompose_page(
         strip_isbd_punctuation=strip_isbd_punctuation,
         isbd_punctuation=isbd_punctuation,
         constituents=constituents,
+        filter_config=filter_config,
     )
 
     skipped_count = 0
@@ -271,8 +290,10 @@ def parse_and_decompose_page(
                 item_to_load = target_elem
 
             rec_decomp = load_record(item_to_load, ctx)
-            acc.add_record(rec_decomp)
-            decomposed_count += 1
+            if acc.add_record(rec_decomp):
+                decomposed_count += 1
+            else:
+                skipped_count += 1
         except Exception as exc:
             error_count += 1
             log_validation(
@@ -722,6 +743,7 @@ async def ingest_oai_pipeline(
                 strip_isbd_punctuation=strip_isbd_punctuation,
                 isbd_punctuation=isbd_punctuation,
                 constituents=source_constituents,
+                filter_config=effective_config,
             )
             for item in stream_file_raw_elements(source_name, effective_config):
                 harvested_count += 1
@@ -730,7 +752,9 @@ async def ingest_oai_pipeline(
                     if raw_id and raw_id in existing_ids:
                         skipped_count += 1
                         continue
-                acc.add(item)
+                if not acc.add(item):
+                    skipped_count += 1
+                    continue
                 if acc.pending >= effective_config.batch_size:
                     await enqueue_batch({"batch": acc.take()})
             if acc.pending:
@@ -777,6 +801,7 @@ async def ingest_oai_pipeline(
                         effective_config.format,
                         source_constituents,
                         task_id,
+                        effective_config,
                     )
                     if err_cnt > 0 and tracker:
                         tracker.record_error(n=err_cnt)

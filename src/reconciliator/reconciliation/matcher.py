@@ -470,6 +470,17 @@ class WorkMatcher:
         statement order. Specs are ordered, first match wins, and the one marked
         `default` claims whatever nothing else did.
         """
+        if self.config is not None and not self.config.accepts(
+            work_type=target.work_type,
+            language=target.language,
+            year=target.year,
+        ):
+            return WEMIMatchResult(
+                target_record_id=target.record_id,
+                match_tier="skipped_filtered_work_type",
+                confidence_score=0.0,
+            )
+
         extracted = extract_identifiers_from_target(target)
         if identifiers:
             for scheme, values in identifiers.items():

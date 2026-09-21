@@ -672,7 +672,70 @@ corpus_agent_cluster_attributes_table = Table(
 )
 
 # ===================================================================
-# 5. PostgreSQL Full-Text & Trigram Index Statements
+# 5. Curation & Review Changeset Tables (§4.5)
+# ===================================================================
+
+review_changesets_table = Table(
+    "review_changesets",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("title", String, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("status", String, nullable=False, default="draft", server_default="draft"),
+    Column("created_by", String, nullable=False),
+    Column("assigned_to", String, nullable=True),
+    Column("committed_by", String, nullable=True),
+    Column("committed_at", DateTime, nullable=True),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Column("updated_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_review_changesets_status", "status"),
+    Index("idx_review_changesets_creator", "created_by"),
+)
+
+changeset_operations_table = Table(
+    "changeset_operations",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "changeset_id",
+        Integer,
+        ForeignKey("review_changesets.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("sequence", Integer, nullable=False, default=1, server_default="1"),
+    Column("operation_type", String, nullable=False),
+    Column("entity_type", String, nullable=False),
+    Column("entity_id", String, nullable=False),
+    Column("target_id", String, nullable=True),
+    Column("parameters_json", Text, nullable=False, default="{}", server_default="{}"),
+    Column("pre_image_json", Text, nullable=True),
+    Column("notes", Text, nullable=True),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_changeset_ops_changeset", "changeset_id", "sequence"),
+    Index("idx_changeset_ops_entity", "entity_type", "entity_id"),
+)
+
+entity_pins_table = Table(
+    "entity_pins",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("entity_type", String, nullable=False),
+    Column("entity_id", String, nullable=False),
+    Column(
+        "changeset_id",
+        Integer,
+        ForeignKey("review_changesets.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("pinned_at", DateTime, server_default=func.current_timestamp()),
+    Column("pinned_by", String, nullable=False),
+    UniqueConstraint("entity_type", "entity_id", name="uq_entity_pins_composite"),
+    Index("idx_entity_pins_lookup", "entity_type", "entity_id"),
+    Index("idx_entity_pins_changeset", "changeset_id"),
+)
+
+# ===================================================================
+# 6. PostgreSQL Full-Text & Trigram Index Statements
 # ===================================================================
 
 PG_SEARCH_DDL_STATEMENTS = [
@@ -733,7 +796,11 @@ __all__ = [
     "corpus_agent_clusters_table",
     "corpus_agent_cluster_members_table",
     "corpus_agent_cluster_attributes_table",
+    "review_changesets_table",
+    "changeset_operations_table",
+    "entity_pins_table",
     "PG_SEARCH_DDL_STATEMENTS",
 ]
+
 
 

@@ -1,14 +1,14 @@
 # Reconciliator
 
-**High-Performance Finnish Bibliographic Authority Reconciliation & Agent URI Enrichment Engine**
+<p align="center">
+  <img src="assets/reconciliator_large_logo.svg" alt="Reconciliator Hero Graphic" width="750" />
+</p>
 
-`reconciliator` is an automated, offline reconciliation and enrichment system designed specifically for Finnish library bibliographic records. It reconciles target MARCXML records against authoritative Finnish catalog sources (Melinda) and international knowledge bases (Wikidata), enriching bibliographic agents with canonical authority identifiers (KANTO, ISNI, VIAF, Wikidata) and modernizing legacy subject headings.
+<p align="center">
+  <strong>High-Performance Finnish Bibliographic Authority Reconciliation & Agent URI Enrichment Engine</strong>
+</p>
 
-> </br> 
-> This repository currently contains only the solution architecture.
-> </br>
-> See the Architecture Specification for implementation details. </br>
-> </br>
+`reconciliator` is an automated, offline reconciliation and enrichment system designed specifically for Finnish library bibliographic records. It reconciles target MARCXML and BIBFRAME records against authoritative Finnish catalog sources (Melinda) and international knowledge bases (Wikidata), enriching bibliographic agents with canonical authority identifiers (KANTO, ISNI, VIAF, Wikidata), resolving multi-format WEMI hierarchies, and modernizing legacy subject headings.
 
 ---
 
