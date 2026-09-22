@@ -91,6 +91,8 @@ class FakeEndpoint:
         until_date: Optional[str] = None,
         resumption_token: Optional[str] = None,
         semaphore: Optional[Any] = None,
+        client: Optional[Any] = None,
+        **kwargs: Any,
     ) -> AsyncIterator[tuple[bytes, Optional[str]]]:
         self.calls.append(
             {

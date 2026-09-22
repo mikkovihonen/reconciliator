@@ -2131,7 +2131,7 @@ def decompose_marc_wemi(
         )
 
     # 9. Medium of Performance (MARC 382)
-    mop_field = get_category_default_field_map().get("medium_of_performance", "382")
+    mop_field = get_category_default_field_map()["medium_of_performance"]
     seen_mop_uris: set[str] = set()
     for f in _get_datafields(record_elem, mop_field):
         heading = _get_subfield(f, "a")

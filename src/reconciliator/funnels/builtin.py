@@ -57,9 +57,7 @@ def build_builtin_specs(patterns: Optional[dict[str, str]] = None) -> list[Funne
                 # English-only, and this is a Finnish-language catalogue.
                 {
                     "work_type": ["music"],
-                    "title_matches": p.get(
-                        "notated_music_title", "(?i)score|partituuri|nuotti|stemma"
-                    ),
+                    "title_matches": p["notated_music_title"],
                 },
                 {"work_type": ["music"], "has_identifier": ["ismn"]},
             {"work_type": ["music"], "has_identifier": ["plate_number"]},
@@ -91,7 +89,7 @@ def build_builtin_specs(patterns: Optional[dict[str, str]] = None) -> list[Funne
         id="funnel_cc_podcast",
         when=[
             {"work_type": ["audio_nonmusic"], "has_key": ["podcast"]},
-            {"work_type": ["audio_nonmusic"], "title_matches": p.get("podcast_title", "podcast")},
+            {"work_type": ["audio_nonmusic"], "title_matches": p["podcast_title"]},
             {"work_type": ["podcast"]},
         ],
         identifier_schemes=["guid_rss", "spotify_uri"],
@@ -319,9 +317,7 @@ def build_builtin_specs(patterns: Optional[dict[str, str]] = None) -> list[Funne
         id="funnel_hh_parallel_multilingual",
         when={
             "key_matches": {
-                "translators_signature": p.get(
-                    "parallel_translators_signature", "(?i)parallel"
-                )
+                "translators_signature": p["parallel_translators_signature"]
             }
         },
         identifier_schemes=["work_uri", "isbn"],
@@ -375,7 +371,7 @@ def build_builtin_specs(patterns: Optional[dict[str, str]] = None) -> list[Funne
             {"work_type": ["government"]},
             {
                 "identifier_matches": {
-                    "urn": p.get("government_valto_urn", "(?i)valto")
+                    "urn": p["government_valto_urn"]
                 }
             },
         ],
@@ -390,7 +386,7 @@ def build_builtin_specs(patterns: Optional[dict[str, str]] = None) -> list[Funne
             {"work_type": ["exhibition", "event"], "has_key": ["exhibition_event"]},
             {
                 "work_type": ["exhibition", "event"],
-                "title_matches": p.get("exhibition_title", "näyttely"),
+                "title_matches": p["exhibition_title"],
             },
         ],
         identifier_schemes=["isbn", "event_id"],

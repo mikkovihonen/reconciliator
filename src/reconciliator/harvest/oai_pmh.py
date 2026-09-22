@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import AsyncIterator, Optional
 
@@ -169,6 +171,7 @@ class OAIPMHHarvester:
         until_date: Optional[str] = None,
         resumption_token: Optional[str] = None,
         semaphore: Optional[asyncio.Semaphore] = None,
+        client: Optional[httpx2.AsyncClient] = None,
     ) -> AsyncIterator[tuple[bytes, Optional[str]]]:
         """Asynchronously harvest raw XML pages for a date slice, yielding (page_bytes, next_token).
 
@@ -188,20 +191,26 @@ class OAIPMHHarvester:
 
         current_token = resumption_token
 
-        async with httpx2.AsyncClient(
-            timeout=self.timeout,
-            headers={"User-Agent": self.user_agent},
-            follow_redirects=True,
-            http2=self.http2,
-        ) as client:
+        client_ctx = (
+            nullcontext(client)
+            if client is not None
+            else httpx2.AsyncClient(
+                timeout=self.timeout,
+                headers={"User-Agent": self.user_agent},
+                follow_redirects=True,
+                http2=self.http2,
+            )
+        )
+
+        async with client_ctx as active_client:
 
             async def _fetch(tok: Optional[str]) -> bytes:
                 req_params = {"verb": "ListRecords", "resumptionToken": tok} if tok else params
                 if semaphore:
                     async with semaphore:
-                        resp = await self._request_with_retry(client, req_params)
+                        resp = await self._request_with_retry(active_client, req_params)
                 else:
-                    resp = await self._request_with_retry(client, req_params)
+                    resp = await self._request_with_retry(active_client, req_params)
                 return resp.content
 
             prefetch_task: Optional[asyncio.Task[bytes]] = None

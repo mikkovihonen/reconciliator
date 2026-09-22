@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+import httpx2
 from lxml import etree
 from rdflib import Graph
 
@@ -22,6 +23,7 @@ from reconciliator.constituents import resolve_for_source
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.loaders.base import DecomposedRecord, LoadContext
+from reconciliator.utils.version import get_default_user_agent
 from reconciliator.loaders.bibframe import (
     get_profile,
     stream_bibframe_records,
@@ -42,6 +44,16 @@ OAI_NS = {
 }
 
 _worker_vocab_store: Optional[Any] = None
+_worker_context: dict[str, Any] = {}
+
+
+def _init_oai_worker(context: dict[str, Any]) -> None:
+    """Initialize worker process static context once on process pool startup."""
+    global _worker_context
+    _worker_context = context
+    db_url = context.get("db_url")
+    if db_url:
+        _get_worker_vocab_store(db_url)
 
 
 def _get_worker_vocab_store(db_url: Optional[str]) -> Optional[Any]:
@@ -142,6 +154,27 @@ class _WEMIBatchAccumulator:
         record = load_record(item, ctx)
         return self.add_record(record)
 
+    def merge_payload(self, payload: dict[str, Any]) -> None:
+        """Merge an existing batch payload dictionary into this accumulator."""
+        count = int(payload.get("record_count") or 0)
+        self.staged_records += count
+        for key in (
+            "works",
+            "expressions",
+            "manifestations",
+            "items",
+            "agents",
+            "contributions",
+            "relationships",
+            "identifiers",
+            "associations",
+            "entity_keys",
+            "entity_subjects",
+        ):
+            items = payload.get(key)
+            if items:
+                getattr(self, key).extend(items)
+
     def take(self) -> dict[str, Any]:
         record_count = self.staged_records
         self.staged_records = 0
@@ -177,15 +210,15 @@ class _WEMIBatchAccumulator:
 
 def parse_and_decompose_page(
     page_bytes: bytes,
-    source_name: str,
-    id_source: str,
-    include_items: bool,
-    strip_isbd_punctuation: bool,
-    isbd_punctuation: str,
-    relator_mappings: Optional[dict[str, str]],
-    database_url: Optional[str],
-    skip_ids: Optional[set[str]],
-    format: str = "marcxml",
+    source_name: Optional[str] = None,
+    id_source: Optional[str] = None,
+    include_items: Optional[bool] = None,
+    strip_isbd_punctuation: Optional[bool] = None,
+    isbd_punctuation: Optional[str] = None,
+    relator_mappings: Optional[dict[str, str]] = None,
+    database_url: Optional[str] = None,
+    skip_ids: Optional[set[str]] = None,
+    format: Optional[str] = None,
     constituents: Optional[Any] = None,
     task_id: Optional[str] = None,
     filter_config: Optional[Any] = None,
@@ -195,8 +228,29 @@ def parse_and_decompose_page(
     Returns:
         (batch_payload_dict, decomposed_records_count, skipped_records_count, error_count)
     """
+    eff_source_name = source_name or _worker_context.get("source_name", "unknown")
+    eff_id_source = id_source or _worker_context.get("id_source", "auto")
+    eff_include_items = (
+        include_items
+        if include_items is not None
+        else _worker_context.get("include_items", False)
+    )
+    eff_strip_isbd = (
+        strip_isbd_punctuation
+        if strip_isbd_punctuation is not None
+        else _worker_context.get("strip_isbd_punctuation", True)
+    )
+    eff_isbd_punct = isbd_punctuation or _worker_context.get("isbd_punctuation", " ./,;:")
+    eff_relator_mappings = relator_mappings or _worker_context.get("relator_mappings")
+    eff_database_url = database_url or _worker_context.get("db_url")
+    eff_skip_ids = skip_ids if skip_ids is not None else _worker_context.get("skip_ids")
+    eff_format = format or _worker_context.get("format", "marcxml")
+    eff_constituents = constituents or _worker_context.get("constituents")
+    eff_filter_config = filter_config or _worker_context.get("filter_config")
+
     if task_id:
         from reconciliator.logging import init_worker_logging
+
         init_worker_logging(task_id)
 
     from reconciliator.logging import log_validation
@@ -210,7 +264,7 @@ def parse_and_decompose_page(
             logger,
             action="skip_page",
             entity="oai_page_xml",
-            source_id=source_name,
+            source_id=eff_source_name,
             reason=f"XMLSyntaxError in OAI page: {exc}",
             task_id=task_id,
         )
@@ -220,30 +274,30 @@ def parse_and_decompose_page(
     if not records:
         records = root.findall(".//record")
 
-    vocab_store = _get_worker_vocab_store(database_url)
+    vocab_store = _get_worker_vocab_store(eff_database_url)
 
     ctx = LoadContext(
-        source=source_name,
-        record_origin=source_name,
-        id_source=id_source,
-        include_items=include_items,
-        relator_mappings=relator_mappings,
+        source=eff_source_name,
+        record_origin=eff_source_name,
+        id_source=eff_id_source,
+        include_items=eff_include_items,
+        relator_mappings=eff_relator_mappings,
         vocab_store=vocab_store,
-        strip_isbd_punctuation=strip_isbd_punctuation,
-        isbd_punctuation=isbd_punctuation,
-        constituents=constituents,
+        strip_isbd_punctuation=eff_strip_isbd,
+        isbd_punctuation=eff_isbd_punct,
+        constituents=eff_constituents,
     )
 
     acc = _WEMIBatchAccumulator(
-        source_name=source_name,
-        id_source=id_source,
-        include_items=include_items,
-        relator_mappings=relator_mappings,
+        source_name=eff_source_name,
+        id_source=eff_id_source,
+        include_items=eff_include_items,
+        relator_mappings=eff_relator_mappings,
         vocab_store=vocab_store,
-        strip_isbd_punctuation=strip_isbd_punctuation,
-        isbd_punctuation=isbd_punctuation,
-        constituents=constituents,
-        filter_config=filter_config,
+        strip_isbd_punctuation=eff_strip_isbd,
+        isbd_punctuation=eff_isbd_punct,
+        constituents=eff_constituents,
+        filter_config=eff_filter_config,
     )
 
     skipped_count = 0
@@ -274,14 +328,14 @@ def parse_and_decompose_page(
         if header_id:
             target_elem.set("_oai_identifier", header_id)
 
-        if skip_ids:
-            raw_id = extract_marc_source_id(target_elem, id_source=id_source)
-            if raw_id and raw_id in skip_ids:
+        if eff_skip_ids:
+            raw_id = extract_marc_source_id(target_elem, id_source=eff_id_source)
+            if raw_id and raw_id in eff_skip_ids:
                 skipped_count += 1
                 continue
 
         try:
-            if format == "bibframe":
+            if eff_format == "bibframe":
                 raw_xml = etree.tostring(target_elem, encoding="utf-8")
                 g = Graph()
                 g.parse(data=raw_xml.decode("utf-8"), format="xml")
@@ -311,7 +365,7 @@ def parse_and_decompose_page(
 def write_wemi_batch(
     repo: WEMIRepository,
     payload: dict[str, Any],
-    chunk_size: int = 1000,
+    chunk_size: Optional[int] = None,
     config: Optional[OAIIngestConfig] = None,
     task_id: str = "",
     tracker: Optional[ProgressTracker] = None,
@@ -345,6 +399,9 @@ def write_wemi_batch(
             entity_subjects=payload.get("entity_subjects") or [],
             record_origin=record_origin,
             chunk_size=chunk_size,
+            use_synchronous_commit_off=getattr(config, "use_synchronous_commit_off", False)
+            if config
+            else False,
         )
     except Exception as exc:
         from sqlalchemy.exc import DataError
@@ -535,6 +592,7 @@ async def ingest_oai_pipeline(
                 )
 
     is_continuation = bool(initial_token or done_slices) or effective_config is not config
+    indexes_dropped = False
     if config.ingest_mode == "replace" and not is_continuation:
         removed = store.delete_source(source_name)
         total_removed = sum(removed.values())
@@ -545,6 +603,13 @@ async def ingest_oai_pipeline(
                 total_removed,
                 ", ".join(f"{k}={v}" for k, v in sorted(removed.items()) if v),
             )
+        if getattr(effective_config, "drop_indexes_during_replace", False):
+            logger.info(
+                "Source '%s': dropping search indexes during bulk replace ingest...",
+                source_name,
+            )
+            store.drop_search_indexes()
+            indexes_dropped = True
     elif config.ingest_mode == "replace" and is_continuation:
         logger.info(
             "Source '%s': ingest_mode=replace skipped - this run continues an earlier "
@@ -652,6 +717,7 @@ async def ingest_oai_pipeline(
 
     async def db_writer() -> None:
         nonlocal total_ingested
+
         while True:
             payload = await batch_queue.get()
             if payload is sentinel:
@@ -668,6 +734,7 @@ async def ingest_oai_pipeline(
                             items_processed=total_ingested,
                             percentage=_current_pct(),
                             metadata=_telemetry(),
+                            force=False,
                         )
                 elif "batch" in payload:
                     task_id = tracker.task_id if tracker else f"oai-ingest-{source_name}"
@@ -676,7 +743,7 @@ async def ingest_oai_pipeline(
                         write_wemi_batch,
                         store,
                         payload["batch"],
-                        effective_config.db_batch_chunk_size,
+                        None,
                         effective_config,
                         task_id,
                         tracker,
@@ -690,7 +757,7 @@ async def ingest_oai_pipeline(
                             items_processed=snapshot["indexed"],
                             percentage=_current_pct(),
                             metadata=snapshot if is_oai else None,
-                            force=True,
+                            force=False,
                         )
             finally:
                 batch_queue.task_done()
@@ -761,11 +828,29 @@ async def ingest_oai_pipeline(
                 await enqueue_batch({"batch": acc.take()})
         else:
             # OAI-PMH harvest with ProcessPoolExecutor and AsyncIO
-            process_pool = ProcessPoolExecutor(max_workers=effective_config.workers)
+            worker_ctx = {
+                "source_name": source_name,
+                "id_source": effective_config.id_source,
+                "include_items": effective_config.include_items,
+                "strip_isbd_punctuation": strip_isbd_punctuation,
+                "isbd_punctuation": isbd_punctuation,
+                "relator_mappings": relator_mappings,
+                "db_url": db_url,
+                "skip_ids": existing_ids if existing_ids else None,
+                "format": effective_config.format,
+                "constituents": source_constituents,
+                "filter_config": effective_config,
+            }
+            process_pool = ProcessPoolExecutor(
+                max_workers=effective_config.workers,
+                initializer=_init_oai_worker,
+                initargs=(worker_ctx,),
+            )
             semaphore = asyncio.Semaphore(effective_config.max_concurrent_requests)
 
             async def harvest_partition_task(
-                slice_from: Optional[str], slice_until: Optional[str]
+                slice_from: Optional[str],
+                slice_until: Optional[str],
             ) -> None:
                 nonlocal harvested_count, skipped_count, delivered
                 harvester = OAIPMHHarvester(
@@ -785,23 +870,10 @@ async def ingest_oai_pipeline(
                     resumption_token=initial_token if not partitioned else None,
                     semaphore=semaphore,
                 ):
-                    task_id = tracker.task_id if tracker else f"oai-ingest-{source_name}"
                     batch_payload, dec_cnt, sk_cnt, err_cnt = await loop.run_in_executor(
                         process_pool,
                         parse_and_decompose_page,
                         page_bytes,
-                        source_name,
-                        effective_config.id_source,
-                        effective_config.include_items,
-                        strip_isbd_punctuation,
-                        isbd_punctuation,
-                        relator_mappings,
-                        db_url,
-                        existing_ids if existing_ids else None,
-                        effective_config.format,
-                        source_constituents,
-                        task_id,
-                        effective_config,
                     )
                     if err_cnt > 0 and tracker:
                         tracker.record_error(n=err_cnt)
@@ -824,6 +896,7 @@ async def ingest_oai_pipeline(
                             items_processed=total_ingested,
                             percentage=_current_pct(),
                             metadata=_telemetry(),
+                            force=False,
                         )
 
                 await enqueue_batch({"slice_done": (slice_from, slice_until)})
@@ -844,11 +917,23 @@ async def ingest_oai_pipeline(
         await enqueue_batch(sentinel)
         await writer_task
 
+        if indexes_dropped:
+            logger.info(
+                "Source '%s': rebuilding search indexes after bulk replace ingest...",
+                source_name,
+            )
+            store.rebuild_search_indexes()
+
         _maybe_checkpoint(force=True)
         if is_oai:
             _save_state("completed", None, None)
 
     except Exception as exc:
+        if indexes_dropped:
+            try:
+                store.rebuild_search_indexes()
+            except Exception:
+                pass
         try:
             if not writer_task.done():
                 await batch_queue.put(sentinel)

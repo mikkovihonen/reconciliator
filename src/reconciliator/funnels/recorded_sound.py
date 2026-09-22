@@ -22,9 +22,9 @@ from reconciliator.config import get_bundled_section_defaults
 from reconciliator.funnels.engine import FunnelContext
 
 _RS_DEFAULTS = dict(get_bundled_section_defaults("funnels").get("recorded_sound") or {})
-DEFAULT_JACCARD_THRESHOLD = float(_RS_DEFAULTS.get("jaccard_threshold", 0.75))
-DEFAULT_MAX_CANDIDATES = int(_RS_DEFAULTS.get("max_candidates", 50))
-DEFAULT_MATCH_TIER = str(_RS_DEFAULTS.get("match_tier", "tier3_tracklist_jaccard"))
+DEFAULT_JACCARD_THRESHOLD = float(_RS_DEFAULTS["jaccard_threshold"])
+DEFAULT_MAX_CANDIDATES = int(_RS_DEFAULTS["max_candidates"])
+DEFAULT_MATCH_TIER = str(_RS_DEFAULTS["match_tier"])
 
 JACCARD_THRESHOLD = DEFAULT_JACCARD_THRESHOLD
 MAX_CANDIDATES = DEFAULT_MAX_CANDIDATES

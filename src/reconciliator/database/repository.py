@@ -246,7 +246,7 @@ class WEMIRepository:
         self,
         agents: list[AgentEntity],
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert or update AgentEntity records in batch with relational attribute upserts."""
         if not agents:
@@ -302,8 +302,9 @@ class WEMIRepository:
 
         def _exec(c: Any) -> None:
             # 1. Batch UPSERT into agents_table
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
+            effective_chunk_size = chunk_size or calculate_batch_size(num_columns=len(agents_table.c))
+            for i in range(0, len(rows), effective_chunk_size):
+                chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(agents_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
@@ -343,8 +344,11 @@ class WEMIRepository:
                                 "value": val,
                             }
                         )
-                for i in range(0, len(attr_rows), chunk_size):
-                    chunk = attr_rows[i : i + chunk_size]
+                effective_attr_chunk_size = chunk_size or calculate_batch_size(
+                    num_columns=len(agent_attributes_table.c)
+                )
+                for i in range(0, len(attr_rows), effective_attr_chunk_size):
+                    chunk = attr_rows[i : i + effective_attr_chunk_size]
                     stmt = pg_insert(agent_attributes_table).values(chunk).on_conflict_do_nothing()
                     c.execute(stmt)
 
@@ -443,7 +447,7 @@ class WEMIRepository:
         works: list[WorkEntity],
         vectors: Optional[np.ndarray] = None,
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert or update WorkEntity records and optional dense vectors in batch."""
         if not works:
@@ -477,8 +481,9 @@ class WEMIRepository:
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
+            effective_chunk_size = chunk_size or calculate_batch_size(num_columns=len(works_table.c))
+            for i in range(0, len(rows), effective_chunk_size):
+                chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(works_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
@@ -521,8 +526,11 @@ class WEMIRepository:
             ]
 
             def _exec_vec(c: Any) -> None:
-                for i in range(0, len(vec_rows), chunk_size):
-                    chunk = vec_rows[i : i + chunk_size]
+                effective_vec_chunk_size = chunk_size or calculate_batch_size(
+                    num_columns=len(work_vectors_table.c)
+                )
+                for i in range(0, len(vec_rows), effective_vec_chunk_size):
+                    chunk = vec_rows[i : i + effective_vec_chunk_size]
                     v_stmt = pg_insert(work_vectors_table).values(chunk)
                     v_stmt = v_stmt.on_conflict_do_update(
                         index_elements=["vector_id"],
@@ -557,7 +565,7 @@ class WEMIRepository:
         self,
         expressions: list[ExpressionEntity],
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert or update ExpressionEntity records and optional dense vectors in batch."""
         if not expressions:
@@ -591,8 +599,11 @@ class WEMIRepository:
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
+            effective_chunk_size = chunk_size or calculate_batch_size(
+                num_columns=len(expressions_table.c)
+            )
+            for i in range(0, len(rows), effective_chunk_size):
+                chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(expressions_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
@@ -629,7 +640,7 @@ class WEMIRepository:
         manifestations: list[ManifestationEntity],
         vectors: Optional[np.ndarray] = None,
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert or update ManifestationEntity records and optional dense vectors in batch."""
         if not manifestations:
@@ -676,8 +687,11 @@ class WEMIRepository:
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
+            effective_chunk_size = chunk_size or calculate_batch_size(
+                num_columns=len(manifestations_table.c)
+            )
+            for i in range(0, len(rows), effective_chunk_size):
+                chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(manifestations_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source", "source_id"],
@@ -738,8 +752,11 @@ class WEMIRepository:
             ]
 
             def _exec_mvec(c: Any) -> None:
-                for i in range(0, len(vec_rows), chunk_size):
-                    chunk = vec_rows[i : i + chunk_size]
+                effective_vec_chunk_size = chunk_size or calculate_batch_size(
+                    num_columns=len(manifestation_vectors_table.c)
+                )
+                for i in range(0, len(vec_rows), effective_vec_chunk_size):
+                    chunk = vec_rows[i : i + effective_vec_chunk_size]
                     v_stmt = pg_insert(manifestation_vectors_table).values(chunk)
                     v_stmt = v_stmt.on_conflict_do_update(
                         index_elements=["vector_id"],
@@ -759,7 +776,7 @@ class WEMIRepository:
         self,
         assocs: list[ManifestationExpressionAssociation],
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> None:
         """Insert or replace junction associations between Manifestations and Expressions."""
         if not assocs:
@@ -785,8 +802,11 @@ class WEMIRepository:
         rows = list(deduped_rows.values())
 
         def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
+            effective_assoc_chunk_size = chunk_size or calculate_batch_size(
+                num_columns=len(manifestation_expressions_table.c)
+            )
+            for i in range(0, len(rows), effective_assoc_chunk_size):
+                chunk = rows[i : i + effective_assoc_chunk_size]
                 stmt = pg_insert(manifestation_expressions_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["manifestation_id", "expression_id"],
@@ -1107,7 +1127,7 @@ class WEMIRepository:
         self,
         rels: list[WorkRelationship],
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert WorkRelationship records in batch."""
         if not rels:
@@ -1124,8 +1144,11 @@ class WEMIRepository:
         id_map: dict[tuple[int, int, str], int] = {}
 
         def _exec(c: Any) -> None:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
+            effective_chunk_size = chunk_size or calculate_batch_size(
+                num_columns=len(work_relationships_table.c)
+            )
+            for i in range(0, len(rows), effective_chunk_size):
+                chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(work_relationships_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source_work_id", "target_work_id", "relationship_type"],
@@ -1188,7 +1211,7 @@ class WEMIRepository:
         manifestation_vectors: Optional[Any] = None,
         record_origin: Optional[RecordOrigin | str] = None,
         conn: Optional[Any] = None,
-        chunk_size: int = 1000,
+        chunk_size: Optional[int] = None,
         use_synchronous_commit_off: bool = False,
     ) -> None:
         """Coordinated batch insertion of WEMI domain entities with foreign key binding in a single transaction."""
@@ -2897,6 +2920,34 @@ class WEMIRepository:
                 removed[table_name] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
         return removed
+
+    def drop_search_indexes(self) -> None:
+        """Drop GIN and full-text search indexes before bulk ingest."""
+        indexes_to_drop = [
+            "idx_works_title_trgm",
+            "idx_agents_name_trgm",
+            "idx_manifestations_title_trgm",
+            "idx_works_fts",
+            "idx_expressions_fts",
+            "idx_manifestations_fts",
+        ]
+        with self.get_connection() as conn:
+            for idx in indexes_to_drop:
+                try:
+                    conn.exec_driver_sql(f"DROP INDEX IF EXISTS {idx};")
+                except Exception as exc:
+                    logger.debug("Could not drop index %s (may not exist): %s", idx, exc)
+
+    def rebuild_search_indexes(self) -> None:
+        """Re-create GIN and full-text search indexes after bulk ingest."""
+        from reconciliator.database.schema import PG_SEARCH_DDL_STATEMENTS
+
+        with self.get_connection() as conn:
+            for stmt in PG_SEARCH_DDL_STATEMENTS:
+                try:
+                    conn.exec_driver_sql(stmt)
+                except Exception as exc:
+                    logger.warning("Failed to execute search DDL '%s': %s", stmt, exc)
 
     def build_wemi_indexes(
         self,

@@ -34,7 +34,7 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
     content_type = str(
         ctx.spec.content_type
         or _get_audio_param(
-            ctx, "content_type", _AUDIO_DEFAULTS.get("content_type", "spoken_word")
+            ctx, "content_type", _AUDIO_DEFAULTS["content_type"]
         )
     )
 
@@ -58,21 +58,21 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
     )
     if not expression:
         default_lang = _get_audio_param(
-            ctx, "default_language", _AUDIO_DEFAULTS.get("default_language", "fin")
+            ctx, "default_language", _AUDIO_DEFAULTS["default_language"]
         )
         title_suffix = _get_audio_param(
-            ctx, "title_suffix", _AUDIO_DEFAULTS.get("title_suffix", " (äänikirja)")
+            ctx, "title_suffix", _AUDIO_DEFAULTS["title_suffix"]
         )
         und_lang = _get_audio_param(
-            ctx, "undefined_language", _AUDIO_DEFAULTS.get("undefined_language", "und")
+            ctx, "undefined_language", _AUDIO_DEFAULTS["undefined_language"]
         )
         source_id_suffix = _get_audio_param(
-            ctx, "source_id_suffix", _AUDIO_DEFAULTS.get("source_id_suffix", "_audio")
+            ctx, "source_id_suffix", _AUDIO_DEFAULTS["source_id_suffix"]
         )
         uri_prefix = _get_audio_param(
             ctx,
             "expression_uri_prefix",
-            _AUDIO_DEFAULTS.get("expression_uri_prefix", "#spoken_word_"),
+            _AUDIO_DEFAULTS["expression_uri_prefix"],
         )
 
         lang = record.language or default_lang

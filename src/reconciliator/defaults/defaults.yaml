@@ -72,6 +72,7 @@ vocabularies:
 
   download_list:
     - "yso"
+    - "yso-aika"
     - "yso-paikat"
     - "kauno"
     - "muso"
@@ -167,6 +168,11 @@ vocabularies:
       - "yso.fi/onto/yso-aika/"
       - "(fi-yso-aika)"
       - "yso-aika:"
+    YSO-PAIKAT:
+      - "yso.fi/onto/yso-paikat/"
+      - "(fi-yso-paikat)"
+      - "yso-paikat:"
+      - "ysop:"
     MUSO:
       - "yso.fi/onto/muso/"
       - "(fi-muso)"
@@ -882,6 +888,7 @@ wikidata:
     topical: "yso"
     genre_form: "slm"
     geographic: "yso"
+    temporal: "yso-aika"
     medium_of_performance: "seko"
 
 ingest:
@@ -890,6 +897,27 @@ ingest:
   target_languages: []
   from_year: null
   until_year: null
+
+ingest_oai:
+  workers: 4
+  max_concurrent_requests: 16
+  slice_days: 7
+  batch_size: 1000
+  batch_flush_interval_seconds: 2.0
+  batch_queue_size: 32
+  request_delay: 0.0
+  timeout: 60.0
+  max_retries: 5
+  base_delay: 1.0
+  http2: true
+  prefetch: true
+  checkpoint_interval_records: 10000
+  checkpoint_interval_seconds: 30.0
+  use_synchronous_commit_off: true
+  drop_indexes_during_replace: false
+  truncate_overlong_values: true
+  truncation_marker: ""
+  default_max_field_length: null
 
 ingest_wikidata:
   dump_path: "dumps/latest-all.json.gz"

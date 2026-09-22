@@ -183,6 +183,17 @@ _FUNNELS_DEFAULTS = get_bundled_section_defaults("funnels")
 _AGENT_CLUSTERING_DEFAULTS = get_bundled_section_defaults("agent_clustering")
 _PG_DEFAULTS = dict(_STORAGE_DEFAULTS.get("postgres") or {})
 _HIERARCHY_DEFAULTS = dict(_VOCAB_DEFAULTS.get("hierarchy") or {})
+_OAI_INGEST_DEFAULTS = get_bundled_section_defaults("ingest_oai")
+_WIKIDATA_INGEST_DEFAULTS = get_bundled_section_defaults("ingest_wikidata")
+_WIKIDATA_DEFAULTS = get_bundled_section_defaults("wikidata")
+_INGEST_DEFAULTS = get_bundled_section_defaults("ingest")
+_CLASSIFICATION_DEFAULTS = get_bundled_section_defaults("classification")
+_DIGITAL_REPO_DEFAULTS = get_bundled_section_defaults("digital_repositories")
+
+
+def get_bundled_oai_ingest_defaults() -> dict[str, Any]:
+    """Get bundled default OAI-PMH ingestion settings dictionary."""
+    return dict(_OAI_INGEST_DEFAULTS)
 
 
 def get_bundled_agent_clustering_defaults() -> dict[str, Any]:
@@ -208,11 +219,11 @@ def get_default_database_url() -> str:
     cfg_url = _PG_DEFAULTS.get("database_url")
     if cfg_url:
         return cfg_url
-    user = _PG_DEFAULTS.get("user", "postgres")
-    password = _PG_DEFAULTS.get("password", "postgres")
-    host = _PG_DEFAULTS.get("host", "localhost")
-    port = _PG_DEFAULTS.get("port", 5432)
-    database = _PG_DEFAULTS.get("database", "reconciliator")
+    user = _PG_DEFAULTS["user"]
+    password = _PG_DEFAULTS["password"]
+    host = _PG_DEFAULTS["host"]
+    port = _PG_DEFAULTS["port"]
+    database = _PG_DEFAULTS["database"]
     return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
 
@@ -263,7 +274,10 @@ def get_subject_field_category_map() -> dict[str, str]:
 
 def get_category_default_field_map() -> dict[str, str]:
     """Load default category name to MARC subject field mapping."""
-    return {cat: tag for tag, cat in DEFAULT_SUBJECT_FIELD_CATEGORY_MAP.items()}
+    res = {cat: tag for tag, cat in DEFAULT_SUBJECT_FIELD_CATEGORY_MAP.items()}
+    if "chronological" in res and "temporal" not in res:
+        res["temporal"] = res["chronological"]
+    return res
 
 
 def get_wikidata_author_properties() -> dict[str, str]:
@@ -358,40 +372,40 @@ class RepositoryFTSConfig(BaseModel):
 class PostgresConfig(BaseModel):
     """PostgreSQL connection, engine tuning, and container configuration."""
 
-    host: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("host", "localhost")))
-    port: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("port", 5432)))
-    database: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("database", "reconciliator")))
-    user: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("user", "postgres")))
-    password: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("password", "postgres")))
+    host: str = Field(default_factory=lambda: str(_PG_DEFAULTS["host"]))
+    port: int = Field(default_factory=lambda: int(_PG_DEFAULTS["port"]))
+    database: str = Field(default_factory=lambda: str(_PG_DEFAULTS["database"]))
+    user: str = Field(default_factory=lambda: str(_PG_DEFAULTS["user"]))
+    password: str = Field(default_factory=lambda: str(_PG_DEFAULTS["password"]))
     database_url: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("database_url"))
 
     # Connection pooling & timeouts
-    pool_size: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("pool_size", 10)))
-    max_overflow: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("max_overflow", 20)))
-    pool_timeout: float = Field(default_factory=lambda: float(_PG_DEFAULTS.get("pool_timeout", 30.0)))
-    pool_recycle: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("pool_recycle", 1800)))
-    pool_pre_ping: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS.get("pool_pre_ping", True)))
+    pool_size: int = Field(default_factory=lambda: int(_PG_DEFAULTS["pool_size"]))
+    max_overflow: int = Field(default_factory=lambda: int(_PG_DEFAULTS["max_overflow"]))
+    pool_timeout: float = Field(default_factory=lambda: float(_PG_DEFAULTS["pool_timeout"]))
+    pool_recycle: int = Field(default_factory=lambda: int(_PG_DEFAULTS["pool_recycle"]))
+    pool_pre_ping: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS["pool_pre_ping"]))
 
     # Performance tuning parameters
-    shared_buffers: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("shared_buffers", "1GB")))
-    work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("work_mem", "64MB")))
-    maintenance_work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("maintenance_work_mem", "256MB")))
-    effective_cache_size: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("effective_cache_size", "3GB")))
-    random_page_cost: float = Field(default_factory=lambda: float(_PG_DEFAULTS.get("random_page_cost", 1.1)))
-    synchronous_commit: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("synchronous_commit", "off")))
+    shared_buffers: str = Field(default_factory=lambda: str(_PG_DEFAULTS["shared_buffers"]))
+    work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS["work_mem"]))
+    maintenance_work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS["maintenance_work_mem"]))
+    effective_cache_size: str = Field(default_factory=lambda: str(_PG_DEFAULTS["effective_cache_size"]))
+    random_page_cost: float = Field(default_factory=lambda: float(_PG_DEFAULTS["random_page_cost"]))
+    synchronous_commit: str = Field(default_factory=lambda: str(_PG_DEFAULTS["synchronous_commit"]))
 
     # Container settings
-    container_name: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("container_name", "reconciliator-pg")))
-    container_image: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("container_image", "docker.io/library/postgres:16-alpine")))
-    container_timeout_seconds: float = Field(default_factory=lambda: float(_PG_DEFAULTS.get("container_timeout_seconds", 30.0)))
-    auto_start_container: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS.get("auto_start_container", True)))
+    container_name: str = Field(default_factory=lambda: str(_PG_DEFAULTS["container_name"]))
+    container_image: str = Field(default_factory=lambda: str(_PG_DEFAULTS["container_image"]))
+    container_timeout_seconds: float = Field(default_factory=lambda: float(_PG_DEFAULTS["container_timeout_seconds"]))
+    auto_start_container: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS["auto_start_container"]))
     locale: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("locale"))
     lc_collate: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("lc_collate"))
     lc_ctype: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("lc_ctype"))
     initdb_args: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("initdb_args"))
 
     # Batch execution limits
-    max_parameters_per_batch: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("max_parameters_per_batch", 32767)))
+    max_parameters_per_batch: int = Field(default_factory=lambda: int(_PG_DEFAULTS["max_parameters_per_batch"]))
     default_chunk_size: Optional[int] = Field(default_factory=lambda: _PG_DEFAULTS.get("default_chunk_size"))
 
     def get_database_url(self) -> str:
@@ -640,14 +654,10 @@ class VocabulariesConfig(BaseModel):
         )
     )
     default_classification_scheme: str = Field(
-        default_factory=lambda: str(
-            get_bundled_defaults().get("classification", {}).get("default_scheme") or ""
-        )
+        default_factory=lambda: str(_CLASSIFICATION_DEFAULTS.get("default_scheme") or "")
     )
     digital_repository_patterns: list[str] = Field(
-        default_factory=lambda: list(
-            get_bundled_defaults().get("digital_repositories", {}).get("uri_patterns") or []
-        )
+        default_factory=lambda: list(_DIGITAL_REPO_DEFAULTS.get("uri_patterns") or [])
     )
     language_code_map: dict[str, str] = Field(
         default_factory=lambda: dict(_VOCAB_DEFAULTS.get("language_code_map", {}))
@@ -1129,25 +1139,19 @@ class IngestFilterConfig(BaseModel):
     """Universal publication and media type filter configuration."""
 
     target_work_types: list[str] = Field(
-        default_factory=lambda: list(
-            get_bundled_defaults().get("ingest", {}).get("target_work_types", [])
-        )
+        default_factory=lambda: list(_INGEST_DEFAULTS.get("target_work_types") or [])
     )
     exclude_work_types: list[str] = Field(
-        default_factory=lambda: list(
-            get_bundled_defaults().get("ingest", {}).get("exclude_work_types", [])
-        )
+        default_factory=lambda: list(_INGEST_DEFAULTS.get("exclude_work_types") or [])
     )
     target_languages: list[str] = Field(
-        default_factory=lambda: list(
-            get_bundled_defaults().get("ingest", {}).get("target_languages", [])
-        )
+        default_factory=lambda: list(_INGEST_DEFAULTS.get("target_languages") or [])
     )
     from_year: Optional[int] = Field(
-        default_factory=lambda: get_bundled_defaults().get("ingest", {}).get("from_year")
+        default_factory=lambda: _INGEST_DEFAULTS.get("from_year")
     )
     until_year: Optional[int] = Field(
-        default_factory=lambda: get_bundled_defaults().get("ingest", {}).get("until_year")
+        default_factory=lambda: _INGEST_DEFAULTS.get("until_year")
     )
 
     def accepts(
@@ -1196,22 +1200,40 @@ class OAIIngestConfig(IngestFilterConfig):
     control_number_prefix: Optional[str] = None
     control_number_padding_digits: Optional[int] = None
     control_number_pattern: Optional[str] = None
-    workers: int = 4
-    max_concurrent_requests: int = 8
+    workers: int = Field(default_factory=lambda: int(_OAI_INGEST_DEFAULTS["workers"]))
+    max_concurrent_requests: int = Field(
+        default_factory=lambda: int(_OAI_INGEST_DEFAULTS["max_concurrent_requests"])
+    )
     from_date: Optional[str] = None
     until_date: Optional[str] = None
-    slice_days: int = 30
-    batch_size: int = 500
-    batch_queue_size: int = 4
-    db_batch_chunk_size: int = 1000
-    request_delay: float = 0.1
-    timeout: float = 60.0
-    max_retries: int = 5
-    base_delay: float = 1.0
-    http2: bool = True
-    prefetch: bool = True
-    checkpoint_interval_records: int = 10000
-    checkpoint_interval_seconds: float = 30.0
+    slice_days: int = Field(default_factory=lambda: int(_OAI_INGEST_DEFAULTS["slice_days"]))
+    batch_size: int = Field(default_factory=lambda: int(_OAI_INGEST_DEFAULTS["batch_size"]))
+    batch_flush_interval_seconds: float = Field(
+        default_factory=lambda: float(_OAI_INGEST_DEFAULTS["batch_flush_interval_seconds"])
+    )
+    batch_queue_size: int = Field(
+        default_factory=lambda: int(_OAI_INGEST_DEFAULTS["batch_queue_size"])
+    )
+    request_delay: float = Field(
+        default_factory=lambda: float(_OAI_INGEST_DEFAULTS["request_delay"])
+    )
+    timeout: float = Field(default_factory=lambda: float(_OAI_INGEST_DEFAULTS["timeout"]))
+    max_retries: int = Field(default_factory=lambda: int(_OAI_INGEST_DEFAULTS["max_retries"]))
+    base_delay: float = Field(default_factory=lambda: float(_OAI_INGEST_DEFAULTS["base_delay"]))
+    http2: bool = Field(default_factory=lambda: bool(_OAI_INGEST_DEFAULTS["http2"]))
+    prefetch: bool = Field(default_factory=lambda: bool(_OAI_INGEST_DEFAULTS["prefetch"]))
+    checkpoint_interval_records: int = Field(
+        default_factory=lambda: int(_OAI_INGEST_DEFAULTS["checkpoint_interval_records"])
+    )
+    checkpoint_interval_seconds: float = Field(
+        default_factory=lambda: float(_OAI_INGEST_DEFAULTS["checkpoint_interval_seconds"])
+    )
+    use_synchronous_commit_off: bool = Field(
+        default_factory=lambda: bool(_OAI_INGEST_DEFAULTS["use_synchronous_commit_off"])
+    )
+    drop_indexes_during_replace: bool = Field(
+        default_factory=lambda: bool(_OAI_INGEST_DEFAULTS["drop_indexes_during_replace"])
+    )
     include_items: bool = False
     normalization: Optional[RecordNormalizationConfig] = None
     # How this source records what a publication contains: a bundled profile
@@ -1223,11 +1245,16 @@ class OAIIngestConfig(IngestFilterConfig):
     # global default.
     constituents_mode: Optional[Literal["off", "keys_only", "entities"]] = None
     # Overlong value truncation
-    truncate_overlong_values: bool = True
-    truncation_marker: str = ""
-    default_max_field_length: Optional[int] = None
+    truncate_overlong_values: bool = Field(
+        default_factory=lambda: bool(_OAI_INGEST_DEFAULTS["truncate_overlong_values"])
+    )
+    truncation_marker: str = Field(
+        default_factory=lambda: str(_OAI_INGEST_DEFAULTS.get("truncation_marker") or "")
+    )
+    default_max_field_length: Optional[int] = Field(
+        default_factory=lambda: _OAI_INGEST_DEFAULTS.get("default_max_field_length")
+    )
     field_length_overrides: dict[str, int] = Field(default_factory=dict)
-
 
     @model_validator(mode="after")
     def validate_workers_and_queues(self) -> OAIIngestConfig:
@@ -1243,9 +1270,9 @@ class OAIIngestConfig(IngestFilterConfig):
             raise ValueError(f"slice_days must be at least 1, got {self.slice_days}")
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be at least 1, got {self.batch_size}")
-        if self.db_batch_chunk_size < 1:
+        if self.batch_flush_interval_seconds <= 0:
             raise ValueError(
-                f"db_batch_chunk_size must be at least 1, got {self.db_batch_chunk_size}"
+                f"batch_flush_interval_seconds must be positive, got {self.batch_flush_interval_seconds}"
             )
         if self.max_retries < 0:
             raise ValueError(f"max_retries cannot be negative, got {self.max_retries}")
@@ -1266,142 +1293,68 @@ class WikidataIngestConfig(IngestFilterConfig):
     """Configuration for streaming Wikidata JSON ingestion."""
 
     creative_work_types: dict[str, str] = Field(
-        default_factory=lambda: dict(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get("creative_work_types", {})
-        )
+        default_factory=lambda: dict(_WIKIDATA_INGEST_DEFAULTS.get("creative_work_types") or {})
     )
     human_and_entity_types: list[str] = Field(
-        default_factory=lambda: list(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get(
-                "human_and_entity_types",
-                ["Q5", "Q2085381", "Q4830453", "Q43229", "Q515", "Q6256"],
-            )
-        )
+        default_factory=lambda: list(_WIKIDATA_INGEST_DEFAULTS.get("human_and_entity_types") or [])
     )
     dump_path: Path = Field(
-        default_factory=lambda: Path(
-            get_bundled_defaults().get("ingest_wikidata", {}).get(
-                "dump_path", "dumps/latest-all.json.gz"
-            )
-        )
+        default_factory=lambda: Path(_WIKIDATA_INGEST_DEFAULTS["dump_path"])
     )
     batch_size: int = Field(
-        default_factory=lambda: int(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("batch_size", 5000)
-        )
+        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["batch_size"])
     )
     pass1_only: bool = Field(
-        default_factory=lambda: bool(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("pass1_only", False)
-        )
+        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["pass1_only"])
     )
     extract_works: bool = Field(
-        default_factory=lambda: bool(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("extract_works", True)
-        )
+        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["extract_works"])
     )
     normalization: Optional[RecordNormalizationConfig] = None
     require_author_authority_id: bool = Field(
-        default_factory=lambda: bool(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get("require_author_authority_id", True)
-        )
+        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["require_author_authority_id"])
     )
     author_authority_properties: list[str] = Field(
-        default_factory=lambda: list(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get(
-                "author_authority_properties",
-                [
-                    "P3595",
-                    "P213",
-                    "P214",
-                    "P227",
-                    "P244",
-                    "P906",
-                    "P496",
-                ],
-            )
-        )
+        default_factory=lambda: list(_WIKIDATA_INGEST_DEFAULTS.get("author_authority_properties") or [])
     )
     use_pigz: bool = Field(
-        default_factory=lambda: bool(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("use_pigz", True)
-        )
+        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["use_pigz"])
     )
     pigz_path: Optional[str] = Field(
-        default_factory=lambda: get_bundled_defaults()
-        .get("ingest_wikidata", {})
-        .get("pigz_path")
+        default_factory=lambda: _WIKIDATA_INGEST_DEFAULTS.get("pigz_path")
     )
     pigz_threads: int = Field(
-        default_factory=lambda: int(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("pigz_threads", 0)
-        )
+        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["pigz_threads"])
     )
     workers: int = Field(
-        default_factory=lambda: int(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("workers", 0)
-        )
+        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["workers"])
     )
     lru_cache_size: int = Field(
-        default_factory=lambda: int(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("lru_cache_size", 500000)
-        )
+        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["lru_cache_size"])
     )
     progress_throttle_interval: int = Field(
-        default_factory=lambda: int(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get("progress_throttle_interval", 32768)
-        )
+        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["progress_throttle_interval"])
     )
     use_synchronous_commit_off: bool = Field(
-        default_factory=lambda: bool(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get("use_synchronous_commit_off", True)
-        )
+        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["use_synchronous_commit_off"])
     )
     languages: dict[str, str] = Field(
-        default_factory=lambda: dict(
-            get_bundled_defaults().get("wikidata", {}).get("languages", {})
-        )
+        default_factory=lambda: dict(_WIKIDATA_DEFAULTS.get("languages") or {})
     )
     subject_mappings: dict[str, str] = Field(
-        default_factory=lambda: dict(
-            get_bundled_defaults().get("wikidata", {}).get("subject_mappings", {})
-        )
+        default_factory=lambda: dict(_WIKIDATA_DEFAULTS.get("subject_mappings") or {})
     )
     truncate_overlong_values: bool = Field(
-        default_factory=lambda: bool(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get("truncate_overlong_values", True)
-        )
+        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["truncate_overlong_values"])
     )
     truncation_marker: str = Field(
-        default_factory=lambda: str(
-            get_bundled_defaults().get("ingest_wikidata", {}).get("truncation_marker", "")
-        )
+        default_factory=lambda: str(_WIKIDATA_INGEST_DEFAULTS.get("truncation_marker") or "")
     )
     default_max_field_length: Optional[int] = Field(
-        default_factory=lambda: get_bundled_defaults()
-        .get("ingest_wikidata", {})
-        .get("default_max_field_length")
+        default_factory=lambda: _WIKIDATA_INGEST_DEFAULTS.get("default_max_field_length")
     )
     field_length_overrides: dict[str, int] = Field(
-        default_factory=lambda: dict(
-            get_bundled_defaults()
-            .get("ingest_wikidata", {})
-            .get("field_length_overrides", {})
-        )
+        default_factory=lambda: dict(_WIKIDATA_INGEST_DEFAULTS.get("field_length_overrides") or {})
     )
 
 
@@ -1499,22 +1452,22 @@ class MultiplexClusterThresholds(BaseModel):
 class WEMIScoringWeightsWithAuthor(BaseModel):
     title: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("title", 0.45)
+            _CLUSTER_DEFAULTS["scoring"]["with_author"]["title"]
         )
     )
     author: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("author", 0.35)
+            _CLUSTER_DEFAULTS["scoring"]["with_author"]["author"]
         )
     )
     year: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("year", 0.10)
+            _CLUSTER_DEFAULTS["scoring"]["with_author"]["year"]
         )
     )
     type: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("type", 0.10)
+            _CLUSTER_DEFAULTS["scoring"]["with_author"]["type"]
         )
     )
 
@@ -1522,17 +1475,17 @@ class WEMIScoringWeightsWithAuthor(BaseModel):
 class WEMIScoringWeightsWithoutAuthor(BaseModel):
     title: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("title", 0.70)
+            _CLUSTER_DEFAULTS["scoring"]["without_author"]["title"]
         )
     )
     year: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("year", 0.15)
+            _CLUSTER_DEFAULTS["scoring"]["without_author"]["year"]
         )
     )
     type: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("type", 0.15)
+            _CLUSTER_DEFAULTS["scoring"]["without_author"]["type"]
         )
     )
 
@@ -1550,27 +1503,27 @@ class WEMIScoringConfig(BaseModel):
     )
     author_missing_similarity: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("author_missing_similarity", 0.60)
+            _CLUSTER_DEFAULTS["scoring"]["author_missing_similarity"]
         )
     )
     year_missing_similarity: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("year_missing_similarity", 0.80)
+            _CLUSTER_DEFAULTS["scoring"]["year_missing_similarity"]
         )
     )
     year_max_difference: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("year_max_difference", 20.0)
+            _CLUSTER_DEFAULTS["scoring"]["year_max_difference"]
         )
     )
     cross_format_type_similarity: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("cross_format_type_similarity", 0.95)
+            _CLUSTER_DEFAULTS["scoring"]["cross_format_type_similarity"]
         )
     )
     default_type_similarity: float = Field(
         default_factory=lambda: float(
-            _CLUSTER_DEFAULTS.get("scoring", {}).get("default_type_similarity", 0.50)
+            _CLUSTER_DEFAULTS["scoring"]["default_type_similarity"]
         )
     )
 
@@ -1578,14 +1531,12 @@ class WEMIScoringConfig(BaseModel):
 class MusicScoreConfig(BaseModel):
     terms: list[str] = Field(
         default_factory=lambda: list(
-            _CLUSTER_DEFAULTS.get("music_score", {}).get(
-                "terms", ["score", "partituuri", "nuotti", "part", "stemma"]
-            )
+            _CLUSTER_DEFAULTS.get("music_score", {}).get("terms") or []
         )
     )
     standard_key_terms: list[str] = Field(
         default_factory=lambda: list(
-            _CLUSTER_DEFAULTS.get("music_score", {}).get("standard_key_terms", ["ismn", "plate"])
+            _CLUSTER_DEFAULTS.get("music_score", {}).get("standard_key_terms") or []
         )
     )
 
@@ -1618,50 +1569,10 @@ class ClusterConfig(BaseModel):
         )
     )
     common_schemes: list[str] = Field(
-        default_factory=lambda: list(
-            _CLUSTER_DEFAULTS.get("common_schemes")
-            or [
-                "isbn",
-                "issn",
-                "doi",
-                "urn",
-                "ismn",
-                "isrc",
-                "ean",
-                "upc",
-                "publisher_number",
-                "plate_number",
-                "patent_number",
-                "swhid",
-                "fingerprint",
-                "bgg",
-                "guid_rss",
-                "fragmenta",
-                "michel",
-                "scott",
-                "km",
-            ]
-        )
+        default_factory=lambda: list(_CLUSTER_DEFAULTS.get("common_schemes") or [])
     )
     domain_key_types: list[str] = Field(
-        default_factory=lambda: list(
-            _CLUSTER_DEFAULTS.get("domain_key_types")
-            or [
-                "patent",
-                "statute",
-                "swhid",
-                "fingerprint",
-                "game",
-                "board_game",
-                "podcast",
-                "citation",
-                "music_work",
-                "fragment_codex",
-                "numismatic",
-                "numismatic_issue",
-                "heritage_model",
-            ]
-        )
+        default_factory=lambda: list(_CLUSTER_DEFAULTS.get("domain_key_types") or [])
     )
 
 
@@ -1673,32 +1584,41 @@ class WorkConsolidationConfig(BaseModel):
     elects one canonical work per equivalence group, without deleting anything.
     """
 
-    enabled: bool = True
+    enabled: bool = Field(
+        default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["enabled"])
+    )
     # Evidence admitted when deciding two work rows are the same work.
-    use_wikidata_qid: bool = True
-    use_shared_identifiers: bool = True
-    use_metadata: bool = True
+    use_wikidata_qid: bool = Field(
+        default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["use_wikidata_qid"])
+    )
+    use_shared_identifiers: bool = Field(
+        default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["use_shared_identifiers"])
+    )
+    use_metadata: bool = Field(
+        default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["use_metadata"])
+    )
     # Identifier schemes strong enough to assert work identity on their own.
     # Deliberately excludes weak or source-local schemes such as control_number.
     strong_identifier_schemes: list[str] = Field(
-        default_factory=lambda: [
-            "isbn",
-            "issn",
-            "ismn",
-            "isrc",
-            "ean",
-            "doi",
-            "urn",
-            "asteri",
-        ]
+        default_factory=lambda: list(
+            _CONSOLIDATION_DEFAULTS.get("strong_identifier_schemes") or []
+        )
     )
     # Metadata agreement required when no identifier or QID is shared.
-    metadata_threshold: float = 0.93
+    metadata_threshold: float = Field(
+        default_factory=lambda: float(_CONSOLIDATION_DEFAULTS["metadata_threshold"])
+    )
     # Consolidate works held by the same source as well as across sources.
-    include_same_source: bool = False
+    include_same_source: bool = Field(
+        default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["include_same_source"])
+    )
     # Sources preferred as the canonical representative, best first. Sources not
     # listed rank after those that are; ties break on work_uri for stability.
-    canonical_source_priority: list[str] = Field(default_factory=list)
+    canonical_source_priority: list[str] = Field(
+        default_factory=lambda: list(
+            _CONSOLIDATION_DEFAULTS.get("canonical_source_priority") or []
+        )
+    )
 
 
 class AgentClusterScoringWeights(BaseModel):
@@ -1707,37 +1627,37 @@ class AgentClusterScoringWeights(BaseModel):
 
     name_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("name_weight", 0.35)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["name_weight"]
         )
     )
     dates_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("dates_weight", 0.20)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["dates_weight"]
         )
     )
     work_cluster_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("work_cluster_weight", 0.20)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["work_cluster_weight"]
         )
     )
     coauthor_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("coauthor_weight", 0.10)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["coauthor_weight"]
         )
     )
     affiliation_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("affiliation_weight", 0.05)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["affiliation_weight"]
         )
     )
     concept_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("concept_weight", 0.05)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["concept_weight"]
         )
     )
     qualifier_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("qualifier_weight", 0.05)
+            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["qualifier_weight"]
         )
     )
 
@@ -1746,70 +1666,70 @@ class AgentClusterConfig(BaseModel):
     """Configuration for cross-source agent entity clustering."""
 
     enabled: bool = Field(
-        default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS.get("enabled", True))
+        default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS["enabled"])
     )
     similarity_threshold: float = Field(
-        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("similarity_threshold", 0.85))
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["similarity_threshold"])
     )
     date_tolerance_years: int = Field(
-        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_years", 1))
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["date_tolerance_years"])
     )
     major_date_discrepancy_veto_years: int = Field(
         default_factory=lambda: int(
-            _AGENT_CLUSTERING_DEFAULTS.get("major_date_discrepancy_veto_years", 2)
+            _AGENT_CLUSTERING_DEFAULTS["major_date_discrepancy_veto_years"]
         )
     )
     require_corroboration_for_date_discrepancy: bool = Field(
         default_factory=lambda: bool(
-            _AGENT_CLUSTERING_DEFAULTS.get("require_corroboration_for_date_discrepancy", True)
+            _AGENT_CLUSTERING_DEFAULTS["require_corroboration_for_date_discrepancy"]
         )
     )
     min_career_overlap_tolerance_years: int = Field(
         default_factory=lambda: int(
-            _AGENT_CLUSTERING_DEFAULTS.get("min_career_overlap_tolerance_years", 40)
+            _AGENT_CLUSTERING_DEFAULTS["min_career_overlap_tolerance_years"]
         )
     )
     batch_size: int = Field(
-        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("batch_size", 1000))
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["batch_size"])
     )
     token_matching_algorithm: str = Field(
         default_factory=lambda: str(
-            _AGENT_CLUSTERING_DEFAULTS.get("token_matching_algorithm", "token_set_ratio")
+            _AGENT_CLUSTERING_DEFAULTS["token_matching_algorithm"]
         )
     )
     affiliation_fuzzy_threshold: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_threshold", 80.0)
+            _AGENT_CLUSTERING_DEFAULTS["affiliation_fuzzy_threshold"]
         )
     )
     affiliation_fuzzy_score: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_score", 0.85)
+            _AGENT_CLUSTERING_DEFAULTS["affiliation_fuzzy_score"]
         )
     )
     enable_hierarchical_concepts: bool = Field(
         default_factory=lambda: bool(
-            _AGENT_CLUSTERING_DEFAULTS.get("enable_hierarchical_concepts", True)
+            _AGENT_CLUSTERING_DEFAULTS["enable_hierarchical_concepts"]
         )
     )
     concept_similarity_weight: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("concept_similarity_weight", 0.85)
+            _AGENT_CLUSTERING_DEFAULTS["concept_similarity_weight"]
         )
     )
     max_blocking_bucket_size: int = Field(
         default_factory=lambda: int(
-            _AGENT_CLUSTERING_DEFAULTS.get("max_blocking_bucket_size", 200)
+            _AGENT_CLUSTERING_DEFAULTS["max_blocking_bucket_size"]
         )
     )
     date_tolerance_score: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_score", 0.70)
+            _AGENT_CLUSTERING_DEFAULTS["date_tolerance_score"]
         )
     )
     date_missing_score: float = Field(
         default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS.get("date_missing_score", 0.50)
+            _AGENT_CLUSTERING_DEFAULTS["date_missing_score"]
         )
     )
     source_authority_precedence: list[str] = Field(
@@ -1960,35 +1880,35 @@ class ReconcileConfig(IngestFilterConfig):
     chronology_max_posthumous_years: int = 70
     strict_homonym_guard: bool = True
     max_editions_compared: int = Field(
-        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("max_editions_compared", 25))
+        default_factory=lambda: int(_RECONCILE_DEFAULTS["max_editions_compared"])
     )
     translator_alignment_threshold: float = Field(
         default_factory=lambda: float(
-            _RECONCILE_DEFAULTS.get("translator_alignment_threshold", 0.70)
+            _RECONCILE_DEFAULTS["translator_alignment_threshold"]
         )
     )
     agent_aligner_threshold: float = Field(
-        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("agent_aligner_threshold", 85.0))
+        default_factory=lambda: float(_RECONCILE_DEFAULTS["agent_aligner_threshold"])
     )
     life_date_tolerance_years: int = Field(
-        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("life_date_tolerance_years", 1))
+        default_factory=lambda: int(_RECONCILE_DEFAULTS["life_date_tolerance_years"])
     )
     homonym_score_margin: float = Field(
-        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("homonym_score_margin", 0.03))
+        default_factory=lambda: float(_RECONCILE_DEFAULTS["homonym_score_margin"])
     )
     qualifier_similarity_threshold: float = Field(
         default_factory=lambda: float(
-            _RECONCILE_DEFAULTS.get("qualifier_similarity_threshold", 80.0)
+            _RECONCILE_DEFAULTS["qualifier_similarity_threshold"]
         )
     )
     distribution_match_threshold: float = Field(
         default_factory=lambda: float(
-            _RECONCILE_DEFAULTS.get("distribution_match_threshold", 80.0)
+            _RECONCILE_DEFAULTS["distribution_match_threshold"]
         )
     )
     surname_similarity_threshold: float = Field(
         default_factory=lambda: float(
-            _RECONCILE_DEFAULTS.get("surname_similarity_threshold", 85.0)
+            _RECONCILE_DEFAULTS["surname_similarity_threshold"]
         )
     )
 

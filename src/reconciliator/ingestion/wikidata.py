@@ -855,16 +855,11 @@ def parse_wikidata_entity(
     topical_field = cat_defaults["topical"]
     genre_field = cat_defaults["genre_form"]
     geo_field = cat_defaults["geographic"]
+    temporal_field = cat_defaults.get("temporal") or cat_defaults["chronological"]
     mop_field = cat_defaults["medium_of_performance"]
 
     subj_mappings = dict(
-        get_bundled_defaults().get("wikidata", {}).get("subject_mappings")
-        or {
-            "topical": "yso",
-            "genre_form": "slm",
-            "geographic": "yso",
-            "medium_of_performance": "seko",
-        }
+        get_bundled_defaults().get("wikidata", {}).get("subject_mappings") or {}
     )
 
     for s_qid in get_claim_qids(claims, "P921"):
@@ -873,7 +868,7 @@ def parse_wikidata_entity(
             {
                 "heading": s_heading,
                 "field": topical_field,
-                "vocabulary": subj_mappings.get("topical", "yso"),
+                "vocabulary": subj_mappings["topical"],
                 "uri": None,
             }
         )
@@ -883,7 +878,7 @@ def parse_wikidata_entity(
             {
                 "heading": g_heading,
                 "field": genre_field,
-                "vocabulary": subj_mappings.get("genre_form", "slm"),
+                "vocabulary": subj_mappings["genre_form"],
                 "uri": None,
             }
         )
@@ -893,7 +888,17 @@ def parse_wikidata_entity(
             {
                 "heading": geo_heading,
                 "field": geo_field,
-                "vocabulary": subj_mappings.get("geographic", "yso"),
+                "vocabulary": subj_mappings["geographic"],
+                "uri": None,
+            }
+        )
+    for t_qid in get_claim_qids(claims, "P2348"):
+        t_heading = _lookup_entity_name(t_qid, store, cache=cache) or t_qid
+        subjects["chronological"].append(
+            {
+                "heading": t_heading,
+                "field": temporal_field,
+                "vocabulary": subj_mappings["temporal"],
                 "uri": None,
             }
         )
@@ -903,7 +908,7 @@ def parse_wikidata_entity(
             {
                 "heading": mus_heading,
                 "field": mop_field,
-                "vocabulary": subj_mappings.get("medium_of_performance", "seko"),
+                "vocabulary": subj_mappings["medium_of_performance"],
                 "uri": None,
             }
         )

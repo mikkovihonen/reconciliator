@@ -64,20 +64,27 @@ def test_oai_ingest_config_workers_and_queue_defaults_and_validation() -> None:
 
     cfg = OAIIngestConfig()
     assert cfg.workers == 4
-    assert cfg.slice_days == 30
-    assert cfg.batch_size == 500
-    assert cfg.batch_queue_size == 4
+    assert cfg.slice_days == 7
+    assert cfg.max_concurrent_requests == 16
+    assert cfg.request_delay == 0.0
+    assert cfg.batch_size == 1000
+    assert cfg.batch_queue_size == 32
+    assert cfg.batch_flush_interval_seconds == 2.0
+    assert cfg.use_synchronous_commit_off is True
+    assert cfg.drop_indexes_during_replace is False
 
     custom = OAIIngestConfig(
         workers=8,
         slice_days=7,
         batch_size=250,
         batch_queue_size=8,
+        batch_flush_interval_seconds=5.0,
     )
     assert custom.workers == 8
     assert custom.slice_days == 7
     assert custom.batch_size == 250
     assert custom.batch_queue_size == 8
+    assert custom.batch_flush_interval_seconds == 5.0
 
     with pytest.raises(ValueError, match="workers must be at least 1"):
         OAIIngestConfig(workers=0)
@@ -90,6 +97,9 @@ def test_oai_ingest_config_workers_and_queue_defaults_and_validation() -> None:
 
     with pytest.raises(ValueError, match="batch_size must be at least 1"):
         OAIIngestConfig(batch_size=0)
+
+    with pytest.raises(ValueError, match="batch_flush_interval_seconds must be positive"):
+        OAIIngestConfig(batch_flush_interval_seconds=0)
 
 
 def test_logging_config_defaults_and_validation() -> None:
@@ -234,3 +244,23 @@ reconcile:
     assert loaded.reconcile.funnel_settings.recorded_sound.jaccard_threshold == 0.85
     assert loaded.reconcile.funnel_settings.audiobook.default_language == "swe"
     assert loaded.reconcile.funnel_settings.patterns.exhibition_title == "utställning"
+
+
+def test_yso_aika_default_temporal_vocabulary() -> None:
+    from reconciliator.config import (
+        VocabulariesConfig,
+        WikidataIngestConfig,
+        get_category_default_field_map,
+    )
+
+    v_cfg = VocabulariesConfig()
+    assert "yso-aika" in v_cfg.download_list
+    assert v_cfg.subject_fields["648"].default_vocab == "yso-aika"
+
+    w_cfg = WikidataIngestConfig()
+    assert w_cfg.subject_mappings.get("temporal") == "yso-aika"
+
+    cat_map = get_category_default_field_map()
+    assert cat_map["temporal"] == "648"
+    assert cat_map["chronological"] == "648"
+
