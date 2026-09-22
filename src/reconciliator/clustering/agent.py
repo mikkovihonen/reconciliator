@@ -30,7 +30,10 @@ from reconciliator.models import (
     AgentClusterAttribute,
     AgentClusterMember,
     AgentClusterResult,
+    ClusterLifecycleEvent,
+    ClusterRedirection,
 )
+from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.normalizers.linguistic import fold_diacritics
 from reconciliator.utils import UnionFind
 
@@ -45,6 +48,7 @@ class AgentClusterer:
         repo: WEMIRepository,
         config: Optional[AgentClusterConfig] = None,
         hierarchy_service: Optional[Any] = None,
+        identity_manager: Optional[ClusterIdentityManager] = None,
     ) -> None:
         self.repo = repo
         if config is not None:
@@ -52,6 +56,7 @@ class AgentClusterer:
         else:
             self.config = AppConfig().agent_clustering
         self.hierarchy_service = hierarchy_service
+        self.identity_manager = identity_manager or ClusterIdentityManager(repo)
 
     def cluster_agents(self) -> AgentClusterResult:
         """Execute full agent clustering pipeline across sources."""
@@ -155,7 +160,22 @@ class AgentClusterer:
         clusters: list[AgentCluster] = []
         cluster_members: list[AgentClusterMember] = []
         cluster_attributes: list[AgentClusterAttribute] = []
+        all_lifecycle_events: list[ClusterLifecycleEvent] = []
+        all_redirections: list[ClusterRedirection] = []
         method_counts: dict[str, int] = defaultdict(int)
+
+        existing_cluster_map: dict[int, str] = {}
+        try:
+            with self.repo.get_corpus_connection() as conn:
+                from reconciliator.database.schema import corpus_agent_cluster_members_table
+                stmt_prev = select(
+                    corpus_agent_cluster_members_table.c.agent_id,
+                    corpus_agent_cluster_members_table.c.cluster_id,
+                )
+                for row in conn.execute(stmt_prev).mappings():
+                    existing_cluster_map[row["agent_id"]] = row["cluster_id"]
+        except Exception as e:
+            logger.debug("No existing agent cluster mapping found: %s", e)
 
         singletons = 0
         multi_member = 0
@@ -178,7 +198,20 @@ class AgentClusterer:
             canonical_aid = sorted_members[0]
             canonical_agent = agents[canonical_aid]
 
-            cluster_id = f"ac_{canonical_agent['source']}_{canonical_agent['source_id']}"
+            member_agent_dicts = [agents[aid] for aid in member_ids]
+            (
+                cluster_id,
+                auth_status,
+                access_point,
+                events,
+                redirections,
+            ) = self.identity_manager.resolve_agent_cluster_identity(
+                canonical_agent=canonical_agent,
+                member_agents=member_agent_dicts,
+                existing_cluster_map=existing_cluster_map,
+            )
+            all_lifecycle_events.extend(events)
+            all_redirections.extend(redirections)
 
             # Canonical URI: prefer override identifier from members in authority order
             canonical_uri = None
@@ -195,7 +228,7 @@ class AgentClusterer:
                     break
 
             if not canonical_uri:
-                canonical_uri = to_curie(canonical_agent["source"], canonical_agent["source_id"])
+                canonical_uri = self.identity_manager.format_canonical_uri("agent", cluster_id)
 
             # Tally works and manifestations
             all_cluster_works: set[Any] = set()
@@ -216,6 +249,8 @@ class AgentClusterer:
                 work_count=len(all_cluster_works),
                 manifestation_count=len(all_cluster_works),
                 confidence_score=1.0,
+                authority_status=auth_status,
+                canonical_access_point=access_point,
             )
             clusters.append(cluster)
 
@@ -339,6 +374,7 @@ class AgentClusterer:
         self.repo.insert_agent_cluster_members_batch(cluster_members)
         logger.info("Persisting %d cluster attributes to database...", len(cluster_attributes))
         self.repo.insert_agent_cluster_attributes_batch(cluster_attributes)
+        self.identity_manager.record_lifecycle_batch(all_lifecycle_events, all_redirections)
 
         logger.info(
             "Agent clustering complete: %d total agents partitioned into %d clusters (%d multi-member, %d singletons).",

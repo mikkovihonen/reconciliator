@@ -1200,6 +1200,11 @@ class WorkCluster(BaseModel):
     canonical_work_source_id: Optional[str] = None
     canonical_title: str
     canonical_author: Optional[str] = None
+    authority_status: Literal["established", "provisional"] = "provisional"
+    canonical_access_point: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
 
     @model_validator(mode="before")
     @classmethod
@@ -1395,8 +1400,40 @@ class AgentCluster(BaseModel):
     work_count: int = 0
     manifestation_count: int = 0
     confidence_score: float = 1.0
+    authority_status: Literal["established", "provisional"] = "provisional"
+    canonical_access_point: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     members: list[AgentClusterMember] = Field(default_factory=list)
     attributes: list[AgentClusterAttribute] = Field(default_factory=list)
+
+
+class ClusterLifecycleEvent(BaseModel):
+    """Event recording the minting, merging, splitting, or deprecation of an authority cluster."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: Optional[int] = None
+    event_type: Literal["mint", "merge", "split", "deprecate", "reinstate"]
+    cluster_type: Literal["agent", "work", "expression"]
+    cluster_id: str
+    target_cluster_id: Optional[str] = None
+    details_json: str = "{}"
+    created_at: Optional[str] = None
+
+
+class ClusterRedirection(BaseModel):
+    """Historical or active redirection mapping from a merged/split/deprecated cluster ID to its target."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    source_cluster_id: str
+    target_cluster_id: Optional[str] = None
+    cluster_type: Literal["agent", "work", "expression"]
+    status_code: int = 308
+    reason: str = "merge"
+    created_at: Optional[str] = None
+
 
 
 class AgentClusterResult(BaseModel):

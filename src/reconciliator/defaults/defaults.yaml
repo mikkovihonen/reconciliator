@@ -1278,5 +1278,77 @@ agent_clustering:
     concept_weight: 0.05
     qualifier_weight: 0.05
 
+virtual_authority:
+  enabled: true
+  base_uri: "urn:reconciliator:"
+  uri_templates:
+    agent: "urn:reconciliator:agent:{id}"
+    work: "urn:reconciliator:work:{id}"
+    expression: "urn:reconciliator:expression:{id}"
+    concept: "urn:reconciliator:concept:{id}"
+  pid_generator: "uuidv7"
+  provenance_sources_priority:
+    - "asteri"
+    - "kanto"
+    - "melinda"
+    - "wikidata"
+  lifecycle:
+    auto_redirect_on_merge: true
+    redirect_status_code: 308
+    tombstone_dissolved_clusters: true
+    split_policy: "retire_and_mint_both"
+    tombstone_retention_days: 365
+  status_policy:
+    authoritative_origins:
+      - "asteri"
+      - "kanto"
+      - "isni"
+      - "viaf"
+      - "wikidata"
+    established_status_name: "established"
+    provisional_status_name: "provisional"
+  serialization:
+    marc21:
+      organization_code: "FI-NL"
+      rules_code: "rda"
+      subject_system_code: "yso"
+      default_indicator_1: "1"
+      standard_id_source_codes:
+        isni: "isni"
+        wikidata: "wikidata"
+        kanto: "fikan"
+        asteri: "fikan"
+        viaf: "viaf"
+        orcid: "orcid"
+    skos:
+      default_namespace: "http://www.w3.org/2004/02/skos/core#"
+      schema_namespace: "http://schema.org/"
+      context_url: "https://schema.org/docs/jsonldcontext.json"
+  openrefine:
+    service_name: "Reconciliator Virtual Authority File"
+    identifier_space: "urn:reconciliator:"
+    schema_space: "http://www.w3.org/2004/02/skos/core#"
+    preview_width: 430
+    preview_height: 300
+    max_candidates: 10
+    default_types:
+      - id: "agent"
+        name: "Agent / Person / Organization"
+      - id: "work"
+        name: "Work / Intellectual Entity"
+  oai_pmh_server:
+    repository_name: "Reconciliator Virtual Authority OAI Provider"
+    admin_email: "admin@reconciliator.local"
+    records_per_page: 100
+    earliest_datestamp: "2000-01-01T00:00:00Z"
+    supported_metadata_prefixes:
+      - "marc21_authority"
+      - "oai_dc"
 
-
+bruno:
+  collection_name: "Reconciliator API"
+  version: "1"
+  environment_name: "local"
+  base_url: "http://localhost:8000"
+  include_assertions: true
+  default_timeout_ms: 5000

@@ -21,6 +21,8 @@ from reconciliator.database import WEMIRepository
 from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     ClusterEdge,
+    ClusterLifecycleEvent,
+    ClusterRedirection,
     CorpusLinkage,
     ExpressionCluster,
     ManifestationCluster,
@@ -29,6 +31,7 @@ from reconciliator.models import (
     SammelbandBinding,
     WorkCluster,
 )
+from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.utils import (
     UnionFind,
     clean_alphanumeric,
@@ -46,12 +49,14 @@ class CorpusClusterer:
         matcher: Optional[WorkMatcher] = None,
         config: Optional[ClusterConfig] = None,
         corpus_origins: Optional[list[str]] = None,
+        identity_manager: Optional[ClusterIdentityManager] = None,
     ) -> None:
         self.corpus_repo = corpus_repo
         self.wemi_repo = wemi_repo if wemi_repo is not None else corpus_repo
         self.matcher = matcher
         self.config = config or ClusterConfig()
         self.corpus_origins = corpus_origins
+        self.identity_manager = identity_manager or ClusterIdentityManager(self.corpus_repo)
 
     def generate_blocking_keys(self, target: MatchRecord) -> list[str]:
         """Generate deterministic blocking keys across all 35 key families and identifiers."""
@@ -386,6 +391,22 @@ class CorpusClusterer:
         manifestation_clusters: list[ManifestationCluster] = []
         corpus_linkages: list[CorpusLinkage] = []
         sammelband_bindings: list[SammelbandBinding] = []
+        all_work_events: list[ClusterLifecycleEvent] = []
+        all_work_redirections: list[ClusterRedirection] = []
+
+        existing_work_map: dict[str, str] = {}
+        try:
+            with self.corpus_repo.get_corpus_connection() as conn:
+                from reconciliator.database.schema import corpus_linkages_table
+                from sqlalchemy import select
+                stmt_prev = select(
+                    corpus_linkages_table.c.record_id,
+                    corpus_linkages_table.c.work_cluster_id,
+                )
+                for row in conn.execute(stmt_prev).mappings():
+                    existing_work_map[row["record_id"]] = row["work_cluster_id"]
+        except Exception:
+            pass
 
         for _, member_ids in work_components.items():
             member_recs = [records_map[mid] for mid in member_ids]
@@ -418,17 +439,25 @@ class CorpusClusterer:
                             if exp_key not in hoisted_expr_curies:
                                 hoisted_expr_curies[exp_key] = m_res.expression_curie
 
-            if not hoisted_work_curie:
-                work_sig = (
-                    f"{canon_rec.title_stem}::{canon_rec.author_key or ''}::{canon_rec.work_type}"
-                )
-                h_work = hashlib.sha256(work_sig.encode("utf-8")).hexdigest()[:16]
-                canonical_work_curie = f"reconciliator:work_{h_work}"
-                work_cluster_id = f"wc_{h_work}"
-            else:
-                canonical_work_curie = hoisted_work_curie
-                h_work = hashlib.sha256(canonical_work_curie.encode("utf-8")).hexdigest()[:16]
-                work_cluster_id = f"wc_{h_work}"
+            (
+                work_cluster_id,
+                auth_status,
+                access_point,
+                events,
+                redirections,
+            ) = self.identity_manager.resolve_work_cluster_identity(
+                canonical_title=canon_rec.uniform_title or canon_rec.title,
+                canonical_author=canon_rec.author_key,
+                work_type=canon_rec.work_type,
+                member_record_ids=member_ids,
+                existing_cluster_map=existing_work_map,
+            )
+            all_work_events.extend(events)
+            all_work_redirections.extend(redirections)
+
+            canonical_work_curie = hoisted_work_curie or self.identity_manager.format_canonical_uri(
+                "work", work_cluster_id
+            )
 
             w_cluster = WorkCluster(
                 cluster_id=work_cluster_id,
@@ -436,6 +465,8 @@ class CorpusClusterer:
                 canonical_work_curie=canonical_work_curie,
                 canonical_title=canon_rec.uniform_title or canon_rec.title,
                 canonical_author=canon_rec.author_key,
+                authority_status=auth_status,
+                canonical_access_point=access_point,
             )
             work_clusters.append(w_cluster)
 
@@ -527,6 +558,7 @@ class CorpusClusterer:
         self.corpus_repo.insert_corpus_linkages_batch(corpus_linkages)
         if sammelband_bindings:
             self.corpus_repo.insert_sammelband_bindings_batch(sammelband_bindings)
+        self.identity_manager.record_lifecycle_batch(all_work_events, all_work_redirections)
 
         elapsed = time.time() - start_time
         return MultiplexClusterResult(

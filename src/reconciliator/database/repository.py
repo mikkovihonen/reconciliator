@@ -53,6 +53,8 @@ from reconciliator.database.schema import (
     manifestations_table,
     review_changesets_table,
     changeset_operations_table,
+    cluster_lifecycle_events_table,
+    cluster_redirections_table,
     entity_pins_table,
     concepts_table,
     concept_mappings_table,
@@ -71,6 +73,8 @@ from reconciliator.models import (
     AgentEntity,
     AgentRelationshipEntity,
     ChangesetOperation,
+    ClusterLifecycleEvent,
+    ClusterRedirection,
     ContributionEntity,
     CorpusLinkage,
     DataReadinessSummary,
@@ -4570,6 +4574,129 @@ class WEMIRepository:
         )
         count_stmt = select(func.count()).select_from(corpus_linkages_table)
         with self.get_corpus_connection() as conn:
+            total = conn.execute(count_stmt).scalar() or 0
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [dict(r) for r in rows], int(total)
+
+    def insert_cluster_lifecycle_event(self, event: ClusterLifecycleEvent) -> None:
+        """Insert an individual authority cluster lifecycle event."""
+        self.insert_cluster_lifecycle_events_batch([event])
+
+    def insert_cluster_lifecycle_events_batch(self, events: list[ClusterLifecycleEvent]) -> None:
+        """Batch insert authority cluster lifecycle events."""
+        if not events:
+            return
+        dicts = [
+            {
+                "event_type": e.event_type,
+                "cluster_type": e.cluster_type,
+                "cluster_id": e.cluster_id,
+                "target_cluster_id": e.target_cluster_id,
+                "details_json": e.details_json,
+            }
+            for e in events
+        ]
+        with self.get_corpus_connection() as conn:
+            conn.execute(insert(cluster_lifecycle_events_table), dicts)
+            conn.commit()
+
+    def insert_cluster_redirections_batch(self, redirections: list[ClusterRedirection]) -> None:
+        """Batch upsert authority cluster redirections."""
+        if not redirections:
+            return
+        dicts = [
+            {
+                "source_cluster_id": r.source_cluster_id,
+                "target_cluster_id": r.target_cluster_id,
+                "cluster_type": r.cluster_type,
+                "status_code": r.status_code,
+                "reason": r.reason,
+            }
+            for r in redirections
+        ]
+        with self.get_corpus_connection() as conn:
+            for d in dicts:
+                stmt = select(cluster_redirections_table.c.source_cluster_id).where(
+                    cluster_redirections_table.c.source_cluster_id == d["source_cluster_id"]
+                )
+                existing = conn.execute(stmt).first()
+                if existing:
+                    conn.execute(
+                        update(cluster_redirections_table)
+                        .where(cluster_redirections_table.c.source_cluster_id == d["source_cluster_id"])
+                        .values(
+                            target_cluster_id=d["target_cluster_id"],
+                            cluster_type=d["cluster_type"],
+                            status_code=d["status_code"],
+                            reason=d["reason"],
+                        )
+                    )
+                else:
+                    conn.execute(insert(cluster_redirections_table), [d])
+            conn.commit()
+
+    def get_cluster_redirection(self, source_cluster_id: str) -> Optional[ClusterRedirection]:
+        """Fetch redirection target for a merged or tombstoned authority cluster."""
+        with self.get_corpus_connection() as conn:
+            stmt = select(cluster_redirections_table).where(
+                cluster_redirections_table.c.source_cluster_id == source_cluster_id
+            )
+            row = conn.execute(stmt).mappings().first()
+            if not row:
+                return None
+            return ClusterRedirection.model_validate(dict(row))
+
+    def get_cluster_lifecycle_events(self, cluster_id: str) -> list[ClusterLifecycleEvent]:
+        """Fetch all lifecycle events for a cluster ordered by timestamp."""
+        with self.get_corpus_connection() as conn:
+            stmt = (
+                select(cluster_lifecycle_events_table)
+                .where(cluster_lifecycle_events_table.c.cluster_id == cluster_id)
+                .order_by(cluster_lifecycle_events_table.c.created_at.asc())
+            )
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [ClusterLifecycleEvent.model_validate(dict(r)) for r in rows]
+
+    def get_agent_cluster_full(self, cluster_id: str) -> Optional[AgentCluster]:
+        """Fetch agent cluster with all member records and aggregated attributes."""
+        cluster = self.get_agent_cluster(cluster_id)
+        if not cluster:
+            return None
+        cluster.members = self.get_agent_cluster_members(cluster_id)
+        cluster.attributes = self.get_agent_cluster_attributes(cluster_id)
+        return cluster
+
+    def get_work_cluster_full(self, cluster_id: str) -> Optional[WorkCluster]:
+        """Fetch work cluster by cluster_id."""
+        with self.get_corpus_connection() as conn:
+            stmt = select(corpus_work_clusters_table).where(
+                corpus_work_clusters_table.c.cluster_id == cluster_id
+            )
+            row = conn.execute(stmt).mappings().first()
+            if not row:
+                return None
+            return WorkCluster.model_validate(dict(row))
+
+    def list_authority_clusters_modified_since(
+        self,
+        cluster_type: str,
+        since: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Fetch modified authority clusters since a given timestamp for OAI-PMH harvesting."""
+        table = (
+            corpus_agent_clusters_table
+            if cluster_type == "agent"
+            else corpus_work_clusters_table
+        )
+        with self.get_corpus_connection() as conn:
+            stmt = select(table)
+            count_stmt = select(func.count()).select_from(table)
+            if since is not None:
+                stmt = stmt.where(table.c.created_at >= since)
+                count_stmt = count_stmt.where(table.c.created_at >= since)
+            stmt = stmt.order_by(table.c.created_at.asc()).limit(limit).offset(offset)
             total = conn.execute(count_stmt).scalar() or 0
             rows = conn.execute(stmt).mappings().fetchall()
             return [dict(r) for r in rows], int(total)

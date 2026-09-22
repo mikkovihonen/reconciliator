@@ -12,6 +12,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from reconciliator.api.routes.auth_config import router as auth_router
+from reconciliator.api.routes.authority import (
+    oai_router,
+    reconcile_router,
+    resolver_router,
+)
 from reconciliator.api.routes.changesets import router as changesets_router
 from reconciliator.api.routes.consolidation import router as consolidation_router
 from reconciliator.api.routes.entities import router as entities_router
@@ -65,6 +70,11 @@ def create_app(
     app.include_router(changesets_router, prefix=api_v1_prefix)
     app.include_router(pipeline_router, prefix=api_v1_prefix)
 
+    # Mount Virtual Authority File (VAF) routers
+    app.include_router(reconcile_router)
+    app.include_router(resolver_router)
+    app.include_router(oai_router)
+
     # Static assets directory for Web UI
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
@@ -80,11 +90,18 @@ def create_app(
         from fastapi import HTTPException
 
         # Catch-all route to serve SPA index.html for client-side routing
-        @app.get("/{full_path:path}")
+        @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(request: Request, full_path: str):
-            # Never intercept API, static, or assets requests with index.html
-            if full_path.startswith("api/") or full_path.startswith("static/") or full_path.startswith("assets/"):
+            # Never intercept API, authority, oai, static, or assets requests with index.html
+            if (
+                full_path.startswith("api/")
+                or full_path.startswith("authority/")
+                or full_path.startswith("oai/")
+                or full_path.startswith("static/")
+                or full_path.startswith("assets/")
+            ):
                 raise HTTPException(status_code=404, detail="Not Found")
+
             index_file = static_dir / "index.html"
             if index_file.exists():
                 return FileResponse(str(index_file))

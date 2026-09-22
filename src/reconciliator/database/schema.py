@@ -543,7 +543,12 @@ corpus_work_clusters_table = Table(
     Column("canonical_work_source_id", String, nullable=True),
     Column("canonical_title", String, nullable=False),
     Column("canonical_author", String, nullable=True),
+    Column("authority_status", String(32), nullable=False, default="provisional", server_default="provisional"),
+    Column("canonical_access_point", Text, nullable=True),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Column("updated_at", DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp()),
 )
+
 
 corpus_expression_clusters_table = Table(
     "corpus_expression_clusters",
@@ -629,9 +634,13 @@ corpus_agent_clusters_table = Table(
     Column("work_count", Integer, nullable=False, default=0, server_default="0"),
     Column("manifestation_count", Integer, nullable=False, default=0, server_default="0"),
     Column("confidence_score", Float, nullable=False, default=1.0, server_default="1.0"),
+    Column("authority_status", String(32), nullable=False, default="provisional", server_default="provisional"),
+    Column("canonical_access_point", Text, nullable=True),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Column("updated_at", DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp()),
     Index("idx_agent_cluster_canonical_id", "canonical_agent_id"),
     Index("idx_agent_cluster_canonical_uri", "canonical_uri"),
+    Index("idx_agent_cluster_authority_status", "authority_status"),
 )
 
 corpus_agent_cluster_members_table = Table(
@@ -669,6 +678,34 @@ corpus_agent_cluster_attributes_table = Table(
     Column("is_canonical", Boolean, nullable=False, default=False, server_default="0"),
     UniqueConstraint("cluster_id", "attribute_type", "value", name="uq_agent_cluster_attr"),
     Index("idx_agent_cluster_attr_cluster", "cluster_id", "attribute_type"),
+)
+
+cluster_lifecycle_events_table = Table(
+    "cluster_lifecycle_events",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("event_type", String(32), nullable=False),  # mint, merge, split, deprecate, reinstate
+    Column("cluster_type", String(32), nullable=False),  # agent, work, expression
+    Column("cluster_id", String(64), nullable=False),
+    Column("target_cluster_id", String(64), nullable=True),
+    Column("details_json", Text, nullable=False, default="{}", server_default="{}"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_lifecycle_cluster", "cluster_id"),
+    Index("idx_lifecycle_type_cluster", "cluster_type", "cluster_id"),
+    Index("idx_lifecycle_created", "created_at"),
+)
+
+cluster_redirections_table = Table(
+    "cluster_redirections",
+    metadata,
+    Column("source_cluster_id", String(64), primary_key=True),
+    Column("target_cluster_id", String(64), nullable=True),  # null if tombstone / 410 Gone
+    Column("cluster_type", String(32), nullable=False),
+    Column("status_code", Integer, nullable=False, default=308, server_default="308"),
+    Column("reason", Text, nullable=False, default="merge", server_default="merge"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_redirections_target", "target_cluster_id"),
+    Index("idx_redirections_type", "cluster_type"),
 )
 
 # ===================================================================
