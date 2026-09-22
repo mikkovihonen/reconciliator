@@ -64,6 +64,7 @@ class ProgressTracker:
         task_type: TaskType = "reconciliation",
         heartbeat_interval: float = 1.0,
         engine: Optional[Engine] = None,
+        initial_items_processed: int = 0,
     ) -> None:
         self.db_path = Path(db_path) if db_path else None
         self.task_id = task_id
@@ -78,7 +79,7 @@ class ProgressTracker:
 
         self._start_time_sec = time.time()
         self._last_heartbeat_sec = 0.0
-        self._items_processed = 0
+        self._items_processed = initial_items_processed
         self._items_total: Optional[int] = None
         self._bytes_processed = 0
         self._bytes_total: Optional[int] = None
@@ -149,6 +150,7 @@ class ProgressTracker:
         items_total: Optional[int] = None,
         bytes_total: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
+        items_processed: Optional[int] = None,
     ) -> None:
         """Start tracking and emit the initial status entry in progress.db."""
         if self.task_id:
@@ -161,12 +163,30 @@ class ProgressTracker:
             self._status = "running"
             self._items_total = items_total
             self._bytes_total = bytes_total
+            if items_processed is not None:
+                self._items_processed = items_processed
             if metadata:
                 self._metadata.update(metadata)
 
             now = _now_iso()
-            meta_json = json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
             with self.engine.begin() as conn:
+                existing = conn.execute(
+                    select(
+                        task_progress_table.c.items_processed,
+                        task_progress_table.c.start_time,
+                    ).where(task_progress_table.c.task_id == self.task_id)
+                ).first()
+                if existing:
+                    if items_processed is None and self._items_processed == 0 and existing.items_processed:
+                        self._items_processed = existing.items_processed
+                    if existing.start_time:
+                        try:
+                            parsed_start = datetime.fromisoformat(existing.start_time)
+                            self._start_time_sec = parsed_start.timestamp()
+                        except Exception:
+                            pass
+
+                meta_json = json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
                 stmt = pg_insert(task_progress_table).values(
                     task_id=self.task_id,
                     task_type=self.task_type,
@@ -190,6 +210,7 @@ class ProgressTracker:
                         "task_type": stmt.excluded.task_type,
                         "status": stmt.excluded.status,
                         "current_stage": stmt.excluded.current_stage,
+                        "items_processed": self._items_processed,
                         "items_total": stmt.excluded.items_total,
                         "bytes_total": stmt.excluded.bytes_total,
                         "last_heartbeat": stmt.excluded.last_heartbeat,
@@ -368,6 +389,96 @@ def list_tasks(db_path: Path | str, limit: int = 50) -> list[TaskProgress]:
         engine.dispose()
 
 
+def find_latest_task_for_source(
+    db_path: Path | str,
+    source_name: str,
+    task_type: TaskType = "oai_pmh_harvest",
+) -> Optional[TaskProgress]:
+    """Find the most recent resumable/interrupted task progress record for a given source."""
+    engine = get_engine(db_path)
+    try:
+        with engine.connect() as conn:
+            stmt = (
+                select(task_progress_table)
+                .where(task_progress_table.c.task_type == task_type)
+                .order_by(task_progress_table.c.last_heartbeat.desc())
+                .limit(50)
+            )
+            rows = conn.execute(stmt).mappings().all()
+            for r in rows:
+                tid = r["task_id"]
+                matched = False
+                if tid.startswith(f"oai-ingest-{source_name}-") or tid == f"oai-ingest-{source_name}":
+                    matched = True
+                elif r["metadata_json"]:
+                    try:
+                        m = json.loads(r["metadata_json"])
+                        if m.get("source") == source_name:
+                            matched = True
+                    except Exception:
+                        pass
+
+                if matched and r["status"] in ("running", "interrupted"):
+                    return TaskProgress(
+                        task_id=r["task_id"],
+                        task_type=r["task_type"],
+                        status=r["status"],
+                        current_stage=r["current_stage"],
+                        items_processed=r["items_processed"],
+                        items_total=r["items_total"],
+                        bytes_processed=r["bytes_processed"],
+                        bytes_total=r["bytes_total"],
+                        rate_per_sec=r["rate_per_sec"],
+                        percentage=r["percentage"],
+                        start_time=r["start_time"],
+                        last_heartbeat=r["last_heartbeat"],
+                        error_message=r["error_message"],
+                        error_count=r.get("error_count", 0) or 0,
+                        metadata_json=r["metadata_json"],
+                    )
+            return None
+    finally:
+        engine.dispose()
+
+
+def mark_stale_tasks(
+    db_path: Path | str,
+    timeout_seconds: float,
+    task_type: Optional[TaskType] = None,
+    exclude_task_id: Optional[str] = None,
+) -> int:
+    """Mark stale running tasks as interrupted if their last heartbeat exceeded the timeout."""
+    if timeout_seconds <= 0:
+        return 0
+    engine = get_engine(db_path)
+    init_progress_db(engine)
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        cutoff_iso = cutoff.isoformat()
+        with engine.begin() as conn:
+            conditions = [
+                task_progress_table.c.status == "running",
+                task_progress_table.c.last_heartbeat < cutoff_iso,
+            ]
+            if task_type:
+                conditions.append(task_progress_table.c.task_type == task_type)
+            if exclude_task_id:
+                conditions.append(task_progress_table.c.task_id != exclude_task_id)
+
+            stmt = (
+                update(task_progress_table)
+                .where(and_(*conditions))
+                .values(
+                    status="interrupted",
+                    error_message="Task heartbeat timed out; marked as interrupted",
+                )
+            )
+            res = conn.execute(stmt)
+            return max(res.rowcount, 0)
+    finally:
+        engine.dispose()
+
+
 def prune_tasks(
     db_path: Path | str,
     task_id: Optional[str] = None,
@@ -391,7 +502,7 @@ def prune_tasks(
 
             if status:
                 if status == "terminated":
-                    conditions.append(task_progress_table.c.status.in_(["completed", "failed"]))
+                    conditions.append(task_progress_table.c.status.in_(["completed", "failed", "interrupted"]))
                 else:
                     conditions.append(task_progress_table.c.status == status)
 
@@ -436,9 +547,14 @@ def format_task_table(tasks: list[TaskProgress]) -> Table:
 
     pipeline_tasks = [t for t in tasks if t.task_type != "system"]
     for t in pipeline_tasks:
-        status_style = (
-            "green" if t.status == "completed" else "yellow" if t.status == "running" else "red"
-        )
+        if t.status == "completed":
+            status_style = "green"
+        elif t.status == "running":
+            status_style = "yellow"
+        elif t.status == "interrupted":
+            status_style = "dim yellow"
+        else:
+            status_style = "red"
         status_text = f"[{status_style}]{t.status.upper()}[/{status_style}]"
 
         meta: dict[str, Any] = {}

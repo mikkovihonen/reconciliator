@@ -642,8 +642,10 @@ async def ingest_oai_pipeline(
 
     def _telemetry() -> dict[str, Any]:
         data: dict[str, Any] = {
-            "harvested": harvested_count,
-            "indexed": total_ingested,
+            "harvested": already_harvested + harvested_count,
+            "indexed": already_harvested + total_ingested,
+            "session_harvested": harvested_count,
+            "session_indexed": total_ingested,
             "skipped": skipped_count,
             "source": source_name,
             "errors": tracker.error_count if tracker else 0,
@@ -708,7 +710,11 @@ async def ingest_oai_pipeline(
             _save_state("in_progress", safe_token, None)
 
     if tracker:
-        tracker.start_task(stage=stage_name, metadata=_telemetry() if is_oai else None)
+        tracker.start_task(
+            stage=stage_name,
+            items_processed=already_harvested,
+            metadata=_telemetry() if is_oai else None,
+        )
 
     loop = asyncio.get_running_loop()
     batch_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=effective_config.batch_queue_size)
@@ -731,7 +737,7 @@ async def ingest_oai_pipeline(
                     if tracker:
                         tracker.update_progress(
                             stage=stage_name,
-                            items_processed=total_ingested,
+                            items_processed=already_harvested + total_ingested,
                             percentage=_current_pct(),
                             metadata=_telemetry(),
                             force=False,
@@ -789,7 +795,7 @@ async def ingest_oai_pipeline(
                     await asyncio.sleep(interval)
                     tracker.update_progress(
                         stage=stage_name,
-                        items_processed=total_ingested,
+                        items_processed=already_harvested + total_ingested,
                         percentage=_current_pct(),
                         metadata=_telemetry(),
                     )
@@ -893,7 +899,7 @@ async def ingest_oai_pipeline(
                     if tracker:
                         tracker.update_progress(
                             stage=stage_name,
-                            items_processed=total_ingested,
+                            items_processed=already_harvested + total_ingested,
                             percentage=_current_pct(),
                             metadata=_telemetry(),
                             force=False,

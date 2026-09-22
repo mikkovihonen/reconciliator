@@ -419,6 +419,18 @@ class PostgresConfig(BaseModel):
     # Batch execution limits
     max_parameters_per_batch: int = Field(default_factory=lambda: int(_PG_DEFAULTS["max_parameters_per_batch"]))
     default_chunk_size: Optional[int] = Field(default_factory=lambda: _PG_DEFAULTS.get("default_chunk_size"))
+    data_dir: Optional[Path] = Field(
+        default_factory=lambda: Path(_PG_DEFAULTS["data_dir"]) if _PG_DEFAULTS.get("data_dir") else None
+    )
+
+    def get_effective_data_dir(self) -> Optional[Path]:
+        """Resolve effective host data directory for PostgreSQL storage bind mount."""
+        env_dir = os.environ.get("RECONCILIATOR_POSTGRES_DATA_DIR")
+        if env_dir:
+            return Path(env_dir).expanduser().resolve()
+        if self.data_dir:
+            return Path(self.data_dir).expanduser().resolve()
+        return None
 
     def get_database_url(self) -> str:
         if self.database_url:
@@ -1267,6 +1279,9 @@ class OAIIngestConfig(IngestFilterConfig):
         default_factory=lambda: _OAI_INGEST_DEFAULTS.get("default_max_field_length")
     )
     field_length_overrides: dict[str, int] = Field(default_factory=dict)
+    adopt_previous_task_id: bool = Field(
+        default_factory=lambda: bool(_OAI_INGEST_DEFAULTS.get("adopt_previous_task_id", True))
+    )
 
     @model_validator(mode="after")
     def validate_workers_and_queues(self) -> OAIIngestConfig:
@@ -2347,9 +2362,21 @@ class ReconcileConfig(IngestFilterConfig):
 class TelemetryConfig(BaseModel):
     """Progress heartbeat and query monitoring intervals."""
 
-    heartbeat_interval_seconds: float = 1.0
-    watch_interval_seconds: float = 1.0
-    show_vector_daemon: bool = True
+    heartbeat_interval_seconds: float = Field(
+        default_factory=lambda: float(_TELEMETRY_DEFAULTS.get("heartbeat_interval_seconds", 60.0))
+    )
+    watch_interval_seconds: float = Field(
+        default_factory=lambda: float(_TELEMETRY_DEFAULTS.get("watch_interval_seconds", 5.0))
+    )
+    stale_heartbeat_timeout_seconds: float = Field(
+        default_factory=lambda: float(_TELEMETRY_DEFAULTS.get("stale_heartbeat_timeout_seconds", 120.0))
+    )
+    adopt_previous_task_id: bool = Field(
+        default_factory=lambda: bool(_TELEMETRY_DEFAULTS.get("adopt_previous_task_id", True))
+    )
+    show_vector_daemon: bool = Field(
+        default_factory=lambda: bool(_TELEMETRY_DEFAULTS.get("show_vector_daemon", True))
+    )
 
 
 class LoggingConfig(BaseModel):

@@ -292,7 +292,7 @@ class ReconciliationMatch(BaseModel):
 
 
 TaskType = Literal["oai_pmh_harvest", "wikidata_ingest", "vocab_ingest", "reconciliation", "system"]
-TaskStatus = Literal["running", "completed", "failed"]
+TaskStatus = Literal["running", "completed", "failed", "interrupted"]
 
 
 class TaskProgress(BaseModel):

@@ -27,8 +27,10 @@ from reconciliator.config import (
 from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.database import (
+    get_container_storage_mount,
     is_container_present,
     is_container_running,
+    migrate_container_storage_to_host,
     reset_all_storage,
     start_postgres_container,
     stop_postgres_container,
@@ -75,9 +77,11 @@ from reconciliator.normalizers.blocking import (
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.progress import (
     ProgressTracker,
+    find_latest_task_for_source,
     format_task_table,
     get_task_progress,
     list_tasks,
+    mark_stale_tasks,
     prune_tasks,
     render_status_json,
     render_vector_daemon_panel,
@@ -110,17 +114,28 @@ def db_start_cmd(
     config: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
+    data_dir: Optional[Path] = typer.Option(
+        None, "--data-dir", "-d", help="Host directory path to bind-mount as PostgreSQL storage"
+    ),
+    recreate: bool = typer.Option(
+        False, "--recreate", help="Recreate container if it already exists"
+    ),
     timeout: float = typer.Option(
         30.0, "--timeout", "-t", help="Timeout in seconds to wait for PostgreSQL readiness"
     ),
 ) -> None:
-    """Start local containerized PostgreSQL instance using Podman."""
+    """Start local containerized PostgreSQL instance using Podman with optional host bind mount."""
     cfg_path = _resolve_cli_config(config)
     cfg = load_config(cfg_path)
     pg = cfg.storage.postgres
+    target_data_dir = data_dir or pg.get_effective_data_dir()
+
     console.print(
         f"[bold blue]Starting PostgreSQL container '{pg.container_name}' on port {pg.port}...[/bold blue]"
     )
+    if target_data_dir:
+        console.print(f"[bold cyan]Using host bind mount for storage:[/bold cyan] {target_data_dir}")
+
     try:
         start_postgres_container(
             host=pg.host,
@@ -132,12 +147,40 @@ def db_start_cmd(
             image=pg.container_image,
             wait_ready=True,
             timeout_seconds=timeout,
+            data_dir=target_data_dir,
+            recreate=recreate,
         )
         console.print(
             f"[bold green]PostgreSQL is running and ready on {pg.host}:{pg.port}/{pg.database}[/bold green]"
         )
     except Exception as e:
         console.print(f"[bold red]Failed to start PostgreSQL container: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@db_app.command("migrate-storage")
+def db_migrate_storage_cmd(
+    target_dir: Path = typer.Option(
+        ..., "--target-dir", "-d", help="Host directory to copy PostgreSQL data to and bind mount"
+    ),
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+) -> None:
+    """Safely migrate existing container data to a host directory bind mount without data loss."""
+    cfg_path = _resolve_cli_config(config)
+    cfg = load_config(cfg_path)
+    pg = cfg.storage.postgres
+    cname = pg.container_name
+
+    console.print(f"[bold blue]Migrating container '{cname}' data to host directory: {target_dir}...[/bold blue]")
+    try:
+        migrate_container_storage_to_host(target_host_dir=target_dir, name=cname)
+        console.print(
+            f"[bold green]Successfully migrated storage for '{cname}' to host directory {target_dir}. Container restarted with bind mount![/bold green]"
+        )
+    except Exception as e:
+        console.print(f"[bold red]Storage migration failed: {e}[/bold red]")
         raise typer.Exit(code=1)
 
 
@@ -173,6 +216,7 @@ def db_status_cmd(
     cname = pg.container_name
     running = is_container_running(name=cname)
     present = is_container_present(name=cname)
+    eff_data_dir = pg.get_effective_data_dir()
 
     table = Table(title="PostgreSQL Container & Connection Status")
     table.add_column("Property", style="cyan")
@@ -187,7 +231,11 @@ def db_status_cmd(
     table.add_row("Host / Port", f"{pg.host}:{pg.port}")
     table.add_row("Database", pg.database)
     table.add_row("User", pg.user)
-    table.add_row("Database URL", pg.get_database_url())
+    active_mount = get_container_storage_mount(cname) or (str(eff_data_dir) if eff_data_dir else None)
+    table.add_row(
+        "Storage Bind Mount",
+        f"[bold cyan]{active_mount}[/bold cyan]" if active_mount else "None (Podman internal volume)",
+    )
 
     console.print(table)
 
@@ -264,6 +312,7 @@ def status_cmd(
         daemon_status = lifecycle.query_status()
 
     def fetch_tasks() -> list[TaskProgress]:
+        mark_stale_tasks(db_target, timeout_seconds=cfg.telemetry.stale_heartbeat_timeout_seconds)
         if task_id:
             t = get_task_progress(db_target, task_id)
             return [t] if t else []
@@ -279,7 +328,7 @@ def status_cmd(
                     if (
                         exit_when_done
                         and tasks
-                        and all(t.status in ("completed", "failed") for t in tasks)
+                        and all(t.status in ("completed", "failed", "interrupted") for t in tasks)
                     ):
                         break
                     time.sleep(poll_interval)
@@ -762,6 +811,16 @@ def ingest_oai_cmd(
         "--restart",
         help="Ignore the saved harvest checkpoint and re-harvest the source from the start",
     ),
+    task_id: Optional[str] = typer.Option(
+        None,
+        "--task-id",
+        help="Explicit task ID to use for progress telemetry",
+    ),
+    adopt_previous_task_id: Optional[bool] = typer.Option(
+        None,
+        "--adopt-previous-task-id/--no-adopt-previous-task-id",
+        help="Override automatic adoption of previous uncompleted task ID when resuming",
+    ),
 ) -> None:
     """Harvest or read authority records from configured OAI-PMH/XML sources.
 
@@ -776,6 +835,11 @@ def ingest_oai_cmd(
     if not cfg.ingest_oai:
         console.print("[red]No ingest_oai section found in configuration.[/red]")
         raise typer.Exit(code=1)
+
+    mark_stale_tasks(
+        cfg.storage.database_url,
+        timeout_seconds=cfg.telemetry.stale_heartbeat_timeout_seconds,
+    )
 
     targets: dict[str, OAIIngestConfig] = {}
     if all_sources:
@@ -818,9 +882,31 @@ def ingest_oai_cmd(
         if prefetch is not None:
             src_cfg.prefetch = prefetch
 
+        effective_adopt = (
+            adopt_previous_task_id
+            if adopt_previous_task_id is not None
+            else src_cfg.adopt_previous_task_id
+        )
+
+        effective_task_id = task_id
+        if not effective_task_id and effective_adopt and not restart:
+            prior_task = find_latest_task_for_source(
+                cfg.storage.database_url,
+                source_name=src_name,
+                task_type="oai_pmh_harvest",
+            )
+            if prior_task:
+                effective_task_id = prior_task.task_id
+                console.print(
+                    f"[dim cyan]Adopting previous task ID '{effective_task_id}' for resumed harvest.[/dim cyan]"
+                )
+
+        if not effective_task_id:
+            effective_task_id = f"oai-ingest-{src_name}-{int(time.time())}"
+
         tracker = ProgressTracker(
             db_path=cfg.storage.database_url,
-            task_id=f"oai-ingest-{src_name}-{int(time.time())}",
+            task_id=effective_task_id,
             task_type="oai_pmh_harvest",
             heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
         )

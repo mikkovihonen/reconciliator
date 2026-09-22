@@ -918,6 +918,7 @@ ingest_oai:
   truncate_overlong_values: true
   truncation_marker: ""
   default_max_field_length: null
+  adopt_previous_task_id: true
 
 ingest_wikidata:
   dump_path: "dumps/latest-all.json.gz"
@@ -1015,6 +1016,7 @@ storage:
     initdb_args: null
     max_parameters_per_batch: 32767
     default_chunk_size: null
+    data_dir: null
   vector_engine:
     backend: "auto"
     device: "auto"
@@ -1198,6 +1200,9 @@ consolidation:
 telemetry:
   heartbeat_interval_seconds: 60.0
   watch_interval_seconds: 5.0
+  stale_heartbeat_timeout_seconds: 120.0
+  adopt_previous_task_id: true
+  show_vector_daemon: true
 
 logging:
   level: "INFO"
