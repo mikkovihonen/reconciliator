@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -28,6 +29,7 @@ class RecordIdentifiers(BaseModel):
     urn: list[str] = Field(default_factory=list)
     doi: list[str] = Field(default_factory=list)
     other_ids: list[str] = Field(default_factory=list)
+    work_identifiers: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class Agent(BaseModel):
@@ -42,10 +44,13 @@ class Agent(BaseModel):
     field_tag: Optional[str] = None  # e.g. "100", "700", "110", "710", "111", "711"
     is_personal: bool = True
     is_fictional: bool = False
+    agent_uri: Optional[str] = None
     uri_subfield_0: list[str] = Field(default_factory=list)  # KANTO / ISNI / VIAF
     uri_subfield_1: list[str] = Field(default_factory=list)  # Wikidata QID
     variant_names: list[str] = Field(default_factory=list)  # Pseudonyms / alternative names
     qualifiers: list[str] = Field(default_factory=list)
+    affiliations: list[str] = Field(default_factory=list)
+    relationships: list[dict[str, Any]] = Field(default_factory=list)
     identifiers: list[IdentifierEntity] = Field(default_factory=list)
 
 
@@ -78,6 +83,7 @@ class Agent(BaseModel):
                     data["birth_year"] = birth_year
                     data["death_year"] = death_year
                     import logging
+
                     from reconciliator.logging import log_sanitization
 
                     log_sanitization(
@@ -158,6 +164,7 @@ class BibliographicRecord(BaseModel):
     volume_designation: Optional[str] = None
     classifications: list[ClassificationItem] = Field(default_factory=list)
     identifiers: RecordIdentifiers = Field(default_factory=RecordIdentifiers)
+    work_identifiers: dict[str, list[str]] = Field(default_factory=dict)
     agents: list[Agent] = Field(default_factory=list)
     subjects: SubjectsContainer = Field(default_factory=SubjectsContainer)
     serialization: str = ""
@@ -520,6 +527,7 @@ class AgentEntity(BaseModel):
     is_fictional: bool = False
     variant_names: list[str] = Field(default_factory=list)
     qualifiers: list[str] = Field(default_factory=list)
+    affiliations: list[str] = Field(default_factory=list)
     identifiers: list[IdentifierEntity] = Field(default_factory=list)
 
 
@@ -552,6 +560,7 @@ class AgentEntity(BaseModel):
                     data["birth_year"] = birth_year
                     data["death_year"] = death_year
                     import logging
+
                     from reconciliator.logging import log_sanitization
 
                     log_sanitization(
@@ -592,11 +601,28 @@ class AgentRelationshipEntity(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     id: Optional[int] = None
-    source_agent_id: int
+    source_agent_id: int = 0
     target_agent_id: Optional[int] = None
+    source_agent_curie: Optional[str] = None
+    target_agent_curie: Optional[str] = None
     target_name: Optional[str] = None
     target_uri: Optional[str] = None
-    relationship_type: str  # 'affiliation', 'pseudonym_of', 'real_identity_of'
+    relationship_type: str  # 'affiliation', 'pseudonym_of', 'real_identity_of', 'predecessor_of', 'successor_of', etc.
+    created_at: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_agent_rel(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "source_agent_uri" in data and not data.get("source_agent_curie"):
+                data["source_agent_curie"] = data.get("source_agent_uri")
+            if "target_agent_uri" in data and not data.get("target_agent_curie"):
+                data["target_agent_curie"] = data.get("target_agent_uri")
+            if "target_uri" in data and not data.get("target_agent_curie"):
+                data["target_agent_curie"] = data.get("target_uri")
+            if not data.get("target_uri") and data.get("target_agent_curie"):
+                data["target_uri"] = data.get("target_agent_curie")
+        return data
 
 
 class WorkEntity(BaseModel):
@@ -1204,6 +1230,15 @@ class WorkCluster(BaseModel):
     canonical_access_point: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def _coerce_datetime_str(cls, v: Any) -> Optional[str]:
+        if isinstance(v, datetime):
+            return v.isoformat()
+        if v is not None:
+            return str(v)
+        return None
 
 
     @model_validator(mode="before")

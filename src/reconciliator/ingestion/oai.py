@@ -101,6 +101,7 @@ class _WEMIBatchAccumulator:
         self.agents: list[Any] = []
         self.contributions: list[Any] = []
         self.relationships: list[Any] = []
+        self.agent_relationships: list[Any] = []
         self.identifiers: list[Any] = []
         self.associations: list[Any] = []
         self.entity_keys: list[Any] = []
@@ -133,6 +134,7 @@ class _WEMIBatchAccumulator:
         self.agents.extend(record.agents)
         self.contributions.extend(record.contributions)
         self.relationships.extend(record.relationships)
+        self.agent_relationships.extend(record.agent_relationships)
         self.identifiers.extend(record.identifiers)
         self.associations.extend(record.associations)
         self.entity_keys.extend(record.entity_keys)
@@ -166,6 +168,7 @@ class _WEMIBatchAccumulator:
             "agents",
             "contributions",
             "relationships",
+            "agent_relationships",
             "identifiers",
             "associations",
             "entity_keys",
@@ -186,6 +189,7 @@ class _WEMIBatchAccumulator:
             "items": self.items,
             "agents": self.agents,
             "relationships": self.relationships,
+            "agent_relationships": self.agent_relationships,
             "identifiers": self.identifiers,
             "associations": self.associations,
             "contributions": self.contributions,
@@ -201,6 +205,7 @@ class _WEMIBatchAccumulator:
         self.agents = []
         self.contributions = []
         self.relationships = []
+        self.agent_relationships = []
         self.identifiers = []
         self.associations = []
         self.entity_keys = []
@@ -392,6 +397,7 @@ def write_wemi_batch(
             items=payload.get("items") or [],
             agents=agents,
             relationships=payload.get("relationships") or [],
+            agent_relationships=payload.get("agent_relationships") or [],
             identifiers=payload.get("identifiers") or [],
             manifestation_expressions=payload.get("associations") or [],
             contributions=payload.get("contributions") or [],

@@ -191,6 +191,7 @@ _CLASSIFICATION_DEFAULTS = get_bundled_section_defaults("classification")
 _DIGITAL_REPO_DEFAULTS = get_bundled_section_defaults("digital_repositories")
 _VIRTUAL_AUTHORITY_DEFAULTS = get_bundled_section_defaults("virtual_authority")
 _BRUNO_DEFAULTS = get_bundled_section_defaults("bruno")
+_AGENT_AUTHORITY_DEFAULTS = get_bundled_section_defaults("agent_authority")
 
 
 def get_bundled_virtual_authority_defaults() -> dict[str, Any]:
@@ -201,6 +202,11 @@ def get_bundled_virtual_authority_defaults() -> dict[str, Any]:
 def get_bundled_bruno_defaults() -> dict[str, Any]:
     """Get bundled default Bruno test suite settings dictionary."""
     return dict(_BRUNO_DEFAULTS)
+
+
+def get_bundled_agent_authority_defaults() -> dict[str, Any]:
+    """Get bundled default agent authority settings dictionary."""
+    return dict(_AGENT_AUTHORITY_DEFAULTS)
 
 
 def get_bundled_oai_ingest_defaults() -> dict[str, Any]:
@@ -295,6 +301,127 @@ def get_category_default_field_map() -> dict[str, str]:
 def get_wikidata_author_properties() -> dict[str, str]:
     """Load default mapping of identifier schemes to Wikidata authority property IDs."""
     return dict(_VOCAB_DEFAULTS.get("wikidata_author_properties", {}))
+
+
+def get_work_authority_sources(config: Optional[Any] = None) -> list[str]:
+    """Retrieve the configured list of work-level authority source names."""
+    if config is not None:
+        if hasattr(config, "vocabularies") and getattr(config.vocabularies, "work_authority_sources", None):
+            return list(config.vocabularies.work_authority_sources)
+        if isinstance(config, dict):
+            vocab = config.get("vocabularies", {})
+            if "work_authority_sources" in vocab:
+                return list(vocab["work_authority_sources"])
+    sources = list(_VOCAB_DEFAULTS.get("work_authority_sources") or [])
+    if not sources:
+        for s_name, s_data in get_bundled_sources_defaults().items():
+            if isinstance(s_data, dict) and s_data.get("entity_type") == "work":
+                sources.append(s_name)
+    return sources
+
+
+def get_default_carrier_source(config: Optional[Any] = None) -> str:
+    """Retrieve the configured default carrier source name."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "default_carrier_source", None
+        ):
+            return str(config.record_normalization.default_carrier_source)
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "default_carrier_source" in rec:
+                return str(rec["default_carrier_source"])
+    val = _REC_DEFAULTS.get("default_carrier_source")
+    if val:
+        return str(val)
+    for s_name, s_data in get_bundled_sources_defaults().items():
+        if isinstance(s_data, dict) and s_data.get("entity_type") == "carrier":
+            return s_name
+    return "melinda"
+
+
+def get_genre_work_types(config: Optional[Any] = None) -> dict[str, dict[str, str]]:
+    """Retrieve mapping of controlled genre/form vocabularies to work types."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "genre_work_types", None
+        ):
+            return {k: dict(v) for k, v in config.record_normalization.genre_work_types.items()}
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "genre_work_types" in rec:
+                return {k: dict(v) for k, v in rec["genre_work_types"].items()}
+    return {k: dict(v) for k, v in _REC_DEFAULTS.get("genre_work_types", {}).items()}
+
+
+def get_genre_patterns(config: Optional[Any] = None) -> dict[str, list[str]]:
+    """Retrieve mapping of work types to genre/form substring patterns."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "genre_patterns", None
+        ):
+            return {k: list(v) for k, v in config.record_normalization.genre_patterns.items()}
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "genre_patterns" in rec:
+                return {k: list(v) for k, v in rec["genre_patterns"].items()}
+    return {k: list(v) for k, v in _REC_DEFAULTS.get("genre_patterns", {}).items()}
+
+
+def get_rda_content_types(config: Optional[Any] = None) -> dict[str, str]:
+    """Retrieve mapping of MARC 336 $b RDA content codes to expression content types."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "rda_content_types", None
+        ):
+            return dict(config.record_normalization.rda_content_types)
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "rda_content_types" in rec:
+                return dict(rec["rda_content_types"])
+    return dict(_REC_DEFAULTS.get("rda_content_types", {}))
+
+
+def get_content_type_work_types(config: Optional[Any] = None) -> dict[str, str]:
+    """Retrieve mapping of MARC 336 $b RDA content codes to work types."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "content_type_work_types", None
+        ):
+            return dict(config.record_normalization.content_type_work_types)
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "content_type_work_types" in rec:
+                return dict(rec["content_type_work_types"])
+    return dict(_REC_DEFAULTS.get("content_type_work_types", {}))
+
+
+def get_tactile_content_codes(config: Optional[Any] = None) -> set[str]:
+    """Retrieve set of RDA content codes designating tactile material."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "tactile_content_codes", None
+        ):
+            return set(config.record_normalization.tactile_content_codes)
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "tactile_content_codes" in rec:
+                return set(rec["tactile_content_codes"])
+    return set(_REC_DEFAULTS.get("tactile_content_codes", []))
+
+
+def get_carrier_type_mappings(config: Optional[Any] = None) -> dict[str, str]:
+    """Retrieve mapping of MARC 338 $b RDA carrier codes to carrier types."""
+    if config is not None:
+        if hasattr(config, "record_normalization") and getattr(
+            config.record_normalization, "carrier_type_mappings", None
+        ):
+            return dict(config.record_normalization.carrier_type_mappings)
+        if isinstance(config, dict):
+            rec = config.get("record_normalization", {})
+            if "carrier_type_mappings" in rec:
+                return dict(rec["carrier_type_mappings"])
+    return dict(_REC_DEFAULTS.get("carrier_type_mappings", {}))
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +713,7 @@ class SourceConfig(BaseModel):
     identifier_pattern: Optional[str] = None
     uppercase_identifier: bool = False
     subfield: str = "0"
+    entity_type: Optional[str] = None
 
 
 class HierarchyConfig(BaseModel):
@@ -636,6 +764,9 @@ class VocabulariesConfig(BaseModel):
     )
     entity_vocabularies: list[str] = Field(
         default_factory=lambda: list(_VOCAB_DEFAULTS.get("entity_vocabularies", []))
+    )
+    work_authority_sources: list[str] = Field(
+        default_factory=lambda: list(_VOCAB_DEFAULTS.get("work_authority_sources", ["asteri_work"]))
     )
     supported_subjects: list[str] = Field(
         default_factory=lambda: list(_VOCAB_DEFAULTS.get("supported_subjects", []))
@@ -837,6 +968,31 @@ class RecordNormalizationConfig(BaseModel):
     )
     default_classification_scheme: str = Field(
         default_factory=lambda: str(_REC_DEFAULTS.get("default_classification_scheme") or "")
+    )
+    default_carrier_source: str = Field(
+        default_factory=lambda: str(_REC_DEFAULTS.get("default_carrier_source") or "melinda")
+    )
+    genre_work_types: dict[str, dict[str, str]] = Field(
+        default_factory=lambda: {
+            k: dict(v) for k, v in _REC_DEFAULTS.get("genre_work_types", {}).items()
+        }
+    )
+    genre_patterns: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            k: list(v) for k, v in _REC_DEFAULTS.get("genre_patterns", {}).items()
+        }
+    )
+    rda_content_types: dict[str, str] = Field(
+        default_factory=lambda: dict(_REC_DEFAULTS.get("rda_content_types", {}))
+    )
+    content_type_work_types: dict[str, str] = Field(
+        default_factory=lambda: dict(_REC_DEFAULTS.get("content_type_work_types", {}))
+    )
+    tactile_content_codes: list[str] = Field(
+        default_factory=lambda: list(_REC_DEFAULTS.get("tactile_content_codes", []))
+    )
+    carrier_type_mappings: dict[str, str] = Field(
+        default_factory=lambda: dict(_REC_DEFAULTS.get("carrier_type_mappings", {}))
     )
     control_number_prefix: Optional[str] = None
     control_number_pattern: Optional[str] = None
@@ -1416,14 +1572,82 @@ class ShortCircuitConfig(BaseModel):
         return self
 
 
-RerankEngineType = Literal["bm25", "cross_encoder", "fuzzy", "noop"]
+class LLMJudgeConfig(BaseModel):
+    """Configuration for autoregressive LLM Judge with KV-branching and zero-copy truncation."""
+
+    backend: Literal["auto", "torch", "mlx"] = "auto"
+    model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    quantization: Optional[Literal["4bit", "8bit"]] = "8bit"
+    device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
+    torch_dtype: Literal["auto", "float16", "bfloat16", "float32"] = "auto"
+    attn_implementation: Literal["auto", "sdpa", "flash_attention_2"] = "auto"
+    pooling_strategy: Literal["last_token", "mean"] = "last_token"
+    batch_size: int = 16
+    positive_token: str = "YES"
+    negative_token: str = "NO"
+    target_template: str = (
+        "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+    )
+    candidate_suffix_template: str = (
+        "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+    )
+    max_seq_length: int = 2048
+
+
+class CascadeRouterConfig(BaseModel):
+    """Configuration for cascading dual-route evaluation and dynamic LLM judge escalation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    heuristic_engine: Literal["bm25", "cross_encoder", "fuzzy", "noop"] = Field(
+        default="bm25",
+        description="Fast heuristic engine to score candidates first: 'bm25', 'fuzzy', 'cross_encoder', or 'noop'",
+    )
+    high_confidence_threshold: float = Field(
+        default=0.90,
+        ge=0.0,
+        le=1.0,
+        description="Heuristic score at or above which a candidate is accepted without LLM judge if margin holds",
+    )
+    low_confidence_threshold: float = Field(
+        default=0.55,
+        ge=0.0,
+        le=1.0,
+        description="Heuristic score below which candidates are rejected without LLM judge",
+    )
+    ambiguity_margin: float = Field(
+        default=0.08,
+        ge=0.0,
+        le=1.0,
+        description="Minimum score gap required between top candidate and 2nd candidate to avoid LLM escalation",
+    )
+    uncertainty_band_min: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Lower bound of heuristic score uncertainty band; scores in this range trigger LLM escalation",
+    )
+    uncertainty_band_max: float = Field(
+        default=0.88,
+        ge=0.0,
+        le=1.0,
+        description="Upper bound of heuristic score uncertainty band",
+    )
+    max_escalated_candidates: int = Field(
+        default=5,
+        ge=1,
+        description="Maximum number of ambiguous candidates to escalate to LLM judge per target",
+    )
+
+
+RerankEngineType = Literal["cascade", "llm_judge", "bm25", "cross_encoder", "fuzzy", "noop"]
 
 
 class RerankConfig(BaseModel):
-    """Configuration for candidate reranking and metadata discriminators."""
+    """Configuration for candidate reranking, metadata discriminators, and LLM judge."""
 
     enabled: bool = True
-    engine: RerankEngineType = "bm25"
+    engine: RerankEngineType = "cascade"
     model_name: Optional[str] = None
     device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
     batch_size: int = 16
@@ -1435,6 +1659,9 @@ class RerankConfig(BaseModel):
     require_surname_match: bool = True
     max_year_difference: int = 5
     year_penalty_threshold: int = 1
+    apply_pre_veto: bool = True
+    judge: LLMJudgeConfig = Field(default_factory=LLMJudgeConfig)
+    cascade: CascadeRouterConfig = Field(default_factory=CascadeRouterConfig)
 
     @model_validator(mode="after")
     def validate_weights(self) -> RerankConfig:
@@ -1779,6 +2006,24 @@ class AgentClusterConfig(BaseModel):
             **_AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {})
         )
     )
+    coalesce_pseudonyms: bool = Field(
+        default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS.get("coalesce_pseudonyms", False))
+    )
+    coalesce_corporate_lineage: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_CLUSTERING_DEFAULTS.get("coalesce_corporate_lineage", False)
+        )
+    )
+    link_cluster_relationships: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_CLUSTERING_DEFAULTS.get("link_cluster_relationships", True)
+        )
+    )
+    relationship_corroboration_score: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("relationship_corroboration_score", 0.90)
+        )
+    )
 
 
 class AuthorityLifecycleConfig(BaseModel):
@@ -2052,7 +2297,7 @@ class VirtualAuthorityConfig(BaseModel):
     provenance_sources_priority: list[str] = Field(
         default_factory=lambda: list(
             _VIRTUAL_AUTHORITY_DEFAULTS.get("provenance_sources_priority")
-            or ["asteri", "kanto", "melinda", "wikidata"]
+            or ["asteri", "kanto", "isni", "viaf", "wikidata"]
         )
     )
     lifecycle: AuthorityLifecycleConfig = Field(
@@ -2078,6 +2323,131 @@ class VirtualAuthorityConfig(BaseModel):
     oai_pmh_server: OAIPMHServerConfig = Field(
         default_factory=lambda: OAIPMHServerConfig(
             **_VIRTUAL_AUTHORITY_DEFAULTS.get("oai_pmh_server", {})
+        )
+    )
+
+
+class QualifierConfig(BaseModel):
+    """Configuration for parsing and normalizing agent qualifiers."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    qualifier_pattern: str = Field(
+        default_factory=lambda: str(
+            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get("qualifier_pattern", r"\(([^)]+)\)$")
+        )
+    )
+    qualifier_subfields: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get("qualifier_subfields") or ["c"]
+        )
+    )
+    strip_enclosing_brackets: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get("strip_enclosing_brackets", True)
+        )
+    )
+    bracket_pairs: list[list[str]] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get("bracket_pairs")
+            or [["(", ")"], ["[", "]"]]
+        )
+    )
+    corporate_category_as_qualifier: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get(
+                "corporate_category_as_qualifier", True
+            )
+        )
+    )
+
+
+class MarcRelationshipConfig(BaseModel):
+    """Configuration for mapping MARC 21 Authority 5xx fields to relationship types."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    code_mappings: dict[str, str] = Field(
+        default_factory=lambda: dict(
+            _AGENT_AUTHORITY_DEFAULTS.get("marc_relationships", {}).get("code_mappings")
+            or {
+                "a": "predecessor_of",
+                "b": "successor_of",
+                "t": "hierarchical_superior_of",
+                "n": "related_corporate_body",
+            }
+        )
+    )
+    designation_patterns: list[dict[str, str]] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("marc_relationships", {}).get("designation_patterns")
+            or []
+        )
+    )
+    default_relationship_type: str = Field(
+        default_factory=lambda: str(
+            _AGENT_AUTHORITY_DEFAULTS.get("marc_relationships", {}).get(
+                "default_relationship_type", "related_to"
+            )
+        )
+    )
+
+
+class RDARelationshipConfig(BaseModel):
+    """Configuration for mapping RDA/SKOS graph predicates to relationship types."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    predicate_mappings: dict[str, str] = Field(
+        default_factory=lambda: dict(
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("predicate_mappings")
+            or {}
+        )
+    )
+    note_semantic_patterns: list[dict[str, str]] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("note_semantic_patterns")
+            or []
+        )
+    )
+    corporate_classes: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("corporate_classes")
+            or []
+        )
+    )
+    person_classes: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("person_classes")
+            or []
+        )
+    )
+    family_classes: list[str] = Field(
+        default_factory=lambda: list(
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("family_classes")
+            or []
+        )
+    )
+
+
+class AgentAuthorityConfig(BaseModel):
+    """Master configuration for agent authority parsing, qualifiers, and relationships."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    qualifiers: QualifierConfig = Field(
+        default_factory=lambda: QualifierConfig(
+            **_AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {})
+        )
+    )
+    marc_relationships: MarcRelationshipConfig = Field(
+        default_factory=lambda: MarcRelationshipConfig(
+            **_AGENT_AUTHORITY_DEFAULTS.get("marc_relationships", {})
+        )
+    )
+    rda_relationships: RDARelationshipConfig = Field(
+        default_factory=lambda: RDARelationshipConfig(
+            **_AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {})
         )
     )
 
@@ -2182,7 +2552,7 @@ class FunnelsConfig(BaseModel):
     )
 
 
-from reconciliator.funnels.spec import FunnelSpec
+from reconciliator.funnels.spec import FunnelSpec  # noqa: E402
 
 
 class ReconcileConfig(IngestFilterConfig):
@@ -2262,6 +2632,16 @@ class ReconcileConfig(IngestFilterConfig):
     surname_similarity_threshold: float = Field(
         default_factory=lambda: float(
             _RECONCILE_DEFAULTS["surname_similarity_threshold"]
+        )
+    )
+    allow_pseudonym_author_match: bool = Field(
+        default_factory=lambda: bool(
+            _RECONCILE_DEFAULTS.get("allow_pseudonym_author_match", True)
+        )
+    )
+    pseudonym_author_match_weight: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("pseudonym_author_match_weight", 0.95)
         )
     )
 
@@ -2480,6 +2860,9 @@ class AppConfig(BaseModel):
     )
     virtual_authority: VirtualAuthorityConfig = Field(
         default_factory=lambda: VirtualAuthorityConfig(**_VIRTUAL_AUTHORITY_DEFAULTS)
+    )
+    agent_authority: AgentAuthorityConfig = Field(
+        default_factory=lambda: AgentAuthorityConfig(**_AGENT_AUTHORITY_DEFAULTS)
     )
     bruno: BrunoConfig = Field(
         default_factory=lambda: BrunoConfig(**_BRUNO_DEFAULTS)

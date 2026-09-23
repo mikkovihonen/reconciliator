@@ -2,6 +2,7 @@
 
 from reconciliator.rerank.base import RerankScorer
 from reconciliator.rerank.bm25 import BM25Scorer, tokenize_text
+from reconciliator.rerank.cascade import CascadeScorer
 from reconciliator.rerank.cross_encoder import CrossEncoderScorer
 from reconciliator.rerank.evaluator import CandidateEvaluator
 from reconciliator.rerank.factory import create_rerank_scorer
@@ -11,6 +12,7 @@ from reconciliator.rerank.noop import NoOpScorer
 __all__ = [
     "BM25Scorer",
     "CandidateEvaluator",
+    "CascadeScorer",
     "CrossEncoderScorer",
     "FuzzyScorer",
     "NoOpScorer",

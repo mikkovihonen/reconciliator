@@ -593,14 +593,18 @@ class ReportGenerator:
 
         rerank_cfg = reconcile_cfg.rerank if reconcile_cfg else None
         rerank_enabled = rerank_cfg.enabled if rerank_cfg else True
-        rerank_engine = rerank_cfg.engine if rerank_cfg else "bm25"
+        rerank_engine = rerank_cfg.engine if rerank_cfg else "cascade"
 
         if not rerank_enabled:
             rerank_engine_str = "disabled"
             rerank_engine_desc = "disabled"
         else:
             rerank_engine_str = rerank_engine
-            if rerank_engine == "bm25":
+            if rerank_engine == "cascade":
+                rerank_engine_desc = "cascading dual-route (heuristic + LLM judge)"
+            elif rerank_engine == "llm_judge":
+                rerank_engine_desc = "autoregressive LLM judge"
+            elif rerank_engine == "bm25":
                 rerank_engine_desc = "BM25 sparse"
             elif rerank_engine == "cross_encoder":
                 rerank_engine_desc = "neural cross-encoder"

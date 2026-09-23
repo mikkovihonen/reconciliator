@@ -661,7 +661,7 @@ def test_agent_reports_quality_and_execution_metadata(tmp_path: Path) -> None:
     # Verify execution metadata
     assert exec_map["threshold"] == "0.8500"
     assert exec_map["short_circuit_threshold"] == "0.9800"
-    assert exec_map["rerank_engine"] == "bm25"
+    assert exec_map["rerank_engine"] == "cascade"
     assert exec_map["dense_weight"] == "0.6000"
     assert exec_map["rerank_weight"] == "0.4000"
 

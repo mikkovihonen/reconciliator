@@ -14,8 +14,9 @@ unreachable outside tests, and this docstring says so rather than advertising it
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from typing import Any, Optional
+
+import numpy as np
 
 from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
 from reconciliator.database import WEMIRepository
@@ -39,7 +40,6 @@ from reconciliator.models import (
     MatchRecord,
     ReconciliationMatch,
     WorkEntity,
-    WorkRelationship,
 )
 from reconciliator.normalizers.blocking import compute_author_key
 from reconciliator.reconciliation.agents import AgentAligner, AgentFallbackResolver
@@ -128,9 +128,7 @@ class WorkMatcher:
         self.agent_indexer = agent_indexer
         self._equivalence_cache: Optional[dict[int, int]] = None
         aligner_thresh = (
-            getattr(self.config, "agent_aligner_threshold", 85.0)
-            if self.config
-            else 85.0
+            getattr(self.config, "agent_aligner_threshold", 85.0) if self.config else 85.0
         )
         self.agent_aligner = AgentAligner(similarity_threshold=aligner_thresh)
         # Funnels are resolved once, here, so an unknown handler name or a bad
@@ -168,7 +166,9 @@ class WorkMatcher:
                 life_date_tolerance_years=getattr(config, "life_date_tolerance_years", 1),
                 homonym_score_margin=getattr(config, "homonym_score_margin", 0.03),
                 surname_match_threshold=getattr(config, "surname_similarity_threshold", 85.0),
-                qualifier_similarity_threshold=getattr(config, "qualifier_similarity_threshold", 80.0),
+                qualifier_similarity_threshold=getattr(
+                    config, "qualifier_similarity_threshold", 80.0
+                ),
                 distribution_match_threshold=getattr(config, "distribution_match_threshold", 80.0),
             )
 
@@ -246,10 +246,15 @@ class WorkMatcher:
         funnel_name: str,
         preferred_schemes: Optional[list[str]] = None,
     ) -> Optional[WEMIMatchResult]:
-        """Attempt Tier 1 standard identifier resolution."""
         schemes_order: list[str] = []
         if preferred_schemes:
             schemes_order.extend([s.lower() for s in preferred_schemes])
+        from reconciliator.config import get_work_authority_sources
+
+        for w_src in get_work_authority_sources(self.config):
+            w_src_l = w_src.lower()
+            if w_src_l in ids and w_src_l not in schemes_order:
+                schemes_order.insert(0, w_src_l)
         for s in ids.keys():
             s_low = s.lower()
             if s_low not in schemes_order:
@@ -347,7 +352,15 @@ class WorkMatcher:
             and self.repo.work_indexer.total_vectors > 0
         ):
             query_text = target.serialized_work or f"{target.title} {target.author_key or ''}"
-            query_vec = self.embedder.embed_texts([query_text])
+            if hasattr(self.embedder, "encode_target"):
+                t_enc = self.embedder.encode_target(query_text, retain_cache=False)
+                query_vec = t_enc.dense_vector
+                if len(query_vec.shape) == 1:
+                    query_vec = query_vec[np.newaxis, :]
+            elif hasattr(self.embedder, "encode_batch_dense"):
+                query_vec = self.embedder.encode_batch_dense([query_text])
+            else:
+                query_vec = self.embedder.embed_texts([query_text])
             # Retrieval depth comes from rerank.top_k. It was hardcoded to 5
             # while the config declared 50, so configuring it did nothing - and
             # depth is exactly what the authoritative_only over-fetch has to
@@ -599,6 +612,12 @@ class WorkMatcher:
         would be compared with different normalisation and "O'Brien" would never
         match "obrien".
         """
+        from reconciliator.config import get_work_authority_sources
+
+        work_sources = {s.lower() for s in get_work_authority_sources(self.config)}
+        target_work_ids = {
+            s: list(v) for s, v in record.identifiers.items() if s.lower() in work_sources
+        }
         return BibliographicRecord(
             source_id=record.record_id,
             source=record.format or "target",
@@ -607,6 +626,7 @@ class WorkMatcher:
             publication_year=record.year,
             volume_designation=record.volume_designation,
             language=record.language,
+            work_identifiers=target_work_ids,
             agents=[Agent(name=record.author_key or "", surname=record.author_key)]
             if record.author_key
             else [],
@@ -761,6 +781,13 @@ class WorkMatcher:
                 if c.agent_id and c.agent_id not in agent_ids:
                     agent_ids.append(c.agent_id)
 
+        rels_map: dict[int, list[dict[str, Any]]] = {}
+        if agent_ids and hasattr(self.repo, "get_agent_relationships_map"):
+            try:
+                rels_map = self.repo.get_agent_relationships_map(agent_ids)
+            except Exception:
+                rels_map = {}
+
         agents: list[Agent] = []
         for aid in agent_ids:
             entity = self.repo.get_agent(aid)
@@ -781,10 +808,9 @@ class WorkMatcher:
                     uri_subfield_1=u1,
                     variant_names=list(entity.variant_names),
                     qualifiers=list(entity.qualifiers),
+                    relationships=rels_map.get(aid, []),
                 )
-
             )
-
 
         title = (work.title if work else None) or (manifestation.title if manifestation else "")
         source = (work.source if work else None) or (manifestation.source if manifestation else "")

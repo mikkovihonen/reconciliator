@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from reconciliator.models import (
     AgentEntity,
+    AgentRelationshipEntity,
     ContributionEntity,
     EntityKey,
     EntitySubject,
@@ -106,6 +107,7 @@ class DecomposedRecord:
     items: list[ItemEntity] = field(default_factory=list)
     agents: list[AgentEntity] = field(default_factory=list)
     relationships: list[WorkRelationship] = field(default_factory=list)
+    agent_relationships: list[AgentRelationshipEntity] = field(default_factory=list)
     identifiers: list[IdentifierEntity] = field(default_factory=list)
     associations: list[ManifestationExpressionAssociation] = field(default_factory=list)
     contributions: list[ContributionEntity] = field(default_factory=list)
@@ -124,6 +126,7 @@ class DecomposedRecord:
             "items",
             "agents",
             "relationships",
+            "agent_relationships",
             "identifiers",
             "associations",
             "contributions",

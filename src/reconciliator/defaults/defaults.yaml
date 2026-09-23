@@ -59,6 +59,9 @@ vocabularies:
   entity_vocabularies:
     - "WIKIDATA"
 
+  work_authority_sources:
+    - "asteri_work"
+
   supported_subjects:
     - "yso"
     - "yso-aika"
@@ -461,6 +464,113 @@ record_normalization:
     - "lc"
 
   default_classification_scheme: "ykl"
+  default_carrier_source: "melinda"
+
+  genre_work_types:
+    slm:
+      "televisio-ohjelmat": "broadcast_program"
+      "televisionäytelmät": "broadcast_program"
+      "televisiosarjat": "broadcast_program"
+      "televisioelokuvat": "broadcast_program"
+      "televisio-oopperat": "broadcast_program"
+      "radio-ohjelmat": "broadcast_program"
+      "radiosarjat": "broadcast_program"
+      "radiosovitukset": "broadcast_program"
+      "kuunnelmat": "broadcast_program"
+      "dokumenttiohjelmat": "broadcast_program"
+      "lastenohjelmat": "broadcast_program"
+      "musiikkiohjelmat": "broadcast_program"
+      "luonto-ohjelmat": "broadcast_program"
+      "juridiset teokset": "legal"
+      "lait": "legal"
+      "asetukset": "legal"
+      "säädöskokoelmat": "legal"
+      "direktiivit": "legal"
+      "valtiosopimukset": "legal"
+      "oikeustapauskokoelmat": "legal"
+      "peruskirjat (juridiset teokset)": "legal"
+      "antologiat": "anthology"
+      "kokoomateokset": "anthology"
+
+  genre_patterns:
+    comic: ["sarjakuv", "manga"]
+    board_game: ["lautapel"]
+    interactive_game: ["videopel", "tietokonepel"]
+    ephemera: ["pienpainat", "tuoteluettel"]
+    drama: ["näytelm"]
+    choreography: ["koreograf"]
+    standard: ["standardi", "standardit"]
+    patent: ["patentt"]
+    podcast: ["podcast"]
+    oral_history: ["haastattelu"]
+    exhibition: ["näyttelyluettel"]
+    critical_edition: ["kriittinen laitos"]
+    numismatic: ["rahat", "mitalit"]
+
+  rda_content_types:
+    txt: "text"
+    ntm: "notated_music"
+    prm: "audio_music"
+    spw: "spoken_word"
+    snd: "sounds"
+    sti: "still_image"
+    tdi: "moving_image"
+    tdm: "three_dimensional_moving_image"
+    tdf: "three_dimensional"
+    cri: "cartographic_image"
+    crd: "cartographic_dataset"
+    crm: "moving_image"
+    crf: "cartographic_image"
+    crt: "tactile_cartographic"
+    crn: "tactile_cartographic"
+    cod: "dataset"
+    cop: "computer_program"
+    ntv: "choreographic_movement"
+    tci: "tactile_graphic"
+    tcm: "tactile_notated_music"
+    tcn: "tactile_notated_music"
+    tct: "tactile_text"
+    tcf: "three_dimensional"
+
+  content_type_work_types:
+    cri: "cartography"
+    crd: "cartography"
+    crm: "cartography"
+    crf: "cartography"
+    cod: "dataset"
+    cop: "software"
+    ntm: "music"
+    prm: "music"
+    spw: "audio_nonmusic"
+    sti: "still_image"
+    tdi: "moving_image"
+    tdm: "moving_image"
+    tdf: "realia"
+    ntv: "choreography"
+
+  tactile_content_codes:
+    - "tci"
+    - "tcm"
+    - "tcn"
+    - "tct"
+    - "tcf"
+    - "crt"
+    - "crn"
+
+  carrier_type_mappings:
+    nc: "volume"
+    nb: "sheet"
+    sd: "audio_disc"
+    ss: "audiocassette"
+    vd: "videodisc"
+    vf: "videocassette"
+    cd: "computer_disc"
+    cr: "online_resource"
+    cb: "memory_card"
+    hd: "microfilm_reel"
+    he: "microfiche"
+    tc: "braille_volume"
+    nr: "object"
 
   control_number_prefix: null
   control_number_pattern: null
@@ -743,18 +853,31 @@ sources:
     aliases: []
     subfield: "0"
   kanto:
+    entity_type: "agent"
     uri_patterns:
       - "^https?://urn\\.fi/URN:NBN:fi:au:pn:"
       - "^https?://urn\\.fi/URN:NBN:fi:au:cn:"
+      - "^https?://finto\\.fi/kanto/[a-z]{2}/page/"
     canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:pn:{identifier}"
-    tag_prefixes: ["(fi-asteri-n)", "asteri", "kanto"]
-    aliases: ["finaf", "asteri"]
+    tag_prefixes: ["(fi-asteri-n)", "(fi-asteri-c)", "(fin11)", "asteri-n", "asteri-c", "kanto"]
+    aliases: ["finaf", "asteri", "fin11"]
+    subfield: "0"
+  asteri_work:
+    entity_type: "work"
+    uri_patterns:
+      - "^https?://melinda\\.kansalliskirjasto\\.fi/teka/byid/\\(fi-asteri-w\\)"
+      - "^https?://urn\\.fi/URN:NBN:fi:au:teka:"
+    canonical_uri_template: "https://melinda.kansalliskirjasto.fi/teka/byid/(FI-ASTERI-W){identifier}"
+    tag_prefixes: ["(fi-asteri-w)", "(fin13)", "asteri-w", "teka"]
+    aliases: ["teka", "fin13", "asteri_work"]
+    identifier_pattern: "^\\d{9}$"
     subfield: "0"
   melinda:
+    entity_type: "carrier"
     uri_patterns: []
     canonical_uri_template: null
-    tag_prefixes: ["(fin11)", "melinda"]
-    aliases: []
+    tag_prefixes: ["(fi-melinda)", "(fin01)", "melinda"]
+    aliases: ["fin01"]
     subfield: "0"
   slm:
     uri_patterns:
@@ -1073,9 +1196,11 @@ reconcile:
   enrich: true
   fold_legacy: true
   link_policy: "priority_fallback"
+  allow_pseudonym_author_match: true
+  pseudonym_author_match_weight: 0.95
   rerank:
-    enabled: false
-    engine: "bm25"
+    enabled: true
+    engine: "cascade"
     dense_weight: 0.5
     rerank_weight: 0.5
     top_k: 20
@@ -1088,6 +1213,29 @@ reconcile:
     year_penalty_threshold: 1
     device: "auto"
     batch_size: 16
+    apply_pre_veto: true
+    judge:
+      backend: "auto"
+      model_name: "Qwen/Qwen2.5-7B-Instruct"
+      quantization: "8bit"
+      device: "auto"
+      torch_dtype: "auto"
+      attn_implementation: "auto"
+      pooling_strategy: "last_token"
+      batch_size: 16
+      positive_token: "YES"
+      negative_token: "NO"
+      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+      candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+      max_seq_length: 2048
+    cascade:
+      heuristic_engine: "bm25"
+      high_confidence_threshold: 0.90
+      low_confidence_threshold: 0.55
+      ambiguity_margin: 0.08
+      uncertainty_band_min: 0.60
+      uncertainty_band_max: 0.88
+      max_escalated_candidates: 5
   cluster:
     enabled: false
     similarity_threshold: 0.85
@@ -1193,6 +1341,8 @@ consolidation:
     - "doi"
     - "urn"
     - "asteri"
+    - "asteri_work"
+    - "kanto"
   metadata_threshold: 0.93
   include_same_source: false
   canonical_source_priority: []
@@ -1255,11 +1405,17 @@ agent_clustering:
   max_blocking_bucket_size: 200
   date_tolerance_score: 0.70
   date_missing_score: 0.50
+  coalesce_pseudonyms: false
+  coalesce_corporate_lineage: false
+  link_cluster_relationships: true
+  relationship_corroboration_score: 0.90
 
   source_authority_precedence:
     - "asteri"
+    - "kanto"
+    - "isni"
+    - "viaf"
     - "wikidata"
-    - "melinda"
 
   override_identifiers:
     - "isni"
@@ -1295,7 +1451,8 @@ virtual_authority:
   provenance_sources_priority:
     - "asteri"
     - "kanto"
-    - "melinda"
+    - "isni"
+    - "viaf"
     - "wikidata"
   lifecycle:
     auto_redirect_on_merge: true
@@ -1357,3 +1514,109 @@ bruno:
   base_url: "http://localhost:8000"
   include_assertions: true
   default_timeout_ms: 5000
+
+agent_authority:
+  qualifiers:
+    qualifier_pattern: "\\(([^)]+)\\)$"
+    qualifier_subfields:
+      - "c"
+    strip_enclosing_brackets: true
+    bracket_pairs:
+      - ["(", ")"]
+      - ["[", "]"]
+    corporate_category_as_qualifier: true
+  marc_relationships:
+    code_mappings:
+      a: "predecessor_of"
+      b: "successor_of"
+      t: "hierarchical_superior_of"
+      n: "related_corporate_body"
+    designation_patterns:
+      - pattern: "(?i)edeltäjä|predecessor|föregående"
+        rel_type: "predecessor_of"
+      - pattern: "(?i)seuraaja|successor|efterföljande"
+        rel_type: "successor_of"
+      - pattern: "(?i)emoyhteisö|parent body|moderorganisation"
+        rel_type: "hierarchical_superior_of"
+      - pattern: "(?i)alayhteisö|subordinate body|underorganisation"
+        rel_type: "hierarchical_subordinate_of"
+      - pattern: "(?i)liitännäisyhteisö|affiliated|ansluten"
+        rel_type: "affiliated_with"
+      - pattern: "(?i)salanimi|pseudonym|salapoliisinimi"
+        rel_type: "pseudonym_of"
+      - pattern: "(?i)todellinen\\s+(henkilöllisyys|nimi)|real identity|verklig identitet"
+        rel_type: "real_identity_of"
+      - pattern: "(?i)jäsen|member|medlem"
+        rel_type: "member_of"
+      - pattern: "(?i)suku|family|familj"
+        rel_type: "related_family"
+    default_relationship_type: "related_to"
+  rda_relationships:
+    predicate_mappings:
+      "http://rdaregistry.info/Elements/a/P50012": "predecessor_of"
+      "http://rdaregistry.info/Elements/u/P60060": "predecessor_of"
+      "http://rdaregistry.info/Elements/a/P50016": "successor_of"
+      "http://rdaregistry.info/Elements/u/P60061": "successor_of"
+      "http://rdaregistry.info/Elements/a/P50336": "related_corporate_body"
+      "http://rdaregistry.info/Elements/u/P60456": "related_corporate_body"
+      "http://rdaregistry.info/Elements/a/P50007": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/u/P60057": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/a/P50008": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/u/P60058": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/a/P50009": "sponsor_of"
+      "http://rdaregistry.info/Elements/u/P60064": "sponsor_of"
+      "http://rdaregistry.info/Elements/a/P50010": "sponsored_by"
+      "http://rdaregistry.info/Elements/u/P60065": "sponsored_by"
+      "http://rdaregistry.info/Elements/a/P50014": "founding_corporate_body_of"
+      "http://rdaregistry.info/Elements/u/P60068": "founding_corporate_body_of"
+      "http://rdaregistry.info/Elements/a/P50015": "founded_corporate_body_of"
+      "http://rdaregistry.info/Elements/u/P60069": "founded_corporate_body_of"
+      "http://rdaregistry.info/Elements/a/P50095": "member_of"
+      "http://rdaregistry.info/Elements/u/P60074": "member_of"
+      "http://rdaregistry.info/Elements/a/P50028": "has_member"
+      "http://rdaregistry.info/Elements/u/P60075": "has_member"
+      "http://rdaregistry.info/Elements/a/P50029": "chief_executive_of"
+      "http://rdaregistry.info/Elements/u/P60076": "chief_executive_of"
+      "http://rdaregistry.info/Elements/a/P50030": "chief_executive"
+      "http://rdaregistry.info/Elements/u/P60077": "chief_executive"
+      "http://rdaregistry.info/Elements/a/P50018": "component_corporate_body_of"
+      "http://rdaregistry.info/Elements/u/P60070": "component_corporate_body_of"
+      "http://rdaregistry.info/Elements/a/P50096": "component_corporate_body"
+      "http://rdaregistry.info/Elements/u/P60071": "component_corporate_body"
+      "http://rdaregistry.info/Elements/a/P50316": "related_person"
+      "http://rdaregistry.info/Elements/u/P60455": "related_person"
+      "http://rdaregistry.info/Elements/a/P50107": "pseudonym_of"
+      "http://rdaregistry.info/Elements/u/P60443": "pseudonym_of"
+      "http://rdaregistry.info/Elements/a/P50108": "real_identity_of"
+      "http://rdaregistry.info/Elements/u/P60444": "real_identity_of"
+      "http://rdaregistry.info/Elements/a/P50109": "alternate_identity_of"
+      "http://rdaregistry.info/Elements/u/P60445": "alternate_identity_of"
+      "http://rdaregistry.info/Elements/a/P50110": "collaborator_of"
+      "http://rdaregistry.info/Elements/u/P60446": "collaborator_of"
+      "http://rdaregistry.info/Elements/a/P50317": "related_family"
+      "http://rdaregistry.info/Elements/a/P50337": "related_family"
+      "http://rdaregistry.info/Elements/a/P50057": "has_member"
+      "http://rdaregistry.info/Elements/u/P60457": "related_family"
+      "http://www.w3.org/2004/02/skos/core#related": "related_to"
+    note_semantic_patterns:
+      - pattern: "(?i)todellinen\\s+nimi"
+        rel_type: "real_identity_of"
+      - pattern: "(?i)salanimi|salapoliisinimi"
+        rel_type: "pseudonym_of"
+    corporate_classes:
+      - "http://rdaregistry.info/Elements/c/C10005"
+      - "http://urn.fi/URN:NBN:fi:schema:bffi:CorporateName"
+      - "http://id.loc.gov/ontologies/bibframe/Organization"
+      - "http://id.loc.gov/ontologies/bibframe/Corporate"
+      - "http://xmlns.com/foaf/0.1/Organization"
+      - "http://schema.org/Organization"
+    person_classes:
+      - "http://rdaregistry.info/Elements/c/C10004"
+      - "http://urn.fi/URN:NBN:fi:schema:bffi:Person"
+      - "http://id.loc.gov/ontologies/bibframe/Person"
+      - "http://xmlns.com/foaf/0.1/Person"
+      - "http://schema.org/Person"
+    family_classes:
+      - "http://rdaregistry.info/Elements/c/C10008"
+      - "http://rdaregistry.info/Elements/c/C10006"
+      - "http://id.loc.gov/ontologies/bibframe/Family"

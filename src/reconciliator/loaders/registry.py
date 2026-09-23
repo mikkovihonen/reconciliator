@@ -93,6 +93,7 @@ class MarcAuthorityLoader(RecordLoader):
         from reconciliator.loaders.marcxml import decompose_marc_authority
 
         subjects: list[Any] = []
+        agent_rels: list[Any] = []
         works, exprs, manifs, items, agents, rels, idents, assoc, contribs = (
             decompose_marc_authority(
                 item,
@@ -103,6 +104,7 @@ class MarcAuthorityLoader(RecordLoader):
                 strip_isbd_punctuation=ctx.strip_isbd_punctuation,
                 isbd_punctuation=ctx.isbd_punctuation,
                 subject_sink=subjects,
+                agent_relationship_sink=agent_rels,
             )
         )
         return DecomposedRecord(
@@ -112,11 +114,46 @@ class MarcAuthorityLoader(RecordLoader):
             items=list(items),
             agents=list(agents),
             relationships=list(rels),
+            agent_relationships=agent_rels,
             identifiers=list(idents),
             associations=list(assoc),
             contributions=list(contribs),
             entity_subjects=subjects,
         )
+
+
+# --- RDF Authority --------------------------------------------------------
+
+
+class RdfAuthorityLoader(RecordLoader):
+    """RDF agent authority graph (Finto/Asteri/RDA)."""
+
+    capabilities: ClassVar[LoaderCapabilities]
+
+    def accepts(self, item: Any) -> bool:
+        from rdflib import Graph
+
+        from reconciliator.loaders.rdf_authority import is_rdf_agent_authority
+
+        return isinstance(item, Graph) and is_rdf_agent_authority(item)
+
+    def _decompose(self, item: Any, ctx: LoadContext) -> DecomposedRecord:
+        from reconciliator.loaders.rdf_authority import decompose_rdf_authority
+
+        subjects: list[Any] = []
+        agent_rels: list[Any] = []
+        record = decompose_rdf_authority(
+            item,
+            source=ctx.source,
+            source_id=ctx.id_source if ctx.id_source != "marc_001" else None,
+            record_origin=ctx.origin,
+            config=getattr(ctx, "config", None),
+            agent_relationship_sink=agent_rels,
+            subject_sink=subjects,
+        )
+        record.agent_relationships = agent_rels
+        record.entity_subjects = subjects
+        return record
 
 
 # --- BIBFRAME -------------------------------------------------------------
@@ -191,6 +228,7 @@ class BibraAdapter(FormatAdapter):
 LOADERS: list[RecordLoader] = [
     MarcAuthorityLoader(),
     MarcBibliographicLoader(),
+    RdfAuthorityLoader(),
     BibframeLoader(),
 ]
 
@@ -350,8 +388,8 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
 
     from reconciliator.loaders.marcxml import (
         CONTENT_TYPE_WORK_TYPES,
+        GENRE_WORK_TYPES,
         RDA_CONTENT_TYPES,
-        SLM_WORK_TYPES,
         derive_domain_keys,
         determine_work_type,
     )
@@ -367,7 +405,10 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         and isinstance(n.value, ast.Constant)
         and isinstance(n.value.value, str)
     }
-    work_types = literals | set(SLM_WORK_TYPES.values()) | set(CONTENT_TYPE_WORK_TYPES.values())
+    genre_work_type_values = {
+        wt for v in GENRE_WORK_TYPES.values() for wt in v.values()
+    }
+    work_types = literals | genre_work_type_values | set(CONTENT_TYPE_WORK_TYPES.values())
 
     key_types: set[str] = set()
     if keys:
@@ -505,8 +546,27 @@ def _bibframe_capabilities() -> LoaderCapabilities:
     )
 
 
+def _rdf_authority_capabilities() -> LoaderCapabilities:
+    return LoaderCapabilities(
+        name="rdf_authority",
+        formats=["rdf_authority", "skos", "rda_rdf"],
+        work_types=set(),
+        content_types=set(),
+        key_types=set(),
+        identifier_schemes={"isni", "viaf", "wikidata", "urn", "uri", "other", "finaf", "asteri"},
+        deterministic_ids=True,
+        stamps_record_origin=True,
+        emits_constituents=False,
+        normalises_isbd=True,
+        folds_subject_vocabularies=False,
+        normalises_relators=False,
+        not_produced={},
+    )
+
+
 MarcBibliographicLoader.capabilities = _marc_capabilities(
     "marc_bibliographic", keys=True, folds=True
 )
 MarcAuthorityLoader.capabilities = _marc_capabilities("marc_authority", keys=False, folds=False)
+RdfAuthorityLoader.capabilities = _rdf_authority_capabilities()
 BibframeLoader.capabilities = _bibframe_capabilities()

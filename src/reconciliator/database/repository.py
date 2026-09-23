@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import defaultdict
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
@@ -27,22 +28,28 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from reconciliator.utils.curie import parse_curie, to_curie
 from reconciliator.database.engine import get_engine, init_authority_db
 from reconciliator.database.ops import calculate_batch_size, insert_batch, upsert_batch
 from reconciliator.database.schema import (
     agent_attributes_table,
     agent_relationships_table,
     agents_table,
+    changeset_operations_table,
+    cluster_lifecycle_events_table,
+    cluster_redirections_table,
+    concept_mappings_table,
+    concepts_table,
     contributions_table,
     corpus_agent_cluster_attributes_table,
     corpus_agent_cluster_members_table,
     corpus_agent_clusters_table,
+    corpus_agent_relationships_table,
     corpus_expression_clusters_table,
     corpus_linkages_table,
     corpus_manifestation_clusters_table,
     corpus_work_clusters_table,
     entity_keys_table,
+    entity_pins_table,
     entity_subjects_table,
     expressions_table,
     harvest_state_table,
@@ -52,12 +59,6 @@ from reconciliator.database.schema import (
     manifestation_vectors_table,
     manifestations_table,
     review_changesets_table,
-    changeset_operations_table,
-    cluster_lifecycle_events_table,
-    cluster_redirections_table,
-    entity_pins_table,
-    concepts_table,
-    concept_mappings_table,
     sammelband_bindings_table,
     sources_table,
     work_consolidations_table,
@@ -79,7 +80,6 @@ from reconciliator.models import (
     CorpusLinkage,
     DataReadinessSummary,
     EntityKey,
-    EntityPin,
     EntitySubject,
     EntityType,
     ExpressionCluster,
@@ -99,6 +99,7 @@ from reconciliator.models import (
     WorkRelationship,
 )
 from reconciliator.normalizers.linguistic import fold_label
+from reconciliator.utils.curie import parse_curie, to_curie
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -297,6 +298,11 @@ class WEMIRepository:
                 for vn in agent.variant_names:
                     if vn:
                         attr_accum.add((key, "variant_name", vn))
+            # Accumulate affiliations
+            if agent.affiliations:
+                for aff in agent.affiliations:
+                    if aff:
+                        attr_accum.add((key, "affiliation", aff))
             # Accumulate identifiers
             if agent.identifiers:
                 ident_accum.setdefault(key, []).extend(agent.identifiers)
@@ -306,7 +312,9 @@ class WEMIRepository:
 
         def _exec(c: Any) -> None:
             # 1. Batch UPSERT into agents_table
-            effective_chunk_size = chunk_size or calculate_batch_size(num_columns=len(agents_table.c))
+            effective_chunk_size = chunk_size or calculate_batch_size(
+                num_columns=len(agents_table.c)
+            )
             for i in range(0, len(rows), effective_chunk_size):
                 chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(agents_table).values(chunk)
@@ -392,10 +400,7 @@ class WEMIRepository:
         """
         if not attributes:
             return
-        rows = [
-            {"agent_id": agent_id, "attribute_type": t, "value": v}
-            for t, v in attributes
-        ]
+        rows = [{"agent_id": agent_id, "attribute_type": t, "value": v} for t, v in attributes]
         stmt = pg_insert(agent_attributes_table).values(rows).on_conflict_do_nothing()
         if conn is not None:
             conn.execute(stmt)
@@ -423,12 +428,62 @@ class WEMIRepository:
                 stmt = pg_insert(agent_relationships_table).values(chunk)
                 c.execute(stmt)
 
+    def insert_corpus_agent_relationships_batch(
+        self,
+        relationships: list[dict[str, Any]],
+        conn: Optional[Any] = None,
+        chunk_size: int = 1000,
+    ) -> None:
+        """Batch insert or ignore cluster-level agent relationships into corpus_agent_relationships_table."""
+        if not relationships:
+            return
+
+        def _exec(c: Any) -> None:
+            for i in range(0, len(relationships), chunk_size):
+                chunk = relationships[i : i + chunk_size]
+                stmt = (
+                    pg_insert(corpus_agent_relationships_table)
+                    .values(chunk)
+                    .on_conflict_do_nothing()
+                )
+                c.execute(stmt)
+
         if conn is not None:
             _exec(conn)
         else:
-            with self.get_connection() as c:
+            with self.get_corpus_connection() as c:
                 _exec(c)
 
+    def get_agent_relationships_map(
+        self, agent_ids: list[int], conn: Optional[Any] = None
+    ) -> dict[int, list[dict[str, Any]]]:
+        """Retrieve all relationships involving the given agent IDs, indexed by agent ID."""
+        if not agent_ids:
+            return {}
+        out: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        chunk_size = 1000
+        target = conn if conn is not None else self.get_connection()
+        for i in range(0, len(agent_ids), chunk_size):
+            chunk = agent_ids[i : i + chunk_size]
+            stmt = select(
+                agent_relationships_table.c.source_agent_id,
+                agent_relationships_table.c.target_agent_id,
+                agent_relationships_table.c.target_name,
+                agent_relationships_table.c.target_uri,
+                agent_relationships_table.c.relationship_type,
+            ).where(
+                (agent_relationships_table.c.source_agent_id.in_(chunk))
+                | (agent_relationships_table.c.target_agent_id.in_(chunk))
+            )
+            for r in target.execute(stmt).mappings():
+                d = dict(r)
+                src = d["source_agent_id"]
+                tgt = d["target_agent_id"]
+                if src in agent_ids:
+                    out[src].append(d)
+                if tgt and tgt in agent_ids:
+                    out[tgt].append(d)
+        return out
 
     def insert_agent_identifiers_batch(
         self,
@@ -485,7 +540,9 @@ class WEMIRepository:
         id_map: dict[tuple[str, str], int] = {}
 
         def _exec(c: Any) -> None:
-            effective_chunk_size = chunk_size or calculate_batch_size(num_columns=len(works_table.c))
+            effective_chunk_size = chunk_size or calculate_batch_size(
+                num_columns=len(works_table.c)
+            )
             for i in range(0, len(rows), effective_chunk_size):
                 chunk = rows[i : i + effective_chunk_size]
                 stmt = pg_insert(works_table).values(chunk)
@@ -1206,6 +1263,7 @@ class WEMIRepository:
         items: Optional[list[ItemEntity]] = None,
         agents: Optional[list[AgentEntity]] = None,
         relationships: Optional[list[WorkRelationship]] = None,
+        agent_relationships: Optional[list[AgentRelationshipEntity]] = None,
         identifiers: Optional[list[IdentifierEntity]] = None,
         manifestation_expressions: Optional[list[ManifestationExpressionAssociation]] = None,
         contributions: Optional[list[ContributionEntity]] = None,
@@ -1321,7 +1379,9 @@ class WEMIRepository:
                             reason=f"Expression cannot resolve parent work_id (work_curie={exp.work_curie})",
                         )
                 if valid_expressions:
-                    e_ids = self.insert_expressions_batch(valid_expressions, conn=c, chunk_size=chunk_size)
+                    e_ids = self.insert_expressions_batch(
+                        valid_expressions, conn=c, chunk_size=chunk_size
+                    )
                     for exp, eid in zip(valid_expressions, e_ids):
                         exp.id = eid
                         expr_key_to_id[exp.curie] = eid
@@ -1385,7 +1445,9 @@ class WEMIRepository:
 
                 component_idx = [i for i, m in enumerate(valid_manifestations) if m.container_curie]
                 if not component_idx:
-                    _insert_manifestations(valid_manifestations, list(range(len(valid_manifestations))))
+                    _insert_manifestations(
+                        valid_manifestations, list(range(len(valid_manifestations)))
+                    )
                 else:
                     container_idx = [
                         i for i, m in enumerate(valid_manifestations) if not m.container_curie
@@ -1427,7 +1489,9 @@ class WEMIRepository:
                         not assoc.expression_id or assoc.expression_id <= 0
                     ) and assoc.expression_curie:
                         assoc.expression_id = _resolve(expr_key_to_id, assoc.expression_curie) or 0
-                    if (not assoc.manifestation_id or assoc.manifestation_id <= 0) and manifestations:
+                    if (
+                        not assoc.manifestation_id or assoc.manifestation_id <= 0
+                    ) and manifestations:
                         assoc.manifestation_id = manifestations[0].id or 0
                     if (not assoc.expression_id or assoc.expression_id <= 0) and expressions:
                         assoc.expression_id = expressions[0].id or 0
@@ -1528,6 +1592,38 @@ class WEMIRepository:
                 if bound_rels:
                     self.insert_work_relationships_batch(bound_rels, conn=c, chunk_size=chunk_size)
 
+            # 8b. Agent Relationships
+            if agent_relationships:
+                bound_agent_rels: list[AgentRelationshipEntity] = []
+                for a_rel in agent_relationships:
+                    if (
+                        not a_rel.source_agent_id or a_rel.source_agent_id <= 0
+                    ) and a_rel.source_agent_curie:
+                        a_rel.source_agent_id = (
+                            _resolve(agent_key_to_id, a_rel.source_agent_curie) or 0
+                        )
+                    if (not a_rel.source_agent_id or a_rel.source_agent_id <= 0) and agents:
+                        a_rel.source_agent_id = agents[0].id or 0
+
+                    if (
+                        not a_rel.target_agent_id or a_rel.target_agent_id <= 0
+                    ) and a_rel.target_agent_curie:
+                        a_rel.target_agent_id = _resolve(agent_key_to_id, a_rel.target_agent_curie)
+
+                    if a_rel.source_agent_id > 0:
+                        bound_agent_rels.append(a_rel)
+                    else:
+                        logger.warning(
+                            "Dropping %s agent relationship with unbound source: source=%s target=%s",
+                            a_rel.relationship_type,
+                            a_rel.source_agent_curie or a_rel.source_agent_id,
+                            a_rel.target_agent_curie or a_rel.target_agent_id,
+                        )
+                if bound_agent_rels:
+                    self.insert_agent_relationships_batch(
+                        bound_agent_rels, conn=c, chunk_size=chunk_size or 1000
+                    )
+
             # 9. Contributions
             if contributions:
                 valid_contribs: list[ContributionEntity] = []
@@ -1589,7 +1685,9 @@ class WEMIRepository:
             # 12. Entity subjects
             if entity_subjects:
                 bound_subjects: list[EntitySubject] = []
-                seen_subj_keys: set[tuple[str, int, Optional[str], Optional[str], Optional[str], str]] = set()
+                seen_subj_keys: set[
+                    tuple[str, int, Optional[str], Optional[str], Optional[str], str]
+                ] = set()
                 for subj in entity_subjects:
                     if (not subj.entity_id or subj.entity_id <= 0) and subj.entity_curie:
                         if subj.entity_type == "work":
@@ -1739,7 +1837,6 @@ class WEMIRepository:
                         result[aid]["qualifiers"].append(val)
                     elif atype == "variant_name":
                         result[aid]["variant_names"].append(val)
-
 
             # 3. Batch fetch identifiers in a single query
             ident_stmt = select(identifiers_table).where(
@@ -3037,7 +3134,10 @@ class WEMIRepository:
                     batch = rows[i : i + batch_size]
                     ids = [int(r[0]) for r in batch]
                     texts = [str(r[1]) for r in batch]
-                    vectors = embedder.embed_texts(texts, batch_size=len(texts))
+                    if hasattr(embedder, "encode_batch_dense"):
+                        vectors = embedder.encode_batch_dense(texts)
+                    else:
+                        vectors = embedder.embed_texts(texts, batch_size=len(texts))
                     vector_ids = indexer.add_vectors(vectors, ids=ids)
                     values_to_insert = [
                         {"vector_id": v_id, id_col_name: ent_id}
@@ -3094,7 +3194,10 @@ class WEMIRepository:
                     texts.append(text)
 
                 if texts:
-                    vectors = embedder.embed_texts(texts, batch_size=len(texts))
+                    if hasattr(embedder, "encode_batch_dense"):
+                        vectors = embedder.encode_batch_dense(texts)
+                    else:
+                        vectors = embedder.embed_texts(texts, batch_size=len(texts))
                     agent_indexer.add_vectors(vectors, ids=ids)
                     total_indexed += len(texts)
 
@@ -3283,10 +3386,7 @@ class WEMIRepository:
                                 if code.startswith(t_code) or t_code.startswith(code):
                                     evidence[cid]["has_classification_match"] = True
                                     matched_str = f"{scheme}:{code}"
-                                    if (
-                                        matched_str
-                                        not in evidence[cid]["matched_classifications"]
-                                    ):
+                                    if matched_str not in evidence[cid]["matched_classifications"]:
                                         evidence[cid]["matched_classifications"].append(matched_str)
 
         return evidence
@@ -3585,7 +3685,6 @@ class WEMIRepository:
             return str(val) if val is not None else None
 
     def find_records_by_key(self, key_type: str, key_value: str) -> list[str]:
-
         """Find record ids (manifestation source_ids) carrying a key.
 
         Reads `entity_keys` rather than the removed `target_keys` staging table.
@@ -3671,12 +3770,9 @@ class WEMIRepository:
             .where(corpus_linkages_table.c.record_id == record_id)
             .scalar_subquery()
         )
-        stmt = (
-            select(corpus_linkages_table.c.record_id)
-            .where(
-                corpus_linkages_table.c.manifestation_cluster_id == sub,
-                corpus_linkages_table.c.record_id != record_id,
-            )
+        stmt = select(corpus_linkages_table.c.record_id).where(
+            corpus_linkages_table.c.manifestation_cluster_id == sub,
+            corpus_linkages_table.c.record_id != record_id,
         )
         with self.get_corpus_connection() as conn:
             return [str(r[0]) for r in conn.execute(stmt)]
@@ -3890,9 +3986,7 @@ class WEMIRepository:
             count_stmt = count_stmt.where(review_changesets_table.c.created_by == created_by)
 
         stmt = (
-            stmt.order_by(review_changesets_table.c.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            stmt.order_by(review_changesets_table.c.created_at.desc()).limit(limit).offset(offset)
         )
 
         with self.get_connection() as conn:
@@ -3902,8 +3996,10 @@ class WEMIRepository:
             for r in rows:
                 cs = ReviewChangeset.model_validate(_row_to_dict(r))
                 # Fetch count of operations for this changeset
-                op_count_stmt = select(func.count()).select_from(changeset_operations_table).where(
-                    changeset_operations_table.c.changeset_id == cs.id
+                op_count_stmt = (
+                    select(func.count())
+                    .select_from(changeset_operations_table)
+                    .where(changeset_operations_table.c.changeset_id == cs.id)
                 )
                 cs.operations_count = int(conn.execute(op_count_stmt).scalar() or 0)
                 results.append(cs)
@@ -3965,10 +4061,9 @@ class WEMIRepository:
         pre_img_json = json.dumps(pre_image, ensure_ascii=False) if pre_image is not None else None
 
         with self.get_connection() as conn:
-            seq_stmt = (
-                select(func.coalesce(func.max(changeset_operations_table.c.sequence), 0))
-                .where(changeset_operations_table.c.changeset_id == changeset_id)
-            )
+            seq_stmt = select(
+                func.coalesce(func.max(changeset_operations_table.c.sequence), 0)
+            ).where(changeset_operations_table.c.changeset_id == changeset_id)
             next_seq = int(conn.execute(seq_stmt).scalar() or 0) + 1
 
             stmt = (
@@ -4036,7 +4131,11 @@ class WEMIRepository:
                             conn,
                             work_consolidations_table,
                             ["work_id"],
-                            {"work_id": wid, "canonical_work_id": canonical_id, "evidence": "manual_curation"},
+                            {
+                                "work_id": wid,
+                                "canonical_work_id": canonical_id,
+                                "evidence": "manual_curation",
+                            },
                         )
                         # Create pin
                         _safe_upsert(
@@ -4053,13 +4152,21 @@ class WEMIRepository:
                     # Add symmetric same_work_as relationships between all pairs
                     for i in range(len(work_ids)):
                         for j in range(i + 1, len(work_ids)):
-                            for src, tgt in ((work_ids[i], work_ids[j]), (work_ids[j], work_ids[i])):
+                            for src, tgt in (
+                                (work_ids[i], work_ids[j]),
+                                (work_ids[j], work_ids[i]),
+                            ):
                                 rel_cond = and_(
                                     work_relationships_table.c.source_work_id == src,
                                     work_relationships_table.c.target_work_id == tgt,
                                     work_relationships_table.c.relationship_type == "same_work_as",
                                 )
-                                if conn.execute(select(work_relationships_table.c.id).where(rel_cond)).scalar() is None:
+                                if (
+                                    conn.execute(
+                                        select(work_relationships_table.c.id).where(rel_cond)
+                                    ).scalar()
+                                    is None
+                                ):
                                     conn.execute(
                                         insert(work_relationships_table).values(
                                             source_work_id=src,
@@ -4085,7 +4192,9 @@ class WEMIRepository:
                     )
                     # Remove from work_consolidations
                     conn.execute(
-                        delete(work_consolidations_table).where(work_consolidations_table.c.work_id == wid)
+                        delete(work_consolidations_table).where(
+                            work_consolidations_table.c.work_id == wid
+                        )
                     )
                     # Add pin indicating work is pinned as singleton
                     _safe_upsert(
@@ -4623,7 +4732,9 @@ class WEMIRepository:
                 if existing:
                     conn.execute(
                         update(cluster_redirections_table)
-                        .where(cluster_redirections_table.c.source_cluster_id == d["source_cluster_id"])
+                        .where(
+                            cluster_redirections_table.c.source_cluster_id == d["source_cluster_id"]
+                        )
                         .values(
                             target_cluster_id=d["target_cluster_id"],
                             cluster_type=d["cluster_type"],
@@ -4686,9 +4797,7 @@ class WEMIRepository:
     ) -> tuple[list[dict[str, Any]], int]:
         """Fetch modified authority clusters since a given timestamp for OAI-PMH harvesting."""
         table = (
-            corpus_agent_clusters_table
-            if cluster_type == "agent"
-            else corpus_work_clusters_table
+            corpus_agent_clusters_table if cluster_type == "agent" else corpus_work_clusters_table
         )
         with self.get_corpus_connection() as conn:
             stmt = select(table)
@@ -4700,4 +4809,3 @@ class WEMIRepository:
             total = conn.execute(count_stmt).scalar() or 0
             rows = conn.execute(stmt).mappings().fetchall()
             return [dict(r) for r in rows], int(total)
-

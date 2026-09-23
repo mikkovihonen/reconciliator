@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from reconciliator.models import BibliographicRecord, ReconciliationMatch
 from reconciliator.rerank.base import RerankScorer
@@ -22,9 +22,12 @@ class CandidateEvaluator:
         self,
         config: RerankConfig,
         scorer: Optional[RerankScorer] = None,
+        judge_backend: Optional[Any] = None,
     ) -> None:
         self.config = config
-        self.scorer: RerankScorer = scorer or create_rerank_scorer(config)
+        self.scorer: RerankScorer = scorer or create_rerank_scorer(
+            config, judge_backend=judge_backend
+        )
 
     def check_volume_match(
         self, target_volume: Optional[str], candidate_volume: Optional[str]
@@ -52,9 +55,12 @@ class CandidateEvaluator:
         return target_norm == candidate_norm
 
     def check_surname_match(
-        self, target_record: BibliographicRecord, candidate_record: BibliographicRecord
+        self,
+        target_record: BibliographicRecord,
+        candidate_record: BibliographicRecord,
+        author_relationships: Optional[dict[str, set[str]]] = None,
     ) -> bool:
-        """Verify that at least one author surname matches between records."""
+        """Verify that at least one author surname matches between records, or matches via pseudonym/identity relationship."""
         if not self.config.require_surname_match:
             return True
 
@@ -65,7 +71,39 @@ class CandidateEvaluator:
         if not target_surnames or not candidate_surnames:
             return True
 
-        return bool(target_surnames & candidate_surnames)
+        if target_surnames & candidate_surnames:
+            return True
+
+        if author_relationships:
+            for ts in target_surnames:
+                if author_relationships.get(ts, set()) & candidate_surnames:
+                    return True
+            for cs in candidate_surnames:
+                if author_relationships.get(cs, set()) & target_surnames:
+                    return True
+
+        # Check agent.relationships directly if present on target or candidate agents
+        from reconciliator.normalizers.blocking import compute_author_key
+
+        for agent in list(target_record.agents) + list(candidate_record.agents):
+            for rel in getattr(agent, "relationships", []) or []:
+                rel_type = rel.get("relationship_type", "")
+                if rel_type in ("pseudonym_of", "real_identity_of", "alternate_identity_of"):
+                    t_name = rel.get("target_name")
+                    if t_name:
+                        norm_target = compute_author_key(t_name, None)
+                        if norm_target:
+                            agent_sur = (agent.surname or "").lower()
+                            if (
+                                agent_sur in target_surnames or not agent_sur
+                            ) and norm_target in candidate_surnames:
+                                return True
+                            if (
+                                agent_sur in candidate_surnames or not agent_sur
+                            ) and norm_target in target_surnames:
+                                return True
+
+        return False
 
     def evaluate_year(
         self, target_year: Optional[int], candidate_year: Optional[int]
@@ -93,12 +131,15 @@ class CandidateEvaluator:
         candidate_record: BibliographicRecord,
         dense_score: float,
         acceptance_threshold: float = 0.85,
+        author_relationships: Optional[dict[str, set[str]]] = None,
     ) -> ReconciliationMatch:
         """Evaluate a candidate record through short-circuit or hybrid dense+rerank scoring."""
         vol_match = self.check_volume_match(
             target_record.volume_designation, candidate_record.volume_designation
         )
-        surname_match = self.check_surname_match(target_record, candidate_record)
+        surname_match = self.check_surname_match(
+            target_record, candidate_record, author_relationships=author_relationships
+        )
         year_valid, year_penalty, year_diff = self.evaluate_year(
             target_record.publication_year, candidate_record.publication_year
         )
@@ -150,8 +191,30 @@ class CandidateEvaluator:
             )
 
         # Stage 3 Reranking
-        target_text = f"{target_record.title} {target_record.publisher or ''}"
-        candidate_text = f"{candidate_record.title} {candidate_record.publisher or ''}"
+        # Pre-veto check: if hard constraints fail and pre-veto is enabled, avoid scoring inference
+        apply_pre_veto = getattr(self.config, "apply_pre_veto", True)
+        hard_pass = vol_match and surname_match and year_valid
+        if apply_pre_veto and not hard_pass:
+            return ReconciliationMatch(
+                candidate_record_id=candidate_record.source_id,
+                source=candidate_record.source,
+                match_tier="tier2_preveto",
+                match_score=round(dense_score, 4),
+                dense_score=round(dense_score, 4),
+                rerank_score=0.0,
+                volume_match=vol_match,
+                surname_match=surname_match,
+                year_diff=year_diff,
+                accepted=False,
+            )
+
+        target_text = (
+            target_record.serialization or f"{target_record.title} {target_record.publisher or ''}"
+        )
+        candidate_text = (
+            candidate_record.serialization
+            or f"{candidate_record.title} {candidate_record.publisher or ''}"
+        )
         raw_rerank = self.scorer.score(target_text, candidate_text)
         rerank_score = max(0.0, raw_rerank - year_penalty)
 
@@ -159,13 +222,19 @@ class CandidateEvaluator:
             self.config.rerank_weight * rerank_score
         )
 
-        hard_pass = vol_match and surname_match and year_valid
         accepted = hard_pass and (hybrid_score >= acceptance_threshold)
+        if self.config.engine == "llm_judge":
+            tier_name = "tier2_llm_judge"
+        elif self.config.engine == "cascade":
+            route = getattr(self.scorer, "last_route", "heuristic")
+            tier_name = "tier2_cascade_judge" if route == "judge" else "tier3_cascade_heuristic"
+        else:
+            tier_name = "tier3_hybrid_rerank"
 
         return ReconciliationMatch(
             candidate_record_id=candidate_record.source_id,
             source=candidate_record.source,
-            match_tier="tier3_hybrid_rerank",
+            match_tier=tier_name,
             match_score=round(hybrid_score, 4),
             dense_score=round(dense_score, 4),
             rerank_score=round(rerank_score, 4),
@@ -174,3 +243,152 @@ class CandidateEvaluator:
             year_diff=year_diff,
             accepted=accepted,
         )
+
+    def evaluate_candidates_batch(
+        self,
+        target_record: BibliographicRecord,
+        candidates: list[tuple[BibliographicRecord, float]],
+        acceptance_threshold: float = 0.85,
+        author_relationships: Optional[dict[str, set[str]]] = None,
+    ) -> list[ReconciliationMatch]:
+        """
+        Evaluate a candidate list against a target record with batch score fusion
+        and margin-aware cascade routing.
+        """
+        if not candidates:
+            return []
+
+        # 1. Pre-filter candidates with discriminators and short-circuit
+        matches: list[Optional[ReconciliationMatch]] = [None] * len(candidates)
+        pending_indices: list[int] = []
+        pending_candidates: list[BibliographicRecord] = []
+        pending_dense_scores: list[float] = []
+        year_penalties: list[float] = []
+        hard_passes: list[bool] = []
+        year_diffs: list[Optional[int]] = []
+        vol_matches: list[bool] = []
+        surname_matches: list[bool] = []
+
+        apply_pre_veto = getattr(self.config, "apply_pre_veto", True)
+
+        for i, (cand_rec, dense_score) in enumerate(candidates):
+            vol_match = self.check_volume_match(
+                target_record.volume_designation, cand_rec.volume_designation
+            )
+            surname_match = self.check_surname_match(
+                target_record, cand_rec, author_relationships=author_relationships
+            )
+            year_valid, year_pen, y_diff = self.evaluate_year(
+                target_record.publication_year, cand_rec.publication_year
+            )
+            hard_pass = vol_match and surname_match and year_valid
+
+            # Short-circuit check
+            if (
+                self.config.short_circuit.enabled
+                and dense_score >= self.config.short_circuit.threshold
+            ):
+                matches[i] = ReconciliationMatch(
+                    candidate_record_id=cand_rec.source_id,
+                    source=cand_rec.source,
+                    match_tier="tier2_dense",
+                    match_score=dense_score,
+                    dense_score=dense_score,
+                    rerank_score=None,
+                    volume_match=vol_match,
+                    surname_match=surname_match,
+                    year_diff=y_diff,
+                    accepted=vol_match,
+                )
+                continue
+
+            # Disabled reranking bypass
+            if not self.config.enabled:
+                matches[i] = ReconciliationMatch(
+                    candidate_record_id=cand_rec.source_id,
+                    source=cand_rec.source,
+                    match_tier="tier2_dense",
+                    match_score=dense_score,
+                    dense_score=dense_score,
+                    rerank_score=None,
+                    volume_match=vol_match,
+                    surname_match=surname_match,
+                    year_diff=y_diff,
+                    accepted=dense_score >= acceptance_threshold,
+                )
+                continue
+
+            # Pre-veto check
+            if apply_pre_veto and not hard_pass:
+                matches[i] = ReconciliationMatch(
+                    candidate_record_id=cand_rec.source_id,
+                    source=cand_rec.source,
+                    match_tier="tier2_preveto",
+                    match_score=round(dense_score, 4),
+                    dense_score=round(dense_score, 4),
+                    rerank_score=0.0,
+                    volume_match=vol_match,
+                    surname_match=surname_match,
+                    year_diff=y_diff,
+                    accepted=False,
+                )
+                continue
+
+            pending_indices.append(i)
+            pending_candidates.append(cand_rec)
+            pending_dense_scores.append(dense_score)
+            year_penalties.append(year_pen)
+            hard_passes.append(hard_pass)
+            year_diffs.append(y_diff)
+            vol_matches.append(vol_match)
+            surname_matches.append(surname_match)
+
+        # 2. Batch scoring for candidates passing pre-veto
+        if pending_indices:
+            target_text = (
+                target_record.serialization
+                or f"{target_record.title} {target_record.publisher or ''}"
+            )
+            candidate_texts = [
+                c.serialization or f"{c.title} {c.publisher or ''}" for c in pending_candidates
+            ]
+            raw_scores = self.scorer.score_batch(target_text, candidate_texts)
+            routes = getattr(self.scorer, "last_routes", ["heuristic"] * len(raw_scores))
+
+            for idx, orig_i in enumerate(pending_indices):
+                raw_rerank = raw_scores[idx]
+                r_pen = year_penalties[idx]
+                rerank_score = max(0.0, raw_rerank - r_pen)
+                dense_score = pending_dense_scores[idx]
+                cand_rec = pending_candidates[idx]
+
+                hybrid_score = (self.config.dense_weight * dense_score) + (
+                    self.config.rerank_weight * rerank_score
+                )
+                accepted = hard_passes[idx] and (hybrid_score >= acceptance_threshold)
+
+                if self.config.engine == "llm_judge":
+                    tier_name = "tier2_llm_judge"
+                elif self.config.engine == "cascade":
+                    tier_name = (
+                        "tier2_cascade_judge"
+                        if routes[idx] == "judge"
+                        else "tier3_cascade_heuristic"
+                    )
+                else:
+                    tier_name = "tier3_hybrid_rerank"
+
+                matches[orig_i] = ReconciliationMatch(
+                    candidate_record_id=cand_rec.source_id,
+                    source=cand_rec.source,
+                    match_tier=tier_name,
+                    match_score=round(hybrid_score, 4),
+                    dense_score=round(dense_score, 4),
+                    rerank_score=round(rerank_score, 4),
+                    volume_match=vol_matches[idx],
+                    surname_match=surname_matches[idx],
+                    year_diff=year_diffs[idx],
+                    accepted=accepted,
+                )
+
+        return [m for m in matches if m is not None]

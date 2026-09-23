@@ -42,6 +42,7 @@ def _get_tag_prefix_rules() -> list[tuple[str, str]]:
             if clean_p.startswith("(") and clean_p.endswith(")"):
                 clean_p = clean_p[1:-1]
             rules.append((clean_p, src_name))
+    rules.sort(key=lambda r: len(r[0]), reverse=True)
     return rules
 
 

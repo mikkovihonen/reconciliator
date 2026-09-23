@@ -183,6 +183,10 @@ vocabularies:
   entity_vocabularies:
     - "WIKIDATA"
 
+  # Configured work authority sources (1..n)
+  work_authority_sources:
+    - "asteri_work"
+
   # All subject vocabularies supported across reconciliation
   supported_subjects:
     - "yso"
@@ -312,9 +316,19 @@ vocabularies:
     KANTO:
       - "urn.fi/urn:nbn:fi:au:pn:"
       - "(fi-asteri-n)"
+      - "(fi-asteri-c)"
+      - "(fin11)"
       - "(fi-kanto)"
-      - "asteri"
+      - "asteri-n"
+      - "asteri-c"
       - "kanto:"
+    TEKA:
+      - "melinda.kansalliskirjasto.fi/teka/byid/"
+      - "urn.fi/urn:nbn:fi:au:teka:"
+      - "(fi-asteri-w)"
+      - "(fin13)"
+      - "asteri-w"
+      - "teka:"
     YSO:
       - "yso.fi/onto/yso/"
       - "(fi-yso)"
@@ -365,8 +379,21 @@ vocabularies:
       id_patterns:
         - '(?i)au:pn:(\d+)'
         - '(?i)\(fi-asteri-n\)(\d+)'
+        - '(?i)\(fi-asteri-c\)(\d+)'
+        - '(?i)\(fin11\)(\d+)'
         - '(?i)\(fi-kanto\)(\d+)'
         - '(?i)(?:^|:)kanto:(\d+)'
+        - '^(\d{9})$'
+      canonical_id_case: "preserve"
+    TEKA:
+      prefix: "asteri_work"
+      uri_template: "https://melinda.kansalliskirjasto.fi/teka/byid/(FI-ASTERI-W){id}"
+      id_patterns:
+        - '(?i)teka/byid/\(fi-asteri-w\)(\d+)'
+        - '(?i)au:teka:(\d+)'
+        - '(?i)\(fi-asteri-w\)(\d+)'
+        - '(?i)\(fin13\)(\d+)'
+        - '(?i)(?:^|:)teka:(\d+)'
         - '^(\d{9})$'
       canonical_id_case: "preserve"
     YSO:
@@ -622,6 +649,69 @@ record_normalization:
     - "lc"
 
   default_classification_scheme: "ykl"
+  # Default origin source name for carrier records when decomposing MARCXML
+  default_carrier_source: "melinda"
+
+  # Work-type resolution from controlled genre/form vocabularies (e.g. SLM, LCGFT)
+  genre_work_types:
+    slm:
+      "televisio-ohjelmat": "broadcast_program"
+      "juridiset teokset": "legal"
+      "antologiat": "anthology"
+
+  # Substring pattern heuristics for genre/form headings
+  genre_patterns:
+    comic: ["sarjakuv", "manga"]
+    board_game: ["lautapel"]
+    interactive_game: ["videopel", "tietokonepel"]
+    ephemera: ["pienpainat", "tuoteluettel"]
+    drama: ["näytelm"]
+    choreography: ["koreograf"]
+    standard: ["standardi", "standardit"]
+    patent: ["patentt"]
+    podcast: ["podcast"]
+    oral_history: ["haastattelu"]
+    exhibition: ["näyttelyluettel"]
+    critical_edition: ["kriittinen laitos"]
+    numismatic: ["rahat", "mitalit"]
+
+  # MARC 336 $b RDA content types to ExpressionContentType
+  rda_content_types:
+    txt: "text"
+    ntm: "notated_music"
+    prm: "audio_music"
+    spw: "spoken_word"
+    snd: "sounds"
+    sti: "still_image"
+    tdi: "moving_image"
+    cod: "dataset"
+    cop: "computer_program"
+
+  # MARC 336 $b RDA content types to WorkType fallback
+  content_type_work_types:
+    cri: "cartography"
+    cod: "dataset"
+    cop: "software"
+    ntm: "music"
+    prm: "music"
+    spw: "audio_nonmusic"
+
+  # RDA tactile content codes
+  tactile_content_codes:
+    - "tci"
+    - "tcm"
+    - "tcn"
+    - "tct"
+    - "tcf"
+    - "crt"
+    - "crn"
+
+  # MARC 338 $b RDA carrier types to CarrierType
+  carrier_type_mappings:
+    nc: "volume"
+    sd: "audio_disc"
+    cr: "online_resource"
+    vd: "videodisc"
 
   # Optional default source control number prefix and padding (e.g. for Melinda records)
   control_number_prefix: null
@@ -974,6 +1064,8 @@ consolidation:
     - "doi"
     - "urn"
     - "asteri"
+    - "asteri_work"
+    - "kanto"
 
   # Metadata agreement required when no identifier or QID is shared.
   # 0.6 * title similarity + 0.4 * creator similarity, both 0..1.
@@ -1088,7 +1180,7 @@ reconcile:
   # Candidate evaluation, reranking and metadata discriminators
   rerank:
     enabled: true                # Toggle candidate reranker
-    engine: "bm25"               # Reranking engine: "bm25", "cross_encoder", "fuzzy", "noop"
+    engine: "cascade"            # Reranking engine: "cascade", "llm_judge", "bm25", "cross_encoder", "fuzzy", "noop"
     model_name: null             # HuggingFace model path (required when engine is cross_encoder)
     batch_size: 16               # Batch inference size for cross-encoder rerankers
     dense_weight: 0.6            # Dense semantic similarity weight (dense_weight + rerank_weight = 1.0)
@@ -1101,6 +1193,33 @@ reconcile:
     require_surname_match: true  # Require at least one matching author surname token
     max_year_difference: 5       # Max allowable publication year discrepancy
     year_penalty_threshold: 1    # Year discrepancy after which proximity penalty begins
+    apply_pre_veto: true         # Run hard discriminators before LLM suffix inference (when engine is llm_judge or cascade)
+
+    # Cascading Dual-Route Router (used when engine is "cascade")
+    cascade:
+      heuristic_engine: "bm25"   # Fast initial scorer ("bm25", "cross_encoder", "fuzzy", "noop")
+      high_confidence_threshold: 0.90 # Resolve via fast heuristic if score >= threshold and hard pass (0 GPU cost)
+      low_confidence_threshold: 0.55  # Reject via heuristic if score < threshold (0 GPU cost)
+      ambiguity_margin: 0.08     # Escalate to LLM judge if top 2 candidate scores are within this margin
+      uncertainty_band_min: 0.60 # Lower bound of uncertainty band triggering LLM judge escalation
+      uncertainty_band_max: 0.88 # Upper bound of uncertainty band triggering LLM judge escalation
+      max_escalated_candidates: 5 # Maximum number of candidate contenders to evaluate on GPU per target
+
+    # Autoregressive LLM Judge with KV-branching and zero-copy truncation (used with "llm_judge" and "cascade")
+    judge:
+      backend: "auto"            # Backend: "auto" (MLX on Apple Silicon, PyTorch on CUDA/CPU), "mlx", "torch"
+      model_name: "Qwen/Qwen2.5-7B-Instruct" # Base model path (e.g. mlx-community/Qwen2.5-7B-Instruct-8bit on Apple Silicon)
+      quantization: "8bit"       # Optional quantization: "4bit", "8bit" (used with mlx backend)
+      device: "auto"             # Device: "auto", "cuda", "mps", "cpu"
+      torch_dtype: "auto"        # Precision: "auto", "float16", "bfloat16", "float32"
+      attn_implementation: "auto"# Attention kernel: "auto", "sdpa", "flash_attention_2"
+      pooling_strategy: "last_token" # "last_token" or "mean"
+      batch_size: 16             # Batch size for offline index dense encoding
+      positive_token: "YES"      # Target classification token for matches
+      negative_token: "NO"       # Target classification token for non-matches
+      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+      candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+      max_seq_length: 2048
 
   # Tier 3 PostgreSQL full-text search fallback when exact and dense matches fail
   fts_fallback:
@@ -1215,3 +1334,104 @@ logging:
   task_id_default: "-"            # Fallback task_id when no active task context is present
   enable_telemetry_handler: true  # Automatically feed ERROR log records into active task error metrics
   sanitization_log_level: "ERROR" # Default log level for data sanitization events ("ERROR", "WARNING", "INFO")
+# ==============================================================================
+# 14. Agent Authority (Kanto / Asteri & Finto RDF/XML)
+# ==============================================================================
+agent_authority:
+  qualifiers:
+    qualifier_pattern: "\\(([^)]+)\\)$"
+    qualifier_subfields:
+      - "c"
+    strip_enclosing_brackets: true
+    bracket_pairs:
+      - ["(", ")"]
+      - ["[", "]"]
+    corporate_category_as_qualifier: true
+  marc_relationships:
+    code_mappings:
+      a: "predecessor_of"
+      b: "successor_of"
+      t: "hierarchical_superior_of"
+      n: "related_corporate_body"
+    designation_patterns:
+      - pattern: "(?i)edeltäjä|predecessor|föregående"
+        rel_type: "predecessor_of"
+      - pattern: "(?i)seuraaja|successor|efterföljande"
+        rel_type: "successor_of"
+      - pattern: "(?i)emoyhteisö|parent body|moderorganisation"
+        rel_type: "hierarchical_superior_of"
+      - pattern: "(?i)alayhteisö|subordinate body|underorganisation"
+        rel_type: "hierarchical_subordinate_of"
+      - pattern: "(?i)liitännäisyhteisö|affiliated|ansluten"
+        rel_type: "affiliated_with"
+      - pattern: "(?i)salanimi|pseudonym"
+        rel_type: "pseudonym_of"
+      - pattern: "(?i)todellinen henkilöllisyys|real identity|verklig identitet"
+        rel_type: "real_identity_of"
+      - pattern: "(?i)jäsen|member|medlem"
+        rel_type: "member_of"
+      - pattern: "(?i)suku|family|familj"
+        rel_type: "related_family"
+    default_relationship_type: "related_to"
+  rda_relationships:
+    predicate_mappings:
+      "http://rdaregistry.info/Elements/a/P50012": "predecessor_of"
+      "http://rdaregistry.info/Elements/u/P60060": "predecessor_of"
+      "http://rdaregistry.info/Elements/a/P50016": "successor_of"
+      "http://rdaregistry.info/Elements/u/P60061": "successor_of"
+      "http://rdaregistry.info/Elements/a/P50336": "related_corporate_body"
+      "http://rdaregistry.info/Elements/u/P60456": "related_corporate_body"
+      "http://rdaregistry.info/Elements/a/P50007": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/a/P50010": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/u/P60096": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/a/P50008": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/a/P50011": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/u/P60097": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/a/P50009": "affiliated_with"
+      "http://rdaregistry.info/Elements/a/P50098": "affiliated_with"
+      "http://rdaregistry.info/Elements/u/P60098": "affiliated_with"
+      "http://schema.org/affiliation": "affiliated_with"
+      "http://rdaregistry.info/Elements/a/P50014": "merged_into"
+      "http://rdaregistry.info/Elements/a/P50015": "absorbed_by"
+      "http://rdaregistry.info/Elements/a/P50095": "member_of"
+      "http://rdaregistry.info/Elements/a/P50028": "has_member"
+      "http://rdaregistry.info/Elements/a/P50029": "founder_of"
+      "http://rdaregistry.info/Elements/a/P50058": "founder_of"
+      "http://rdaregistry.info/Elements/a/P50030": "officer_of"
+      "http://rdaregistry.info/Elements/a/P50018": "officer_of"
+      "http://rdaregistry.info/Elements/a/P50096": "employee_of"
+      "http://rdaregistry.info/Elements/a/P50316": "related_person"
+      "http://rdaregistry.info/Elements/u/P60455": "related_person"
+      "http://rdaregistry.info/Elements/a/P50107": "pseudonym_of"
+      "http://rdaregistry.info/Elements/a/P50108": "pseudonym_of"
+      "http://rdaregistry.info/Elements/u/P60686": "pseudonym_of"
+      "http://rdaregistry.info/Elements/a/P50109": "real_identity_of"
+      "http://rdaregistry.info/Elements/a/P50110": "real_identity_of"
+      "http://rdaregistry.info/Elements/u/P60683": "real_identity_of"
+      "http://rdaregistry.info/Elements/a/P50317": "related_family"
+      "http://rdaregistry.info/Elements/a/P50337": "related_family"
+      "http://rdaregistry.info/Elements/a/P50057": "has_member"
+      "http://rdaregistry.info/Elements/u/P60457": "related_family"
+      "http://www.w3.org/2004/02/skos/core#related": "related_to"
+    note_semantic_patterns:
+      - pattern: "(?i)todellinen\\s+nimi"
+        rel_type: "pseudonym_of"
+      - pattern: "(?i)salanimi"
+        rel_type: "real_identity_of"
+    corporate_classes:
+      - "http://rdaregistry.info/Elements/c/C10005"
+      - "http://urn.fi/URN:NBN:fi:schema:bffi:CorporateName"
+      - "http://id.loc.gov/ontologies/bibframe/Organization"
+      - "http://id.loc.gov/ontologies/bibframe/Corporate"
+      - "http://xmlns.com/foaf/0.1/Organization"
+      - "http://schema.org/Organization"
+    person_classes:
+      - "http://rdaregistry.info/Elements/c/C10004"
+      - "http://urn.fi/URN:NBN:fi:schema:bffi:Person"
+      - "http://id.loc.gov/ontologies/bibframe/Person"
+      - "http://xmlns.com/foaf/0.1/Person"
+      - "http://schema.org/Person"
+    family_classes:
+      - "http://rdaregistry.info/Elements/c/C10008"
+      - "http://rdaregistry.info/Elements/c/C10006"
+      - "http://id.loc.gov/ontologies/bibframe/Family"

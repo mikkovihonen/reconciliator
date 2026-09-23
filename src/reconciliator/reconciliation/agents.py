@@ -6,8 +6,8 @@ from typing import Any, Iterable, Optional
 
 from rapidfuzz import fuzz
 
-from reconciliator.utils.curie import parse_curie
 from reconciliator.models import Agent, AgentURI, BibliographicRecord, IdentifierEntity
+from reconciliator.utils.curie import parse_curie
 from reconciliator.vocab import detect_vocabulary, extract_concept_id
 
 
@@ -266,7 +266,9 @@ def verify_qualifiers(
     threshold: float = 80.0,
 ) -> tuple[bool, str]:
     """Verify compatibility of empirical agent qualifier distributions or lists."""
-    return _verify_distribution_match(target_qualifiers, candidate_qualifiers, "qualifier", threshold=threshold)
+    return _verify_distribution_match(
+        target_qualifiers, candidate_qualifiers, "qualifier", threshold=threshold
+    )
 
 
 def verify_affiliations(
@@ -275,7 +277,9 @@ def verify_affiliations(
     threshold: float = 80.0,
 ) -> tuple[bool, str]:
     """Verify compatibility of agent affiliations (e.g. universities, institutes)."""
-    return _verify_distribution_match(target_affiliations, candidate_affiliations, "affiliation", threshold=threshold)
+    return _verify_distribution_match(
+        target_affiliations, candidate_affiliations, "affiliation", threshold=threshold
+    )
 
 
 def verify_languages(
@@ -320,14 +324,10 @@ def verify_subjects(
 
     # 2. Concept ID match across vocabularies (e.g. 'p2591' in 'yso:p2591' and 'kauno:p2591')
     target_ids = {
-        cid.lower()
-        for k in target_subjects
-        if (cid := extract_concept_id(k)) is not None
+        cid.lower() for k in target_subjects if (cid := extract_concept_id(k)) is not None
     }
     cand_ids = {
-        cid.lower()
-        for k in candidate_subjects
-        if (cid := extract_concept_id(k)) is not None
+        cid.lower() for k in candidate_subjects if (cid := extract_concept_id(k)) is not None
     }
     if target_ids & cand_ids:
         return True, "subject_matched"
@@ -455,7 +455,12 @@ def check_homonym_ambiguity(
         matching_q_cands = []
         for c in close_candidates:
             c_q_dict = c.get("qualifiers") or {}
-            if c_q_dict and verify_qualifiers(effective_qualifiers, c_q_dict, threshold=distribution_match_threshold)[0]:
+            if (
+                c_q_dict
+                and verify_qualifiers(
+                    effective_qualifiers, c_q_dict, threshold=distribution_match_threshold
+                )[0]
+            ):
                 matching_q_cands.append(c)
         if len(matching_q_cands) == 1:
             return True, "ambiguity_resolved_by_qualifier"
@@ -465,7 +470,12 @@ def check_homonym_ambiguity(
         matching_a_cands = []
         for c in close_candidates:
             c_a_dict = c.get("affiliations") or {}
-            if c_a_dict and verify_affiliations(effective_affiliations, c_a_dict, threshold=distribution_match_threshold)[0]:
+            if (
+                c_a_dict
+                and verify_affiliations(
+                    effective_affiliations, c_a_dict, threshold=distribution_match_threshold
+                )[0]
+            ):
                 matching_a_cands.append(c)
         if len(matching_a_cands) == 1:
             return True, "ambiguity_resolved_by_affiliation"
@@ -528,6 +538,78 @@ def check_homonym_ambiguity(
     )
 
 
+def check_agent_relationship(
+    target_agent: Any,
+    candidate: dict[str, Any],
+    target_relationships: Optional[list[dict[str, Any]]] = None,
+) -> Optional[str]:
+    """Check if target and candidate are connected by an explicit identity or lineage relationship."""
+    rels = target_relationships or getattr(target_agent, "relationships", None) or []
+    target_curie = getattr(target_agent, "agent_uri", None)
+    target_id = getattr(target_agent, "id", None)
+    cand_curie = candidate.get("agent_uri") or candidate.get("source_id") or candidate.get("uri")
+    cand_id = candidate.get("id")
+    cand_name = str(candidate.get("name", "")).strip().lower()
+
+    for r in rels:
+        rtype = r.get("relationship_type", "")
+        t_curie = r.get("target_agent_curie") or r.get("target_uri")
+        t_id = r.get("target_agent_id")
+        t_name = str(r.get("target_name", "")).strip().lower()
+
+        matches = False
+        if cand_id and t_id and cand_id == t_id:
+            matches = True
+        elif (
+            cand_curie
+            and t_curie
+            and (
+                cand_curie == t_curie
+                or cand_curie.endswith(t_curie)
+                or t_curie.endswith(cand_curie)
+            )
+        ):
+            matches = True
+        elif cand_name and t_name and (cand_name == t_name or fuzz.ratio(cand_name, t_name) >= 90):
+            matches = True
+
+        if matches:
+            return rtype
+
+    cand_rels = candidate.get("relationships") or []
+    target_name = str(getattr(target_agent, "name", "")).strip().lower()
+    for r in cand_rels:
+        rtype = r.get("relationship_type", "")
+        t_curie = r.get("target_agent_curie") or r.get("target_uri")
+        t_id = r.get("target_agent_id")
+        t_name = str(r.get("target_name", "")).strip().lower()
+
+        matches = False
+        if target_id and t_id and target_id == t_id:
+            matches = True
+        elif (
+            target_curie
+            and t_curie
+            and (
+                target_curie == t_curie
+                or target_curie.endswith(t_curie)
+                or t_curie.endswith(target_curie)
+            )
+        ):
+            matches = True
+        elif (
+            target_name
+            and t_name
+            and (target_name == t_name or fuzz.ratio(target_name, t_name) >= 90)
+        ):
+            matches = True
+
+        if matches:
+            return rtype
+
+    return None
+
+
 class AgentFallbackResolver:
     """Evaluates agent fallback candidates against target agent using dynamic selective guards."""
 
@@ -565,6 +647,7 @@ class AgentFallbackResolver:
         target_publisher: Optional[str] = None,
         target_classifications: Optional[list[tuple[str, str]]] = None,
         target_subjects: Optional[dict[str, int]] = None,
+        target_relationships: Optional[list[dict[str, Any]]] = None,
         vocab_store: Optional[Any] = None,
     ) -> tuple[Optional[dict[str, Any]], str]:
         """Filter and select the best candidate agent via dynamic selective guards.
@@ -605,12 +688,16 @@ class AgentFallbackResolver:
 
         # 3. Evaluate each viable candidate with dynamic guards
         for cand in viable:
+            rel_type = check_agent_relationship(
+                target_agent, cand, target_relationships=target_relationships
+            )
+
             # Identifier guard: if both have identifiers, verify at least one matches
             if target_agent.identifiers and cand.get("identifiers"):
                 ident_ok, ident_reason = verify_agent_identifiers(
                     target_agent.identifiers, cand.get("identifiers", [])
                 )
-                if not ident_ok:
+                if not ident_ok and not rel_type:
                     continue
 
             # Life dates guard
@@ -624,7 +711,14 @@ class AgentFallbackResolver:
                 tolerance_years=self.life_date_tolerance_years,
             )
             if not date_ok:
-                continue
+                if rel_type not in (
+                    "predecessor_of",
+                    "successor_of",
+                    "real_identity_of",
+                    "pseudonym_of",
+                    "alternate_identity_of",
+                ):
+                    continue
 
             # Chronology guard
             if self.verify_chronology:
@@ -635,15 +729,23 @@ class AgentFallbackResolver:
                     min_author_age=self.min_author_age,
                     max_posthumous_years=self.max_posthumous_years,
                 )
-                if not chrono_ok:
+                if not chrono_ok and rel_type not in ("predecessor_of", "successor_of"):
                     continue
 
             # Surname guard: if target has surname, candidate must match surname token
             if target_agent.surname and cand.get("surname"):
                 s_target = target_agent.surname.strip().lower()
                 s_cand = str(cand["surname"]).strip().lower()
-                if s_target != s_cand and fuzz.ratio(s_target, s_cand) < self.surname_match_threshold:
-                    continue
+                if (
+                    s_target != s_cand
+                    and fuzz.ratio(s_target, s_cand) < self.surname_match_threshold
+                ):
+                    if rel_type not in (
+                        "real_identity_of",
+                        "pseudonym_of",
+                        "alternate_identity_of",
+                    ):
+                        continue
 
             # Qualifier distribution guard
             cand_q = cand.get("qualifiers") or {}
@@ -651,7 +753,7 @@ class AgentFallbackResolver:
                 q_ok, _ = verify_qualifiers(
                     target_agent.qualifiers, cand_q, threshold=self.qualifier_similarity_threshold
                 )
-                if not q_ok:
+                if not q_ok and not rel_type:
                     continue
 
             # Affiliation distribution guard
@@ -661,11 +763,12 @@ class AgentFallbackResolver:
                 a_ok, _ = verify_affiliations(
                     target_aff, cand_a, threshold=self.distribution_match_threshold
                 )
-                if not a_ok:
+                if not a_ok and not rel_type:
                     continue
 
             # Candidate passed all active dynamic selective guards!
+            if rel_type:
+                return cand, f"accepted_via_relationship_{rel_type}"
             return cand, "accepted_via_selective_guards"
 
         return None, "all_candidates_rejected_by_guards"
-

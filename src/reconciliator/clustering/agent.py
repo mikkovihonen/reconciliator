@@ -14,8 +14,8 @@ from typing import Any, Optional
 from rapidfuzz import fuzz, utils
 from sqlalchemy import select
 
+from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.config import AgentClusterConfig, AppConfig
-from reconciliator.utils.curie import to_curie
 from reconciliator.database import (
     WEMIRepository,
     agent_attributes_table,
@@ -33,7 +33,6 @@ from reconciliator.models import (
     ClusterLifecycleEvent,
     ClusterRedirection,
 )
-from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.normalizers.linguistic import fold_diacritics
 from reconciliator.utils import UnionFind
 
@@ -105,9 +104,8 @@ class AgentClusterer:
         attributes_by_agent = self._load_attributes(all_agent_ids)
         affiliations_by_agent = self._load_affiliations(all_agent_ids)
         concepts_by_agent = self._load_concepts(all_agent_ids)
-        works_by_agent, coauthors_by_agent, roles_by_agent = self._load_contributions(
-            all_agent_ids
-        )
+        works_by_agent, coauthors_by_agent, roles_by_agent = self._load_contributions(all_agent_ids)
+        agent_relationships = self._load_agent_relationships(all_agent_ids)
 
         # 3. Initialize UnionFind Disjoint-Set Structure
         uf: UnionFind[int] = UnionFind(all_agent_ids)
@@ -118,6 +116,35 @@ class AgentClusterer:
         self._link_by_identifiers(
             all_agent_ids, identifiers_by_agent, uf, link_methods, link_confidences
         )
+
+        # Stage 1b: Optional Deterministic Linking via Configured Identity Coalescence
+        for rel in agent_relationships:
+            src_id = rel.get("source_agent_id")
+            tgt_id = rel.get("target_agent_id")
+            rtype = rel.get("relationship_type")
+            if not src_id or not tgt_id or src_id == tgt_id:
+                continue
+            if src_id not in all_agent_id_set or tgt_id not in all_agent_id_set:
+                continue
+
+            should_link = False
+            if self.config.coalesce_pseudonyms and rtype in (
+                "real_identity_of",
+                "pseudonym_of",
+                "alternate_identity_of",
+            ):
+                should_link = True
+            elif self.config.coalesce_corporate_lineage and rtype in (
+                "predecessor_of",
+                "successor_of",
+            ):
+                should_link = True
+
+            if should_link:
+                uf.union(src_id, tgt_id)
+                pair_key = (min(src_id, tgt_id), max(src_id, tgt_id))
+                link_methods[pair_key] = f"coalesce_{rtype}"
+                link_confidences[pair_key] = 1.0
 
         # 5. Stage 2: Multi-Key Candidate Generation
         candidate_pairs = self._generate_blocking_candidates(agents, attributes_by_agent)
@@ -168,6 +195,7 @@ class AgentClusterer:
         try:
             with self.repo.get_corpus_connection() as conn:
                 from reconciliator.database.schema import corpus_agent_cluster_members_table
+
                 stmt_prev = select(
                     corpus_agent_cluster_members_table.c.agent_id,
                     corpus_agent_cluster_members_table.c.cluster_id,
@@ -376,6 +404,40 @@ class AgentClusterer:
         self.repo.insert_agent_cluster_attributes_batch(cluster_attributes)
         self.identity_manager.record_lifecycle_batch(all_lifecycle_events, all_redirections)
 
+        # Stage 6b: Project agent relationships into corpus_agent_relationships_table
+        if self.config.link_cluster_relationships and agent_relationships:
+            agent_to_cluster = {m.agent_id: m.cluster_id for m in cluster_members}
+            cluster_rels: list[dict[str, Any]] = []
+            seen_cluster_rels: set[tuple[str, str, str]] = set()
+
+            for rel in agent_relationships:
+                src_id = rel.get("source_agent_id")
+                tgt_id = rel.get("target_agent_id")
+                rtype = rel.get("relationship_type")
+                if not src_id or not tgt_id or not rtype:
+                    continue
+                c_src = agent_to_cluster.get(src_id)
+                c_tgt = agent_to_cluster.get(tgt_id)
+                if not c_src or not c_tgt or c_src == c_tgt:
+                    continue
+                rel_key = (c_src, c_tgt, rtype)
+                if rel_key not in seen_cluster_rels:
+                    seen_cluster_rels.add(rel_key)
+                    cluster_rels.append(
+                        {
+                            "source_cluster_id": c_src,
+                            "target_cluster_id": c_tgt,
+                            "relationship_type": rtype,
+                            "confidence": 1.0,
+                        }
+                    )
+            if cluster_rels:
+                logger.info(
+                    "Persisting %d inter-cluster agent relationships to corpus_agent_relationships...",
+                    len(cluster_rels),
+                )
+                self.repo.insert_corpus_agent_relationships_batch(cluster_rels)
+
         logger.info(
             "Agent clustering complete: %d total agents partitioned into %d clusters (%d multi-member, %d singletons).",
             total_agents,
@@ -448,7 +510,7 @@ class AgentClusterer:
         return out
 
     def _load_affiliations(self, agent_ids: list[int]) -> dict[int, set[str]]:
-        """Load affiliations from agent_relationships_table."""
+        """Load affiliations from agent_relationships_table and agent_attributes_table."""
         out: dict[int, set[str]] = defaultdict(set)
         chunk_size = self.config.batch_size
         with self.repo.get_connection() as conn:
@@ -460,12 +522,47 @@ class AgentClusterer:
                     agent_relationships_table.c.target_uri,
                 ).where(
                     agent_relationships_table.c.source_agent_id.in_(chunk),
-                    agent_relationships_table.c.relationship_type == "affiliation",
+                    agent_relationships_table.c.relationship_type.in_(
+                        ("affiliation", "affiliated_with", "member_of")
+                    ),
                 )
                 for r in conn.execute(stmt):
                     val = r[1] or r[2]
                     if val:
                         out[r[0]].add(str(val).strip())
+
+                # Also load from agent_attributes_table
+                stmt_attr = select(
+                    agent_attributes_table.c.agent_id,
+                    agent_attributes_table.c.value,
+                ).where(
+                    agent_attributes_table.c.agent_id.in_(chunk),
+                    agent_attributes_table.c.attribute_type == "affiliation",
+                )
+                for r in conn.execute(stmt_attr):
+                    if r[1]:
+                        out[r[0]].add(str(r[1]).strip())
+        return out
+
+    def _load_agent_relationships(self, agent_ids: list[int]) -> list[dict[str, Any]]:
+        """Load directed agent relationships where either agent is in the active set."""
+        out: list[dict[str, Any]] = []
+        chunk_size = self.config.batch_size
+        with self.repo.get_connection() as conn:
+            for i in range(0, len(agent_ids), chunk_size):
+                chunk = agent_ids[i : i + chunk_size]
+                stmt = select(
+                    agent_relationships_table.c.source_agent_id,
+                    agent_relationships_table.c.target_agent_id,
+                    agent_relationships_table.c.target_name,
+                    agent_relationships_table.c.target_uri,
+                    agent_relationships_table.c.relationship_type,
+                ).where(
+                    (agent_relationships_table.c.source_agent_id.in_(chunk))
+                    | (agent_relationships_table.c.target_agent_id.in_(chunk))
+                )
+                for r in conn.execute(stmt).mappings():
+                    out.append(dict(r))
         return out
 
     def _load_concepts(self, agent_ids: list[int]) -> dict[int, set[str]]:
@@ -651,10 +748,7 @@ class AgentClusterer:
                 abs(d1 - d2) if d1 is not None and d2 is not None else 0,
             )
             if max_diff <= self.config.date_tolerance_years:
-                if (
-                    self.config.require_corroboration_for_date_discrepancy
-                    and not has_corroboration
-                ):
+                if self.config.require_corroboration_for_date_discrepancy and not has_corroboration:
                     return 0.0, "rejected_minor_date_discrepancy_without_corroboration"
             else:
                 return 0.0, "rejected_date_discrepancy_exceeds_tolerance"

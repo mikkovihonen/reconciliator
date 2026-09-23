@@ -1278,11 +1278,19 @@ def reconcile_cmd(
         cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
     ) or cfg.normalization.vocab
     vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
-    embedder = SentenceEmbedder(cfg.embedding)
+    if r_cfg.rerank and r_cfg.rerank.engine in ("llm_judge", "cascade"):
+        from reconciliator.embedding.template import RecordTemplateEngine
+        from reconciliator.judge.factory import create_judge_backend
+
+        embedder = create_judge_backend(r_cfg.rerank.judge)
+        template_engine = RecordTemplateEngine(cfg.embedding.template_path)
+    else:
+        embedder = SentenceEmbedder(cfg.embedding)
+        template_engine = embedder.template_engine
     rec_norm_cfg = r_cfg.normalization or cfg.normalization.record
     normalizer = RecordNormalizer(
         vocab_folder=vocab_folder,
-        template_engine=embedder.template_engine,
+        template_engine=template_engine,
         config=rec_norm_cfg,
     )
     # The embedder is passed so the work and manifestation indexes are live:
@@ -1460,6 +1468,7 @@ def reconcile_cmd(
                 wemi_repo=wemi_repo,
                 matcher=work_matcher,
                 config=r_cfg.cluster,
+                corpus_origins=[corpus_source],
             )
             clusterer.cluster_corpus()
             for lnk in corpus_repo.get_all_corpus_linkages():
@@ -2027,7 +2036,12 @@ def build_index_cmd(
     from reconciliator.indexer import create_vector_engine
 
     cfg = load_config(config_path)
-    embedder = SentenceEmbedder(cfg.embedding)
+    if cfg.reconcile and cfg.reconcile.rerank.engine in ("llm_judge", "cascade"):
+        from reconciliator.judge.factory import create_judge_backend
+
+        embedder = create_judge_backend(cfg.reconcile.rerank.judge)
+    else:
+        embedder = SentenceEmbedder(cfg.embedding)
     wemi_repo = _wemi_repo(cfg, embedder=embedder)
 
     chosen = str(tier).lower()

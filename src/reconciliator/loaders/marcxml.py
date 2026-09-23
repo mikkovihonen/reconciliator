@@ -14,13 +14,21 @@ from lxml import etree
 
 from reconciliator.config import (
     DEFAULT_FICTIONAL_QUALIFIERS,
+    get_carrier_type_mappings,
     get_category_default_field_map,
+    get_content_type_work_types,
+    get_default_carrier_source,
+    get_genre_patterns,
+    get_genre_work_types,
+    get_rda_content_types,
     get_subject_field_category_map,
+    get_tactile_content_codes,
+    get_work_authority_sources,
 )
 from reconciliator.constituents import ConstituentProfile, get_constituent_profile
 from reconciliator.constituents.record import Constituent
 from reconciliator.constituents.record import finalise as finalise_constituents
-from reconciliator.utils.curie import to_curie
+from reconciliator.embedding.template import WEMISerializationEngine
 
 # ISBD presentation punctuation and the stripper live with the loader contract:
 # the charset had a second declaration here, and two copies of a normalisation
@@ -30,6 +38,7 @@ from reconciliator.utils.curie import to_curie
 from reconciliator.loaders.base import DEFAULT_ISBD_PUNCTUATION, strip_isbd
 from reconciliator.models import (
     AgentEntity,
+    AgentRelationshipEntity,
     CarrierType,
     ContributionEntity,
     EntityKey,
@@ -55,10 +64,9 @@ from reconciliator.normalizers.blocking import (
     compute_work_blocking_key,
 )
 from reconciliator.normalizers.relators import normalize_role
-from reconciliator.embedding.template import WEMISerializationEngine
 from reconciliator.utils import to_manifestation_entity_keys
+from reconciliator.utils.curie import parse_curie, to_curie
 from reconciliator.vocab import (
-    detect_vocabulary,
     extract_concept_id,
     fold_subjects,
     subject_footprint,
@@ -263,6 +271,7 @@ def parse_marc_record_elem(
     fallback_id: Optional[str] = None,
     id_source: str = "marc_001",
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
+    work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
@@ -315,13 +324,53 @@ def parse_marc_record_elem(
         vol_designations.extend(parts)
 
     uniform_title = None
+    work_authority_candidates: list[str] = []
+    work_identifiers: dict[str, list[str]] = {}
+
+    work_auth_set = {
+        s.lower()
+        for s in (
+            work_authority_sources
+            if work_authority_sources is not None
+            else get_work_authority_sources()
+        )
+    }
+
     f130 = _get_datafields(record_elem, "130")
     if f130:
         uniform_title = _isbd(_get_subfield(f130[0], "a"))
+        for f in f130:
+            for u in _get_subfields(f, "0") + _get_subfields(f, "1"):
+                if u:
+                    work_authority_candidates.append(u.strip())
     if not uniform_title:
         f240 = _get_datafields(record_elem, "240")
         if f240:
             uniform_title = _isbd(_get_subfield(f240[0], "a"))
+    for f in _get_datafields(record_elem, "240"):
+        for u in _get_subfields(f, "0") + _get_subfields(f, "1"):
+            if u:
+                work_authority_candidates.append(u.strip())
+
+    for tag in ("100", "110", "111", "700", "710", "711"):
+        for f in _get_datafields(record_elem, tag):
+            if _get_subfield(f, "t"):
+                for u in _get_subfields(f, "0") + _get_subfields(f, "1"):
+                    if u:
+                        work_authority_candidates.append(u.strip())
+
+    for tag in ("758",):
+        for f in _get_datafields(record_elem, tag):
+            for u in _get_subfields(f, "0") + _get_subfields(f, "1"):
+                if u:
+                    work_authority_candidates.append(u.strip())
+
+    for raw_wid in work_authority_candidates:
+        src_w, sid_w = parse_curie(raw_wid)
+        if src_w in work_auth_set and sid_w:
+            bucket = work_identifiers.setdefault(src_w, [])
+            if sid_w not in bucket:
+                bucket.append(sid_w)
 
     variant_titles: list[str] = []
     for f in _get_datafields(record_elem, "246"):
@@ -586,10 +635,11 @@ def parse_marc_record_elem(
             name = strip_isbd(_get_subfield(f, "a"), strip_isbd_punctuation, isbd_punctuation)
             if name:
                 sub_cs = [c.strip(" ,;.") for c in _get_subfields(f, "c") if c.strip(" ,;.")]
+                name, parsed_qualifiers = extract_agent_qualifiers(name, sub_cs)
                 sub_d = _get_subfield(f, "d")
                 sub_q = _get_subfield(f, "q")
                 birth_yr, death_yr = parse_marc_dates(sub_d)
-                full_literal = f"{name} {' '.join(sub_cs)}".strip()
+                full_literal = f"{name} {' '.join(parsed_qualifiers)}".strip()
                 is_fictional = any(q in full_literal.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
                 raw_roles = [
                     r.strip(" ,;.")
@@ -608,27 +658,29 @@ def parse_marc_record_elem(
                     norm_roles = [IMPLIED_MAIN_ENTRY_ROLE]
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
-                # Convert ORCID from $0/$1 into an IdentifierEntity
                 agent_identifiers: list[dict[str, Any]] = []
-                for u in u1 + u0:
-                    if "orcid.org" in u.lower():
-                        orcid_id = (
-                            u.replace("https://orcid.org/", "")
-                            .replace("http://orcid.org/", "")
-                            .strip()
+                seen_agent_idents: set[tuple[str, str]] = set()
+                for sub_code, u_list in (("0", u0), ("1", u1)):
+                    for u in u_list:
+                        if not u or not u.strip():
+                            continue
+                        src, val = parse_curie(
+                            u.strip(), default_source="wikidata" if sub_code == "1" else "uri"
                         )
-                        if orcid_id:
-                            agent_identifiers.append(
-                                {
-                                    "entity_type": "agent",
-                                    "source": "orcid",
-                                    "source_id": orcid_id,
-                                    "source_id_normalized": orcid_id.replace("-", "")
-                                    .strip()
-                                    .lower(),
-                                }
-                            )
-                        break
+                        if not val:
+                            continue
+                        key = (src, val)
+                        if key in seen_agent_idents:
+                            continue
+                        seen_agent_idents.add(key)
+                        agent_identifiers.append(
+                            {
+                                "entity_type": "agent",
+                                "source": src,
+                                "source_id": val,
+                                "source_id_normalized": val.replace("-", "").strip().lower(),
+                            }
+                        )
                 agents.append(
                     {
                         "field_tag": tag,
@@ -642,7 +694,7 @@ def parse_marc_record_elem(
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
                         "identifiers": agent_identifiers,
-                        "qualifiers": [c for c in dict.fromkeys(sub_cs) if c],
+                        "qualifiers": parsed_qualifiers,
                         "role_counts": dict(Counter(norm_roles)),
                         "language_counts": dict(rec_languages),
                         "subject_counts": {},
@@ -655,8 +707,9 @@ def parse_marc_record_elem(
             name = strip_isbd(_get_subfield(f, "a"), strip_isbd_punctuation, isbd_punctuation)
             if name:
                 sub_cs = [c.strip(" ,;.") for c in _get_subfields(f, "c") if c.strip(" ,;.")]
+                name, parsed_qualifiers = extract_agent_qualifiers(name, sub_cs)
                 sub_d = _get_subfield(f, "d")
-                full_literal = f"{name} {' '.join(sub_cs)}".strip()
+                full_literal = f"{name} {' '.join(parsed_qualifiers)}".strip()
                 is_fictional = any(q in full_literal.lower() for q in DEFAULT_FICTIONAL_QUALIFIERS)
                 raw_roles = [
                     r.strip(" ,;.")
@@ -675,27 +728,29 @@ def parse_marc_record_elem(
                     norm_roles = [IMPLIED_MAIN_ENTRY_ROLE]
                 u0 = _get_subfields(f, "0")
                 u1 = _get_subfields(f, "1")
-                # Convert ORCID from $0/$1 into an IdentifierEntity
                 agent_identifiers: list[dict[str, Any]] = []
-                for u in u1 + u0:
-                    if "orcid.org" in u.lower():
-                        orcid_id = (
-                            u.replace("https://orcid.org/", "")
-                            .replace("http://orcid.org/", "")
-                            .strip()
+                seen_agent_idents: set[tuple[str, str]] = set()
+                for sub_code, u_list in (("0", u0), ("1", u1)):
+                    for u in u_list:
+                        if not u or not u.strip():
+                            continue
+                        src, val = parse_curie(
+                            u.strip(), default_source="wikidata" if sub_code == "1" else "uri"
                         )
-                        if orcid_id:
-                            agent_identifiers.append(
-                                {
-                                    "entity_type": "agent",
-                                    "source": "orcid",
-                                    "source_id": orcid_id,
-                                    "source_id_normalized": orcid_id.replace("-", "")
-                                    .strip()
-                                    .lower(),
-                                }
-                            )
-                        break
+                        if not val:
+                            continue
+                        key = (src, val)
+                        if key in seen_agent_idents:
+                            continue
+                        seen_agent_idents.add(key)
+                        agent_identifiers.append(
+                            {
+                                "entity_type": "agent",
+                                "source": src,
+                                "source_id": val,
+                                "source_id_normalized": val.replace("-", "").strip().lower(),
+                            }
+                        )
                 agents.append(
                     {
                         "field_tag": tag,
@@ -709,7 +764,7 @@ def parse_marc_record_elem(
                         "uri_subfield_0": u0,
                         "uri_subfield_1": u1,
                         "identifiers": agent_identifiers,
-                        "qualifiers": [c for c in dict.fromkeys(sub_cs) if c],
+                        "qualifiers": parsed_qualifiers,
                         "role_counts": dict(Counter(norm_roles)),
                         "language_counts": dict(rec_languages),
                         "subject_counts": {},
@@ -802,7 +857,9 @@ def parse_marc_record_elem(
             "plate_number": plate_numbers,
             "strn": strns,
             "control_number": [source_id] if source_id else [],
+            **{scheme: list(w_ids) for scheme, w_ids in work_identifiers.items()},
         },
+        "work_identifiers": work_identifiers,
         "fingerprints": fingerprints,
         "patent_numbers": patent_numbers,
         "cartographic_coordinates": cartographic_coordinates,
@@ -861,40 +918,44 @@ def iter_marc_record_elements(
 # parents, so a record carrying one is a broadcast programme either way.
 #
 # Legal: the whole "juridiset teokset" (s1507) branch.
-SLM_WORK_TYPES: dict[str, str] = {
-    # televisio-ohjelmat s1209 and its narrower concepts
-    "televisio-ohjelmat": "broadcast_program",
-    "televisionäytelmät": "broadcast_program",
-    "televisiosarjat": "broadcast_program",
-    "televisioelokuvat": "broadcast_program",
-    "televisio-oopperat": "broadcast_program",
-    # radio-ohjelmat s1416 and its narrower concepts
-    "radio-ohjelmat": "broadcast_program",
-    "radiosarjat": "broadcast_program",
-    "radiosovitukset": "broadcast_program",
-    "kuunnelmat": "broadcast_program",
-    # shared narrower concepts of the two above
-    "dokumenttiohjelmat": "broadcast_program",
-    "lastenohjelmat": "broadcast_program",
-    "musiikkiohjelmat": "broadcast_program",
-    "luonto-ohjelmat": "broadcast_program",
-    # juridiset teokset s1507 and its narrower concepts
-    "juridiset teokset": "legal",
-    "lait": "legal",
-    "asetukset": "legal",
-    "säädöskokoelmat": "legal",
-    "direktiivit": "legal",
-    "valtiosopimukset": "legal",
-    "oikeustapauskokoelmat": "legal",
-    "peruskirjat (juridiset teokset)": "legal",
-    # antologiat s289, whose broader concept is kokoomateokset s963
-    "antologiat": "anthology",
-    "kokoomateokset": "anthology",
-}
+GENRE_WORK_TYPES: dict[str, dict[str, str]] = get_genre_work_types()
+GENRE_PATTERNS: dict[str, list[str]] = get_genre_patterns()
+RDA_CONTENT_TYPES: dict[str, str] = get_rda_content_types()
+CONTENT_TYPE_WORK_TYPES: dict[str, str] = get_content_type_work_types()
+TACTILE_CONTENT_CODES: set[str] = get_tactile_content_codes()
+CARRIER_TYPE_MAPPINGS: dict[str, str] = get_carrier_type_mappings()
 
 
-def determine_work_type(record_elem: etree._Element) -> WorkType:
+def determine_work_type(
+    record_elem: etree._Element,
+    genre_work_types: Optional[dict[str, dict[str, str]]] = None,
+    genre_patterns: Optional[dict[str, list[str]]] = None,
+    content_type_work_types: Optional[dict[str, str]] = None,
+    tactile_content_codes: Optional[Iterable[str]] = None,
+    config: Optional[Any] = None,
+) -> WorkType:
     """Determine WEMI WorkType from Leader/06-07, 007, 008, 336, 502, and 655."""
+    gw_types = (
+        genre_work_types
+        if genre_work_types is not None
+        else get_genre_work_types(config)
+    )
+    gp_patterns = (
+        genre_patterns
+        if genre_patterns is not None
+        else get_genre_patterns(config)
+    )
+    ct_work_types = (
+        content_type_work_types
+        if content_type_work_types is not None
+        else get_content_type_work_types(config)
+    )
+    tactile_codes = (
+        set(tactile_content_codes)
+        if tactile_content_codes is not None
+        else get_tactile_content_codes(config)
+    )
+
     leader_elem = record_elem.find("marc:leader", MARC_NS)
     if leader_elem is None:
         leader_elem = record_elem.find(".//leader")
@@ -910,71 +971,46 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
 
     # Check genre/form headings
     genre_field = get_category_default_field_map()["genre_form"]
-    genre_headings = [
-        (_get_subfield(f, "a") or "").lower() for f in _get_datafields(record_elem, genre_field)
-    ]
-    # Terms taken from SLM (Suomalainen lajityyppi- ja muotosanasto), which the
-    # subject-analysis guidance names as the 655 vocabulary (`$2 slm/fin`), and
-    # verified against Finto rather than guessed. Exact-match first, because
-    # substring matching across this vocabulary collides - "dokumenttiohjelmat"
-    # (broadcast programmes) and "dokumenttielokuvat" (documentary films) share a
-    # stem but are different materials.
-    for gh in genre_headings:
-        term = gh.strip()
-        resolved = SLM_WORK_TYPES.get(term)
-        if resolved:
-            return resolved  # type: ignore[return-value]
+    genre_elements = _get_datafields(record_elem, genre_field)
 
-    for gh in genre_headings:
-        if "sarjakuv" in gh or "manga" in gh:
-            return "comic"
-        if "lautapel" in gh:
-            return "board_game"
-        if "videopel" in gh or "tietokonepel" in gh:
-            return "interactive_game"
-        if "pienpainat" in gh or "tuoteluettel" in gh:
-            return "ephemera"
-        if "näytelm" in gh:
-            return "drama"
-        if "koreograf" in gh:
-            return "choreography"
-        if "standardi" in gh or "standardit" in gh:
-            return "standard"
-        if "patentt" in gh:
-            return "patent"
-        if "podcast" in gh:
-            return "podcast"
-        if "haastattelu" in gh:
-            return "oral_history"
-        if "näyttelyluettel" in gh:
-            return "exhibition"
-        if "kriittinen laitos" in gh:
-            return "critical_edition"
-        if "rahat" in gh or "mitalit" in gh:
-            return "numismatic"
+    # 1. Exact match against configured genre vocabularies
+    for f in genre_elements:
+        gh = (_get_subfield(f, "a") or "").lower().strip()
+        if not gh:
+            continue
+        vocab = (_get_subfield(f, "2") or "").lower().strip()
+        vocab_base = vocab.split("/")[0] if vocab else ""
 
-    # Tactile resources, from either the machine-readable accessibility field or
-    # a tactile RDA content type. The Finnish accessibility guidance directs
-    # cataloguers to 341 (`341 0# $a tactile $e braille $2 sapdv` for a braille
-    # book), and 336 $b carries the tactile content codes independently.
-    #
-    # Placed after the genre headings but before the leader checks: a braille
-    # book has Leader/06 = "a" like any text, so a leader-first order would never
-    # see it. Whether a braille *score* should be "tactile" or "music" is a
-    # genuine cataloguing question and this order answers "tactile" - flagged for
-    # the National Library rather than settled here.
+        # If field specifies a vocabulary code (e.g. "slm"), check its terms first
+        if vocab_base and vocab_base in gw_types:
+            resolved = gw_types[vocab_base].get(gh)
+            if resolved:
+                return resolved  # type: ignore[return-value]
+
+        # Fallback match across all configured genre vocabularies
+        for v_dict in gw_types.values():
+            resolved = v_dict.get(gh)
+            if resolved:
+                return resolved  # type: ignore[return-value]
+
+    # 2. Substring pattern heuristics from configuration
+    for f in genre_elements:
+        gh = (_get_subfield(f, "a") or "").lower()
+        for target_type, patterns in gp_patterns.items():
+            if any(p in gh for p in patterns):
+                return target_type  # type: ignore[return-value]
+
+    # Tactile resources
     for f in _get_datafields(record_elem, "341"):
         for val in _get_subfields(f, "a"):
             if val.strip().lower() == "tactile":
                 return "tactile"
     for f in _get_datafields(record_elem, "336"):
         for sub in _get_subfields(f, "b"):
-            if sub.strip().lower() in TACTILE_CONTENT_CODES:
+            if sub.strip().lower() in tactile_codes:
                 return "tactile"
 
-    # A 111 meeting main entry is a conference. Without this no MARC record ever
-    # became work_type "conference" or "event", so funnel J was unreachable
-    # despite 111 already being parsed as a corporate agent.
+    # A 111 meeting main entry is a conference.
     if _get_datafields(record_elem, "111"):
         return "conference"
 
@@ -1015,21 +1051,7 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     if date1 and int(date1) < 1800:
         return "early_print"
 
-    # Web archive and digital surrogate, from 857 "elektronisen arkiston sijainti
-    # ja käyttö" - the field that exists for material "saatavissa verkkoarkistossa
-    # tai digitaalisessa arkistossa", as distinct from 856's ordinary electronic
-    # location. Its second indicator says what the archived copy IS:
-    #
-    #   # or 0  the described resource itself, held in the archive -> web harvest
-    #   1 or 4  an electronic version of a physical resource       -> surrogate
-    #
-    # 533 "jäljennehuomautus" says the same as indicator 1 in note form.
-    #
-    # Checked after the leader and genre tests on purpose: a digitised map is
-    # still a map, so surrogate-ness only classifies a record that would
-    # otherwise be generic text. That this is a work type at all is arguable -
-    # being a surrogate is a property of the manifestation, not of the work - and
-    # is one of the questions to put to the National Library.
+    # Web archive and digital surrogate
     for f in _get_datafields(record_elem, "857"):
         relationship = (f.get("ind2") or " ").strip()
         if relationship in ("1", "4"):
@@ -1038,14 +1060,10 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     if _get_datafields(record_elem, "533"):
         return "preservation_surrogate"
 
-    # RDA content type as a work-type signal, before the serial/default fall
-    # through. Leader/06 wins where it is specific, but an RDA record is required
-    # to carry 336 and many electronic resources carry a generic leader with a
-    # precise content type - so a dataset coded `336 $b cod` under Leader/06 "a"
-    # was arriving as plain text.
+    # RDA content type as a work-type signal
     for f in _get_datafields(record_elem, "336"):
         for sub in _get_subfields(f, "b"):
-            implied = CONTENT_TYPE_WORK_TYPES.get(sub.strip().lower())
+            implied = ct_work_types.get(sub.strip().lower())
             if implied:
                 return implied  # type: ignore[return-value]
 
@@ -1058,80 +1076,23 @@ def determine_work_type(record_elem: etree._Element) -> WorkType:
     return "text"
 
 
-# MARC 336 $b (rdacontent) -> ExpressionContentType.
-#
-# The full LoC "Term and Code List for RDA Content Types", mapped onto the
-# internal vocabulary. Where RDA is finer-grained than ExpressionContentType the
-# nearest internal value is used and the RDA term is named in the comment, so a
-# future widening of the internal type has the original distinction to hand.
-RDA_CONTENT_TYPES: dict[str, ExpressionContentType] = {
-    "txt": "text",
-    "ntm": "notated_music",
-    "prm": "audio_music",  # performed music
-    "spw": "spoken_word",
-    "snd": "sounds",
-    "sti": "still_image",
-    "tdi": "moving_image",  # two-dimensional moving image: film, video
-    "tdm": "three_dimensional_moving_image",
-    "tdf": "three_dimensional",  # three-dimensional form
-    "cri": "cartographic_image",
-    "crd": "cartographic_dataset",
-    "crm": "moving_image",  # cartographic moving image
-    "crf": "cartographic_image",  # cartographic three-dimensional form
-    "crt": "tactile_cartographic",  # cartographic tactile image
-    "crn": "tactile_cartographic",  # cartographic tactile 3-D form
-    "cod": "dataset",  # computer dataset
-    "cop": "computer_program",
-    "ntv": "choreographic_movement",  # notated movement
-    "tci": "tactile_graphic",  # tactile image
-    "tcm": "tactile_notated_music",
-    "tcn": "tactile_notated_music",  # tactile notated movement
-    "tct": "tactile_text",
-    "tcf": "three_dimensional",  # tactile three-dimensional form
-}
-
-# RDA content type -> WorkType, used only when Leader/06 was not specific.
-# Deliberately partial: codes whose work type the leader already handles well, or
-# which imply nothing about the work type, are left out.
-CONTENT_TYPE_WORK_TYPES: dict[str, str] = {
-    "cri": "cartography",
-    "crd": "cartography",
-    "crm": "cartography",
-    "crf": "cartography",
-    "cod": "dataset",  # computer dataset
-    "cop": "software",  # computer program
-    "ntm": "music",  # notated music
-    "prm": "music",  # performed music
-    "spw": "audio_nonmusic",  # spoken word
-    "sti": "still_image",
-    "tdi": "moving_image",  # two-dimensional moving image
-    "tdm": "moving_image",  # three-dimensional moving image
-    "tdf": "realia",  # three-dimensional form
-    "ntv": "choreography",  # notated movement
-}
-
-# The tactile subset, which is what makes a resource tactile regardless of what
-# else it is. 341 $a "tactile" (‡2 sapdv) says the same thing in machine-readable
-# form and is the field the accessibility guidance directs cataloguers to.
-TACTILE_CONTENT_CODES = frozenset({"tci", "tcm", "tcn", "tct", "tcf", "crt", "crn"})
-
-
 def determine_content_type(
-    record_elem: etree._Element, work_type: WorkType = "text"
+    record_elem: etree._Element,
+    work_type: WorkType = "text",
+    rda_content_types: Optional[dict[str, str]] = None,
+    config: Optional[Any] = None,
 ) -> ExpressionContentType:
     """Determine WEMI ExpressionContentType from 336 $b, Leader/06, or work_type."""
-    # RDA content types (336 $b, $2 rdacontent). Codes verified against the LoC
-    # "Term and Code List for RDA Content Types" rather than transcribed from
-    # memory: the previous mapping had `tdi` (two-dimensional moving image - the
-    # code ordinary film and video carry) pointing at three-dimensional moving
-    # image, `tdm` at a static three-dimensional form, `tcf` and `tcm` swapped
-    # with each other's meanings, and three codes that do not exist in the
-    # vocabulary at all (`dta`, `dcr`, `tcg`).
+    rc_types = (
+        rda_content_types
+        if rda_content_types is not None
+        else get_rda_content_types(config)
+    )
     for f in _get_datafields(record_elem, "336"):
         for sub in _get_subfields(f, "b"):
-            resolved = RDA_CONTENT_TYPES.get(sub.lower().strip())
+            resolved = rc_types.get(sub.lower().strip())
             if resolved:
-                return resolved
+                return resolved  # type: ignore[return-value]
 
     # Fallbacks based on work_type
     if work_type == "music":
@@ -1159,37 +1120,22 @@ def determine_content_type(
     return "text"
 
 
-def determine_carrier_type(record_elem: etree._Element) -> CarrierType:
+def determine_carrier_type(
+    record_elem: etree._Element,
+    carrier_type_mappings: Optional[dict[str, str]] = None,
+    config: Optional[Any] = None,
+) -> CarrierType:
     """Determine WEMI CarrierType from 338 $b or Leader/07/007."""
+    c_mappings = (
+        carrier_type_mappings
+        if carrier_type_mappings is not None
+        else get_carrier_type_mappings(config)
+    )
     for f in _get_datafields(record_elem, "338"):
         for sub in _get_subfields(f, "b"):
-            code = sub.lower()
-            if code == "nc":
-                return "volume"
-            if code == "nb":
-                return "sheet"
-            if code == "sd":
-                return "audio_disc"
-            if code == "ss":
-                return "audiocassette"
-            if code == "vd":
-                return "videodisc"
-            if code == "vf":
-                return "videocassette"
-            if code == "cd":
-                return "computer_disc"
-            if code == "cr":
-                return "online_resource"
-            if code == "cb":
-                return "memory_card"
-            if code == "hd":
-                return "microfilm_reel"
-            if code == "he":
-                return "microfiche"
-            if code == "tc":
-                return "braille_volume"
-            if code == "nr":
-                return "object"
+            code = sub.lower().strip()
+            if code in c_mappings:
+                return c_mappings[code]  # type: ignore[return-value]
 
     # Fallback based on 007
     f007 = _get_controlfield(record_elem, "007") or ""
@@ -1302,6 +1248,96 @@ def is_marc_authority_record(record_elem: etree._Element) -> bool:
     return False
 
 
+def extract_agent_qualifiers(
+    raw_name: str,
+    sub_c_values: Iterable[str] = (),
+    qualifier_config: Optional[Any] = None,
+) -> tuple[str, list[str]]:
+    """Extract qualifiers from subfield values and/or parenthesized name suffix according to configuration."""
+    from reconciliator.config import AppConfig
+
+    if qualifier_config is None:
+        try:
+            qualifier_config = AppConfig().agent_authority.qualifiers
+        except Exception:
+            qualifier_config = None
+
+    pattern_str = getattr(qualifier_config, "qualifier_pattern", r"\(([^)]+)\)$")
+    strip_brackets = getattr(qualifier_config, "strip_enclosing_brackets", True)
+    bracket_pairs = getattr(qualifier_config, "bracket_pairs", [["(", ")"], ["[", "]"]])
+
+    qualifiers: list[str] = []
+    clean_name = raw_name
+
+    # Check parenthesized suffix in raw_name
+    if pattern_str and raw_name:
+        m = re.search(pattern_str, raw_name.strip())
+        if m:
+            q_val = m.group(1).strip()
+            if q_val:
+                qualifiers.append(q_val)
+            clean_name = raw_name[: m.start()].rstrip(" ,;.")
+
+    # Process subfield c values
+    for val in sub_c_values:
+        v = val.strip(" ,;.")
+        if not v:
+            continue
+        if strip_brackets:
+            for pair in bracket_pairs:
+                open_b, close_b = pair[0], pair[1]
+                if v.startswith(open_b) and v.endswith(close_b) and len(v) >= 2:
+                    v = v[len(open_b) : -len(close_b)].strip(" ,;.")
+        if v and v not in qualifiers:
+            qualifiers.append(v)
+
+    return clean_name, qualifiers
+
+
+def resolve_marc_relationship_type(
+    w_code: str,
+    i_desig: str,
+    tag: str = "500",
+    config: Optional[Any] = None,
+) -> str:
+    """Resolve relationship type from MARC 5xx $w code and $i designation according to config."""
+    from reconciliator.config import AppConfig
+
+    marc_rel_cfg = getattr(getattr(config, "agent_authority", None), "marc_relationships", None)
+    if marc_rel_cfg is None:
+        try:
+            marc_rel_cfg = AppConfig().agent_authority.marc_relationships
+        except Exception:
+            marc_rel_cfg = None
+
+    code_mappings = getattr(marc_rel_cfg, "code_mappings", None) or {
+        "a": "predecessor_of",
+        "b": "successor_of",
+        "t": "hierarchical_superior_of",
+        "n": "related_corporate_body",
+    }
+    designation_patterns = getattr(marc_rel_cfg, "designation_patterns", None) or []
+    default_rel_type = getattr(marc_rel_cfg, "default_relationship_type", "related_to")
+
+    w_clean = w_code.strip()
+    if w_clean and w_clean in code_mappings:
+        return code_mappings[w_clean]
+
+    i_clean = i_desig.strip()
+    if i_clean:
+        for pat_entry in designation_patterns:
+            pat = pat_entry.get("pattern", "") if isinstance(pat_entry, dict) else getattr(pat_entry, "pattern", "")
+            r_type = pat_entry.get("rel_type", "") if isinstance(pat_entry, dict) else getattr(pat_entry, "rel_type", "")
+            if pat and r_type and re.search(pat, i_clean):
+                return r_type
+
+    if tag == "510":
+        return "related_corporate_body"
+    elif tag == "500":
+        return "related_person"
+    return default_rel_type
+
+
 def decompose_marc_authority(
     record_elem: etree._Element,
     source: str = "authority",
@@ -1311,6 +1347,8 @@ def decompose_marc_authority(
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
     subject_sink: Optional[list[EntitySubject]] = None,
+    agent_relationship_sink: Optional[list[AgentRelationshipEntity]] = None,
+    config: Optional[Any] = None,
 ) -> tuple[
     list[WorkEntity],
     list[ExpressionEntity],
@@ -1393,6 +1431,9 @@ def decompose_marc_authority(
                 agent_name_clean = (
                     strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
                 )
+                agent_name_clean, parsed_qualifiers = extract_agent_qualifiers(
+                    agent_name_clean, _get_subfields(agent_field, "c"), config
+                )
                 agent_dates = _get_subfield(agent_field, "d")
                 b_yr, d_yr = parse_marc_dates(agent_dates)
                 sub0 = _get_subfield(agent_field, "0") or _get_subfield(agent_field, "1")
@@ -1414,6 +1455,7 @@ def decompose_marc_authority(
                     death_year=d_yr,
                     fuller_name=_get_subfield(agent_field, "q"),
                     is_personal=bool(f100),
+                    qualifiers=parsed_qualifiers,
                 )
                 agents_list.append(agent)
                 contributions.append(
@@ -1601,6 +1643,28 @@ def decompose_marc_authority(
         agent_name_clean = (
             strip_isbd(agent_name, strip_isbd_punctuation, isbd_punctuation) or agent_name
         )
+        sub_c_list = _get_subfields(agent_field, "c")
+        agent_name_clean, parsed_qualifiers = extract_agent_qualifiers(
+            agent_name_clean, sub_c_list, config
+        )
+
+        from reconciliator.config import AppConfig
+
+        q_cfg = getattr(getattr(config, "agent_authority", None), "qualifiers", None)
+        if q_cfg is None:
+            try:
+                q_cfg = AppConfig().agent_authority.qualifiers
+            except Exception:
+                q_cfg = None
+        corp_cat = getattr(q_cfg, "corporate_category_as_qualifier", True)
+        if corp_cat and not f100:
+            for f in _get_datafields(record_elem, "368"):
+                cat_val = _get_subfield(f, "a") or _get_subfield(f, "b")
+                if cat_val:
+                    cat_clean = strip_isbd(cat_val, strip_isbd_punctuation, isbd_punctuation) or cat_val
+                    if cat_clean and cat_clean not in parsed_qualifiers:
+                        parsed_qualifiers.append(cat_clean)
+
         agent_dates = _get_subfield(agent_field, "d")
         birth_yr, death_yr = parse_marc_dates(agent_dates)
 
@@ -1625,11 +1689,13 @@ def decompose_marc_authority(
                     )
 
         # Affiliations from 373
-        affiliations: dict[str, int] = {}
+        affiliations: list[str] = []
         for f in _get_datafields(record_elem, "373"):
             aff = _get_subfield(f, "a")
             if aff:
-                affiliations[aff] = affiliations.get(aff, 0) + 1
+                aff_clean = strip_isbd(aff, strip_isbd_punctuation, isbd_punctuation) or aff
+                if aff_clean and aff_clean not in affiliations:
+                    affiliations.append(aff_clean)
 
         # Identifiers & Agent URI
         agent_uri: Optional[str] = None
@@ -1655,20 +1721,26 @@ def decompose_marc_authority(
         # so reconciliation can transfer them, not just the one chosen as agent_uri.
         for sub_code in ("0", "1"):
             for uri in _get_subfields(agent_field, sub_code):
-                if not uri or any(i.value == uri for i in identifiers):
+                if not uri or not uri.strip():
                     continue
                 if not agent_uri:
-                    agent_uri = uri
-                scheme = (
-                    detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")
-                ).lower()
+                    agent_uri = uri.strip()
+                scheme, val = parse_curie(
+                    uri.strip(), default_source="wikidata" if sub_code == "1" else "uri"
+                )
+                if not val or any(
+                    (i.source == scheme and i.source_id == val)
+                    or i.source_id == uri.strip()
+                    for i in identifiers
+                ):
+                    continue
                 identifiers.append(
                     IdentifierEntity(
                         entity_type="agent",
                         entity_id=0,
                         scheme=scheme,
-                        value=uri,
-                        value_normalized=uri.replace("-", "").strip().lower(),
+                        value=val,
+                        value_normalized=val.replace("-", "").strip().lower(),
                     )
                 )
 
@@ -1696,8 +1768,56 @@ def decompose_marc_authority(
             fuller_name=_get_subfield(agent_field, "q"),
             is_personal=bool(f100),
             variant_names=variant_names,
+            qualifiers=parsed_qualifiers,
+            affiliations=affiliations,
             identifiers=identifiers,
         )
+
+        if agent_relationship_sink is not None:
+            # 373 affiliations as relationships
+            for aff in affiliations:
+                agent_relationship_sink.append(
+                    AgentRelationshipEntity(
+                        source_agent_id=0,
+                        target_agent_id=0,
+                        source_agent_curie=agent_uri,
+                        relationship_type="affiliation",
+                        target_name=aff,
+                    )
+                )
+
+            # 500, 510, 511 See Also From Tracings
+            for tag in ("500", "510", "511"):
+                for f in _get_datafields(record_elem, tag):
+                    if _get_subfield(f, "t") is not None:
+                        continue
+                    t_name = _get_subfield(f, "a")
+                    if not t_name:
+                        continue
+                    t_name_clean = (
+                        strip_isbd(t_name, strip_isbd_punctuation, isbd_punctuation) or t_name
+                    )
+                    w_code = _get_subfield(f, "w") or ""
+                    i_desig = _get_subfield(f, "i") or ""
+                    t_sub0 = _get_subfield(f, "0") or _get_subfield(f, "1")
+
+                    rel_type = resolve_marc_relationship_type(
+                        w_code=w_code,
+                        i_desig=i_desig,
+                        tag=tag,
+                        config=config,
+                    )
+
+                    agent_relationship_sink.append(
+                        AgentRelationshipEntity(
+                            source_agent_id=0,
+                            target_agent_id=0,
+                            source_agent_curie=agent_uri,
+                            target_agent_curie=t_sub0.strip() if t_sub0 else None,
+                            relationship_type=rel_type,
+                            target_name=t_name_clean,
+                        )
+                    )
 
 
         if subject_sink is not None:
@@ -1774,12 +1894,13 @@ def decompose_marc_authority(
 
 def decompose_marc_wemi(
     record_elem: etree._Element,
-    source: str = "melinda",
+    source: Optional[str] = None,
     id_source: str = "marc_001",
     include_items: bool = False,
     record_origin: Optional[RecordOrigin | str] = None,
     serialization_engine: Optional[WEMISerializationEngine] = None,
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
+    work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
@@ -1787,6 +1908,7 @@ def decompose_marc_wemi(
     subject_sink: Optional[list[EntitySubject]] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
+    config: Optional[Any] = None,
 ) -> tuple[
     WorkEntity,
     ExpressionEntity,
@@ -1805,6 +1927,9 @@ def decompose_marc_wemi(
     eleventh tuple element so that adding it does not break the ten-way unpacking
     at every existing call site; the tuple is slated to become a result object.
     """
+    if source is None:
+        source = get_default_carrier_source(config)
+
     # record_origin names the ingest source since Phase 13. An explicit value
     # wins; otherwise the source name is the origin.
     effective_origin: RecordOrigin = record_origin or source or "unknown"
@@ -1813,6 +1938,7 @@ def decompose_marc_wemi(
         source=source,
         id_source=id_source,
         supported_subject_vocabularies=supported_subject_vocabularies,
+        work_authority_sources=work_authority_sources,
         legacy_to_modern=legacy_to_modern,
         relator_mappings=relator_mappings,
         vocab_store=vocab_store,
@@ -1840,9 +1966,9 @@ def decompose_marc_wemi(
     if not work_uri:
         work_uri = f"urn:work:{source}:{source_id}"
 
-    work_type = determine_work_type(record_elem)
-    content_type = determine_content_type(record_elem, work_type=work_type)
-    carrier_type = determine_carrier_type(record_elem)
+    work_type = determine_work_type(record_elem, config=config)
+    content_type = determine_content_type(record_elem, work_type=work_type, config=config)
+    carrier_type = determine_carrier_type(record_elem, config=config)
 
     # Variant titles from 246 (Varying Form of Title) and 740 (Uncontrolled
     # Related/Analytical Title) are routed through subject_sink so they're
@@ -2088,6 +2214,19 @@ def decompose_marc_wemi(
             )
         )
 
+    # 1..n Work Authority Identifiers dynamically emitted
+    for scheme, wids in (parsed.get("work_identifiers") or {}).items():
+        for wid in wids:
+            identifiers.append(
+                IdentifierEntity(
+                    entity_type="work",
+                    entity_id=0,
+                    scheme=scheme,
+                    value=wid,
+                    value_normalized=wid.strip().lower(),
+                )
+            )
+
     # Digital File Formats (347)
     for fmt in parsed.get("digital_file_formats", []):
         identifiers.append(
@@ -2242,38 +2381,17 @@ def decompose_marc_wemi(
         )
 
         # Persist every authority URI carried on the agent.
-        # Use identifiers from the agent dict if available, else fall back to u0/u1.
-        agent_idents = a.get("identifiers", [])
-        if agent_idents:
-            for ident_data in agent_idents:
-                identifiers.append(
-                    IdentifierEntity(
-                        entity_type="agent",
-                        entity_id=0,
-                        entity_uri=a_uri,
-                        source=ident_data.get("source", "uri"),
-                        source_id=ident_data.get("source_id", ""),
-                        source_id_normalized=ident_data.get("source_id_normalized", ""),
-                    )
+        for ident_data in a.get("identifiers", []):
+            identifiers.append(
+                IdentifierEntity(
+                    entity_type="agent",
+                    entity_id=0,
+                    entity_uri=a_uri,
+                    source=ident_data.get("source", "uri"),
+                    source_id=ident_data.get("source_id", ""),
+                    source_id_normalized=ident_data.get("source_id_normalized", ""),
                 )
-        else:
-            for sub_code, uri_list in (("0", u0), ("1", u1)):
-                for uri in uri_list:
-                    if not uri:
-                        continue
-                    scheme = (
-                        detect_vocabulary(uri) or ("wikidata" if sub_code == "1" else "uri")
-                    ).lower()
-                    identifiers.append(
-                        IdentifierEntity(
-                            entity_type="agent",
-                            entity_id=0,
-                            entity_uri=a_uri,
-                            scheme=scheme,
-                            value=uri,
-                            value_normalized=uri.replace("-", "").strip().lower(),
-                        )
-                    )
+            )
 
     # Bind non-agent identifiers to their owning entity by URI so that a batch
     # holding several records does not attribute them all to the first one.
@@ -2701,6 +2819,7 @@ def build_target_record_from_marc(
     id_source: str = "marc_001",
     serialization_engine: Optional[WEMISerializationEngine] = None,
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
+    work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
@@ -2713,6 +2832,7 @@ def build_target_record_from_marc(
         source=source,
         id_source=id_source,
         supported_subject_vocabularies=supported_subject_vocabularies,
+        work_authority_sources=work_authority_sources,
         legacy_to_modern=legacy_to_modern,
         relator_mappings=relator_mappings,
         vocab_store=vocab_store,
@@ -2754,6 +2874,7 @@ def build_target_record_from_marc(
         id_source=id_source,
         serialization_engine=engine,
         supported_subject_vocabularies=supported_subject_vocabularies,
+        work_authority_sources=work_authority_sources,
         legacy_to_modern=legacy_to_modern,
     )
 

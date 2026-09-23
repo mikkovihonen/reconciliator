@@ -14,6 +14,7 @@ from reconciliator.config import (
     DEFAULT_VOLUME_SUFFIXES,
     RecordNormalizationConfig,
 )
+from reconciliator.embedding.template import RecordTemplateEngine
 from reconciliator.models import (
     Agent,
     BibliographicRecord,
@@ -33,7 +34,6 @@ from reconciliator.normalizers.identifiers import (
 )
 from reconciliator.normalizers.linguistic import build_biographical_date_pattern
 from reconciliator.normalizers.relators import RelatorRegistry
-from reconciliator.embedding.template import RecordTemplateEngine
 from reconciliator.vocab import VocabFolder, extract_concept_id, normalize_subject_vocabulary
 
 
@@ -464,9 +464,22 @@ class RecordNormalizer:
                 dois.append(norm_doi)
 
         other_ids = [str(oid).strip() for oid in raw_ids.get("other_ids", []) if oid]
+        work_identifiers: dict[str, list[str]] = {}
+        raw_work_ids = raw_ids.get("work_identifiers", {})
+        if isinstance(raw_work_ids, dict):
+            for k, v in raw_work_ids.items():
+                if isinstance(v, list):
+                    work_identifiers[str(k)] = [str(x).strip() for x in v if str(x).strip()]
+                elif isinstance(v, str) and v.strip():
+                    work_identifiers[str(k)] = [v.strip()]
 
         identifiers = RecordIdentifiers(
-            isbn=isbns, issn=issns, urn=urns, doi=dois, other_ids=other_ids
+            isbn=isbns,
+            issn=issns,
+            urn=urns,
+            doi=dois,
+            other_ids=other_ids,
+            work_identifiers=work_identifiers,
         )
 
         # Agents
@@ -640,6 +653,12 @@ class RecordNormalizer:
             volume_designation=volume_designation,
             classifications=classifications,
             identifiers=identifiers,
+            work_identifiers=work_identifiers
+            or (
+                raw_data.get("work_identifiers")
+                if isinstance(raw_data.get("work_identifiers"), dict)
+                else {}
+            ),
             agents=agents,
             subjects=subjects,
             serialization="",

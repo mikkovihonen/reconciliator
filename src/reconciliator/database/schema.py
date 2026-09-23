@@ -680,6 +680,35 @@ corpus_agent_cluster_attributes_table = Table(
     Index("idx_agent_cluster_attr_cluster", "cluster_id", "attribute_type"),
 )
 
+corpus_agent_relationships_table = Table(
+    "corpus_agent_relationships",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "source_cluster_id",
+        String(64),
+        ForeignKey("corpus_agent_clusters.cluster_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "target_cluster_id",
+        String(64),
+        ForeignKey("corpus_agent_clusters.cluster_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("relationship_type", String(64), nullable=False),
+    Column("confidence", Float, nullable=False, default=1.0, server_default="1.0"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    UniqueConstraint(
+        "source_cluster_id",
+        "target_cluster_id",
+        "relationship_type",
+        name="uq_corpus_agent_relationships",
+    ),
+    Index("idx_corpus_agent_rel_source", "source_cluster_id", "relationship_type"),
+    Index("idx_corpus_agent_rel_target", "target_cluster_id", "relationship_type"),
+)
+
 cluster_lifecycle_events_table = Table(
     "cluster_lifecycle_events",
     metadata,
@@ -833,6 +862,7 @@ __all__ = [
     "corpus_agent_clusters_table",
     "corpus_agent_cluster_members_table",
     "corpus_agent_cluster_attributes_table",
+    "corpus_agent_relationships_table",
     "review_changesets_table",
     "changeset_operations_table",
     "entity_pins_table",
