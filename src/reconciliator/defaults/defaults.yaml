@@ -1176,6 +1176,8 @@ storage:
     default_limit: 20
     prefix_search: false
 
+vector_model: "embedding"
+
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
   template_path: "reconciliator/templates/default_serialization.j2"
@@ -1184,6 +1186,24 @@ embedding:
   vector_dim: null
   force_template: false
   max_seq_length: null
+  cuda_batch_scale: 4
+  mps_batch_scale: 2
+  num_cpu_threads: null
+
+llm:
+  backend: "auto"
+  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  quantization: "8bit"
+  device: "auto"
+  torch_dtype: "auto"
+  attn_implementation: "auto"
+  pooling_strategy: "last_token"
+  batch_size: 16
+  positive_token: "YES"
+  negative_token: "NO"
+  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+  candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+  max_seq_length: 2048
 
 reconcile:
   target_work_types: []
@@ -1214,20 +1234,6 @@ reconcile:
     device: "auto"
     batch_size: 16
     apply_pre_veto: true
-    judge:
-      backend: "auto"
-      model_name: "Qwen/Qwen2.5-7B-Instruct"
-      quantization: "8bit"
-      device: "auto"
-      torch_dtype: "auto"
-      attn_implementation: "auto"
-      pooling_strategy: "last_token"
-      batch_size: 16
-      positive_token: "YES"
-      negative_token: "NO"
-      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
-      candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
-      max_seq_length: 2048
     cascade:
       heuristic_engine: "bm25"
       high_confidence_threshold: 0.90

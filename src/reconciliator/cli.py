@@ -24,9 +24,8 @@ from reconciliator.config import (
     configure_logging,
     load_config,
 )
-from reconciliator.ingestion.sanitizer import sanitize_batch_payload
-from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.database import (
+    WEMIRepository,
     get_container_storage_mount,
     is_container_present,
     is_container_running,
@@ -35,10 +34,10 @@ from reconciliator.database import (
     start_postgres_container,
     stop_postgres_container,
 )
-from reconciliator.embedding.embedder import SentenceEmbedder
 from reconciliator.indexer.ipc.client import DaemonLifecycleManager
 from reconciliator.indexer.ipc.protocol import get_default_socket_path
 from reconciliator.ingestion.oai import ingest_oai_pipeline
+from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
@@ -60,7 +59,6 @@ from reconciliator.loaders.marcxml import (
     iter_marc_record_elements,
     parse_marc_record_elem,
 )
-from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
@@ -87,6 +85,7 @@ from reconciliator.progress import (
     render_vector_daemon_panel,
     run_telemetry_tui,
 )
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.reports import (
     AgentReportRow,
     ExpressionReportRow,
@@ -94,8 +93,8 @@ from reconciliator.reports import (
     SubjectReportRow,
     WorkReportRow,
 )
-from reconciliator.database import WEMIRepository
 from reconciliator.utils import parse_duration_seconds
+from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.vocab import VocabFolder, VocabStore, detect_vocabulary
 from reconciliator.xml_enricher import MARCXMLEnricher
 
@@ -134,7 +133,9 @@ def db_start_cmd(
         f"[bold blue]Starting PostgreSQL container '{pg.container_name}' on port {pg.port}...[/bold blue]"
     )
     if target_data_dir:
-        console.print(f"[bold cyan]Using host bind mount for storage:[/bold cyan] {target_data_dir}")
+        console.print(
+            f"[bold cyan]Using host bind mount for storage:[/bold cyan] {target_data_dir}"
+        )
 
     try:
         start_postgres_container(
@@ -173,7 +174,9 @@ def db_migrate_storage_cmd(
     pg = cfg.storage.postgres
     cname = pg.container_name
 
-    console.print(f"[bold blue]Migrating container '{cname}' data to host directory: {target_dir}...[/bold blue]")
+    console.print(
+        f"[bold blue]Migrating container '{cname}' data to host directory: {target_dir}...[/bold blue]"
+    )
     try:
         migrate_container_storage_to_host(target_host_dir=target_dir, name=cname)
         console.print(
@@ -231,10 +234,14 @@ def db_status_cmd(
     table.add_row("Host / Port", f"{pg.host}:{pg.port}")
     table.add_row("Database", pg.database)
     table.add_row("User", pg.user)
-    active_mount = get_container_storage_mount(cname) or (str(eff_data_dir) if eff_data_dir else None)
+    active_mount = get_container_storage_mount(cname) or (
+        str(eff_data_dir) if eff_data_dir else None
+    )
     table.add_row(
         "Storage Bind Mount",
-        f"[bold cyan]{active_mount}[/bold cyan]" if active_mount else "None (Podman internal volume)",
+        f"[bold cyan]{active_mount}[/bold cyan]"
+        if active_mount
+        else "None (Podman internal volume)",
     )
 
     console.print(table)
@@ -1040,7 +1047,11 @@ def _ingest_corpus_as_wemi(
         except Exception as exc:
             from sqlalchemy.exc import DataError
 
-            if isinstance(exc, DataError) and config is not None and config.truncate_overlong_values:
+            if (
+                isinstance(exc, DataError)
+                and config is not None
+                and config.truncate_overlong_values
+            ):
                 from reconciliator.logging import log_validation
 
                 log_validation(
@@ -1278,15 +1289,18 @@ def reconcile_cmd(
         cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
     ) or cfg.normalization.vocab
     vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
-    if r_cfg.rerank and r_cfg.rerank.engine in ("llm_judge", "cascade"):
-        from reconciliator.embedding.template import RecordTemplateEngine
-        from reconciliator.judge.factory import create_judge_backend
+    from reconciliator.embedding import create_vector_embedder
+    from reconciliator.embedding.template import RecordTemplateEngine
 
-        embedder = create_judge_backend(r_cfg.rerank.judge)
-        template_engine = RecordTemplateEngine(cfg.embedding.template_path)
-    else:
-        embedder = SentenceEmbedder(cfg.embedding)
-        template_engine = embedder.template_engine
+    embedder = create_vector_embedder(cfg)
+    template_path = (
+        cfg.embedding.template_path
+        if cfg.embedding
+        else Path("reconciliator/embedding/templates/default_serialization.j2")
+    )
+    template_engine = getattr(embedder, "template_engine", None) or RecordTemplateEngine(
+        template_path
+    )
     rec_norm_cfg = r_cfg.normalization or cfg.normalization.record
     normalizer = RecordNormalizer(
         vocab_folder=vocab_folder,
@@ -1986,7 +2000,6 @@ def cluster_agents_cmd(
 
 
 @app.command("build-agent-index")
-
 def build_agent_index_cmd(
     config_path: Path = typer.Option(
         Path("config.yaml"), "--config", "-c", help="Path to config.yaml"
@@ -1998,7 +2011,9 @@ def build_agent_index_cmd(
 
     cfg = load_config(config_path)
     wemi_repo = _wemi_repo(cfg)
-    embedder = SentenceEmbedder(cfg.embedding)
+    from reconciliator.embedding import create_vector_embedder
+
+    embedder = create_vector_embedder(cfg)
     agent_indexer = create_vector_engine(
         cfg.storage.agent_index,
         dimension=embedder.dimension,
@@ -2036,12 +2051,9 @@ def build_index_cmd(
     from reconciliator.indexer import create_vector_engine
 
     cfg = load_config(config_path)
-    if cfg.reconcile and cfg.reconcile.rerank.engine in ("llm_judge", "cascade"):
-        from reconciliator.judge.factory import create_judge_backend
+    from reconciliator.embedding import create_vector_embedder
 
-        embedder = create_judge_backend(cfg.reconcile.rerank.judge)
-    else:
-        embedder = SentenceEmbedder(cfg.embedding)
+    embedder = create_vector_embedder(cfg)
     wemi_repo = _wemi_repo(cfg, embedder=embedder)
 
     chosen = str(tier).lower()
@@ -2158,6 +2170,7 @@ def serve_cmd(
 ) -> None:
     """Launch Reconciliator REST API and Web UI server."""
     import uvicorn
+
     from reconciliator.api import create_app
 
     resolved_config = _resolve_cli_config(config)
@@ -2171,7 +2184,9 @@ def serve_cmd(
     wemi_repo = _wemi_repo(cfg)
     embedder = None
     try:
-        embedder = SentenceEmbedder(cfg.embedding)
+        from reconciliator.embedding import create_vector_embedder
+
+        embedder = create_vector_embedder(cfg)
     except Exception as e:
         logger.debug("Embedder not loaded for API serve: %s", e)
 

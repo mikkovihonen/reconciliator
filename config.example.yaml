@@ -98,8 +98,15 @@ storage:
     prefix_search: false          # Append wildcard * to search terms by default
 
 # ==============================================================================
-# 3. Embedding Model & Template Serialization
+# 3. Vector Model Configuration
 # ==============================================================================
+# Reconciliator builds and queries vector indices (work, manifestation, agent)
+# using either a lightweight SentenceTransformers embedding model OR an
+# autoregressive base LLM (with last-token pooling & KV-branching).
+# Set 'vector_model' explicitly to either "embedding" or "llm".
+vector_model: "embedding"
+
+# --- Option A: Fast Embedding Model (SentenceTransformers, CPU/MPS/CUDA) ---
 embedding:
   # HuggingFace model identifier or local directory for dense sentence embedding
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
@@ -107,11 +114,31 @@ embedding:
   # Jinja2 template used for serializing bibliographic metadata into embeddable strings
   template_path: "reconciliator/templates/default_serialization.j2"
 
+  # Inference device: 'auto', 'cpu', 'cuda', 'mps'
+  device: "auto"
+
   # Inference batch size for sentence embedding encoding
   batch_size: 64
 
   # If true, permits reconciliation even if template hash differs from vector index metadata
   force_template: false
+
+# --- Option B: Base LLM Judge & Dense Retriever (Qwen2.5 / PyTorch / MLX) ---
+# To switch active vector model from embedding to LLM, set `vector_model: "llm"` above.
+llm:
+  backend: "auto"                        # 'auto', 'torch', or 'mlx' (Apple Silicon native)
+  model_name: "Qwen/Qwen2.5-7B-Instruct" # HuggingFace model name or local path
+  quantization: "8bit"                   # '8bit', '4bit', or null
+  device: "auto"                         # 'auto', 'cuda', 'mps', 'cpu'
+  torch_dtype: "auto"
+  attn_implementation: "auto"
+  pooling_strategy: "last_token"
+  batch_size: 16                         # Batch size for dense vector extraction
+  positive_token: "YES"
+  negative_token: "NO"
+  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+  candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+  max_seq_length: 2048                   # Maximum sequence length for context window
 
 # ==============================================================================
 # 4. Linguistic Rules & Text Normalization Conventions

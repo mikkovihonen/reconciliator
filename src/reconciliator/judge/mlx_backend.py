@@ -149,6 +149,10 @@ class MLXJudgeBackend:
             base_seq_len=base_seq_len,
         )
 
+    def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
+        """Batch dense encoding (SentenceEmbedder protocol parity)."""
+        return self.encode_batch_dense(texts)
+
     def encode_batch_dense(self, texts: list[str]) -> np.ndarray:
         """Batch dense encoding for vector indexing."""
         if not texts:

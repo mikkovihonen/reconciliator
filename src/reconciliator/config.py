@@ -173,6 +173,10 @@ _ENRICH_DEFAULTS = get_bundled_enrichment_defaults()
 _COMPUTE_DEFAULTS = get_bundled_section_defaults("compute")
 _STORAGE_DEFAULTS = get_bundled_section_defaults("storage")
 _EMBED_DEFAULTS = get_bundled_section_defaults("embedding")
+_LLM_DEFAULTS = get_bundled_section_defaults("llm")
+_VECTOR_MODEL_DEFAULT: Literal["embedding", "llm"] = str(
+    get_bundled_defaults().get("vector_model") or "embedding"
+)  # type: ignore[assignment]
 _RECONCILE_DEFAULTS = get_bundled_section_defaults("reconcile")
 _CLUSTER_DEFAULTS = dict(_RECONCILE_DEFAULTS.get("cluster") or {})
 _CONSOLIDATION_DEFAULTS = get_bundled_section_defaults("consolidation")
@@ -207,6 +211,21 @@ def get_bundled_bruno_defaults() -> dict[str, Any]:
 def get_bundled_agent_authority_defaults() -> dict[str, Any]:
     """Get bundled default agent authority settings dictionary."""
     return dict(_AGENT_AUTHORITY_DEFAULTS)
+
+
+def get_bundled_embedding_defaults() -> dict[str, Any]:
+    """Get bundled default embedding model settings dictionary."""
+    return dict(_EMBED_DEFAULTS)
+
+
+def get_bundled_llm_defaults() -> dict[str, Any]:
+    """Get bundled default LLM settings dictionary."""
+    return dict(_LLM_DEFAULTS)
+
+
+def get_bundled_vector_model_default() -> str:
+    """Get bundled default vector model selection ('embedding' or 'llm')."""
+    return str(_VECTOR_MODEL_DEFAULT)
 
 
 def get_bundled_oai_ingest_defaults() -> dict[str, Any]:
@@ -306,7 +325,9 @@ def get_wikidata_author_properties() -> dict[str, str]:
 def get_work_authority_sources(config: Optional[Any] = None) -> list[str]:
     """Retrieve the configured list of work-level authority source names."""
     if config is not None:
-        if hasattr(config, "vocabularies") and getattr(config.vocabularies, "work_authority_sources", None):
+        if hasattr(config, "vocabularies") and getattr(
+            config.vocabularies, "work_authority_sources", None
+        ):
             return list(config.vocabularies.work_authority_sources)
         if isinstance(config, dict):
             vocab = config.get("vocabularies", {})
@@ -528,26 +549,40 @@ class PostgresConfig(BaseModel):
     # Performance tuning parameters
     shared_buffers: str = Field(default_factory=lambda: str(_PG_DEFAULTS["shared_buffers"]))
     work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS["work_mem"]))
-    maintenance_work_mem: str = Field(default_factory=lambda: str(_PG_DEFAULTS["maintenance_work_mem"]))
-    effective_cache_size: str = Field(default_factory=lambda: str(_PG_DEFAULTS["effective_cache_size"]))
+    maintenance_work_mem: str = Field(
+        default_factory=lambda: str(_PG_DEFAULTS["maintenance_work_mem"])
+    )
+    effective_cache_size: str = Field(
+        default_factory=lambda: str(_PG_DEFAULTS["effective_cache_size"])
+    )
     random_page_cost: float = Field(default_factory=lambda: float(_PG_DEFAULTS["random_page_cost"]))
     synchronous_commit: str = Field(default_factory=lambda: str(_PG_DEFAULTS["synchronous_commit"]))
 
     # Container settings
     container_name: str = Field(default_factory=lambda: str(_PG_DEFAULTS["container_name"]))
     container_image: str = Field(default_factory=lambda: str(_PG_DEFAULTS["container_image"]))
-    container_timeout_seconds: float = Field(default_factory=lambda: float(_PG_DEFAULTS["container_timeout_seconds"]))
-    auto_start_container: bool = Field(default_factory=lambda: bool(_PG_DEFAULTS["auto_start_container"]))
+    container_timeout_seconds: float = Field(
+        default_factory=lambda: float(_PG_DEFAULTS["container_timeout_seconds"])
+    )
+    auto_start_container: bool = Field(
+        default_factory=lambda: bool(_PG_DEFAULTS["auto_start_container"])
+    )
     locale: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("locale"))
     lc_collate: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("lc_collate"))
     lc_ctype: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("lc_ctype"))
     initdb_args: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("initdb_args"))
 
     # Batch execution limits
-    max_parameters_per_batch: int = Field(default_factory=lambda: int(_PG_DEFAULTS["max_parameters_per_batch"]))
-    default_chunk_size: Optional[int] = Field(default_factory=lambda: _PG_DEFAULTS.get("default_chunk_size"))
+    max_parameters_per_batch: int = Field(
+        default_factory=lambda: int(_PG_DEFAULTS["max_parameters_per_batch"])
+    )
+    default_chunk_size: Optional[int] = Field(
+        default_factory=lambda: _PG_DEFAULTS.get("default_chunk_size")
+    )
     data_dir: Optional[Path] = Field(
-        default_factory=lambda: Path(_PG_DEFAULTS["data_dir"]) if _PG_DEFAULTS.get("data_dir") else None
+        default_factory=lambda: (
+            Path(_PG_DEFAULTS["data_dir"]) if _PG_DEFAULTS.get("data_dir") else None
+        )
     )
 
     def get_effective_data_dir(self) -> Optional[Path]:
@@ -628,21 +663,44 @@ class StorageConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """Embedding model and hardware acceleration configuration."""
 
-    model_name: str = "TurkuNLP/sbert-cased-finnish-paraphrase"
-    template_path: Path = Path("reconciliator/embedding/templates/default_serialization.j2")
-    device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
-    batch_size: int = 64
-    cuda_batch_scale: int = 4
-    mps_batch_scale: int = 2
-    num_cpu_threads: Optional[int] = None  # None → os.cpu_count()
-    force_template: bool = False
+    model_name: str = Field(
+        default_factory=lambda: str(
+            _EMBED_DEFAULTS.get("model_name", "TurkuNLP/sbert-cased-finnish-paraphrase")
+        )
+    )
+    template_path: Path = Field(
+        default_factory=lambda: Path(
+            _EMBED_DEFAULTS.get(
+                "template_path", "reconciliator/embedding/templates/default_serialization.j2"
+            )
+        )
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: _EMBED_DEFAULTS.get("device", "auto")
+    )
+    batch_size: int = Field(default_factory=lambda: int(_EMBED_DEFAULTS.get("batch_size", 64)))
+    cuda_batch_scale: int = Field(
+        default_factory=lambda: int(_EMBED_DEFAULTS.get("cuda_batch_scale", 4))
+    )
+    mps_batch_scale: int = Field(
+        default_factory=lambda: int(_EMBED_DEFAULTS.get("mps_batch_scale", 2))
+    )
+    num_cpu_threads: Optional[int] = Field(
+        default_factory=lambda: _EMBED_DEFAULTS.get("num_cpu_threads")
+    )
+    force_template: bool = Field(
+        default_factory=lambda: bool(_EMBED_DEFAULTS.get("force_template", False))
+    )
+    vector_dim: Optional[int] = Field(default_factory=lambda: _EMBED_DEFAULTS.get("vector_dim"))
+    max_seq_length: Optional[int] = Field(
+        default_factory=lambda: _EMBED_DEFAULTS.get("max_seq_length")
+    )
 
     @model_validator(mode="after")
     def validate_batch_size(self) -> EmbeddingConfig:
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be a positive integer, got {self.batch_size}")
         return self
-
 
 
 # ---------------------------------------------------------------------------
@@ -719,9 +777,7 @@ class SourceConfig(BaseModel):
 class HierarchyConfig(BaseModel):
     """Configuration for hierarchical vocabulary traversal, reasoning, and semantic similarity."""
 
-    enabled: bool = Field(
-        default_factory=lambda: bool(_HIERARCHY_DEFAULTS.get("enabled", True))
-    )
+    enabled: bool = Field(default_factory=lambda: bool(_HIERARCHY_DEFAULTS.get("enabled", True)))
     max_traversal_depth: int = Field(
         default_factory=lambda: int(_HIERARCHY_DEFAULTS.get("max_traversal_depth", 10))
     )
@@ -732,9 +788,7 @@ class HierarchyConfig(BaseModel):
         default_factory=lambda: float(_HIERARCHY_DEFAULTS.get("path_decay_factor", 0.85))
     )
     similarity_algorithm: Literal["path_decay", "wu_palmer"] = Field(
-        default_factory=lambda: str(
-            _HIERARCHY_DEFAULTS.get("similarity_algorithm", "path_decay")
-        )  # type: ignore[arg-type]
+        default_factory=lambda: str(_HIERARCHY_DEFAULTS.get("similarity_algorithm", "path_decay"))  # type: ignore[arg-type]
     )
     min_similarity_threshold: float = Field(
         default_factory=lambda: float(_HIERARCHY_DEFAULTS.get("min_similarity_threshold", 0.60))
@@ -918,8 +972,6 @@ class VocabulariesConfig(BaseModel):
     @property
     def biographical_date_pattern(self) -> Optional[str]:
         return None
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -1314,7 +1366,6 @@ class VocabIngestConfig(BaseModel):
     field_length_overrides: dict[str, int] = Field(default_factory=dict)
 
 
-
 class IngestFilterConfig(BaseModel):
     """Universal publication and media type filter configuration."""
 
@@ -1327,12 +1378,8 @@ class IngestFilterConfig(BaseModel):
     target_languages: list[str] = Field(
         default_factory=lambda: list(_INGEST_DEFAULTS.get("target_languages") or [])
     )
-    from_year: Optional[int] = Field(
-        default_factory=lambda: _INGEST_DEFAULTS.get("from_year")
-    )
-    until_year: Optional[int] = Field(
-        default_factory=lambda: _INGEST_DEFAULTS.get("until_year")
-    )
+    from_year: Optional[int] = Field(default_factory=lambda: _INGEST_DEFAULTS.get("from_year"))
+    until_year: Optional[int] = Field(default_factory=lambda: _INGEST_DEFAULTS.get("until_year"))
 
     def accepts(
         self,
@@ -1481,15 +1528,9 @@ class WikidataIngestConfig(IngestFilterConfig):
     human_and_entity_types: list[str] = Field(
         default_factory=lambda: list(_WIKIDATA_INGEST_DEFAULTS.get("human_and_entity_types") or [])
     )
-    dump_path: Path = Field(
-        default_factory=lambda: Path(_WIKIDATA_INGEST_DEFAULTS["dump_path"])
-    )
-    batch_size: int = Field(
-        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["batch_size"])
-    )
-    pass1_only: bool = Field(
-        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["pass1_only"])
-    )
+    dump_path: Path = Field(default_factory=lambda: Path(_WIKIDATA_INGEST_DEFAULTS["dump_path"]))
+    batch_size: int = Field(default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["batch_size"]))
+    pass1_only: bool = Field(default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["pass1_only"]))
     extract_works: bool = Field(
         default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["extract_works"])
     )
@@ -1498,20 +1539,18 @@ class WikidataIngestConfig(IngestFilterConfig):
         default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["require_author_authority_id"])
     )
     author_authority_properties: list[str] = Field(
-        default_factory=lambda: list(_WIKIDATA_INGEST_DEFAULTS.get("author_authority_properties") or [])
+        default_factory=lambda: list(
+            _WIKIDATA_INGEST_DEFAULTS.get("author_authority_properties") or []
+        )
     )
-    use_pigz: bool = Field(
-        default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["use_pigz"])
-    )
+    use_pigz: bool = Field(default_factory=lambda: bool(_WIKIDATA_INGEST_DEFAULTS["use_pigz"]))
     pigz_path: Optional[str] = Field(
         default_factory=lambda: _WIKIDATA_INGEST_DEFAULTS.get("pigz_path")
     )
     pigz_threads: int = Field(
         default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["pigz_threads"])
     )
-    workers: int = Field(
-        default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["workers"])
-    )
+    workers: int = Field(default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["workers"]))
     lru_cache_size: int = Field(
         default_factory=lambda: int(_WIKIDATA_INGEST_DEFAULTS["lru_cache_size"])
     )
@@ -1541,7 +1580,6 @@ class WikidataIngestConfig(IngestFilterConfig):
     )
 
 
-
 # ---------------------------------------------------------------------------
 # Reconciliation and Matching Configuration Models
 # ---------------------------------------------------------------------------
@@ -1554,7 +1592,6 @@ class TemplateSetPathsConfig(BaseModel):
     expression: Path = Path("reconciliator/embedding/templates/expression_serialization.j2")
     manifestation: Path = Path("reconciliator/embedding/templates/manifestation_serialization.j2")
     agent: Path = Path("reconciliator/embedding/templates/agent_serialization.j2")
-
 
 
 class ShortCircuitConfig(BaseModel):
@@ -1575,23 +1612,53 @@ class ShortCircuitConfig(BaseModel):
 class LLMJudgeConfig(BaseModel):
     """Configuration for autoregressive LLM Judge with KV-branching and zero-copy truncation."""
 
-    backend: Literal["auto", "torch", "mlx"] = "auto"
-    model_name: str = "Qwen/Qwen2.5-7B-Instruct"
-    quantization: Optional[Literal["4bit", "8bit"]] = "8bit"
-    device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
-    torch_dtype: Literal["auto", "float16", "bfloat16", "float32"] = "auto"
-    attn_implementation: Literal["auto", "sdpa", "flash_attention_2"] = "auto"
-    pooling_strategy: Literal["last_token", "mean"] = "last_token"
-    batch_size: int = 16
-    positive_token: str = "YES"
-    negative_token: str = "NO"
-    target_template: str = (
-        "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+    backend: Literal["auto", "torch", "mlx"] = Field(
+        default_factory=lambda: _LLM_DEFAULTS.get("backend", "auto")
     )
-    candidate_suffix_template: str = (
-        "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+    model_name: str = Field(
+        default_factory=lambda: str(_LLM_DEFAULTS.get("model_name", "Qwen/Qwen2.5-7B-Instruct"))
     )
-    max_seq_length: int = 2048
+    quantization: Optional[Literal["4bit", "8bit"]] = Field(
+        default_factory=lambda: _LLM_DEFAULTS.get("quantization", "8bit")
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: _LLM_DEFAULTS.get("device", "auto")
+    )
+    torch_dtype: Literal["auto", "float16", "bfloat16", "float32"] = Field(
+        default_factory=lambda: _LLM_DEFAULTS.get("torch_dtype", "auto")
+    )
+    attn_implementation: Literal["auto", "sdpa", "flash_attention_2"] = Field(
+        default_factory=lambda: _LLM_DEFAULTS.get("attn_implementation", "auto")
+    )
+    pooling_strategy: Literal["last_token", "mean"] = Field(
+        default_factory=lambda: _LLM_DEFAULTS.get("pooling_strategy", "last_token")
+    )
+    batch_size: int = Field(default_factory=lambda: int(_LLM_DEFAULTS.get("batch_size", 16)))
+    positive_token: str = Field(
+        default_factory=lambda: str(_LLM_DEFAULTS.get("positive_token", "YES"))
+    )
+    negative_token: str = Field(
+        default_factory=lambda: str(_LLM_DEFAULTS.get("negative_token", "NO"))
+    )
+    target_template: str = Field(
+        default_factory=lambda: str(
+            _LLM_DEFAULTS.get(
+                "target_template",
+                "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n",
+            )
+        )
+    )
+    candidate_suffix_template: str = Field(
+        default_factory=lambda: str(
+            _LLM_DEFAULTS.get(
+                "candidate_suffix_template",
+                "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: ",
+            )
+        )
+    )
+    max_seq_length: int = Field(
+        default_factory=lambda: int(_LLM_DEFAULTS.get("max_seq_length", 2048))
+    )
 
 
 class CascadeRouterConfig(BaseModel):
@@ -1660,7 +1727,7 @@ class RerankConfig(BaseModel):
     max_year_difference: int = 5
     year_penalty_threshold: int = 1
     apply_pre_veto: bool = True
-    judge: LLMJudgeConfig = Field(default_factory=LLMJudgeConfig)
+    judge: Optional[LLMJudgeConfig] = None
     cascade: CascadeRouterConfig = Field(default_factory=CascadeRouterConfig)
 
     @model_validator(mode="after")
@@ -1702,45 +1769,30 @@ class MultiplexClusterThresholds(BaseModel):
         return self
 
 
-
 class WEMIScoringWeightsWithAuthor(BaseModel):
     title: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["with_author"]["title"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["with_author"]["title"])
     )
     author: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["with_author"]["author"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["with_author"]["author"])
     )
     year: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["with_author"]["year"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["with_author"]["year"])
     )
     type: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["with_author"]["type"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["with_author"]["type"])
     )
 
 
 class WEMIScoringWeightsWithoutAuthor(BaseModel):
     title: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["without_author"]["title"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["without_author"]["title"])
     )
     year: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["without_author"]["year"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["without_author"]["year"])
     )
     type: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["without_author"]["type"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["without_author"]["type"])
     )
 
 
@@ -1756,37 +1808,25 @@ class WEMIScoringConfig(BaseModel):
         )
     )
     author_missing_similarity: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["author_missing_similarity"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["author_missing_similarity"])
     )
     year_missing_similarity: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["year_missing_similarity"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["year_missing_similarity"])
     )
     year_max_difference: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["year_max_difference"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["year_max_difference"])
     )
     cross_format_type_similarity: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["cross_format_type_similarity"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["cross_format_type_similarity"])
     )
     default_type_similarity: float = Field(
-        default_factory=lambda: float(
-            _CLUSTER_DEFAULTS["scoring"]["default_type_similarity"]
-        )
+        default_factory=lambda: float(_CLUSTER_DEFAULTS["scoring"]["default_type_similarity"])
     )
 
 
 class MusicScoreConfig(BaseModel):
     terms: list[str] = Field(
-        default_factory=lambda: list(
-            _CLUSTER_DEFAULTS.get("music_score", {}).get("terms") or []
-        )
+        default_factory=lambda: list(_CLUSTER_DEFAULTS.get("music_score", {}).get("terms") or [])
     )
     standard_key_terms: list[str] = Field(
         default_factory=lambda: list(
@@ -1813,14 +1853,10 @@ class ClusterConfig(BaseModel):
     message_passing: bool = True
     reconcile_items: bool = False
     scoring: WEMIScoringConfig = Field(
-        default_factory=lambda: WEMIScoringConfig(
-            **_CLUSTER_DEFAULTS.get("scoring", {})
-        )
+        default_factory=lambda: WEMIScoringConfig(**_CLUSTER_DEFAULTS.get("scoring", {}))
     )
     music_score: MusicScoreConfig = Field(
-        default_factory=lambda: MusicScoreConfig(
-            **_CLUSTER_DEFAULTS.get("music_score", {})
-        )
+        default_factory=lambda: MusicScoreConfig(**_CLUSTER_DEFAULTS.get("music_score", {}))
     )
     common_schemes: list[str] = Field(
         default_factory=lambda: list(_CLUSTER_DEFAULTS.get("common_schemes") or [])
@@ -1838,9 +1874,7 @@ class WorkConsolidationConfig(BaseModel):
     elects one canonical work per equivalence group, without deleting anything.
     """
 
-    enabled: bool = Field(
-        default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["enabled"])
-    )
+    enabled: bool = Field(default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["enabled"]))
     # Evidence admitted when deciding two work rows are the same work.
     use_wikidata_qid: bool = Field(
         default_factory=lambda: bool(_CONSOLIDATION_DEFAULTS["use_wikidata_qid"])
@@ -1854,9 +1888,7 @@ class WorkConsolidationConfig(BaseModel):
     # Identifier schemes strong enough to assert work identity on their own.
     # Deliberately excludes weak or source-local schemes such as control_number.
     strong_identifier_schemes: list[str] = Field(
-        default_factory=lambda: list(
-            _CONSOLIDATION_DEFAULTS.get("strong_identifier_schemes") or []
-        )
+        default_factory=lambda: list(_CONSOLIDATION_DEFAULTS.get("strong_identifier_schemes") or [])
     )
     # Metadata agreement required when no identifier or QID is shared.
     metadata_threshold: float = Field(
@@ -1869,25 +1901,18 @@ class WorkConsolidationConfig(BaseModel):
     # Sources preferred as the canonical representative, best first. Sources not
     # listed rank after those that are; ties break on work_uri for stability.
     canonical_source_priority: list[str] = Field(
-        default_factory=lambda: list(
-            _CONSOLIDATION_DEFAULTS.get("canonical_source_priority") or []
-        )
+        default_factory=lambda: list(_CONSOLIDATION_DEFAULTS.get("canonical_source_priority") or [])
     )
 
 
 class AgentClusterScoringWeights(BaseModel):
-
     """Weights for multi-feature agent cluster scoring."""
 
     name_weight: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["name_weight"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["name_weight"])
     )
     dates_weight: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["dates_weight"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["scoring_weights"]["dates_weight"])
     )
     work_cluster_weight: float = Field(
         default_factory=lambda: float(
@@ -1919,9 +1944,7 @@ class AgentClusterScoringWeights(BaseModel):
 class AgentClusterConfig(BaseModel):
     """Configuration for cross-source agent entity clustering."""
 
-    enabled: bool = Field(
-        default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS["enabled"])
-    )
+    enabled: bool = Field(default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS["enabled"]))
     similarity_threshold: float = Field(
         default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["similarity_threshold"])
     )
@@ -1929,9 +1952,7 @@ class AgentClusterConfig(BaseModel):
         default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["date_tolerance_years"])
     )
     major_date_discrepancy_veto_years: int = Field(
-        default_factory=lambda: int(
-            _AGENT_CLUSTERING_DEFAULTS["major_date_discrepancy_veto_years"]
-        )
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["major_date_discrepancy_veto_years"])
     )
     require_corroboration_for_date_discrepancy: bool = Field(
         default_factory=lambda: bool(
@@ -1943,48 +1964,30 @@ class AgentClusterConfig(BaseModel):
             _AGENT_CLUSTERING_DEFAULTS["min_career_overlap_tolerance_years"]
         )
     )
-    batch_size: int = Field(
-        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["batch_size"])
-    )
+    batch_size: int = Field(default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["batch_size"]))
     token_matching_algorithm: str = Field(
-        default_factory=lambda: str(
-            _AGENT_CLUSTERING_DEFAULTS["token_matching_algorithm"]
-        )
+        default_factory=lambda: str(_AGENT_CLUSTERING_DEFAULTS["token_matching_algorithm"])
     )
     affiliation_fuzzy_threshold: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["affiliation_fuzzy_threshold"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["affiliation_fuzzy_threshold"])
     )
     affiliation_fuzzy_score: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["affiliation_fuzzy_score"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["affiliation_fuzzy_score"])
     )
     enable_hierarchical_concepts: bool = Field(
-        default_factory=lambda: bool(
-            _AGENT_CLUSTERING_DEFAULTS["enable_hierarchical_concepts"]
-        )
+        default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS["enable_hierarchical_concepts"])
     )
     concept_similarity_weight: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["concept_similarity_weight"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["concept_similarity_weight"])
     )
     max_blocking_bucket_size: int = Field(
-        default_factory=lambda: int(
-            _AGENT_CLUSTERING_DEFAULTS["max_blocking_bucket_size"]
-        )
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS["max_blocking_bucket_size"])
     )
     date_tolerance_score: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["date_tolerance_score"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["date_tolerance_score"])
     )
     date_missing_score: float = Field(
-        default_factory=lambda: float(
-            _AGENT_CLUSTERING_DEFAULTS["date_missing_score"]
-        )
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS["date_missing_score"])
     )
     source_authority_precedence: list[str] = Field(
         default_factory=lambda: list(
@@ -1992,14 +1995,10 @@ class AgentClusterConfig(BaseModel):
         )
     )
     override_identifiers: list[str] = Field(
-        default_factory=lambda: list(
-            _AGENT_CLUSTERING_DEFAULTS.get("override_identifiers") or []
-        )
+        default_factory=lambda: list(_AGENT_CLUSTERING_DEFAULTS.get("override_identifiers") or [])
     )
     blocking_keys: list[str] = Field(
-        default_factory=lambda: list(
-            _AGENT_CLUSTERING_DEFAULTS.get("blocking_keys") or []
-        )
+        default_factory=lambda: list(_AGENT_CLUSTERING_DEFAULTS.get("blocking_keys") or [])
     )
     scoring_weights: AgentClusterScoringWeights = Field(
         default_factory=lambda: AgentClusterScoringWeights(
@@ -2043,12 +2042,16 @@ class AuthorityLifecycleConfig(BaseModel):
     )
     tombstone_dissolved_clusters: bool = Field(
         default_factory=lambda: bool(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("lifecycle", {}).get("tombstone_dissolved_clusters", True)
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("lifecycle", {}).get(
+                "tombstone_dissolved_clusters", True
+            )
         )
     )
     split_policy: Literal["retire_and_mint_both", "preserve_primary"] = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("lifecycle", {}).get("split_policy", "retire_and_mint_both")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("lifecycle", {}).get(
+                "split_policy", "retire_and_mint_both"
+            )
         )
     )
     tombstone_retention_days: int = Field(
@@ -2071,12 +2074,16 @@ class AuthorityStatusPolicyConfig(BaseModel):
     )
     established_status_name: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("status_policy", {}).get("established_status_name", "established")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("status_policy", {}).get(
+                "established_status_name", "established"
+            )
         )
     )
     provisional_status_name: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("status_policy", {}).get("provisional_status_name", "provisional")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("status_policy", {}).get(
+                "provisional_status_name", "provisional"
+            )
         )
     )
 
@@ -2088,27 +2095,37 @@ class MARC21AuthoritySerializationConfig(BaseModel):
 
     organization_code: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("marc21", {}).get("organization_code", "FI-NL")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("marc21", {})
+            .get("organization_code", "FI-NL")
         )
     )
     rules_code: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("marc21", {}).get("rules_code", "rda")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("marc21", {})
+            .get("rules_code", "rda")
         )
     )
     subject_system_code: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("marc21", {}).get("subject_system_code", "yso")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("marc21", {})
+            .get("subject_system_code", "yso")
         )
     )
     default_indicator_1: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("marc21", {}).get("default_indicator_1", "1")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("marc21", {})
+            .get("default_indicator_1", "1")
         )
     )
     standard_id_source_codes: dict[str, str] = Field(
         default_factory=lambda: dict(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("marc21", {}).get("standard_id_source_codes")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("marc21", {})
+            .get("standard_id_source_codes")
             or {
                 "isni": "isni",
                 "wikidata": "wikidata",
@@ -2128,23 +2145,23 @@ class SKOSAuthoritySerializationConfig(BaseModel):
 
     default_namespace: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("skos", {}).get(
-                "default_namespace", "http://www.w3.org/2004/02/skos/core#"
-            )
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("skos", {})
+            .get("default_namespace", "http://www.w3.org/2004/02/skos/core#")
         )
     )
     schema_namespace: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("skos", {}).get(
-                "schema_namespace", "http://schema.org/"
-            )
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("skos", {})
+            .get("schema_namespace", "http://schema.org/")
         )
     )
     context_url: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {}).get("skos", {}).get(
-                "context_url", "https://schema.org/docs/jsonldcontext.json"
-            )
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("serialization", {})
+            .get("skos", {})
+            .get("context_url", "https://schema.org/docs/jsonldcontext.json")
         )
     )
 
@@ -2189,7 +2206,9 @@ class OpenRefineConfig(BaseModel):
     )
     identifier_space: str = Field(
         default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("openrefine", {}).get("identifier_space", "urn:reconciliator:")
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("openrefine", {}).get(
+                "identifier_space", "urn:reconciliator:"
+            )
         )
     )
     schema_space: str = Field(
@@ -2276,7 +2295,9 @@ class VirtualAuthorityConfig(BaseModel):
         default_factory=lambda: bool(_VIRTUAL_AUTHORITY_DEFAULTS.get("enabled", True))
     )
     base_uri: str = Field(
-        default_factory=lambda: str(_VIRTUAL_AUTHORITY_DEFAULTS.get("base_uri", "urn:reconciliator:"))
+        default_factory=lambda: str(
+            _VIRTUAL_AUTHORITY_DEFAULTS.get("base_uri", "urn:reconciliator:")
+        )
     )
     uri_templates: dict[str, str] = Field(
         default_factory=lambda: dict(
@@ -2290,9 +2311,7 @@ class VirtualAuthorityConfig(BaseModel):
         )
     )
     pid_generator: Literal["uuidv7", "monotonic_int", "opaque_hash"] = Field(
-        default_factory=lambda: str(
-            _VIRTUAL_AUTHORITY_DEFAULTS.get("pid_generator", "uuidv7")
-        )
+        default_factory=lambda: str(_VIRTUAL_AUTHORITY_DEFAULTS.get("pid_generator", "uuidv7"))
     )
     provenance_sources_priority: list[str] = Field(
         default_factory=lambda: list(
@@ -2334,7 +2353,9 @@ class QualifierConfig(BaseModel):
 
     qualifier_pattern: str = Field(
         default_factory=lambda: str(
-            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get("qualifier_pattern", r"\(([^)]+)\)$")
+            _AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}).get(
+                "qualifier_pattern", r"\(([^)]+)\)$"
+            )
         )
     )
     qualifier_subfields: list[str] = Field(
@@ -2400,8 +2421,7 @@ class RDARelationshipConfig(BaseModel):
 
     predicate_mappings: dict[str, str] = Field(
         default_factory=lambda: dict(
-            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("predicate_mappings")
-            or {}
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("predicate_mappings") or {}
         )
     )
     note_semantic_patterns: list[dict[str, str]] = Field(
@@ -2412,20 +2432,17 @@ class RDARelationshipConfig(BaseModel):
     )
     corporate_classes: list[str] = Field(
         default_factory=lambda: list(
-            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("corporate_classes")
-            or []
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("corporate_classes") or []
         )
     )
     person_classes: list[str] = Field(
         default_factory=lambda: list(
-            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("person_classes")
-            or []
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("person_classes") or []
         )
     )
     family_classes: list[str] = Field(
         default_factory=lambda: list(
-            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("family_classes")
-            or []
+            _AGENT_AUTHORITY_DEFAULTS.get("rda_relationships", {}).get("family_classes") or []
         )
     )
 
@@ -2436,9 +2453,7 @@ class AgentAuthorityConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     qualifiers: QualifierConfig = Field(
-        default_factory=lambda: QualifierConfig(
-            **_AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {})
-        )
+        default_factory=lambda: QualifierConfig(**_AGENT_AUTHORITY_DEFAULTS.get("qualifiers", {}))
     )
     marc_relationships: MarcRelationshipConfig = Field(
         default_factory=lambda: MarcRelationshipConfig(
@@ -2460,9 +2475,7 @@ class BrunoConfig(BaseModel):
     collection_name: str = Field(
         default_factory=lambda: str(_BRUNO_DEFAULTS.get("collection_name", "Reconciliator API"))
     )
-    version: str = Field(
-        default_factory=lambda: str(_BRUNO_DEFAULTS.get("version", "1"))
-    )
+    version: str = Field(default_factory=lambda: str(_BRUNO_DEFAULTS.get("version", "1")))
     environment_name: str = Field(
         default_factory=lambda: str(_BRUNO_DEFAULTS.get("environment_name", "local"))
     )
@@ -2606,9 +2619,7 @@ class ReconcileConfig(IngestFilterConfig):
         default_factory=lambda: int(_RECONCILE_DEFAULTS["max_editions_compared"])
     )
     translator_alignment_threshold: float = Field(
-        default_factory=lambda: float(
-            _RECONCILE_DEFAULTS["translator_alignment_threshold"]
-        )
+        default_factory=lambda: float(_RECONCILE_DEFAULTS["translator_alignment_threshold"])
     )
     agent_aligner_threshold: float = Field(
         default_factory=lambda: float(_RECONCILE_DEFAULTS["agent_aligner_threshold"])
@@ -2620,24 +2631,16 @@ class ReconcileConfig(IngestFilterConfig):
         default_factory=lambda: float(_RECONCILE_DEFAULTS["homonym_score_margin"])
     )
     qualifier_similarity_threshold: float = Field(
-        default_factory=lambda: float(
-            _RECONCILE_DEFAULTS["qualifier_similarity_threshold"]
-        )
+        default_factory=lambda: float(_RECONCILE_DEFAULTS["qualifier_similarity_threshold"])
     )
     distribution_match_threshold: float = Field(
-        default_factory=lambda: float(
-            _RECONCILE_DEFAULTS["distribution_match_threshold"]
-        )
+        default_factory=lambda: float(_RECONCILE_DEFAULTS["distribution_match_threshold"])
     )
     surname_similarity_threshold: float = Field(
-        default_factory=lambda: float(
-            _RECONCILE_DEFAULTS["surname_similarity_threshold"]
-        )
+        default_factory=lambda: float(_RECONCILE_DEFAULTS["surname_similarity_threshold"])
     )
     allow_pseudonym_author_match: bool = Field(
-        default_factory=lambda: bool(
-            _RECONCILE_DEFAULTS.get("allow_pseudonym_author_match", True)
-        )
+        default_factory=lambda: bool(_RECONCILE_DEFAULTS.get("allow_pseudonym_author_match", True))
     )
     pseudonym_author_match_weight: float = Field(
         default_factory=lambda: float(
@@ -2655,7 +2658,6 @@ class ReconcileConfig(IngestFilterConfig):
     truncation_marker: str = ""
     default_max_field_length: Optional[int] = None
     field_length_overrides: dict[str, int] = Field(default_factory=dict)
-
 
     @property
     def enrichment_toggles(self) -> EnrichmentConfig:
@@ -2749,7 +2751,9 @@ class TelemetryConfig(BaseModel):
         default_factory=lambda: float(_TELEMETRY_DEFAULTS.get("watch_interval_seconds", 5.0))
     )
     stale_heartbeat_timeout_seconds: float = Field(
-        default_factory=lambda: float(_TELEMETRY_DEFAULTS.get("stale_heartbeat_timeout_seconds", 120.0))
+        default_factory=lambda: float(
+            _TELEMETRY_DEFAULTS.get("stale_heartbeat_timeout_seconds", 120.0)
+        )
     )
     adopt_previous_task_id: bool = Field(
         default_factory=lambda: bool(_TELEMETRY_DEFAULTS.get("adopt_previous_task_id", True))
@@ -2815,9 +2819,15 @@ class EntraAuthConfig(BaseModel):
     client_secret: Optional[str] = None
     audience: Optional[str] = None
     role_claim: str = "roles"
-    admin_roles: list[str] = Field(default_factory=lambda: ["Reconciliator.Admin", "Admin", "admin"])
-    curator_roles: list[str] = Field(default_factory=lambda: ["Reconciliator.Curator", "Curator", "curator"])
-    reader_roles: list[str] = Field(default_factory=lambda: ["Reconciliator.Reader", "Reader", "reader"])
+    admin_roles: list[str] = Field(
+        default_factory=lambda: ["Reconciliator.Admin", "Admin", "admin"]
+    )
+    curator_roles: list[str] = Field(
+        default_factory=lambda: ["Reconciliator.Curator", "Curator", "curator"]
+    )
+    reader_roles: list[str] = Field(
+        default_factory=lambda: ["Reconciliator.Reader", "Reader", "reader"]
+    )
     dev_default_role: str = "Admin"
     dev_user_email: str = "dev@localhost"
     dev_user_name: str = "Local Developer"
@@ -2828,7 +2838,9 @@ class AppConfig(BaseModel):
 
     compute: ComputeConfig = Field(default_factory=lambda: ComputeConfig(**_COMPUTE_DEFAULTS))
     storage: StorageConfig = Field(default_factory=lambda: StorageConfig(**_STORAGE_DEFAULTS))
+    vector_model: Literal["embedding", "llm"] = Field(default_factory=lambda: _VECTOR_MODEL_DEFAULT)
     embedding: EmbeddingConfig = Field(default_factory=lambda: EmbeddingConfig(**_EMBED_DEFAULTS))
+    llm: LLMJudgeConfig = Field(default_factory=lambda: LLMJudgeConfig(**_LLM_DEFAULTS))
     linguistic: LinguisticConfig = Field(default_factory=LinguisticConfig)
     vocabularies: VocabulariesConfig = Field(default_factory=VocabulariesConfig)
     auth: EntraAuthConfig = Field(default_factory=EntraAuthConfig)
@@ -2864,12 +2876,8 @@ class AppConfig(BaseModel):
     agent_authority: AgentAuthorityConfig = Field(
         default_factory=lambda: AgentAuthorityConfig(**_AGENT_AUTHORITY_DEFAULTS)
     )
-    bruno: BrunoConfig = Field(
-        default_factory=lambda: BrunoConfig(**_BRUNO_DEFAULTS)
-    )
-    funnels: FunnelsConfig = Field(
-        default_factory=lambda: FunnelsConfig(**_FUNNELS_DEFAULTS)
-    )
+    bruno: BrunoConfig = Field(default_factory=lambda: BrunoConfig(**_BRUNO_DEFAULTS))
+    funnels: FunnelsConfig = Field(default_factory=lambda: FunnelsConfig(**_FUNNELS_DEFAULTS))
 
     reconcile: Optional[ReconcileConfig] = None
     telemetry: TelemetryConfig = Field(
@@ -2896,6 +2904,26 @@ class AppConfig(BaseModel):
         return data
 
     @model_validator(mode="after")
+    def _validate_vector_model(self) -> Self:
+        if self.vector_model not in ("embedding", "llm"):
+            raise ValueError(
+                f"Invalid vector_model: '{self.vector_model}'. "
+                "Must be explicitly set to either 'embedding' or 'llm'."
+            )
+        if self.vector_model == "llm":
+            if self.reconcile is not None:
+                self.reconcile.rerank.judge = self.llm
+        elif self.vector_model == "embedding":
+            if self.reconcile is not None:
+                if self.reconcile.rerank.engine == "llm_judge":
+                    raise ValueError(
+                        "Rerank engine 'llm_judge' cannot be used when vector_model is 'embedding'. "
+                        "Set vector_model: 'llm' to use LLM Judge."
+                    )
+                self.reconcile.rerank.judge = None
+        return self
+
+    @model_validator(mode="after")
     def _propagate_shared_settings(self) -> Self:
         shared_dev = self.compute.device
         shared_threads = self.compute.threads
@@ -2906,8 +2934,10 @@ class AppConfig(BaseModel):
         if self.storage.vector_engine.threads is None and shared_threads is not None:
             self.storage.vector_engine.threads = shared_threads
 
-        if self.embedding.device == "auto" and shared_dev != "auto":
+        if self.embedding and self.embedding.device == "auto" and shared_dev != "auto":
             self.embedding.device = shared_dev
+        if self.llm and self.llm.device == "auto" and shared_dev != "auto":
+            self.llm.device = shared_dev
 
         if self.reconcile:
             if self.reconcile.rerank.device == "auto" and shared_dev != "auto":
@@ -3149,7 +3179,6 @@ def _resolve_config_paths(config: AppConfig, base_dir: Path) -> AppConfig:
                 else:
                     config.embedding.template_path = candidate
 
-
     # Download configs
     for skos_cfg in config.download_skosmos.values():
         if skos_cfg.output_dir:
@@ -3241,7 +3270,9 @@ def configure_logging(logging_cfg: Optional[LoggingConfig | AppConfig] = None) -
             root_logger.removeFilter(f)
     root_logger.addFilter(task_filter)
 
-    formatter = TaskLogFormatter(fmt=cfg.format, datefmt=cfg.date_format, default_task_id=cfg.task_id_default)
+    formatter = TaskLogFormatter(
+        fmt=cfg.format, datefmt=cfg.date_format, default_task_id=cfg.task_id_default
+    )
 
     # Remove existing handlers (preserving pytest LogCaptureHandler if present)
     for handler in list(root_logger.handlers):

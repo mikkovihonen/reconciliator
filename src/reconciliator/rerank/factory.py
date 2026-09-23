@@ -14,9 +14,7 @@ if TYPE_CHECKING:
     from reconciliator.config import RerankConfig
 
 
-def create_rerank_scorer(
-    config: RerankConfig, judge_backend: Optional[Any] = None
-) -> RerankScorer:
+def create_rerank_scorer(config: RerankConfig, judge_backend: Optional[Any] = None) -> RerankScorer:
     """Instantiate a RerankScorer implementation based on configuration."""
     engine = config.engine.lower().strip()
     if engine == "cascade":
@@ -40,7 +38,10 @@ def create_rerank_scorer(
         else:
             raise ValueError(f"Unknown heuristic engine for cascade: '{heur_type}'")
 
-        judge_scorer = LLMJudgeScorer(backend=judge_backend, config=getattr(config, "judge", None))
+        judge_scorer = None
+        judge_cfg = getattr(config, "judge", None)
+        if judge_backend is not None or judge_cfg is not None:
+            judge_scorer = LLMJudgeScorer(backend=judge_backend, config=judge_cfg)
         return CascadeScorer(
             heuristic_scorer=heuristic_scorer,
             judge_scorer=judge_scorer,

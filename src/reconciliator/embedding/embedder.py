@@ -8,9 +8,13 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from reconciliator.config import EmbeddingConfig
-from reconciliator.utils.device import configure_mixed_precision, get_optimal_batch_size, resolve_device
-from reconciliator.models import BibliographicRecord
 from reconciliator.embedding.template import RecordTemplateEngine
+from reconciliator.models import BibliographicRecord
+from reconciliator.utils.device import (
+    configure_mixed_precision,
+    get_optimal_batch_size,
+    resolve_device,
+)
 
 
 class SentenceEmbedder:
@@ -82,3 +86,20 @@ class SentenceEmbedder:
         texts = [self.serialize_record(r) for r in records]
         return self.embed_texts(texts, batch_size=batch_size)
 
+    def encode_batch_dense(self, texts: list[str]) -> np.ndarray:
+        """Batch dense encoding for vector index ingestion (protocol parity with LLMJudgeBackend)."""
+        return self.embed_texts(texts)
+
+    def encode_target(self, text: str, retain_cache: bool = True) -> Any:
+        """Single-pass target encoding for coarse retrieval (protocol parity with LLMJudgeBackend)."""
+        from reconciliator.judge.protocol import TargetEncoding
+
+        dense_vecs = self.embed_texts([text])
+        dense_vec = (
+            dense_vecs[0] if len(dense_vecs) > 0 else np.zeros(self.dimension, dtype=np.float32)
+        )
+        return TargetEncoding(
+            dense_vector=dense_vec,
+            kv_cache=None,
+            base_seq_len=0,
+        )

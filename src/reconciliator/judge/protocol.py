@@ -43,6 +43,10 @@ class LLMJudgeBackend(Protocol):
         """Batch dense encoding for vector index ingestion."""
         ...
 
+    def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
+        """Batch dense encoding (SentenceEmbedder protocol parity)."""
+        ...
+
     def evaluate_candidate(
         self, base_cache: Any, base_seq_len: int, candidate_suffix: str
     ) -> CandidateEvaluation:

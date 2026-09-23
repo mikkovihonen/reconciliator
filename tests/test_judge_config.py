@@ -34,19 +34,20 @@ def test_rerank_config_with_judge() -> None:
     assert cfg.judge.quantization == "4bit"
 
 
-def test_defaults_yaml_contains_judge() -> None:
-    """Verify that defaults.yaml contains the new rerank.judge block."""
+def test_defaults_yaml_contains_vector_model_and_llm() -> None:
+    """Verify that defaults.yaml contains vector_model: 'embedding' and the top-level llm block."""
     defaults_file = Path("src/reconciliator/defaults/defaults.yaml")
     assert defaults_file.exists()
 
     with defaults_file.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
-    rerank_sec = data.get("reconcile", {}).get("rerank", {})
-    assert "judge" in rerank_sec
-    assert rerank_sec.get("apply_pre_veto") is True
-    judge_sec = rerank_sec["judge"]
-    assert judge_sec.get("backend") == "auto"
-    assert judge_sec.get("positive_token") == "YES"
-    assert judge_sec.get("negative_token") == "NO"
-
+    assert "vector_model" in data
+    assert data["vector_model"] == "embedding"
+    assert "llm" in data
+    assert data["llm"] is not None
+    llm_sec = data["llm"]
+    assert llm_sec.get("backend") == "auto"
+    assert llm_sec.get("positive_token") == "YES"
+    assert llm_sec.get("negative_token") == "NO"
+    assert llm_sec.get("model_name") == "Qwen/Qwen2.5-7B-Instruct"
