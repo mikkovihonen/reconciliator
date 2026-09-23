@@ -6,7 +6,6 @@ LoC relator codes, mode of issuance) to canonical ontologies via skos:exactMatch
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,7 +56,7 @@ def resolve_bridge_files(config: Optional[Any] = None) -> list[Path]:
 
 
 def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> list[dict[str, Any]]:
-    """Parse bridge Turtle content into structured bridge mappings.
+    """Parse bridge Turtle content into structured bridge mappings using rdflib.
 
     Extracts:
     - source_uri: e.g. <http://id.loc.gov/vocabulary/countries/fi>
@@ -69,92 +68,57 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
     if isinstance(content, Path):
         content = content.read_text(encoding="utf-8")
 
-    prefixes: dict[str, str] = {
-        "skos:": "http://www.w3.org/2004/02/skos/core#",
-        "yso:": "http://www.yso.fi/onto/yso/",
-        "loc:": "http://id.loc.gov/vocabulary/",
-    }
-    for m in re.finditer(
-        r"(?:@prefix|PREFIX)\s+([a-zA-Z0-9_-]+:)\s+<([^>]+)>", content, re.IGNORECASE
-    ):
-        prefixes[m.group(1)] = m.group(2)
+    import rdflib
+    from rdflib.namespace import OWL, RDFS, SKOS
 
-    def _resolve(raw: str) -> str:
-        raw = raw.strip()
-        if raw.startswith("<") and raw.endswith(">"):
-            return raw[1:-1]
-        for pfx, base in prefixes.items():
-            if raw.startswith(pfx):
-                return base + raw[len(pfx) :]
-        return raw
+    g = rdflib.Graph()
+    g.parse(data=content, format="turtle")
 
     bridges: list[dict[str, Any]] = []
 
-    blocks = re.split(r"(?:^|\n)(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+", content)
-    if len(blocks) > 1:
-        for i in range(1, len(blocks), 2):
-            raw_subj = blocks[i]
-            body = blocks[i + 1]
-            if "skos:exactMatch" not in body and "owl:sameAs" not in body:
-                continue
+    # Find subjects that have skos:exactMatch or owl:sameAs
+    seen_subjects = list(dict.fromkeys(
+        list(g.subjects(SKOS.exactMatch, None)) + list(g.subjects(OWL.sameAs, None))
+    ))
 
-            subj_uri = _resolve(raw_subj)
+    for subj in seen_subjects:
+        subj_uri = str(subj)
+        target_objs = list(g.objects(subj, SKOS.exactMatch)) + list(g.objects(subj, OWL.sameAs))
+        if not target_objs:
+            continue
+        target_uri = str(target_objs[0])
 
-            m_match = re.search(
-                r"(?:skos:exactMatch|owl:sameAs)\s+(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)",
-                body,
-            )
-            if not m_match:
-                continue
-            target_uri = _resolve(m_match.group(1))
+        pref_labels: dict[str, str] = {}
+        for pref_obj in g.objects(subj, SKOS.prefLabel):
+            lang = (getattr(pref_obj, "language", None) or "und").lower()
+            pref_labels[lang] = str(pref_obj)
 
-            pref_labels: dict[str, str] = {}
-            alt_labels: dict[str, list[str]] = {}
+        # Fallback to rdfs:label if no prefLabel found
+        if not pref_labels:
+            for rdfs_obj in g.objects(subj, RDFS.label):
+                lang = (getattr(rdfs_obj, "language", None) or "und").lower()
+                pref_labels[lang] = str(rdfs_obj)
 
-            # Parse skos:prefLabel clauses
-            for pref_m in re.finditer(
-                r"skos:prefLabel\s+((?:\"[^\"]*\"@[a-zA-Z_-]+\s*,\s*)*\"[^\"]*\"@[a-zA-Z_-]+)",
-                body,
-            ):
-                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', pref_m.group(1)):
-                    pref_labels[lang.lower()] = val
+        alt_labels: dict[str, list[str]] = {}
+        for alt_obj in g.objects(subj, SKOS.altLabel):
+            lang = (getattr(alt_obj, "language", None) or "und").lower()
+            alt_labels.setdefault(lang, []).append(str(alt_obj))
 
-            # Parse rdfs:label if prefLabel not found
-            if not pref_labels:
-                for rdfs_m in re.finditer(
-                    r"rdfs:label\s+((?:\"[^\"]*\"@[a-zA-Z_-]+\s*,\s*)*\"[^\"]*\"@[a-zA-Z_-]+)",
-                    body,
-                ):
-                    for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', rdfs_m.group(1)):
-                        pref_labels[lang.lower()] = val
+        notation_obj = g.value(subj, SKOS.notation)
+        notation = str(notation_obj) if notation_obj is not None else None
 
-            # Parse skos:altLabel clauses
-            for alt_m in re.finditer(
-                r"skos:altLabel\s+((?:\"[^\"]*\"@[a-zA-Z_-]+\s*,\s*)*\"[^\"]*\"@[a-zA-Z_-]+)",
-                body,
-            ):
-                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', alt_m.group(1)):
-                    alt_labels.setdefault(lang.lower(), []).append(val)
+        item: dict[str, Any] = {
+            "source_uri": subj_uri,
+            "target_uri": target_uri,
+            "bridge_vocab": bridge_vocab,
+            "notation": notation,
+            "pref_labels": pref_labels,
+            "alt_labels": alt_labels,
+        }
+        for lang, val in pref_labels.items():
+            item[f"pref_label_{lang}"] = val
 
-            # Fallback if no specific clauses parsed
-            if not pref_labels:
-                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', body):
-                    pref_labels.setdefault(lang.lower(), val)
-
-            m_not = re.search(r'skos:notation\s+"([^"]+)"', body)
-
-            item: dict[str, Any] = {
-                "source_uri": subj_uri,
-                "target_uri": target_uri,
-                "bridge_vocab": bridge_vocab,
-                "notation": m_not.group(1) if m_not else None,
-                "pref_labels": pref_labels,
-                "alt_labels": alt_labels,
-            }
-            for lang, val in pref_labels.items():
-                item[f"pref_label_{lang}"] = val
-
-            bridges.append(item)
+        bridges.append(item)
 
     return bridges
 

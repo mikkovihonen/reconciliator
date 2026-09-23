@@ -7,6 +7,9 @@ import re
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+import rdflib
+from rdflib import XSD, URIRef
+from rdflib.namespace import DCTERMS, OWL, RDF, SKOS
 from sqlalchemy.exc import DataError
 
 from reconciliator.config import (
@@ -28,12 +31,15 @@ from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
 from reconciliator.vocab.bridges import (
-    get_bundled_bridge_files,
     parse_bridge_turtle,
     resolve_bridge_files,
 )
 from reconciliator.vocab.detection import extract_concept_id
 from reconciliator.vocab.store import VocabStore, is_language_allowed
+
+# Configure string passthrough for XSD.date so that BCE negative dates (e.g. in yso-aika)
+# do not crash Python datetime.date parsing.
+rdflib.term._toPythonMapping[XSD.date] = str
 
 logger = logging.getLogger(__name__)
 
@@ -51,212 +57,173 @@ def parse_turtle_simple(
     default_vocab: Optional[str] = None,
 ) -> tuple[list[VocabConcept], list[ConceptMapping], list[dict[str, Any]]]:
     """
-    Fast regex-based parser for SKOS Turtle (.ttl) concepts, mappings, and hierarchy edges.
+    W3C-compliant SKOS Turtle (.ttl) parser using rdflib.
     Extracts skos:Concept, prefLabels, altLabels, exactMatch, isReplacedBy, skos:broader, and skos:narrower.
-    Supports both full URIs (<...>) and prefixed IRIs (@prefix ...).
     """
     concepts: list[VocabConcept] = []
     mappings: list[ConceptMapping] = []
     hierarchy_edges: list[dict[str, Any]] = []
     active_legacy = legacy_thesauri if legacy_thesauri is not None else _DEFAULT_LEGACY_SOURCES
 
-    # Extract prefix declarations
-    prefixes: dict[str, str] = {}
-    for m in re.finditer(
-        r"(?:@prefix|PREFIX)\s+([a-zA-Z0-9_-]+:)\s+<([^>]+)>", content, re.IGNORECASE
-    ):
-        prefixes[m.group(1)] = m.group(2)
+    from reconciliator.utils.curie import parse_curie
+    from reconciliator.vocab import detect_vocabulary
 
-    def _resolve_uri(raw: str) -> str:
-        raw = raw.strip()
-        if raw.startswith("<") and raw.endswith(">"):
-            return raw[1:-1]
-        for pfx, base in prefixes.items():
-            if raw.startswith(pfx):
-                return base + raw[len(pfx) :]
-        return raw
+    def _detect_vocab(u: str) -> str:
+        src, _ = parse_curie(u)
+        if src and src != "unknown":
+            return src.lower()
+        detected = detect_vocabulary(u)
+        if detected:
+            return detected.lower()
+        u_clean = u.split("#")[0] if "#" in u else u
+        for seg in reversed(u_clean.rstrip("/").split("/")):
+            clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
+            if (
+                clean_seg
+                and not re.match(r"^p?\d+$", clean_seg, re.I)
+                and len(clean_seg) > 2
+            ):
+                return clean_seg.lower()
+        return default_vocab.lower() if default_vocab else "vocab"
 
-    # Match each skos:Concept block
-    blocks = re.split(
-        r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+skos:Concept\b",
-        content,
+    active_target_fields = (
+        vocab_target_fields
+        if vocab_target_fields is not None
+        else get_bundled_vocabularies_defaults().get("vocab_target_fields", {})
     )
-    if len(blocks) > 1:
-        lit_pattern = r"(?:\"(?:[^\"\\]|\\.)*\"(?:@[a-zA-Z0-9_-]+)?(?:\^\^[^\s;,.]*)?)"
-        for i in range(1, len(blocks), 2):
-            uri = _resolve_uri(blocks[i])
-            full_body = blocks[i + 1]
-            body = re.split(
-                r"(?:\n|^)\s*(?:<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+",
-                full_body,
-            )[0]
+    default_target_field = get_bundled_vocabularies_defaults()["default_vocab_target_field"]
 
-            # Detect vocabulary from concept scheme or URI
-            def _detect_vocab(u: str) -> str:
-                from reconciliator.utils.curie import parse_curie
-                from reconciliator.vocab import detect_vocabulary
+    g = rdflib.Graph()
+    g.parse(data=content, format="turtle")
 
-                src, _ = parse_curie(u)
-                if src and src != "unknown":
-                    return src.lower()
-                detected = detect_vocabulary(u)
-                if detected:
-                    return detected.lower()
-                u_clean = u.split("#")[0] if "#" in u else u
-                for seg in reversed(u_clean.rstrip("/").split("/")):
-                    clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
-                    if (
-                        clean_seg
-                        and not re.match(r"^p?\d+$", clean_seg, re.I)
-                        and len(clean_seg) > 2
-                    ):
-                        return clean_seg.lower()
-                return default_vocab.lower() if default_vocab else "vocab"
+    concept_subjects = list(dict.fromkeys(g.subjects(RDF.type, SKOS.Concept)))
+    for subj in concept_subjects:
+        uri = str(subj)
 
-            from reconciliator.vocab import detect_vocabulary
+        # Detect vocabulary from concept scheme or URI
+        vocab = ""
+        for scheme in g.objects(subj, SKOS.inScheme):
+            raw_scheme = str(scheme)
+            detected_scheme = detect_vocabulary(raw_scheme)
+            if detected_scheme:
+                vocab = detected_scheme.lower()
+                break
 
-            vocab = ""
-            scheme_m = re.search(r"skos:inScheme\s+([^\s;.]+)", body)
-            if scheme_m:
-                raw_scheme = scheme_m.group(1).strip()
-                resolved_scheme = _resolve_uri(raw_scheme)
-                detected_scheme = detect_vocabulary(resolved_scheme) or detect_vocabulary(raw_scheme)
-                if detected_scheme:
-                    vocab = detected_scheme.lower()
+        if not vocab:
+            vocab = _detect_vocab(uri)
 
-            if not vocab:
-                vocab = _detect_vocab(uri)
+        if (not vocab or vocab == "vocab") and default_vocab:
+            vocab = default_vocab.lower()
 
-            if (not vocab or vocab == "vocab") and default_vocab:
-                vocab = default_vocab.lower()
+        pref_labels: dict[str, str] = {}
+        for pref_obj in g.objects(subj, SKOS.prefLabel):
+            lang_code = (getattr(pref_obj, "language", None) or "und").lower()
+            if is_language_allowed(lang_code, pref_label_languages):
+                pref_labels[lang_code] = str(pref_obj)
 
-            pref_labels: dict[str, str] = {}
-            for pref_clause in re.findall(
-                rf"skos:prefLabel\s+({lit_pattern}(?:\s*,\s*{lit_pattern})*)", body
-            ):
-                for lbl, lang in re.findall(
-                    r'"((?:[^"\\]|\\.)*)"(?:@([a-zA-Z0-9_-]+))?', pref_clause
-                ):
-                    lang_code = (lang or "und").lower()
-                    if is_language_allowed(lang_code, pref_label_languages):
-                        pref_labels[lang_code] = lbl
+        alt_labels: dict[str, list[str]] = {}
+        for alt_obj in g.objects(subj, SKOS.altLabel):
+            lang_code = (getattr(alt_obj, "language", None) or "und").lower()
+            if is_language_allowed(lang_code, alt_label_languages):
+                alt_labels.setdefault(lang_code, []).append(str(alt_obj))
 
-            alt_labels: dict[str, list[str]] = {}
-            for alt_clause in re.findall(
-                rf"skos:altLabel\s+({lit_pattern}(?:\s*,\s*{lit_pattern})*)", body
-            ):
-                for lbl, lang in re.findall(
-                    r'"((?:[^"\\]|\\.)*)"(?:@([a-zA-Z0-9_-]+))?', alt_clause
-                ):
-                    lang_code = (lang or "und").lower()
-                    if is_language_allowed(lang_code, alt_label_languages):
-                        alt_labels.setdefault(lang_code, []).append(lbl)
+        dep_val = g.value(subj, OWL.deprecated)
+        is_deprecated = bool(
+            dep_val is not None
+            and (getattr(dep_val, "value", None) is True or str(dep_val).lower() == "true")
+        )
 
-            is_deprecated = bool(
-                re.search(r'owl:deprecated\s+(?:"true"\^\^xsd:boolean|true\b)', body, re.IGNORECASE)
+        target_field = active_target_fields.get(vocab, default_target_field)
+
+        concept = VocabConcept(
+            uri=uri,
+            vocabulary=vocab,
+            pref_labels=pref_labels,
+            alt_labels=alt_labels,
+            is_deprecated=is_deprecated,
+            target_field=target_field,
+        )
+        concepts.append(concept)
+
+        # 1. Deprecated replacement concepts (within the same vocabulary)
+        _dc_elem_replaced = URIRef("http://purl.org/dc/elements/1.1/isReplacedBy")
+        replacements = list(g.objects(subj, DCTERMS.isReplacedBy)) + list(g.objects(subj, _dc_elem_replaced))
+        for rep in replacements:
+            target_uri = str(rep)
+            target_v = _detect_vocab(target_uri)
+            t_field = active_target_fields.get(target_v, target_field)
+            mappings.append(
+                ConceptMapping(
+                    legacy_uri=uri,
+                    legacy_vocab=vocab,
+                    legacy_labels=pref_labels,
+                    target_uri=target_uri,
+                    target_vocab=target_v,
+                    mapping_type="deprecated_replacement",
+                    target_field=t_field,
+                )
             )
 
-            active_target_fields = (
-                vocab_target_fields
-                if vocab_target_fields is not None
-                else get_bundled_vocabularies_defaults().get("vocab_target_fields", {})
-            )
-            default_target_field = get_bundled_vocabularies_defaults()["default_vocab_target_field"]
-            target_field = active_target_fields.get(vocab, default_target_field)
+        # 2. Legacy thesauri mappings
+        for match in g.objects(subj, SKOS.exactMatch):
+            match_uri = str(match)
+            match_v = _detect_vocab(match_uri)
 
-            concept = VocabConcept(
-                uri=uri,
-                vocabulary=vocab,
-                pref_labels=pref_labels,
-                alt_labels=alt_labels,
-                is_deprecated=is_deprecated,
-                target_field=target_field,
-            )
-            concepts.append(concept)
-
-            # 1. Deprecated replacement concepts (within the same vocabulary)
-            for rep_clause in re.findall(r"(?:dct:isReplacedBy|dc:isReplacedBy)\s+([^;.]+)", body):
-                for raw_rep in re.findall(r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", rep_clause):
-                    target_uri = _resolve_uri(raw_rep)
-                    target_v = _detect_vocab(target_uri)
-                    t_field = active_target_fields.get(target_v, target_field)
-                    mappings.append(
-                        ConceptMapping(
-                            legacy_uri=uri,
-                            legacy_vocab=vocab,
-                            legacy_labels=pref_labels,
-                            target_uri=target_uri,
-                            target_vocab=target_v,
-                            mapping_type="deprecated_replacement",
-                            target_field=t_field,
-                        )
+            if match_v in active_legacy and vocab not in active_legacy:
+                # Inverted: legacy thesaurus maps into this modern canonical concept
+                mappings.append(
+                    ConceptMapping(
+                        legacy_uri=match_uri,
+                        legacy_vocab=match_v,
+                        legacy_labels=pref_labels,
+                        target_uri=uri,
+                        target_vocab=vocab,
+                        mapping_type="exact_match",
+                        target_field=target_field,
                     )
+                )
+            elif vocab in active_legacy and match_v not in active_legacy:
+                # Direct: current concept is legacy thesaurus mapping to modern canonical concept
+                t_field = active_target_fields.get(match_v, default_target_field)
+                mappings.append(
+                    ConceptMapping(
+                        legacy_uri=uri,
+                        legacy_vocab=vocab,
+                        legacy_labels=pref_labels,
+                        target_uri=match_uri,
+                        target_vocab=match_v,
+                        mapping_type="exact_match",
+                        target_field=t_field,
+                    )
+                )
 
-            # 2. Legacy thesauri mappings
-            for match_clause in re.findall(r"skos:exactMatch\s+([^;.]+)", body):
-                for raw_match in re.findall(
-                    r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", match_clause
-                ):
-                    match_uri = _resolve_uri(raw_match)
-                    match_v = _detect_vocab(match_uri)
+        # Check hierarchical broader / narrower relations
+        cid = concept.concept_id
+        for parent in g.objects(subj, SKOS.broader):
+            parent_uri = str(parent)
+            pcid = extract_concept_id(parent_uri)
+            if pcid and pcid != cid:
+                hierarchy_edges.append(
+                    {
+                        "vocabulary": vocab,
+                        "concept_id": cid,
+                        "broader_concept_id": pcid,
+                        "relation_type": "broader",
+                    }
+                )
 
-                    if match_v in active_legacy and vocab not in active_legacy:
-                        # Inverted: legacy thesaurus maps into this modern canonical concept
-                        mappings.append(
-                            ConceptMapping(
-                                legacy_uri=match_uri,
-                                legacy_vocab=match_v,
-                                legacy_labels=pref_labels,
-                                target_uri=uri,
-                                target_vocab=vocab,
-                                mapping_type="exact_match",
-                                target_field=target_field,
-                            )
-                        )
-                    elif vocab in active_legacy and match_v not in active_legacy:
-                        # Direct: current concept is legacy thesaurus mapping to modern canonical concept
-                        t_field = active_target_fields.get(match_v, default_target_field)
-                        mappings.append(
-                            ConceptMapping(
-                                legacy_uri=uri,
-                                legacy_vocab=vocab,
-                                legacy_labels=pref_labels,
-                                target_uri=match_uri,
-                                target_vocab=match_v,
-                                mapping_type="exact_match",
-                                target_field=t_field,
-                            )
-                        )
-
-            # Check hierarchical broader / narrower relations
-            cid = concept.concept_id
-            for bm in re.findall(r"skos:broader\s+([^;.]+)", body):
-                for raw_b in re.findall(r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", bm):
-                    parent_uri = _resolve_uri(raw_b)
-                    pcid = extract_concept_id(parent_uri)
-                    if pcid and pcid != cid:
-                        hierarchy_edges.append(
-                            {
-                                "vocabulary": vocab,
-                                "concept_id": cid,
-                                "broader_concept_id": pcid,
-                                "relation_type": "broader",
-                            }
-                        )
-
-            for nm in re.findall(r"skos:narrower\s+([^;.]+)", body):
-                for raw_n in re.findall(r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", nm):
-                    child_uri = _resolve_uri(raw_n)
-                    ncid = extract_concept_id(child_uri)
-                    if ncid and ncid != cid:
-                        hierarchy_edges.append(
-                            {
-                                "vocabulary": vocab,
-                                "concept_id": ncid,
-                                "broader_concept_id": cid,
-                                "relation_type": "broader",
-                            }
-                        )
+        for child in g.objects(subj, SKOS.narrower):
+            child_uri = str(child)
+            ncid = extract_concept_id(child_uri)
+            if ncid and ncid != cid:
+                hierarchy_edges.append(
+                    {
+                        "vocabulary": vocab,
+                        "concept_id": ncid,
+                        "broader_concept_id": cid,
+                        "relation_type": "broader",
+                    }
+                )
 
     return concepts, mappings, hierarchy_edges
 
