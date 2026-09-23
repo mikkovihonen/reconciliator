@@ -410,3 +410,108 @@ def test_thesis_enrichment_configurable_relator() -> None:
     f710 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='710']")
     assert f710 is not None
     assert _get_subfields(f710, "0") == ["http://example.org/institution/univ1"]
+
+
+def test_enrich_agent_actionable_urns() -> None:
+    """Test that agents receive full actionable URNs from configured templates."""
+    xml_str = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <controlfield tag="001">008</controlfield>
+      <datafield tag="700" ind1="1" ind2=" ">
+        <subfield code="a">Waltari, Mika</subfield>
+      </datafield>
+    </record>
+    """
+    elem = etree.fromstring(xml_str.strip())
+    rec = BibliographicRecord(
+        source_id="008",
+        source="target",
+        title="Test Record",
+        agents=[
+            Agent(name="Waltari, Mika", surname="Waltari"),
+            Agent(name="Atena Kustannus", surname=None),
+        ],
+    )
+
+    res = ReconciliationResult(
+        target_record=rec,
+        selected_agent_uris={
+            0: ["kanto_pn:000123456"],
+            1: ["kanto_cn:000000252"],
+        },
+    )
+
+    enricher = MARCXMLEnricher()
+    # Add a 710 datafield for Atena Kustannus
+    f710_elem = etree.SubElement(elem, "{http://www.loc.gov/MARC21/slim}datafield", tag="710", ind1="2", ind2=" ")
+    s_a = etree.SubElement(f710_elem, "{http://www.loc.gov/MARC21/slim}subfield", code="a")
+    s_a.text = "Atena Kustannus"
+
+    enriched = enricher.enrich_record_tree(elem, res, enrich=True, fold_legacy=False)
+
+    f700 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='700']")
+    assert f700 is not None
+    u0_700 = _get_subfields(f700, "0")
+    assert u0_700 == ["https://urn.fi/URN:NBN:fi:au:pn:000123456"]
+
+    f710 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='710']")
+    assert f710 is not None
+    u0_710 = _get_subfields(f710, "0")
+    assert u0_710 == ["https://urn.fi/URN:NBN:fi:au:cn:000000252"]
+
+
+def test_enrich_subject_headings_full_actionable_urns() -> None:
+    """Test that subject fields with URN vocabularies or ontologies receive full actionable URNs/URIs."""
+    from unittest.mock import MagicMock
+
+    xml_str = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <controlfield tag="001">009</controlfield>
+      <datafield tag="655" ind1=" " ind2="7">
+        <subfield code="a">sarjakuvat</subfield>
+        <subfield code="2">slm/fin</subfield>
+      </datafield>
+      <datafield tag="650" ind1=" " ind2="7">
+        <subfield code="a">kosto</subfield>
+        <subfield code="2">yso/fin</subfield>
+      </datafield>
+      <datafield tag="651" ind1=" " ind2="7">
+        <subfield code="a">Iso-Britannia</subfield>
+        <subfield code="2">yso-paikat/fin</subfield>
+      </datafield>
+      <datafield tag="648" ind1=" " ind2="7">
+        <subfield code="a">1980-luku</subfield>
+        <subfield code="2">yso-aika</subfield>
+      </datafield>
+    </record>
+    """
+    elem = etree.fromstring(xml_str.strip())
+    enricher = MARCXMLEnricher()
+
+    mock_vf = MagicMock()
+
+    def mock_fold(heading, source_vocab=None, source_field=None, source_uri=None, lang=None):
+        if source_field == "655":
+            return ("655", "slm/fin", "slm:s356", "sarjakuvat", "exact", None)
+        elif source_field == "650":
+            return ("650", "yso/fin", "yso:p22090", "kosto", "exact", None)
+        elif source_field == "651":
+            return ("651", "yso-paikat/fin", "yso-paikat:p104990", "Iso-Britannia", "exact", None)
+        elif source_field == "648":
+            return ("648", "yso-aika", "yso-aika:p6198061989", "1980-luku", "exact", None)
+        return (source_field, source_vocab, source_uri or "", heading, "none", None)
+
+    mock_vf.fold_subject_heading.side_effect = mock_fold
+    enricher.vocab_folder = mock_vf
+
+    enriched = enricher.enrich_record_tree(elem, enrich=True, fold_legacy=True)
+
+    f655 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='655']")
+    f650 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']")
+    f651 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='651']")
+    f648 = enriched.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='648']")
+
+    assert _get_subfields(f655, "0") == ["https://urn.fi/URN:NBN:fi:au:slm:s356"]
+    assert _get_subfields(f650, "0") == ["http://www.yso.fi/onto/yso/p22090"]
+    assert _get_subfields(f651, "0") == ["http://www.yso.fi/onto/yso-paikat/p104990"]
+    assert _get_subfields(f648, "0") == ["http://www.yso.fi/onto/yso-aika/p6198061989"]

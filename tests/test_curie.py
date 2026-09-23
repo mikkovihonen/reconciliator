@@ -11,13 +11,16 @@ from reconciliator.utils.curie import (
 def test_to_curie() -> None:
     assert to_curie("wikidata", "Q42") == "wikidata:Q42"
     assert to_curie("MELINDA", "000123") == "melinda:000123"
-    assert to_curie("kanto", "000012345") == "kanto:000012345"
+    assert to_curie("kanto_pn", "000012345") == "kanto_pn:000012345"
+    assert to_curie("kanto_cn", "000012345") == "kanto_cn:000012345"
 
 
 def test_parse_curie_standard() -> None:
     assert parse_curie("wikidata:Q12344") == ("wikidata", "Q12344")
     assert parse_curie("isni:0000000121484501") == ("isni", "0000000121484501")
     assert parse_curie("melinda:000123456") == ("melinda", "000123456")
+    assert parse_curie("kanto_pn:000012345") == ("kanto_pn", "000012345")
+    assert parse_curie("kanto_cn:000012345") == ("kanto_cn", "000012345")
 
 
 def test_parse_curie_from_uris() -> None:
@@ -25,12 +28,14 @@ def test_parse_curie_from_uris() -> None:
     assert parse_curie("http://wikidata.org/wiki/Q42") == ("wikidata", "Q42")
     assert parse_curie("https://isni.org/isni/0000000121484501") == ("isni", "0000000121484501")
     assert parse_curie("http://viaf.org/viaf/12345") == ("viaf", "12345")
-    assert parse_curie("http://urn.fi/URN:NBN:fi:au:pn:000012345") == ("kanto", "000012345")
+    assert parse_curie("http://urn.fi/URN:NBN:fi:au:pn:000012345") == ("kanto_pn", "000012345")
+    assert parse_curie("http://urn.fi/URN:NBN:fi:au:cn:000012345") == ("kanto_cn", "000012345")
     assert parse_curie("https://orcid.org/0000-0002-1825-0097") == ("orcid", "0000-0002-1825-0097")
 
 
 def test_parse_curie_from_marc_prefix() -> None:
-    assert parse_curie("(FI-ASTERI-N)000012345") == ("kanto", "000012345")
+    assert parse_curie("(FI-ASTERI-N)000012345") == ("kanto_pn", "000012345")
+    assert parse_curie("(FI-ASTERI-C)000012345") == ("kanto_cn", "000012345")
     assert parse_curie("(FI-MELINDA)000123456") == ("melinda", "000123456")
 
 
@@ -58,5 +63,16 @@ def test_utils_reexports() -> None:
     )
 
     assert to_curie("wikidata", "Q42") == "wikidata:Q42"
+
+
+def test_to_actionable_uri() -> None:
+    from reconciliator.utils.curie import to_actionable_uri
+
+    assert to_actionable_uri("kanto_pn:000012345") == "https://urn.fi/URN:NBN:fi:au:pn:000012345"
+    assert to_actionable_uri("kanto_cn:000012345") == "https://urn.fi/URN:NBN:fi:au:cn:000012345"
+    assert to_actionable_uri("slm:s123") == "https://urn.fi/URN:NBN:fi:au:slm:s123"
+    assert to_actionable_uri("seko:s456") == "https://urn.fi/URN:NBN:fi:au:seko:s456"
+    assert to_actionable_uri("mts:m789") == "https://urn.fi/URN:NBN:fi:au:mts:m789"
+    assert to_actionable_uri("https://example.com/foo") == "https://example.com/foo"
     assert parse_curie("wikidata:Q42") == ("wikidata", "Q42")
     assert extract_wikidata_qid("Q42") == "Q42"

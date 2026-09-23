@@ -33,7 +33,7 @@ class SKOSAuthoritySerializer:
         exact_matches = [
             f"{m.source}:{m.source_id}"
             for m in cluster.members
-            if m.source.lower() in ("isni", "viaf", "wikidata", "kanto", "asteri")
+            if m.source.lower() in ("isni", "viaf", "wikidata", "kanto_pn", "kanto_cn", "asteri")
         ]
         affiliations = [a.value for a in cluster.attributes if a.attribute_type == "affiliation"]
         occupations = [a.value for a in cluster.attributes if a.attribute_type == "occupation"]
@@ -110,7 +110,7 @@ class SKOSAuthoritySerializer:
             lines.append(f'    skos:altLabel "{escaped_vn}" ')
 
         for m in cluster.members:
-            if m.source.lower() in ("isni", "viaf", "wikidata", "kanto"):
+            if m.source.lower() in ("isni", "viaf", "wikidata", "kanto_pn", "kanto_cn"):
                 lines[-1] += ";"
                 lines.append(f"    skos:exactMatch <{m.source}:{m.source_id}> ")
 

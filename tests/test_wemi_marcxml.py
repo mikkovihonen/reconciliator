@@ -582,7 +582,7 @@ def test_an_authority_uri_beats_any_derived_id():
         </record>""".encode()
     )
     agent = decompose_marc_wemi(rec, source="melinda")[4][0]
-    assert agent.agent_uri == "kanto:000123"
+    assert agent.agent_uri == "kanto_pn:000123"
 
 
 def test_all_decomposition_paths_mint_the_same_uri_shape():

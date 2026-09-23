@@ -156,7 +156,8 @@ linguistic:
 
 vocabularies:
   agent_priority:
-    - "KANTO"
+    - "KANTO_PN"
+    - "KANTO_CN"
     - "ISNI"
     - "VIAF"
     - "WIKIDATA"
@@ -271,12 +272,18 @@ vocabularies:
       allowed_vocabs: ["seko", "muso", "yso"]
 
   vocabulary_patterns:
-    KANTO:
+    KANTO_PN:
       - "urn.fi/urn:nbn:fi:au:pn:"
       - "(fi-asteri-n)"
-      - "(fi-kanto)"
-      - "asteri"
-      - "kanto:"
+      - "asteri-n"
+      - "kanto_pn:"
+      - "kanto-pn:"
+    KANTO_CN:
+      - "urn.fi/urn:nbn:fi:au:cn:"
+      - "(fi-asteri-c)"
+      - "asteri-c"
+      - "kanto_cn:"
+      - "kanto-cn:"
     YSO:
       - "yso.fi/onto/yso/"
       - "(fi-yso)"
@@ -329,14 +336,24 @@ vocabularies:
       - "wikidata:"
 
   concept_id_rules:
-    KANTO:
-      prefix: "kanto"
+    KANTO_PN:
+      prefix: "kanto_pn"
       uri_template: "https://urn.fi/URN:NBN:fi:au:pn:{id}"
       id_patterns:
         - '(?i)au:pn:(\d+)'
         - '(?i)\(fi-asteri-n\)(\d+)'
-        - '(?i)\(fi-kanto\)(\d+)'
-        - '(?i)(?:^|:)kanto:(\d+)'
+        - '(?i)(?:^|:)kanto_pn:(\d+)'
+        - '(?i)(?:^|:)kanto-pn:(\d+)'
+        - '^(\d{9})$'
+      canonical_id_case: "preserve"
+    KANTO_CN:
+      prefix: "kanto_cn"
+      uri_template: "https://urn.fi/URN:NBN:fi:au:cn:{id}"
+      id_patterns:
+        - '(?i)au:cn:(\d+)'
+        - '(?i)\(fi-asteri-c\)(\d+)'
+        - '(?i)(?:^|:)kanto_cn:(\d+)'
+        - '(?i)(?:^|:)kanto-cn:(\d+)'
         - '^(\d{9})$'
       canonical_id_case: "preserve"
     YSO:
@@ -386,7 +403,7 @@ vocabularies:
       canonical_id_case: "lower"
     SLM:
       prefix: "slm"
-      uri_template: "http://urn.fi/URN:NBN:fi:au:slm:{id}"
+      uri_template: "https://urn.fi/URN:NBN:fi:au:slm:{id}"
       id_patterns:
         - '(?i)au:slm:(s\d+)'
         - '(?i)\(fi-slm\)(s\d+)'
@@ -395,7 +412,7 @@ vocabularies:
       canonical_id_case: "lower"
     SEKO:
       prefix: "seko"
-      uri_template: "http://urn.fi/URN:NBN:fi:au:seko:{id}"
+      uri_template: "https://urn.fi/URN:NBN:fi:au:seko:{id}"
       id_patterns:
         - '(?i)au:seko:(s\d+)'
         - '(?i)\(fi-seko\)(s\d+)'
@@ -404,7 +421,7 @@ vocabularies:
       canonical_id_case: "lower"
     MTS:
       prefix: "mts"
-      uri_template: "http://urn.fi/URN:NBN:fi:au:mts:{id}"
+      uri_template: "https://urn.fi/URN:NBN:fi:au:mts:{id}"
       id_patterns:
         - '(?i)au:mts:(m\d+)'
         - '(?i)\(fi-mts\)(m\d+)'
@@ -1113,7 +1130,8 @@ agent_clustering:
 
   source_authority_precedence:
     - "asteri"
-    - "kanto"
+    - "kanto_pn"
+    - "kanto_cn"
     - "isni"
     - "viaf"
     - "wikidata"
@@ -1122,7 +1140,8 @@ agent_clustering:
     - "isni"
     - "viaf"
     - "orcid"
-    - "kanto"
+    - "kanto_pn"
+    - "kanto_cn"
     - "wikidata"
 
   blocking_keys:
@@ -1151,7 +1170,8 @@ virtual_authority:
   pid_generator: "uuidv7"
   provenance_sources_priority:
     - "asteri"
-    - "kanto"
+    - "kanto_pn"
+    - "kanto_cn"
     - "isni"
     - "viaf"
     - "wikidata"
@@ -1164,7 +1184,8 @@ virtual_authority:
   status_policy:
     authoritative_origins:
       - "asteri"
-      - "kanto"
+      - "kanto_pn"
+      - "kanto_cn"
       - "isni"
       - "viaf"
       - "wikidata"
@@ -1179,7 +1200,8 @@ virtual_authority:
       standard_id_source_codes:
         isni: "isni"
         wikidata: "wikidata"
-        kanto: "fikan"
+        kanto_pn: "fikan"
+        kanto_cn: "fikan"
         asteri: "fikan"
         viaf: "viaf"
         orcid: "orcid"
@@ -1247,7 +1269,8 @@ consolidation:
     - "urn"
     - "asteri"
     - "asteri_work"
-    - "kanto"
+    - "kanto_pn"
+    - "kanto_cn"
   metadata_threshold: 0.93
   include_same_source: false
   canonical_source_priority: []
@@ -1419,15 +1442,21 @@ sources:
     tag_prefixes: ["orcid"]
     aliases: []
     subfield: "0"
-  kanto:
+  kanto_pn:
     entity_type: "agent"
     uri_patterns:
       - "^https?://urn\\.fi/URN:NBN:fi:au:pn:"
+    canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:pn:{identifier}"
+    tag_prefixes: ["(fi-asteri-n)", "asteri-n", "kanto_pn", "kanto-pn"]
+    aliases: []
+    subfield: "0"
+  kanto_cn:
+    entity_type: "agent"
+    uri_patterns:
       - "^https?://urn\\.fi/URN:NBN:fi:au:cn:"
-      - "^https?://finto\\.fi/kanto/[a-z]{2}/page/"
-    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:pn:{identifier}"
-    tag_prefixes: ["(fi-asteri-n)", "(fi-asteri-c)", "(fin11)", "asteri-n", "asteri-c", "kanto"]
-    aliases: ["finaf", "asteri", "fin11"]
+    canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:cn:{identifier}"
+    tag_prefixes: ["(fi-asteri-c)", "asteri-c", "kanto_cn", "kanto-cn"]
+    aliases: []
     subfield: "0"
   asteri_work:
     entity_type: "work"
@@ -1450,18 +1479,18 @@ sources:
     uri_patterns:
       - "^https?://urn\\.fi/URN:NBN:fi:au:slm:"
       - "^https?://finto\\.fi/slm/[a-z]{2}/page/"
-    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:slm:{identifier}"
+    canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:slm:{identifier}"
     tag_prefixes: ["slm"]
   seko:
     uri_patterns:
       - "^https?://urn\\.fi/URN:NBN:fi:au:seko:"
       - "^https?://finto\\.fi/seko/[a-z]{2}/page/"
-    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:seko:{identifier}"
+    canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:seko:{identifier}"
     tag_prefixes: ["seko"]
   mts:
     uri_patterns:
       - "^https?://urn\\.fi/URN:NBN:fi:au:mts:"
-    canonical_uri_template: "http://urn.fi/URN:NBN:fi:au:mts:{identifier}"
+    canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:mts:{identifier}"
     tag_prefixes: ["mts"]
   urn:
     uri_patterns:

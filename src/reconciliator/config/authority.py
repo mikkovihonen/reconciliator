@@ -73,7 +73,7 @@ class AuthorityStatusPolicyConfig(BaseModel):
     authoritative_origins: list[str] = Field(
         default_factory=lambda: list(
             _VIRTUAL_AUTHORITY_DEFAULTS.get("status_policy", {}).get("authoritative_origins")
-            or ["asteri", "kanto", "isni", "viaf", "wikidata"]
+            or ["asteri", "kanto_pn", "kanto_cn", "isni", "viaf", "wikidata"]
         )
     )
     established_status_name: str = Field(
@@ -133,7 +133,8 @@ class MARC21AuthoritySerializationConfig(BaseModel):
             or {
                 "isni": "isni",
                 "wikidata": "wikidata",
-                "kanto": "fikan",
+                "kanto_pn": "fikan",
+                "kanto_cn": "fikan",
                 "asteri": "fikan",
                 "viaf": "viaf",
                 "orcid": "orcid",
@@ -320,7 +321,7 @@ class VirtualAuthorityConfig(BaseModel):
     provenance_sources_priority: list[str] = Field(
         default_factory=lambda: list(
             _VIRTUAL_AUTHORITY_DEFAULTS.get("provenance_sources_priority")
-            or ["asteri", "kanto", "isni", "viaf", "wikidata"]
+            or ["asteri", "kanto_pn", "kanto_cn", "isni", "viaf", "wikidata"]
         )
     )
     lifecycle: AuthorityLifecycleConfig = Field(

@@ -588,16 +588,22 @@ class WorkMatcher:
         idents = agent.identifiers
         if not idents and agent.id:
             idents = self.repo.get_identifiers_for_entity("agent", agent.id)
+        from reconciliator.utils.curie import format_source_uri
+        from reconciliator.vocab import format_wikidata_uri
+
         for ident in idents:
             src = (ident.source or "").lower()
             if src == "wikidata":
                 _add(format_wikidata_uri(ident.source_id), "1")
             else:
-                _add(ident.curie or f"{src}:{ident.source_id}", "0")
+                _add(format_source_uri(src, ident.source_id), "0")
 
-        _add(agent.curie)
-        if agent.source.lower() == "wikidata" and agent.source_id:
-            _add(format_wikidata_uri(agent.source_id), "1")
+        if agent.source and agent.source_id and agent.source.lower() != "unknown":
+            src = agent.source.lower()
+            if src == "wikidata":
+                _add(format_wikidata_uri(agent.source_id), "1")
+            else:
+                _add(format_source_uri(src, agent.source_id), "0")
 
         return u0, u1
 
@@ -950,6 +956,13 @@ class WorkMatcher:
                 )
                 existing_uris.add(uri)
 
+            from reconciliator.utils.curie import (
+                _get_sources_registry,
+                format_source_uri,
+                to_actionable_uri,
+            )
+            from reconciliator.vocab import format_wikidata_uri
+
             if best_cand.get("id"):
                 try:
                     agent_idents = self.repo.get_identifiers_for_entity(
@@ -957,8 +970,13 @@ class WorkMatcher:
                     )
                     for ident in agent_idents:
                         is_wd = ident.scheme.lower() == "wikidata"
+                        uri = (
+                            format_wikidata_uri(ident.source_id)
+                            if is_wd
+                            else format_source_uri(ident.scheme, ident.source_id)
+                        )
                         _accept(
-                            ident.curie,
+                            uri,
                             "1" if is_wd else "0",
                             "WIKIDATA" if is_wd else ident.scheme.upper(),
                         )
@@ -969,16 +987,15 @@ class WorkMatcher:
             c_sid = best_cand.get("source_id")
             if c_src and c_sid and not str(c_src).startswith(("urn", "unknown")):
                 c_src_l = str(c_src).lower()
-                from reconciliator.utils.curie import _get_sources_registry, format_source_uri
-
                 formatted_uri = format_source_uri(c_src_l, str(c_sid))
                 src_info = _get_sources_registry().get(c_src_l, {})
                 subf = str(src_info.get("subfield", "1" if c_src_l == "wikidata" else "0"))
                 _accept(formatted_uri, subf, str(c_src).upper())
 
             if best_cand.get("agent_uri"):
-                a_uri = str(best_cand["agent_uri"])
-                if not a_uri.startswith(("urn:agent:", "urn:reconciliator:")):
+                raw_a_uri = str(best_cand["agent_uri"])
+                if not raw_a_uri.startswith(("urn:agent:", "urn:reconciliator:")):
+                    a_uri = to_actionable_uri(raw_a_uri)
                     is_wd = "wikidata.org" in a_uri.lower()
                     _accept(a_uri, "1" if is_wd else "0", "WIKIDATA" if is_wd else "OTHER")
 

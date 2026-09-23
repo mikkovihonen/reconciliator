@@ -133,8 +133,8 @@ reconcile:
     detailed_file: "{reports}/subject_uris.tsv"
     summary_file: "{reports}/subject_summary.tsv"
   link_policy: "priority_fallback"
-  vocabularies: ["KANTO", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
-  agent_priority: ["KANTO", "ISNI", "VIAF", "WIKIDATA"]
+  vocabularies: ["KANTO_PN", "KANTO_CN", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
+  agent_priority: ["KANTO_PN", "KANTO_CN", "ISNI", "VIAF", "WIKIDATA"]
   subject_priority: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO"]
 
 telemetry:
@@ -229,7 +229,7 @@ def test_export_preserves_every_input_field(tmp_path: Path) -> None:
     # And enrichment actually happened.
     assert ("0", "http://www.yso.fi/onto/yso/p2591") in out_subfield_values
     assert ("0", "http://urn.fi/URN:NBN:fi:au:slm:s123") in out_subfield_values
-    assert ("0", "kanto:000123456") in out_subfield_values
+    assert ("0", "https://urn.fi/URN:NBN:fi:au:pn:000123456") in out_subfield_values
     assert "655" in out_tags, "kaunokki heading should fold from 650 to 655"
 
 

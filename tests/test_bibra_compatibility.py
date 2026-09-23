@@ -216,7 +216,7 @@ def test_enrich_bibra_json() -> None:
     recon = enriched["reconciliation"]
     assert len(recon["agents"]) == 1
     assert recon["agents"][0]["name"] == "Waltari, Mika"
-    assert recon["agents"][0]["kanto_uri"] == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
+    assert recon["agents"][0]["kanto_pn_uri"] == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
     assert recon["agents"][0]["wikidata_uri"] == "http://www.wikidata.org/entity/Q273115"
 
 
@@ -308,8 +308,8 @@ reconcile:
     max_year_difference: 5
     year_penalty_threshold: 1
   link_policy: "priority_fallback"
-  vocabularies: ["KANTO", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
-  agent_priority: ["KANTO", "ISNI", "VIAF", "WIKIDATA"]
+  vocabularies: ["KANTO_PN", "KANTO_CN", "YSO", "MUSO", "KAUNO", "SLM", "SEKO", "VIAF", "ISNI", "WIKIDATA"]
+  agent_priority: ["KANTO_PN", "KANTO_CN", "ISNI", "VIAF", "WIKIDATA"]
   subject_priority: ["YSO", "KAUNO", "MUSO", "SLM", "SEKO"]
 
 telemetry:
@@ -350,10 +350,13 @@ telemetry:
     assert len(json_lines) == 2
     assert "reconciliation" in json_lines[0]
     assert json_lines[0]["reconciliation"]["status"] == "matched"
-    assert json_lines[0]["reconciliation"]["agents"][0]["kanto_uri"] == "kanto:000123456"
+    assert (
+        json_lines[0]["reconciliation"]["agents"][0]["kanto_pn_uri"]
+        == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
+    )
 
     # Check TSV reports exist
     agent_detailed = reports_dir / "agent_uris.tsv"
     assert agent_detailed.exists()
     content = agent_detailed.read_text(encoding="utf-8")
-    assert "kanto:000123456" in content
+    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in content

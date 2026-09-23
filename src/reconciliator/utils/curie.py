@@ -159,20 +159,52 @@ def parse_curie(curie_or_uri: str, default_source: str = "") -> tuple[str, str]:
     return (default_source.lower() if default_source else "unknown", raw)
 
 
-def format_source_uri(source: str, identifier: str) -> str:
-    """Format source and identifier into canonical URI using configured templates."""
+def format_source_uri(
+    source: str,
+    identifier: str,
+    template: Optional[str] = None,
+) -> str:
+    """Format source and identifier into canonical URI using configured template."""
     clean_src = str(source or "").strip().lower()
     clean_id = str(identifier or "").strip()
-    registry = _get_sources_registry()
-    src_data = registry.get(clean_src)
     encoded_id = encode_curie_reference(clean_id)
-    if isinstance(src_data, dict):
-        template = src_data.get("canonical_uri_template")
-        if template:
+
+    if not template:
+        registry = _get_sources_registry()
+        src_data = registry.get(clean_src)
+        if not src_data:
+            for k, v in registry.items():
+                if isinstance(v, dict) and clean_src in [a.lower() for a in v.get("aliases", [])]:
+                    clean_src = k
+                    src_data = v
+                    break
+        if isinstance(src_data, dict):
+            template = src_data.get("canonical_uri_template")
             if src_data.get("uppercase_identifier"):
                 encoded_id = encoded_id.upper()
-            return template.format(identifier=encoded_id)
+
+    if template:
+        tmpl = template.replace("{id}", "{identifier}")
+        return tmpl.format(identifier=encoded_id)
+
     return to_curie(clean_src, clean_id)
+
+
+def to_actionable_uri(
+    curie_or_uri: str,
+    template: Optional[str] = None,
+    default_source: str = "",
+) -> str:
+    """Convert any CURIE or URI to its canonical actionable URI using configured template."""
+    if not curie_or_uri:
+        return ""
+    raw = str(curie_or_uri).strip()
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    src, sid = parse_curie(raw, default_source=default_source)
+    if src and src != "unknown" and sid:
+        return format_source_uri(src, sid, template=template)
+    return raw
 
 
 def extract_source_identifier(source: str, curie_or_id: str) -> Optional[str]:

@@ -4,8 +4,10 @@ from reconciliator.vocab import VocabularyManager, detect_vocabulary
 
 
 def test_detect_vocabulary() -> None:
-    assert detect_vocabulary("https://urn.fi/URN:NBN:fi:au:pn:000123456") == "KANTO"
-    assert detect_vocabulary("(FI-ASTERI-N)000123456") == "KANTO"
+    assert detect_vocabulary("https://urn.fi/URN:NBN:fi:au:pn:000123456") == "KANTO_PN"
+    assert detect_vocabulary("(FI-ASTERI-N)000123456") == "KANTO_PN"
+    assert detect_vocabulary("https://urn.fi/URN:NBN:fi:au:cn:000000252") == "KANTO_CN"
+    assert detect_vocabulary("(FI-ASTERI-C)000000252") == "KANTO_CN"
     assert detect_vocabulary("http://www.yso.fi/onto/yso/p2591") == "YSO"
     assert detect_vocabulary("http://urn.fi/URN:NBN:fi:au:slm:s123") == "SLM"
     assert detect_vocabulary("http://urn.fi/URN:NBN:fi:au:seko:s789") == "SEKO"
@@ -18,20 +20,20 @@ def test_detect_vocabulary() -> None:
 
 def test_priority_fallback() -> None:
     vm = VocabularyManager(
-        allowed_vocabularies=["KANTO", "ISNI", "VIAF", "WIKIDATA"],
-        agent_priority=["KANTO", "ISNI", "VIAF", "WIKIDATA"],
+        allowed_vocabularies=["KANTO_PN", "KANTO_CN", "ISNI", "VIAF", "WIKIDATA"],
+        agent_priority=["KANTO_PN", "KANTO_CN", "ISNI", "VIAF", "WIKIDATA"],
         link_policy="priority_fallback",
     )
 
     kanto_uri = "https://urn.fi/URN:NBN:fi:au:pn:000123456"
     viaf_uri = "http://viaf.org/viaf/111079447"
 
-    # Both present -> KANTO chosen, VIAF suppressed
+    # Both present -> KANTO_PN chosen, VIAF suppressed
     selected, suppressed = vm.select_agent_uris([kanto_uri, viaf_uri])
     assert selected == [kanto_uri]
     assert suppressed == [viaf_uri]
 
-    # Orthogonal $0 (KANTO, VIAF) and $1 (WIKIDATA)
+    # Orthogonal $0 (KANTO_PN, VIAF) and $1 (WIKIDATA)
     wikidata_uri = "http://www.wikidata.org/entity/Q273115"
     selected_ortho, suppressed_ortho = vm.select_agent_uris([kanto_uri, viaf_uri, wikidata_uri])
     assert kanto_uri in selected_ortho
@@ -48,7 +50,7 @@ def test_priority_fallback() -> None:
 
 def test_all_links_policy() -> None:
     vm = VocabularyManager(
-        allowed_vocabularies=["KANTO", "VIAF"],
+        allowed_vocabularies=["KANTO_PN", "VIAF"],
         link_policy="all",
     )
 
@@ -130,9 +132,10 @@ def test_normalize_concept_id_and_expand() -> None:
     assert normalize_concept_id("http://urn.fi/URN:NBN:fi:au:seko:s789") == "seko:s789"
 
     # KANTO: Asteri URN, control numbers
-    assert normalize_concept_id("https://urn.fi/URN:NBN:fi:au:pn:000123456") == "kanto:000123456"
-    assert normalize_concept_id("(FI-ASTERI-N)000123456") == "kanto:000123456"
-    assert normalize_concept_id("(fi-kanto)000123456") == "kanto:000123456"
+    assert normalize_concept_id("https://urn.fi/URN:NBN:fi:au:pn:000123456") == "kanto_pn:000123456"
+    assert normalize_concept_id("(FI-ASTERI-N)000123456") == "kanto_pn:000123456"
+    assert normalize_concept_id("https://urn.fi/URN:NBN:fi:au:cn:000000252") == "kanto_cn:000000252"
+    assert normalize_concept_id("(FI-ASTERI-C)000000252") == "kanto_cn:000000252"
 
     # WIKIDATA: upper case QID
     assert normalize_concept_id("http://www.wikidata.org/entity/q42") == "wikidata:Q42"
@@ -144,8 +147,9 @@ def test_normalize_concept_id_and_expand() -> None:
 
     # Expand back to canonical URI
     assert concept_id_to_uri("yso:p2591") == "http://www.yso.fi/onto/yso/p2591"
-    assert concept_id_to_uri("slm:s123") == "http://urn.fi/URN:NBN:fi:au:slm:s123"
-    assert concept_id_to_uri("kanto:000123456") == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
+    assert concept_id_to_uri("slm:s123") == "https://urn.fi/URN:NBN:fi:au:slm:s123"
+    assert concept_id_to_uri("kanto_pn:000123456") == "https://urn.fi/URN:NBN:fi:au:pn:000123456"
+    assert concept_id_to_uri("kanto_cn:000000252") == "https://urn.fi/URN:NBN:fi:au:cn:000000252"
     assert concept_id_to_uri("wikidata:Q42") == "http://www.wikidata.org/entity/Q42"
 
 

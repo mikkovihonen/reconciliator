@@ -47,7 +47,8 @@ def test_authority_status_determination():
 
     # Asteri / Kanto origin -> established
     assert mgr.determine_authority_status(["helka", "asteri"]) == "established"
-    assert mgr.determine_authority_status(["kanto"]) == "established"
+    assert mgr.determine_authority_status(["kanto_pn"]) == "established"
+    assert mgr.determine_authority_status(["kanto_cn"]) == "established"
     assert mgr.determine_authority_status(["wikidata"]) == "established"
 
 

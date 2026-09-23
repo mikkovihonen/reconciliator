@@ -22,11 +22,11 @@ def setup_function() -> None:
 
 
 def test_parse_curie_asteri_agent_and_work() -> None:
-    # Agent authorities (Kanto / Asteri person & corporate & legacy Aleph FIN11)
-    assert parse_curie("(FI-ASTERI-N)000041539") == ("kanto", "000041539")
-    assert parse_curie("(FI-ASTERI-C)000012345") == ("kanto", "000012345")
-    assert parse_curie("(FIN11)000041539") == ("kanto", "000041539")
-    assert parse_curie("http://urn.fi/URN:NBN:fi:au:pn:000041539") == ("kanto", "000041539")
+    # Agent authorities (Kanto / Asteri person & corporate)
+    assert parse_curie("(FI-ASTERI-N)000041539") == ("kanto_pn", "000041539")
+    assert parse_curie("(FI-ASTERI-C)000012345") == ("kanto_cn", "000012345")
+    assert parse_curie("http://urn.fi/URN:NBN:fi:au:pn:000041539") == ("kanto_pn", "000041539")
+    assert parse_curie("http://urn.fi/URN:NBN:fi:au:cn:000012345") == ("kanto_cn", "000012345")
 
     # Work authorities (Teka / Asteri work & legacy Aleph FIN13)
     assert parse_curie("(FI-ASTERI-W)000015266") == ("asteri_work", "000015266")
@@ -290,7 +290,7 @@ def test_agent_multiple_identifiers_extracted_uniformly() -> None:
     agent_id_map = {i["source"]: i["source_id"] for i in agent["identifiers"]}
 
     assert agent_id_map.get("orcid") == "0000-0002-1825-0097"
-    assert agent_id_map.get("kanto") == "000012345"
+    assert agent_id_map.get("kanto_pn") == "000012345"
     assert agent_id_map.get("isni") == "0000000121404100"
     assert agent_id_map.get("wikidata") == "Q42"
 
@@ -300,6 +300,6 @@ def test_agent_multiple_identifiers_extracted_uniformly() -> None:
     decomp_map = {i.source: i.source_id for i in agent_entities}
 
     assert decomp_map.get("orcid") == "0000-0002-1825-0097"
-    assert decomp_map.get("kanto") == "000012345"
+    assert decomp_map.get("kanto_pn") == "000012345"
     assert decomp_map.get("isni") == "0000000121404100"
     assert decomp_map.get("wikidata") == "Q42"

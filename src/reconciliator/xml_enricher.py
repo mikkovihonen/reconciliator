@@ -177,17 +177,20 @@ class MARCXMLEnricher:
 
                     # Inject or update modern $0 URI if enrich is active
                     if enrich and target_uri:
+                        from reconciliator.utils.curie import to_actionable_uri
+
+                        actionable_target_uri = to_actionable_uri(target_uri)
                         if source_uri and source_uri in existing_uris:
                             f0_elems = field.findall(
                                 "marc:subfield[@code='0']", MARC_NS
                             ) or field.findall("subfield[@code='0']")
                             for elem in f0_elems:
                                 if elem.text and elem.text.strip() == source_uri:
-                                    elem.text = target_uri
+                                    elem.text = actionable_target_uri
                                     break
-                        elif target_uri not in existing_uris:
+                        elif actionable_target_uri not in existing_uris:
                             sub_0 = etree.SubElement(field, subfield_tag, code="0")
-                            sub_0.text = target_uri
+                            sub_0.text = actionable_target_uri
 
                     # Inject $1 Wikidata URI if enrich is active and qid is present
                     if enrich and qid:
@@ -237,11 +240,20 @@ class MARCXMLEnricher:
                                 sub.text = uri
                                 existing_u1.add(uri)
                         else:
-                            # Check if an existing $0 refers to the same entity (e.g. legacy Asteri control number)
-                            from reconciliator.utils.curie import parse_curie, to_curie
+                            # Format as full actionable URN/URI using template from configuration
+                            from reconciliator.utils.curie import (
+                                parse_curie,
+                                to_actionable_uri,
+                                to_curie,
+                            )
 
-                            uri_src, uri_sid = parse_curie(uri)
-                            uri_curie = to_curie(uri_src, uri_sid) if uri_src != "unknown" else uri
+                            actionable_uri = to_actionable_uri(uri)
+                            uri_src, uri_sid = parse_curie(actionable_uri)
+                            uri_curie = (
+                                to_curie(uri_src, uri_sid)
+                                if uri_src != "unknown"
+                                else actionable_uri
+                            )
 
                             matched_existing_sub = None
                             for sub_elem in matched_field.findall(
@@ -249,17 +261,23 @@ class MARCXMLEnricher:
                             ) or matched_field.findall(".//subfield[@code='0']"):
                                 s_text = (sub_elem.text or "").strip()
                                 s_src, s_sid = parse_curie(s_text)
-                                s_curie = to_curie(s_src, s_sid) if s_src != "unknown" else s_text
-                                if s_text == uri or (uri_src != "unknown" and s_curie == uri_curie):
+                                s_curie = (
+                                    to_curie(s_src, s_sid)
+                                    if s_src != "unknown"
+                                    else s_text
+                                )
+                                if s_text == actionable_uri or (
+                                    uri_src != "unknown" and s_curie == uri_curie
+                                ):
                                     matched_existing_sub = sub_elem
                                     break
 
                             if matched_existing_sub is not None:
-                                matched_existing_sub.text = uri
-                            elif uri not in existing_u0:
+                                matched_existing_sub.text = actionable_uri
+                            elif actionable_uri not in existing_u0:
                                 sub = etree.SubElement(matched_field, subfield_tag, code="0")
-                                sub.text = uri
-                                existing_u0.add(uri)
+                                sub.text = actionable_uri
+                                existing_u0.add(actionable_uri)
 
         # 2.1 Contributor Role Normalization & Injection ($e/$j and $4)
         if enrich and (

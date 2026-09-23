@@ -171,6 +171,7 @@ def normalize_concept_id(
 def concept_id_to_uri(
     concept_id: Optional[str],
     rules: Optional[dict[str, Any]] = None,
+    template: Optional[str] = None,
 ) -> Optional[str]:
     """Expand internal canonical 'vocab:id' to external canonical URI via configured uri_template."""
     if not concept_id:
@@ -179,9 +180,13 @@ def concept_id_to_uri(
     if not raw:
         return None
 
-    # If it's already an absolute URI, return stripped form
-    if raw.startswith("http://") or raw.startswith("https://") or raw.startswith("urn:"):
+    if raw.startswith("http://") or raw.startswith("https://"):
         return raw.rstrip("/")
+
+    if template:
+        _, _, cid = raw.partition(":") if ":" in raw else ("", "", raw)
+        tmpl = template.replace("{identifier}", "{id}")
+        return tmpl.format(id=cid.strip())
 
     active_rules = (
         {k.upper(): dict(v) for k, v in rules.items()}
