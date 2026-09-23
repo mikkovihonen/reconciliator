@@ -80,7 +80,7 @@ def parse_turtle_simple(
             clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
             if (
                 clean_seg
-                and not re.match(r"^p?\d+$", clean_seg, re.I)
+                and not (clean_seg.isdigit() or (clean_seg.lower().startswith("p") and clean_seg[1:].isdigit()))
                 and len(clean_seg) > 2
             ):
                 return clean_seg.lower()

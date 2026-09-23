@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
-import re
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import AsyncIterator, Optional
@@ -20,15 +20,6 @@ OAI_NS = {
     "oai": "http://www.openarchives.org/OAI/2.0/",
     "marc": "http://www.loc.gov/MARC21/slim",
 }
-
-_RESUMPTION_TOKEN_RE = re.compile(
-    rb"<(?:\w+:)?resumptionToken[^>]*>([^<]+)</(?:\w+:)?resumptionToken>",
-    re.IGNORECASE,
-)
-_ERROR_RE = re.compile(
-    rb"<(?:\w+:)?error\s+[^>]*code=[\"']([^\"']+)[\"'][^>]*>(.*?)</(?:\w+:)?error>",
-    re.IGNORECASE | re.DOTALL,
-)
 
 
 def partition_date_range(
@@ -57,22 +48,40 @@ def partition_date_range(
 
 
 def extract_page_resumption_token(page_bytes: bytes) -> Optional[str]:
-    """Fast extraction of resumptionToken from raw OAI-PMH XML response bytes."""
-    match = _RESUMPTION_TOKEN_RE.search(page_bytes)
-    if match:
-        token = match.group(1).strip()
-        if token:
-            return token.decode("utf-8", errors="replace")
+    """Extraction of resumptionToken from raw OAI-PMH XML response bytes using lxml."""
+    if not page_bytes or b"resumptionToken" not in page_bytes:
+        return None
+    try:
+        context = etree.iterparse(
+            io.BytesIO(page_bytes),
+            events=("end",),
+            tag=("resumptionToken", "{http://www.openarchives.org/OAI/2.0/}resumptionToken"),
+        )
+        for _, elem in context:
+            text = (elem.text or "").strip()
+            if text:
+                return text
+    except Exception:
+        pass
     return None
 
 
 def extract_page_error(page_bytes: bytes) -> Optional[tuple[str, str]]:
-    """Fast extraction of OAI-PMH error code and message from response bytes."""
-    match = _ERROR_RE.search(page_bytes)
-    if match:
-        code = match.group(1).decode("utf-8", errors="replace").strip()
-        msg = match.group(2).decode("utf-8", errors="replace").strip()
-        return code, msg
+    """Extraction of OAI-PMH error code and message from response bytes using lxml."""
+    if not page_bytes or b"error" not in page_bytes:
+        return None
+    try:
+        context = etree.iterparse(
+            io.BytesIO(page_bytes),
+            events=("end",),
+            tag=("error", "{http://www.openarchives.org/OAI/2.0/}error"),
+        )
+        for _, elem in context:
+            code = elem.get("code", "").strip()
+            msg = (elem.text or "").strip()
+            return code, msg
+    except Exception:
+        pass
     return None
 
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -31,9 +30,6 @@ from typing import Optional
 
 class ModuleRefError(ValueError):
     """A configured module reference could not be resolved."""
-
-
-_BARE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def is_path_reference(value: str) -> bool:
@@ -65,7 +61,7 @@ def resolve_module_ref(
         return None
 
     if not is_path_reference(value):
-        if not _BARE_NAME.match(value):
+        if not value.isidentifier():
             raise error_cls(
                 f"{kind} {subject!r}: {value!r} is neither a path "
                 f"(ending in .py) nor a valid built-in name"

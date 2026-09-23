@@ -552,6 +552,14 @@ def _extract_author_data(
     return None
 
 
+def is_qid(val: Any) -> bool:
+    """Check if value is an unresolved Wikidata QID (e.g. 'Q12345')."""
+    if not val:
+        return False
+    s = str(val).strip()
+    return len(s) > 1 and s.startswith("Q") and s[1:].isdigit()
+
+
 def _lookup_entity_name(
     qid: str,
     store: Optional[WEMIRepository],
@@ -564,7 +572,7 @@ def _lookup_entity_name(
         author = cache.get(qid)
         if author:
             name = author.get("name")
-            if name and not re.match(r"^Q\d+$", str(name)):
+            if name and not is_qid(name):
                 return str(name)
         return None
     if not store:
@@ -574,7 +582,7 @@ def _lookup_entity_name(
         cache.set(qid, author)
     if author:
         name = author.get("name")
-        if name and not re.match(r"^Q\d+$", str(name)):
+        if name and not is_qid(name):
             return str(name)
     return None
 
@@ -682,7 +690,7 @@ def parse_wikidata_entity(
         pub_qids = get_claim_qids(claims, "P123")
         if pub_qids:
             publisher = _lookup_entity_name(pub_qids[0], store, cache=cache)
-    if publisher and re.match(r"^Q\d+$", publisher.strip()):
+    if publisher and is_qid(publisher):
         publisher = None
 
     # Publication Place: first check qualifier, then database lookup
@@ -691,7 +699,7 @@ def parse_wikidata_entity(
         place_qids = get_claim_qids(claims, "P291")
         if place_qids:
             publication_place = _lookup_entity_name(place_qids[0], store, cache=cache)
-    if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
+    if publication_place and is_qid(publication_place):
         publication_place = None
 
     # Language & Original Language
@@ -740,7 +748,7 @@ def parse_wikidata_entity(
         series_qids = get_claim_qids(claims, "P179")
         if series_qids:
             series_title = _lookup_entity_name(series_qids[0], store, cache=cache)
-    if series_title and re.match(r"^Q\d+$", series_title.strip()):
+    if series_title and is_qid(series_title):
         series_title = None
 
     # Volume Designation
@@ -1322,7 +1330,7 @@ def decompose_wikidata_entity(
         pub_qids = get_claim_qids(claims, "P123")
         if pub_qids:
             publisher = _lookup_entity_name(pub_qids[0], store, cache=cache)
-    if publisher and re.match(r"^Q\d+$", publisher.strip()):
+    if publisher and is_qid(publisher):
         publisher = None
 
     # Publication Place
@@ -1331,7 +1339,7 @@ def decompose_wikidata_entity(
         place_qids = get_claim_qids(claims, "P291")
         if place_qids:
             publication_place = _lookup_entity_name(place_qids[0], store, cache=cache)
-    if publication_place and re.match(r"^Q\d+$", publication_place.strip()):
+    if publication_place and is_qid(publication_place):
         publication_place = None
 
     # Languages
@@ -1412,7 +1420,7 @@ def decompose_wikidata_entity(
     for prop, role in creator_props:
         for c_qid in get_claim_qids(claims, prop):
             c_name = _lookup_entity_name(c_qid, store, cache=cache) or c_qid
-            if not primary_creator_name and not re.match(r"^Q\d+$", c_name):
+            if not primary_creator_name and not is_qid(c_name):
                 primary_creator_name = c_name
             author_data: Optional[dict[str, Any]] = None
             if cache is not None and c_qid in cache:
