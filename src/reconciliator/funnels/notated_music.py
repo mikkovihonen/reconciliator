@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from reconciliator.config import get_bundled_section_defaults
+from reconciliator.config.defaults import get_bundled_section_defaults
 from reconciliator.funnels.engine import FunnelContext, default_tier2
 
 _NM_DEFAULTS = dict(get_bundled_section_defaults("funnels").get("notated_music") or {})

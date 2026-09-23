@@ -29,11 +29,11 @@ def test_load_sample_config() -> None:
     assert config.reconcile.rerank.engine == "bm25"
     assert config.reconcile.rerank.dense_weight == 0.6
     assert config.reconcile.rerank.short_circuit.threshold == 0.98
-    assert "melinda" in config.ingest_oai
-    assert config.ingest_oai["melinda"].source_type == "file"
-    assert config.ingest_oai["melinda"].batch_size == 10
-    assert config.ingest_oai["melinda"].input_path is not None
-    assert config.ingest_oai["melinda"].input_path.is_absolute()
+    assert "melinda" in config.ingestion.oai
+    assert config.ingestion.oai["melinda"].source_type == "file"
+    assert config.ingestion.oai["melinda"].batch_size == 10
+    assert config.ingestion.oai["melinda"].input_path is not None
+    assert config.ingestion.oai["melinda"].input_path.is_absolute()
 
 
 def test_missing_config_raises_file_not_found() -> None:
@@ -264,3 +264,35 @@ def test_yso_aika_default_temporal_vocabulary() -> None:
     assert cat_map["temporal"] == "648"
     assert cat_map["chronological"] == "648"
 
+
+def test_wikidata_omitted_or_disabled(tmp_path: Path) -> None:
+    # 1. Omitted wikidata section defaults to None
+    cfg_file = tmp_path / "omitted.yaml"
+    cfg_file.write_text(
+        """
+ingestion:
+  vocab:
+    input_path: "data/vocab"
+reconcile:
+  target_file: "target.xml"
+""",
+        encoding="utf-8",
+    )
+    loaded = load_config(cfg_file)
+    assert loaded.ingestion.wikidata is None
+    assert loaded.ingestion.vocab is not None
+    assert loaded.ingestion.vocab.enabled is True
+
+    # 2. Disabled wikidata section
+    cfg_disabled = tmp_path / "disabled.yaml"
+    cfg_disabled.write_text(
+        """
+ingestion:
+  wikidata:
+    enabled: false
+""",
+        encoding="utf-8",
+    )
+    loaded_disabled = load_config(cfg_disabled)
+    assert loaded_disabled.ingestion.wikidata is not None
+    assert loaded_disabled.ingestion.wikidata.enabled is False

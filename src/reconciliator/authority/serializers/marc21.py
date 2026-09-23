@@ -158,7 +158,9 @@ class MARC21AuthoritySerializer:
         )
         self._create_subfield(df678, "a", status_text)
 
-        return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="utf-8").decode("utf-8")
+        return etree.tostring(
+            root, pretty_print=True, xml_declaration=True, encoding="utf-8"
+        ).decode("utf-8")
 
     def serialize_work_cluster(self, cluster: WorkCluster) -> str:
         """Serialize a WorkCluster into a standard MARC 21 Authority XML document."""
@@ -208,8 +210,12 @@ class MARC21AuthoritySerializer:
         if cluster.canonical_work_source:
             df670 = self._create_datafield(root, "670", " ", " ")
             self._create_subfield(
-                df670, "a", f"{cluster.canonical_work_source.upper()}: {cluster.canonical_work_source_id or ''}"
+                df670,
+                "a",
+                f"{cluster.canonical_work_source.upper()}: {cluster.canonical_work_source_id or ''}",
             )
             self._create_subfield(df670, "b", f"Authorized work title: {cluster.canonical_title}")
 
-        return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="utf-8").decode("utf-8")
+        return etree.tostring(
+            root, pretty_print=True, xml_declaration=True, encoding="utf-8"
+        ).decode("utf-8")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,6 @@ from reconciliator.config import StorageConfig
 from reconciliator.database import get_engine, init_authority_db, init_corpus_db
 from reconciliator.progress import init_progress_db
 from reconciliator.vocab import init_vocab_db
-
-import os
 
 os.environ.setdefault("RECONCILIATOR_NULL_POOL", "1")
 

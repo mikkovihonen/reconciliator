@@ -22,7 +22,6 @@ from rapidfuzz import fuzz
 from sqlalchemy import and_, func, select
 
 from reconciliator.config import WorkConsolidationConfig
-from reconciliator.utils.curie import to_curie
 from reconciliator.database import (
     WEMIRepository,
     agents_table,
@@ -34,6 +33,7 @@ from reconciliator.database import (
 )
 from reconciliator.models import WorkRelationship
 from reconciliator.utils import UnionFind, clean_alphanumeric
+from reconciliator.utils.curie import to_curie
 
 logger = logging.getLogger(__name__)
 
@@ -380,7 +380,11 @@ class WorkConsolidator:
                     pinned_canonical = existing_canonicals[m]
                     break
 
-            canonical = pinned_canonical if pinned_canonical is not None else self.elect_canonical(members, sigs)
+            canonical = (
+                pinned_canonical
+                if pinned_canonical is not None
+                else self.elect_canonical(members, sigs)
+            )
             result.groups.append(members)
             for work_id in members:
                 result.canonical_by_work[work_id] = canonical
@@ -426,4 +430,3 @@ class WorkConsolidator:
             return {
                 (r["source_work_id"], r["target_work_id"]) for r in conn.execute(stmt).mappings()
             }
-

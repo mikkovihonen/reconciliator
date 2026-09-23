@@ -9,7 +9,11 @@ from sqlalchemy.pool import StaticPool
 
 from reconciliator.api.app import create_app
 from reconciliator.config import AppConfig, EntraAuthConfig
-from reconciliator.database import WEMIRepository, metadata, works_table, review_changesets_table, entity_pins_table
+from reconciliator.database import (
+    WEMIRepository,
+    metadata,
+    works_table,
+)
 
 
 @pytest.fixture
@@ -274,7 +278,3 @@ def test_asset_serving(client):
     res_emblem_png = client.get("/assets/reconciliator_emblem.png")
     assert res_emblem_png.status_code == 200
     assert "image/png" in res_emblem_png.headers.get("content-type", "")
-
-
-
-

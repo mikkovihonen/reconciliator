@@ -54,7 +54,7 @@ def get_bruno_test_suite_zip(
     - Automated assertions for status codes and payloads
     """
     from reconciliator.api.bruno import BrunoCollectionGenerator
-    from reconciliator.config import AppConfig, BrunoConfig
+    from reconciliator.config import AppConfig
 
     app_cfg: AppConfig = getattr(request.app.state, "config", AppConfig())
     bruno_cfg = app_cfg.bruno.model_copy()
@@ -110,4 +110,3 @@ def get_bruno_test_suite_json(
         config=bruno_cfg,
     )
     return generator.generate_json_export()
-

@@ -20,8 +20,8 @@ from reconciliator.funnels import (
     resolve_specs,
 )
 from reconciliator.funnels.spec import FunnelSpec, FunnelWhen
-from reconciliator.reconciliation import _merge_funnel_specs
 from reconciliator.models import MatchRecord
+from reconciliator.reconciliation import _merge_funnel_specs
 
 
 def _record(**kw) -> MatchRecord:
@@ -406,13 +406,22 @@ def test_an_ascii_folded_relator_term_resolves():
 
 
 def test_an_exact_term_still_resolves_the_same_way():
-    """Folding is consulted only when an exact lookup fails, so every term that
-    resolved before resolves to the same code."""
-    from reconciliator.config import DEFAULT_RELATOR_MAPPINGS
+    """Every standard role term resolves to its expected MARC code."""
     from reconciliator.normalizers.relators import normalize_role
 
-    for term, code in DEFAULT_RELATOR_MAPPINGS.items():
-        assert normalize_role(term) == code.strip().lower(), term
+    for term, code in [
+        ("kirjoittaja", "aut"),
+        ("toimittaja", "edt"),
+        ("kuvittaja", "ill"),
+        ("kääntäjä", "trl"),
+        ("säveltäjä", "cmp"),
+        ("näyttelijä", "act"),
+        ("author", "aut"),
+        ("editor", "edt"),
+        ("författare", "aut"),
+        ("redaktör", "edt"),
+    ]:
+        assert normalize_role(term) == code, term
 
 
 def test_an_unknown_role_is_still_returned_as_itself():
@@ -424,7 +433,8 @@ def test_an_unknown_role_is_still_returned_as_itself():
 def test_a_configured_mapping_folds_too():
     from reconciliator.normalizers.relators import RelatorRegistry
 
-    registry = RelatorRegistry(relator_mappings={"tulkitsijä": "trl"})
+    registry = RelatorRegistry()
+    registry.register("trl", "tulkitsijä")
     assert registry.normalize_role("tulkitsija") == "trl"
 
 
@@ -458,24 +468,23 @@ def test_build_builtin_specs_custom_patterns():
     )
     podcast_spec = next(s for s in custom if s.id == "funnel_cc_podcast")
     assert any(
-        getattr(w, "title_matches", None) == "custom_podcast_regex"
-        for w in podcast_spec.when
+        getattr(w, "title_matches", None) == "custom_podcast_regex" for w in podcast_spec.when
     )
 
     exhibition_spec = next(s for s in custom if s.id == "funnel_ll_exhibition")
     assert any(
-        getattr(w, "title_matches", None) == "custom_exhibition_regex"
-        for w in exhibition_spec.when
+        getattr(w, "title_matches", None) == "custom_exhibition_regex" for w in exhibition_spec.when
     )
 
 
 def test_audiobook_custom_config_fields():
     from unittest.mock import MagicMock
+
     from reconciliator.funnels.audiobook import tier2
     from reconciliator.funnels.engine import FunnelContext
     from reconciliator.funnels.spec import FunnelSpec
-    from reconciliator.reconciliation import WEMIMatchResult
     from reconciliator.models import WorkEntity
+    from reconciliator.reconciliation import WEMIMatchResult
 
     spec = FunnelSpec(
         id="funnel_e_audiobook",

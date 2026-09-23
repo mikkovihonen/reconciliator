@@ -277,12 +277,13 @@ def test_cli_download_skosmos_single_and_ingest(tmp_path: Path) -> None:
     config_yaml = f"""
 storage:
   data_dir: "{tmp_path}"
-download_skosmos:
-  finto:
-    enabled: true
-    api_url: "https://api.finto.fi/rest/v1"
-    output_dir: "{out_dir}"
-    vocabularies: ["yso"]
+ingestion:
+  skosmos:
+    finto:
+      enabled: true
+      api_url: "https://api.finto.fi/rest/v1"
+      output_dir: "{out_dir}"
+      vocabularies: ["yso"]
 """
     config_file.write_text(config_yaml, encoding="utf-8")
 
@@ -334,22 +335,23 @@ def test_cli_download_skosmos_all_sources(tmp_path: Path) -> None:
     config_yaml = f"""
 storage:
   data_dir: "{tmp_path}"
-download_skosmos:
-  finto:
-    enabled: true
-    api_url: "https://api.finto.fi/rest/v1"
-    output_dir: "{out_dir_finto}"
-    vocabularies: ["yso"]
-  agrovoc:
-    enabled: true
-    api_url: "https://agrovoc.example.org/rest/v1"
-    output_dir: "{out_dir_agrovoc}"
-    vocabularies: ["agrovoc"]
-  disabled_src:
-    enabled: false
-    api_url: "https://disabled.example.org/rest/v1"
-    output_dir: "{tmp_path}/disabled"
-    vocabularies: ["disabled_vocab"]
+ingestion:
+  skosmos:
+    finto:
+      enabled: true
+      api_url: "https://api.finto.fi/rest/v1"
+      output_dir: "{out_dir_finto}"
+      vocabularies: ["yso"]
+    agrovoc:
+      enabled: true
+      api_url: "https://agrovoc.example.org/rest/v1"
+      output_dir: "{out_dir_agrovoc}"
+      vocabularies: ["agrovoc"]
+    disabled_src:
+      enabled: false
+      api_url: "https://disabled.example.org/rest/v1"
+      output_dir: "{tmp_path}/disabled"
+      vocabularies: ["disabled_vocab"]
 """
     config_file.write_text(config_yaml, encoding="utf-8")
 
@@ -419,10 +421,11 @@ def test_cli_download_skosmos_unknown_source_error(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
     config_file.write_text(
         """
-download_skosmos:
-  finto:
-    enabled: true
-    vocabularies: ["yso"]
+ingestion:
+  skosmos:
+    finto:
+      enabled: true
+      vocabularies: ["yso"]
 """,
         encoding="utf-8",
     )

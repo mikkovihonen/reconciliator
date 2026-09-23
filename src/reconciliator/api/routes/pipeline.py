@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 
 from reconciliator.api.auth import get_current_user, require_admin
 from reconciliator.database import WEMIRepository, task_progress_table
 from reconciliator.models import TaskProgress, UserProfile
-from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -133,4 +132,3 @@ def trigger_pipeline_task(
         "message": f"Task '{task_type}' launched in background",
         "triggered_by": user.email,
     }
-

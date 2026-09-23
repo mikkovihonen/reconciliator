@@ -16,10 +16,10 @@ import pytest
 from lxml import etree
 
 from reconciliator.config import ReconcileConfig, RerankConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.loaders.marcxml import build_target_record_from_marc, decompose_marc_wemi
 from reconciliator.reconciliation import WorkMatcher
-from reconciliator.database import WEMIRepository
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
 DIM = 16

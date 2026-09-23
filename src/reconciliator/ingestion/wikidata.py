@@ -14,9 +14,10 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import IO, Any, Iterator, Optional
+from typing import Any, Iterator, Optional
 
 import orjson
+from sqlalchemy.exc import DataError
 
 from reconciliator.config import (
     WikidataIngestConfig,
@@ -26,6 +27,10 @@ from reconciliator.config import (
     get_subject_field_category_map,
     get_wikidata_author_properties,
 )
+from reconciliator.database import WEMIRepository
+from reconciliator.database.schema import agents_table
+from reconciliator.embedding.template import WEMISerializationEngine
+from reconciliator.ingestion.sanitizer import sanitize_batch_payload, sanitize_entities
 from reconciliator.models import (
     AgentEntity,
     CarrierType,
@@ -43,16 +48,13 @@ from reconciliator.models import (
 from reconciliator.normalizers.blocking import compute_title_stem
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
-from reconciliator.database import WEMIRepository
-from reconciliator.database.schema import agents_table
-from reconciliator.embedding.template import WEMISerializationEngine
-from reconciliator.ingestion.sanitizer import sanitize_batch_payload, sanitize_entities
 from reconciliator.vocab import concept_id_to_uri, format_wikidata_uri
-from sqlalchemy.exc import DataError
 
 logger = logging.getLogger(__name__)
 
-WIKIDATA_LANG_MAP = dict(get_bundled_defaults().get("wikidata", {}).get("languages") or {})
+WIKIDATA_LANG_MAP = dict(
+    get_bundled_defaults().get("ingestion", {}).get("wikidata", {}).get("languages") or {}
+)
 WIKIDATA_PREF_LANGS: list[str] = list(
     get_bundled_defaults().get("vocabularies", {}).get("preferred_label_languages") or []
 )
@@ -142,9 +144,7 @@ def extract_claim_qualifier_string(
     return None
 
 
-BIB_INDICATORS_RE = re.compile(
-    b'"(?:P212|P957|P3595|P213|Q571|Q7725634|Q47461344|Q2085381|P1476)"'
-)
+BIB_INDICATORS_RE = re.compile(b'"(?:P212|P957|P3595|P213|Q571|Q7725634|Q47461344|Q2085381|P1476)"')
 
 AUTHOR_INDICATORS_RE = re.compile(
     b'"(?:Q5|Q170574|Q2085381|Q4830453|Q43229|Q515|Q6256|P3595|P213|P214|P227|P244|P906|P496|P98|P86)"'
@@ -592,7 +592,9 @@ def parse_wikidata_entity(
     """
     cfg = config or _DEFAULT_WIKIDATA_CONFIG
     creative_map = cfg.creative_work_types or _CREATIVE_WORK_MAPPING
-    human_types = set(cfg.human_and_entity_types) if cfg.human_and_entity_types else _HUMAN_AND_ENTITY_TYPES
+    human_types = (
+        set(cfg.human_and_entity_types) if cfg.human_and_entity_types else _HUMAN_AND_ENTITY_TYPES
+    )
 
     qid = entity.get("id", "")
     claims = entity.get("claims", {})
@@ -858,9 +860,7 @@ def parse_wikidata_entity(
     temporal_field = cat_defaults.get("temporal") or cat_defaults["chronological"]
     mop_field = cat_defaults["medium_of_performance"]
 
-    subj_mappings = dict(
-        get_bundled_defaults().get("wikidata", {}).get("subject_mappings") or {}
-    )
+    subj_mappings = dict(get_bundled_defaults().get("wikidata", {}).get("subject_mappings") or {})
 
     for s_qid in get_claim_qids(claims, "P921"):
         s_heading = _lookup_entity_name(s_qid, store, cache=cache) or s_qid
@@ -1088,9 +1088,7 @@ def _prescan_authors(
             total_authors += len(author_batch)
             author_batch.clear()
             if tracker:
-                tracker.update_progress(
-                    stage="wikidata_prescan", items_processed=total_authors
-                )
+                tracker.update_progress(stage="wikidata_prescan", items_processed=total_authors)
 
     finally:
         if hasattr(stream, "close"):
@@ -1255,7 +1253,9 @@ def decompose_wikidata_entity(
     """
     cfg = config or _DEFAULT_WIKIDATA_CONFIG
     creative_map = cfg.creative_work_types or _CREATIVE_WORK_MAPPING
-    human_types = set(cfg.human_and_entity_types) if cfg.human_and_entity_types else _HUMAN_AND_ENTITY_TYPES
+    human_types = (
+        set(cfg.human_and_entity_types) if cfg.human_and_entity_types else _HUMAN_AND_ENTITY_TYPES
+    )
 
     qid = entity.get("id", "")
     claims = entity.get("claims", {})

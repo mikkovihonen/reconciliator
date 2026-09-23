@@ -1,8 +1,9 @@
 """Tests for Finto RDF authority decomposition (Minna Canth / Wilja, Petja Valasvaara / Vince)."""
 
 import rdflib
+
 from reconciliator.loaders.rdf_authority import decompose_rdf_authority, is_rdf_agent_authority
-from reconciliator.loaders.registry import RdfAuthorityLoader, LoadContext, select_loader
+from reconciliator.loaders.registry import LoadContext, RdfAuthorityLoader, select_loader
 
 
 def test_finto_minna_canth_wilja():
@@ -74,4 +75,3 @@ def test_finto_loader_registry_dispatch():
     member_rels = [r for r in rec.agent_relationships if r.relationship_type == "member_of"]
     assert len(member_rels) == 1
     assert member_rels[0].target_name == "Advanced Art (yhtye)"
-

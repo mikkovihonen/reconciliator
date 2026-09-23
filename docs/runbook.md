@@ -1016,7 +1016,6 @@ normalization:
 | `biographical_century_suffixes`| `list[str]` | `['luku', 'talet', ...]` | Suffixes designating century/period notations (e.g. `1800-luku`). |
 | `biographical_date_pattern` | `str` | `None` | Optional raw regex pattern overriding modular biographical date parsing. |
 | `roman_numerals` | `dict[str, int]` | Roman numeral map (`i: 1`, `ii: 2`, ...) | Roman numeral mappings used when normalizing volume designations. |
-| `relator_mappings` | `dict[str, str]` | Multilingual term map | Natural-language relator word to MARC code mappings (`term -> code`). |
 | `custom_relator_terms` | `dict[str, str]` | `{}` | Additional relator term mappings (`code -> term`). |
 | `default_language` | `str` | `fi` | Fallback language code when not specified on record. |
 

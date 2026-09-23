@@ -19,12 +19,14 @@ from sqlalchemy import delete, func, nulls_first, select
 
 from reconciliator.constituents import resolve_for_source
 from reconciliator.database import (
+    WEMIRepository,
     expressions_table,
     manifestation_expressions_table,
     manifestations_table,
     work_relationships_table,
     works_table,
 )
+from reconciliator.embedding.template import WEMISerializationEngine
 from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.loaders.base import DecomposedRecord, LoadContext
 from reconciliator.loaders.registry import (
@@ -33,8 +35,6 @@ from reconciliator.loaders.registry import (
     MarcBibliographicLoader,
     load_record,
 )
-from reconciliator.database import WEMIRepository
-from reconciliator.embedding.template import WEMISerializationEngine
 
 SRC = "fono"
 

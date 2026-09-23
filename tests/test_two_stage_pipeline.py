@@ -169,4 +169,3 @@ def test_two_stage_pipeline_successful_match(mock_backend: MagicMock) -> None:
     # Fused score: 0.5 * 0.90 + 0.5 * 0.95 = 0.925
     assert verdict.match_score == 0.925
     mock_backend.evaluate_candidate.assert_called_once()
-

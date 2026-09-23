@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from reconciliator.config import get_bundled_vocab_defaults
+from reconciliator.config import get_bundled_vocabularies_defaults
 
 
 def strip_vocabulary_subcode(vocab: Optional[str]) -> str:
@@ -22,7 +22,7 @@ def get_vocabulary_patterns() -> dict[str, list[str]]:
     """Retrieve vocabulary namespace patterns dynamically from YAML configuration defaults."""
     return {
         k.upper(): [p.lower() for p in pats]
-        for k, pats in get_bundled_vocab_defaults().get("vocabulary_patterns", {}).items()
+        for k, pats in get_bundled_vocabularies_defaults().get("vocabulary_patterns", {}).items()
     }
 
 
@@ -30,7 +30,7 @@ def get_concept_id_rules() -> dict[str, dict[str, Any]]:
     """Retrieve concept ID normalization rules dynamically from YAML configuration defaults."""
     return {
         k.upper(): dict(v)
-        for k, v in get_bundled_vocab_defaults().get("concept_id_rules", {}).items()
+        for k, v in get_bundled_vocabularies_defaults().get("concept_id_rules", {}).items()
     }
 
 
@@ -44,10 +44,15 @@ def detect_vocabulary(uri: str, patterns: Optional[dict[str, list[str]]] = None)
         if patterns is not None
         else get_vocabulary_patterns()
     )
-    for vocab, pats in active_patterns.items():
-        for pat in pats:
-            if pat in lower_uri:
-                return vocab
+    candidates: list[tuple[str, str]] = [
+        (pat, vocab)
+        for vocab, pats in active_patterns.items()
+        for pat in pats
+    ]
+    candidates.sort(key=lambda item: len(item[0]), reverse=True)
+    for pat, vocab in candidates:
+        if pat in lower_uri:
+            return vocab
     return None
 
 
@@ -229,4 +234,3 @@ def format_wikidata_uri(
 
     clean_qid = raw.partition(":")[-1] if ":" in raw else raw
     return concept_id_to_uri(f"wikidata:{clean_qid.upper()}", rules=rules)
-

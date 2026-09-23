@@ -1,7 +1,7 @@
 """Unit tests verifying multi-candidate authority URI aggregation."""
 
-from reconciliator.reconciliation import AgentAligner
 from reconciliator.models import Agent, BibliographicRecord
+from reconciliator.reconciliation import AgentAligner
 
 
 def test_multi_candidate_uri_aggregation() -> None:

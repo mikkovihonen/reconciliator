@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from reconciliator.config import AppConfig, ReconcileConfig
+from reconciliator.config import ReconcileConfig
 
 
 def test_reconciliation_configuration_integrity() -> None:

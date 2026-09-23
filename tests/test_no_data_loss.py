@@ -104,18 +104,19 @@ embedding:
   device: "cpu"
   batch_size: 16
 
-ingest_vocab:
-  input_path: "{FIXTURES / "sample_finto.ttl"}"
-  vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
-  legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
+ingestion:
+  vocab:
+    input_path: "{FIXTURES / "sample_finto.ttl"}"
+    vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
+    legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 
-ingest_oai:
-  melinda:
-    enabled: true
-    source_type: "file"
-    input_path: "{FIXTURES / "sample_melinda.xml"}"
-    workers: 1
-    batch_size: 10
+  oai:
+    melinda:
+      enabled: true
+      source_type: "file"
+      input_path: "{FIXTURES / "sample_melinda.xml"}"
+      workers: 1
+      batch_size: 10
 
 reconcile:
   target_file: "{target}"
@@ -143,7 +144,9 @@ telemetry:
         encoding="utf-8",
     )
 
-    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=_mock_transformer()):
+    with patch(
+        "reconciliator.embedding.embedder.SentenceTransformer", return_value=_mock_transformer()
+    ):
         reset_cmd(config=cfg, yes=True)
         ingest_vocab_cmd(config=cfg)
         ingest_oai_cmd(config=cfg)
@@ -286,7 +289,9 @@ def test_reconcile_is_idempotent(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with patch("reconciliator.embedding.embedder.SentenceTransformer", return_value=_mock_transformer()):
+    with patch(
+        "reconciliator.embedding.embedder.SentenceTransformer", return_value=_mock_transformer()
+    ):
         reconcile_cmd(config=cfg2)
 
     once, twice = _fields(out_xml), _fields(second_out)

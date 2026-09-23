@@ -23,7 +23,9 @@ def list_works(
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
         return {"items": [], "total": 0}
-    works, total = repo.get_works_paginated(source=source, work_type=work_type, limit=limit, offset=offset)
+    works, total = repo.get_works_paginated(
+        source=source, work_type=work_type, limit=limit, offset=offset
+    )
     return {"items": [w.model_dump() for w in works], "total": total}
 
 
@@ -38,8 +40,12 @@ def get_work(request: Request, work_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
 
     w_dict = w.model_dump()
-    w_dict["identifiers"] = [i.model_dump() for i in repo.get_identifiers_for_entity("work", work_id)]
-    w_dict["contributions"] = [c.model_dump() for c in repo.get_contributions_for_entity("work", work_id)]
+    w_dict["identifiers"] = [
+        i.model_dump() for i in repo.get_identifiers_for_entity("work", work_id)
+    ]
+    w_dict["contributions"] = [
+        c.model_dump() for c in repo.get_contributions_for_entity("work", work_id)
+    ]
     w_dict["subjects"] = [s.model_dump() for s in repo.get_subjects_for_entity("work", work_id)]
     w_dict["relationships"] = [r.model_dump() for r in repo.get_work_relationships(work_id)]
     return w_dict
@@ -101,8 +107,12 @@ def get_manifestation(request: Request, manif_id: int) -> dict[str, Any]:
 
     m_dict = m.model_dump()
     m_dict["items"] = [it.model_dump() for it in repo.get_items_for_manifestation(manif_id)]
-    m_dict["identifiers"] = [i.model_dump() for i in repo.get_identifiers_for_entity("manifestation", manif_id)]
-    m_dict["expressions"] = [e.model_dump() for e in repo.get_expressions_for_manifestation(manif_id)]
+    m_dict["identifiers"] = [
+        i.model_dump() for i in repo.get_identifiers_for_entity("manifestation", manif_id)
+    ]
+    m_dict["expressions"] = [
+        e.model_dump() for e in repo.get_expressions_for_manifestation(manif_id)
+    ]
     return m_dict
 
 
@@ -133,6 +143,7 @@ def get_agent(request: Request, agent_id: int) -> dict[str, Any]:
 
     a_dict = a.model_dump()
     a_dict["subjects"] = [s.model_dump() for s in repo.get_subjects_for_agent(agent_id)]
-    a_dict["identifiers"] = [i.model_dump() for i in repo.get_identifiers_for_entity("agent", agent_id)]
+    a_dict["identifiers"] = [
+        i.model_dump() for i in repo.get_identifiers_for_entity("agent", agent_id)
+    ]
     return a_dict
-

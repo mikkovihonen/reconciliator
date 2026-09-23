@@ -442,3 +442,89 @@ def test_bibframe_dynamic_default_subject_field() -> None:
     assert len(rec["subjects"]["medium_of_performance"]) == 1
     assert rec["subjects"]["medium_of_performance"][0]["heading"] == "Musiikki"
     assert rec["subjects"]["medium_of_performance"][0]["field"] == "382"
+
+
+def test_parse_turtle_simple_labels_with_dots_and_in_scheme() -> None:
+    ttl = """
+    @prefix yso: <http://www.yso.fi/onto/yso/> .
+    @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+    yso:p1199911000 a skos:Concept ;
+        skos:inScheme yso:aika ;
+        skos:prefLabel "1600-luku eaa."@fi,
+            "1600-talet f.Kr."@sv ;
+        skos:altLabel "1600-luku eKr."@fi,
+            "1600-talet f.v.t."@sv .
+
+    yso:p6160061699 a skos:Concept ;
+        skos:inScheme yso:aika ;
+        skos:prefLabel "1600-luku"@fi,
+            "1600-talet"@sv .
+    """
+    concepts, _, _ = parse_turtle_simple(ttl)
+    assert len(concepts) == 2
+
+    c1 = concepts[0]
+    assert c1.vocabulary == "yso-aika"
+    assert c1.target_field == "648"
+    assert c1.pref_labels == {"fi": "1600-luku eaa.", "sv": "1600-talet f.Kr."}
+    assert c1.alt_labels == {"fi": ["1600-luku eKr."], "sv": ["1600-talet f.v.t."]}
+
+    c2 = concepts[1]
+    assert c2.vocabulary == "yso-aika"
+    assert c2.target_field == "648"
+    assert c2.pref_labels == {"fi": "1600-luku", "sv": "1600-talet"}
+
+
+def test_enricher_modernizes_unlinked_648(tmp_path: Path) -> None:
+    store = VocabStore(tmp_path / "vocab_enrich_648_unlinked.db")
+    store.insert_concepts(
+        [
+            VocabConcept(
+                uri="http://www.yso.fi/onto/yso-aika/p6160061699",
+                vocabulary="yso-aika",
+                concept_id="p6160061699",
+                pref_labels={"fi": "1600-luku", "sv": "1600-talet"},
+                target_field="648",
+            )
+        ]
+    )
+    folder = VocabFolder(store)
+    enricher = MARCXMLEnricher(vocab_folder=folder)
+
+    xml_content = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+        <controlfield tag="001">rec_temp_1</controlfield>
+        <datafield tag="648" ind1=" " ind2="7">
+            <subfield code="a">1600-luku</subfield>
+        </datafield>
+    </record>
+    """
+    root = etree.fromstring(xml_content.encode("utf-8"))
+    enricher.enrich_record_tree(
+        root,
+        fold_legacy=True,
+        enrich=True,
+    )
+
+    f648 = root.findall(".//marc:datafield[@tag='648']", MARC_NS) or root.findall(
+        ".//datafield[@tag='648']"
+    )
+    assert len(f648) == 1
+    f = f648[0]
+    suba = (f.findall("marc:subfield[@code='a']", MARC_NS) or f.findall("subfield[@code='a']"))[
+        0
+    ].text
+    assert suba == "1600-luku"
+    sub2 = (f.findall("marc:subfield[@code='2']", MARC_NS) or f.findall("subfield[@code='2']"))[
+        0
+    ].text
+    assert sub2 == "yso-aika"
+    sub0 = [
+        e.text
+        for e in (
+            f.findall("marc:subfield[@code='0']", MARC_NS) or f.findall("subfield[@code='0']")
+        )
+    ]
+    assert "http://www.yso.fi/onto/yso-aika/p6160061699" in sub0
+

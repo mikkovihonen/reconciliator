@@ -175,7 +175,9 @@ def test_cascade_scorer_batch_close_competition_escalation() -> None:
     scores = scorer.score_batch("target", ["c1", "c2", "c3"], past_key_values="mock_kv")
     # c1 and c2 received judge scores, c3 retained heuristic score
     assert scores == [0.98, 0.25, 0.40]
-    mock_judge.score_batch.assert_called_once_with("target", ["c1", "c2"], past_key_values="mock_kv")
+    mock_judge.score_batch.assert_called_once_with(
+        "target", ["c1", "c2"], past_key_values="mock_kv"
+    )
 
 
 def test_cascade_scorer_batch_uncertainty_band_capping() -> None:

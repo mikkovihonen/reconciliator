@@ -6,8 +6,8 @@ from pathlib import Path
 import orjson
 
 from reconciliator.config import VectorEngineConfig
-from reconciliator.ingestion.wikidata import stream_wikidata_dump
 from reconciliator.database import WEMIRepository
+from reconciliator.ingestion.wikidata import stream_wikidata_dump
 
 
 def _make_store(tmp_path: Path) -> WEMIRepository:
@@ -281,6 +281,7 @@ def test_open_dump_stream_fallback(tmp_path: Path) -> None:
 
 def test_chunk_stream_lines() -> None:
     import io
+
     from reconciliator.ingestion.wikidata import _chunk_stream_lines
 
     stream = io.BytesIO(b"line1\nline2\nline3\nline4\nline5\n")
@@ -297,24 +298,34 @@ def test_worker_parse_authors_and_raw_bib_chunks() -> None:
         _worker_parse_raw_bib_chunk,
     )
 
-    author_line = orjson.dumps({
-        "id": "Q10",
-        "claims": {
-            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
-            "P213": [{"mainsnak": {"datavalue": {"value": "0000 0001 2345 6789"}}}],
-        },
-        "labels": {"fi": {"value": "Kirjailija"}},
-    }) + b"\n"
+    author_line = (
+        orjson.dumps(
+            {
+                "id": "Q10",
+                "claims": {
+                    "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}],
+                    "P213": [{"mainsnak": {"datavalue": {"value": "0000 0001 2345 6789"}}}],
+                },
+                "labels": {"fi": {"value": "Kirjailija"}},
+            }
+        )
+        + b"\n"
+    )
 
-    book_line = orjson.dumps({
-        "id": "Q20",
-        "claims": {
-            "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q571"}}}}],
-            "P1476": [{"mainsnak": {"datavalue": {"value": {"text": "Kirja"}}}}],
-            "P212": [{"mainsnak": {"datavalue": {"value": "978-951-0-12345-6"}}}],
-        },
-        "labels": {"fi": {"value": "Kirja"}},
-    }) + b"\n"
+    book_line = (
+        orjson.dumps(
+            {
+                "id": "Q20",
+                "claims": {
+                    "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q571"}}}}],
+                    "P1476": [{"mainsnak": {"datavalue": {"value": {"text": "Kirja"}}}}],
+                    "P212": [{"mainsnak": {"datavalue": {"value": "978-951-0-12345-6"}}}],
+                },
+                "labels": {"fi": {"value": "Kirja"}},
+            }
+        )
+        + b"\n"
+    )
 
     chunk = [b"[\n", author_line, book_line, b"]\n"]
 
@@ -332,10 +343,12 @@ def test_prefetch_batch_qids(tmp_path: Path) -> None:
     from reconciliator.ingestion.wikidata import AuthorLRUCache, prefetch_batch_qids
 
     store = _make_store(tmp_path)
-    store.insert_wikidata_authors([
-        {"qid": "Q101", "name": "Author 101", "identifiers": {"viaf": "101"}},
-        {"qid": "Q102", "name": "Author 102", "identifiers": {"viaf": "102"}},
-    ])
+    store.insert_wikidata_authors(
+        [
+            {"qid": "Q101", "name": "Author 101", "identifiers": {"viaf": "101"}},
+            {"qid": "Q102", "name": "Author 102", "identifiers": {"viaf": "102"}},
+        ]
+    )
 
     cache = AuthorLRUCache(maxsize=100)
     entities = [
@@ -405,16 +418,18 @@ def test_insert_wikidata_authors_large_parameter_batch(tmp_path: Path) -> None:
     # 3,000 authors * 8 variant names/qualifiers = >70,000 parameters for agent_attributes
     large_batch = []
     for i in range(2500):
-        large_batch.append({
-            "qid": f"Q999{i}",
-            "name": f"Author {i}",
-            "family_name": f"Family {i}",
-            "birth_year": 1900 + (i % 100),
-            "variant_names": [f"Alias A {i}", f"Alias B {i}", f"Alias C {i}"],
-            "qualifiers": [f"Qual 1 {i}", f"Qual 2 {i}", f"Qual 3 {i}"],
-            "occupations": [f"Occ {i}"],
-            "identifiers": {"isni": f"0000 0001 0000 {i:04d}", "viaf": f"12345{i}"},
-        })
+        large_batch.append(
+            {
+                "qid": f"Q999{i}",
+                "name": f"Author {i}",
+                "family_name": f"Family {i}",
+                "birth_year": 1900 + (i % 100),
+                "variant_names": [f"Alias A {i}", f"Alias B {i}", f"Alias C {i}"],
+                "qualifiers": [f"Qual 1 {i}", f"Qual 2 {i}", f"Qual 3 {i}"],
+                "occupations": [f"Occ {i}"],
+                "identifiers": {"isni": f"0000 0001 0000 {i:04d}", "viaf": f"12345{i}"},
+            }
+        )
 
     # This previously failed with:
     # OperationalError: sending query and params failed: number of parameters must be between 0 and 65535
@@ -425,4 +440,3 @@ def test_insert_wikidata_authors_large_parameter_batch(tmp_path: Path) -> None:
     assert author["name"] == "Author 0"
     assert "Alias A 0" in author["variant_names"]
     assert author["identifiers"]["isni"] == "0000 0001 0000 0000"
-

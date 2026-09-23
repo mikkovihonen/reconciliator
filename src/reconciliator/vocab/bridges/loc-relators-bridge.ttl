@@ -25,6 +25,8 @@ loc:act  skos:exactMatch mts:m1241 ;
          skos:prefLabel  "näyttelijä"@fi,
                          "skådespelare"@sv,
                          "actor agent"@en ;
+         skos:altLabel   "näytt."@fi,
+                         "skådesp."@sv ;
          skos:notation   "act" .
 
 loc:adi  skos:exactMatch mts:m277 ;
@@ -61,6 +63,8 @@ loc:arr  skos:exactMatch mts:m1205 ;
          skos:prefLabel  "sovittaja"@fi,
                          "arrangör av musikalisk komposition"@sv,
                          "arranger agent of music"@en ;
+         skos:altLabel   "sov."@fi,
+                         "arr."@sv ;
          skos:notation   "arr" .
 
 loc:art  skos:exactMatch mts:m511 ;
@@ -91,12 +95,16 @@ loc:aus  skos:exactMatch mts:m79 ;
          skos:prefLabel  "käsikirjoittaja"@fi,
                          "manusförfattare"@sv,
                          "screenwriter agent"@en ;
+         skos:altLabel   "käsik."@fi,
+                         "käsikirj."@fi ;
          skos:notation   "aus" .
 
 loc:aut  skos:exactMatch mts:m552 ;
          skos:prefLabel  "kirjoittaja"@fi,
                          "författare"@sv,
                          "author agent"@en ;
+         skos:altLabel   "kirj."@fi,
+                         "förf."@sv ;
          skos:notation   "aut" .
 
 loc:bka  skos:exactMatch mts:m1775 ;
@@ -181,6 +189,9 @@ loc:cmp  skos:exactMatch mts:m695 ;
          skos:prefLabel  "säveltäjä"@fi,
                          "kompositör"@sv,
                          "composer"@en ;
+         skos:altLabel   "säv."@fi,
+                         "tons."@sv,
+                         "komp."@sv ;
          skos:notation   "cmp" .
 
 loc:cnd  skos:exactMatch mts:m3589 ;
@@ -331,6 +342,8 @@ loc:drt  skos:exactMatch mts:m397 ;
          skos:prefLabel  "ohjaaja"@fi,
                          "regissör"@sv,
                          "director agent"@en ;
+         skos:altLabel   "ohj."@fi,
+                         "reg."@sv ;
          skos:notation   "drt" .
 
 loc:dsr  skos:exactMatch mts:m1486 ;
@@ -373,6 +386,8 @@ loc:edt  skos:exactMatch mts:m5656 ;
          skos:prefLabel  "toimittaja"@fi,
                          "redaktör"@sv,
                          "editor agent"@en ;
+         skos:altLabel   "toim."@fi,
+                         "red."@sv ;
          skos:notation   "edt" .
 
 loc:egr  skos:exactMatch mts:m1741 ;
@@ -457,6 +472,8 @@ loc:ill  skos:exactMatch mts:m2932 ;
          skos:prefLabel  "kuvittaja"@fi,
                          "illustratör"@sv,
                          "illustrator"@en ;
+         skos:altLabel   "kuv."@fi,
+                         "ill."@sv ;
          skos:notation   "ill" .
 
 loc:ilu  skos:exactMatch mts:m1767 ;
@@ -541,6 +558,7 @@ loc:lyr  skos:exactMatch mts:m384 ;
          skos:prefLabel  "sanoittaja"@fi,
                          "sångtextförfattare"@sv,
                          "lyricist agent"@en ;
+         skos:altLabel   "san."@fi ;
          skos:notation   "lyr" .
 
 loc:med  skos:exactMatch mts:m90 ;
@@ -649,6 +667,7 @@ loc:pht  skos:exactMatch mts:m1042 ;
          skos:prefLabel  "teoksen valokuvaaja"@fi,
                          "fotograf till verk"@sv,
                          "photographer agent of work"@en ;
+         skos:altLabel   "valok."@fi ;
          skos:notation   "pht" .
 
 loc:plt  skos:exactMatch mts:m1751 ;
@@ -685,6 +704,7 @@ loc:prf  skos:exactMatch mts:m4115 ;
          skos:prefLabel  "esittäjä"@fi,
                          "framförare"@sv,
                          "performer"@en ;
+         skos:altLabel   "esitt."@fi ;
          skos:notation   "prf" .
 
 loc:prg  skos:exactMatch mts:m534 ;
@@ -901,6 +921,10 @@ loc:trl  skos:exactMatch mts:m23 ;
          skos:prefLabel  "kääntäjä"@fi,
                          "översättare"@sv,
                          "translator agent"@en ;
+         skos:altLabel   "käänt."@fi,
+                         "suom."@fi,
+                         "övers."@sv,
+                         "suomentaja"@fi ;
          skos:notation   "trl" .
 
 loc:vac  skos:exactMatch mts:m17 ;

@@ -284,8 +284,8 @@ def test_ingest_oai_pipeline_custom_batch_queue_size() -> None:
 
 def test_wemi_repository_get_indexed_source_ids(tmp_path: Path) -> None:
     from reconciliator.config import VectorEngineConfig
-    from reconciliator.models import ManifestationEntity
     from reconciliator.database import WEMIRepository
+    from reconciliator.models import ManifestationEntity
 
     db_path = tmp_path / "test_auth.db"
     index_path = tmp_path / "test_auth.index"
@@ -325,8 +325,8 @@ def test_wemi_repository_get_indexed_source_ids(tmp_path: Path) -> None:
 
 def test_ingest_oai_pipeline_skip_existing(tmp_path: Path) -> None:
     from reconciliator.config import OAIIngestConfig, VectorEngineConfig
-    from reconciliator.ingestion.oai import ingest_oai_pipeline
     from reconciliator.database import WEMIRepository
+    from reconciliator.ingestion.oai import ingest_oai_pipeline
 
     config = OAIIngestConfig(
         source_type="file",
@@ -363,8 +363,8 @@ def test_ingest_oai_pipeline_skip_existing(tmp_path: Path) -> None:
 
 def test_wemi_repository_get_indexed_source_ids_variants(tmp_path: Path) -> None:
     from reconciliator.config import VectorEngineConfig
-    from reconciliator.models import ManifestationEntity
     from reconciliator.database import WEMIRepository
+    from reconciliator.models import ManifestationEntity
 
     vec_cfg = VectorEngineConfig(backend="usearch", device="cpu", mode="embedded")
     store = WEMIRepository(
@@ -392,8 +392,8 @@ def test_wemi_repository_get_indexed_source_ids_variants(tmp_path: Path) -> None
 def test_ingest_oai_pipeline_skip_existing_matches_canonical_ids(tmp_path: Path) -> None:
     """Skip-existing compares the (003)001 form that storage actually holds."""
     from reconciliator.config import OAIIngestConfig, VectorEngineConfig
-    from reconciliator.ingestion.oai import ingest_oai_pipeline
     from reconciliator.database import WEMIRepository
+    from reconciliator.ingestion.oai import ingest_oai_pipeline
 
     config = OAIIngestConfig(
         source_type="file",

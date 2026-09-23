@@ -1,7 +1,5 @@
 """Tests for agent cluster relationship projection and identity coalescence."""
 
-from unittest.mock import MagicMock
-from reconciliator.clustering.agent import AgentClusterer
 from reconciliator.config import AgentClusterConfig
 from reconciliator.models import AgentClusterMember
 
@@ -86,15 +84,15 @@ def test_agent_cluster_coalescence_selection():
     }
 
     # When False, should not trigger union
-    should_link_false = (
-        cfg_no_coalesce.coalesce_pseudonyms
-        and rel["relationship_type"] in ("real_identity_of", "pseudonym_of")
+    should_link_false = cfg_no_coalesce.coalesce_pseudonyms and rel["relationship_type"] in (
+        "real_identity_of",
+        "pseudonym_of",
     )
     assert should_link_false is False
 
     # When True, should trigger union
-    should_link_true = (
-        cfg_coalesce.coalesce_pseudonyms
-        and rel["relationship_type"] in ("real_identity_of", "pseudonym_of")
+    should_link_true = cfg_coalesce.coalesce_pseudonyms and rel["relationship_type"] in (
+        "real_identity_of",
+        "pseudonym_of",
     )
     assert should_link_true is True

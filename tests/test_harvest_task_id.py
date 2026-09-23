@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from reconciliator.cli import app
@@ -18,13 +15,11 @@ from reconciliator.config import (
     StorageConfig,
     TelemetryConfig,
     get_bundled_defaults,
-    load_config,
 )
 from reconciliator.progress import (
     ProgressTracker,
     find_latest_task_for_source,
     get_task_progress,
-    init_progress_db,
     mark_stale_tasks,
     prune_tasks,
 )
@@ -33,8 +28,8 @@ from reconciliator.progress import (
 def test_config_surface_defaults() -> None:
     """Verify defaults.yaml and typed Pydantic models expose adopt_previous_task_id and timeouts."""
     bundled = get_bundled_defaults()
-    assert "ingest_oai" in bundled
-    assert bundled["ingest_oai"]["adopt_previous_task_id"] is True
+    assert "ingestion" in bundled
+    assert bundled["ingestion"]["oai_defaults"]["adopt_previous_task_id"] is True
 
     assert "telemetry" in bundled
     assert bundled["telemetry"]["adopt_previous_task_id"] is True
@@ -60,8 +55,10 @@ def test_mark_stale_tasks(tmp_storage: StorageConfig) -> None:
     # Manually backdate tracker1 heartbeat
     tracker1.update_progress(force=True)
     with tracker1.engine.begin() as conn:
-        from reconciliator.database import task_progress_table
         from sqlalchemy import update
+
+        from reconciliator.database import task_progress_table
+
         conn.execute(
             update(task_progress_table)
             .where(task_progress_table.c.task_id == "task-stale-1")
@@ -77,7 +74,9 @@ def test_mark_stale_tasks(tmp_storage: StorageConfig) -> None:
             .values(last_heartbeat=fresh_time)
         )
 
-    tracker3 = ProgressTracker(db_path=db_url, task_id="task-completed-3", task_type="oai_pmh_harvest")
+    tracker3 = ProgressTracker(
+        db_path=db_url, task_id="task-completed-3", task_type="oai_pmh_harvest"
+    )
     tracker3.start_task(stage="harvest")
     tracker3.complete_task()
     with tracker3.engine.begin() as conn:
@@ -116,8 +115,10 @@ def test_find_latest_task_for_source(tmp_storage: StorageConfig) -> None:
     t_melinda.start_task(stage="harvest_and_index", metadata={"source": "melinda"})
     # Mark it interrupted
     with t_melinda.engine.begin() as conn:
-        from reconciliator.database import task_progress_table
         from sqlalchemy import update
+
+        from reconciliator.database import task_progress_table
+
         conn.execute(
             update(task_progress_table)
             .where(task_progress_table.c.task_id == "oai-ingest-melinda-11111")
@@ -180,11 +181,15 @@ def test_adopt_task_preserves_cumulative_progress(tmp_storage: StorageConfig) ->
 def test_prune_tasks_includes_interrupted(tmp_storage: StorageConfig) -> None:
     """Verify prune_tasks with status='terminated' prunes interrupted tasks."""
     db_url = tmp_storage.database_url
-    tracker = ProgressTracker(db_path=db_url, task_id="task-interrupted-prune", task_type="oai_pmh_harvest")
+    tracker = ProgressTracker(
+        db_path=db_url, task_id="task-interrupted-prune", task_type="oai_pmh_harvest"
+    )
     tracker.start_task()
     with tracker.engine.begin() as conn:
-        from reconciliator.database import task_progress_table
         from sqlalchemy import update
+
+        from reconciliator.database import task_progress_table
+
         conn.execute(
             update(task_progress_table)
             .where(task_progress_table.c.task_id == "task-interrupted-prune")
@@ -206,27 +211,38 @@ storage:
   data_dir: "{tmp_storage.data_dir}"
   database_url: "{tmp_storage.database_url}"
 
-ingest_oai:
-  test_src:
-    enabled: true
-    source_type: "oai"
-    oai_url: "https://test.example.org/oai"
-    workers: 1
-    adopt_previous_task_id: true
+ingestion:
+  oai:
+    test_src:
+      enabled: true
+      source_type: "oai"
+      oai_url: "https://test.example.org/oai"
+      workers: 1
+      adopt_previous_task_id: true
 """
     )
 
     async def fake_pipeline(*args: Any, **kwargs: Any) -> int:
         tracker = kwargs.get("tracker")
         if tracker:
-            tracker.start_task(stage="harvest_and_index", metadata={"source": kwargs.get("source_name")})
+            tracker.start_task(
+                stage="harvest_and_index", metadata={"source": kwargs.get("source_name")}
+            )
         return 10
 
     with patch("reconciliator.cli.ingest_oai_pipeline", side_effect=fake_pipeline) as mock_pipe:
         # 1. Explicit --task-id
         res = runner.invoke(
             app,
-            ["ingest-oai", "--config", str(cfg_file), "--source", "test_src", "--task-id", "my-custom-task-42"],
+            [
+                "ingest-oai",
+                "--config",
+                str(cfg_file),
+                "--source",
+                "test_src",
+                "--task-id",
+                "my-custom-task-42",
+            ],
         )
         assert res.exit_code == 0
         call_kwargs = mock_pipe.call_args.kwargs
@@ -250,7 +266,14 @@ ingest_oai:
         mock_pipe.reset_mock()
         res = runner.invoke(
             app,
-            ["ingest-oai", "--config", str(cfg_file), "--source", "test_src", "--no-adopt-previous-task-id"],
+            [
+                "ingest-oai",
+                "--config",
+                str(cfg_file),
+                "--source",
+                "test_src",
+                "--no-adopt-previous-task-id",
+            ],
         )
         assert res.exit_code == 0
         call_kwargs = mock_pipe.call_args.kwargs

@@ -476,14 +476,6 @@ def test_a_blank_node_role_is_read_from_its_label(ctx: LoadContext):
     assert not any(_looks_like_blank_node(r) for r in roles)
 
 
-def test_a_configured_relator_mapping_reaches_the_bibframe_path():
-    """`ctx.relator_mappings` is how a deployment adds a term the registry does
-    not know; the BibFrame path used to ignore the field entirely."""
-    graph = Graph().parse(data=ROLE_TTL.replace('"kääntäjä"', '"tulkitsija"'), format="turtle")
-    ctx = LoadContext(source="melinda", relator_mappings={"tulkitsija": "trl"})
-    record = load_record(graph, ctx)
-    assert sorted({c.role for c in record.contributions}) == ["aut", "trl"]
-
 
 def test_a_role_the_registry_does_not_know_survives_as_itself(ctx: LoadContext):
     """Normalising is not the same as discarding: an unmapped role is still the

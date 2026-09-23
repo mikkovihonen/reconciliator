@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Literal, Optional
 
-from reconciliator.config import get_bundled_vocab_defaults
+from reconciliator.config import get_bundled_vocabularies_defaults
 from reconciliator.vocab.detection import (
     concept_id_to_uri,
     detect_vocabulary,
     extract_concept_id,
     format_wikidata_uri,
-    get_concept_id_rules,
-    get_vocabulary_patterns,
     normalize_concept_id,
     strip_vocabulary_subcode,
 )
@@ -38,7 +36,7 @@ def resolve_subject_concept_id(
         store_cfg = getattr(vocab_store, "config", None)
         pref_langs = getattr(
             store_cfg, "preferred_label_languages", None
-        ) or get_bundled_vocab_defaults().get("preferred_label_languages", [])
+        ) or get_bundled_vocabularies_defaults().get("preferred_label_languages", [])
         for pl in pref_langs:
             if pl and pl.lower() not in langs_to_try:
                 langs_to_try.append(pl.lower())
@@ -80,7 +78,7 @@ def normalize_subject_vocabulary(
     """
     defaults: dict[str, Any] = {}
     if supported_vocabularies is None or legacy_to_modern is None:
-        defaults = get_bundled_vocab_defaults()
+        defaults = get_bundled_vocabularies_defaults()
 
     supp_set: set[str]
     if supported_vocabularies is not None:
@@ -148,7 +146,7 @@ class VocabularyManager:
             or supported_subject_vocabularies is None
             or legacy_to_modern is None
         ):
-            defaults = get_bundled_vocab_defaults()
+            defaults = get_bundled_vocabularies_defaults()
 
         raw_allowed = (
             allowed_vocabularies
@@ -362,4 +360,3 @@ class VocabularyManager:
                 selected_uris.append(u)
 
         return selected_uris, suppressed_uris
-

@@ -3,4 +3,3 @@
 from reconciliator.authority.lifecycle import ClusterIdentityManager
 
 __all__ = ["ClusterIdentityManager"]
-

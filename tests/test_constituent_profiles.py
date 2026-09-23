@@ -299,7 +299,7 @@ def test_default_config_looks_for_nothing():
 def _config_file(tmp_path: Path, source: dict, global_block: dict | None = None) -> Path:
     data: dict = {
         "storage": {"data_dir": str(tmp_path / "data")},
-        "ingest_oai": {"melinda": {"oai_url": "http://example.org/oai", **source}},
+        "ingestion": {"oai": {"melinda": {"oai_url": "http://example.org/oai", **source}}},
     }
     if global_block is not None:
         data["constituents"] = global_block
@@ -311,7 +311,7 @@ def _config_file(tmp_path: Path, source: dict, global_block: dict | None = None)
 def test_the_example_config_resolves(tmp_path: Path):
     config = load_config("config.example.yaml")
     assert config.config_dir == Path.cwd().resolve()
-    melinda = config.ingest_oai["melinda"]
+    melinda = config.ingestion.oai["melinda"]
     resolved = resolve_for_source(
         "melinda",
         melinda.constituents,

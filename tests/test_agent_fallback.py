@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 
 from reconciliator.config import ReconcileConfig, VectorEngineConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer import create_vector_engine
-from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     Agent,
     AgentEntity,
@@ -24,7 +24,7 @@ from reconciliator.models import (
     WorkEntity,
 )
 from reconciliator.normalizers.blocking import compute_title_stem
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation import WorkMatcher
 
 
 class MockDeterministicEmbedder:
@@ -196,7 +196,6 @@ def setup_authority_system(tmp_path: Path):
         qualifiers=["kuvataiteilija"],
     )
 
-
     for parts in (
         _authority_record(
             "melinda-001",
@@ -343,7 +342,6 @@ def test_scenario3_fallback_success_with_qualifier(setup_authority_system) -> No
         publication_year=1965,
         agents=[Agent(name="Virtanen, Matti", surname="Virtanen", qualifiers=["lääkäri"])],
         subjects=SubjectsContainer(),
-
     )
 
     res = _reconcile(matcher, target)

@@ -8,9 +8,8 @@ All qualifiers and relationship mappings are resolved dynamically via configurat
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
-import rdflib
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import FOAF, OWL, RDF, RDFS, SKOS
 
@@ -135,7 +134,15 @@ def decompose_rdf_authority(
         if isinstance(s, URIRef):
             o_str = str(o)
             if (
-                o in (RDAC.C10004, RDAC.C10005, RDAC.C10006, RDAC.C10008, FOAF.Person, FOAF.Organization)
+                o
+                in (
+                    RDAC.C10004,
+                    RDAC.C10005,
+                    RDAC.C10006,
+                    RDAC.C10008,
+                    FOAF.Person,
+                    FOAF.Organization,
+                )
                 or any(cls in o_str for cls in corporate_classes | person_classes | family_classes)
                 or o_str.endswith(("/C10004", "/C10005", "/C10006", "/C10008"))
             ):
@@ -398,8 +405,16 @@ def decompose_rdf_authority(
             for n_obj in graph.objects(agent_node, n_pred):
                 n_text = str(n_obj).strip()
                 for n_entry in note_patterns:
-                    pat = n_entry.get("pattern", "") if isinstance(n_entry, dict) else getattr(n_entry, "pattern", "")
-                    r_type = n_entry.get("rel_type", "") if isinstance(n_entry, dict) else getattr(n_entry, "rel_type", "")
+                    pat = (
+                        n_entry.get("pattern", "")
+                        if isinstance(n_entry, dict)
+                        else getattr(n_entry, "pattern", "")
+                    )
+                    r_type = (
+                        n_entry.get("rel_type", "")
+                        if isinstance(n_entry, dict)
+                        else getattr(n_entry, "rel_type", "")
+                    )
                     if pat and r_type and re.search(pat, n_text, re.IGNORECASE):
                         note_rel_override = r_type
                         break

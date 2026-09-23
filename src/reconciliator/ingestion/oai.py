@@ -14,16 +14,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-import httpx2
 from lxml import etree
 from rdflib import Graph
 
 from reconciliator.config import OAIIngestConfig
 from reconciliator.constituents import resolve_for_source
+from reconciliator.database import WEMIRepository
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
 from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.loaders.base import DecomposedRecord, LoadContext
-from reconciliator.utils.version import get_default_user_agent
 from reconciliator.loaders.bibframe import (
     get_profile,
     stream_bibframe_records,
@@ -34,7 +33,6 @@ from reconciliator.loaders.marcxml import (
 from reconciliator.loaders.registry import load_record
 from reconciliator.models import HarvestState
 from reconciliator.progress import ProgressTracker
-from reconciliator.database import WEMIRepository
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +74,6 @@ class _WEMIBatchAccumulator:
         source_name: str,
         id_source: str = "auto",
         include_items: bool = False,
-        relator_mappings: Optional[dict[str, str]] = None,
         vocab_store: Optional[Any] = None,
         strip_isbd_punctuation: bool = True,
         isbd_punctuation: str = " ./,;:",
@@ -88,7 +85,6 @@ class _WEMIBatchAccumulator:
         self.include_items = include_items
         self.strip_isbd_punctuation = strip_isbd_punctuation
         self.isbd_punctuation = isbd_punctuation
-        self.relator_mappings = relator_mappings
         self.vocab_store = vocab_store
         self.constituents = constituents
         self.filter_config = filter_config
@@ -147,7 +143,6 @@ class _WEMIBatchAccumulator:
             record_origin=self.source_name,
             id_source=self.id_source,
             include_items=self.include_items,
-            relator_mappings=self.relator_mappings,
             vocab_store=self.vocab_store,
             strip_isbd_punctuation=self.strip_isbd_punctuation,
             isbd_punctuation=self.isbd_punctuation,
@@ -220,7 +215,6 @@ def parse_and_decompose_page(
     include_items: Optional[bool] = None,
     strip_isbd_punctuation: Optional[bool] = None,
     isbd_punctuation: Optional[str] = None,
-    relator_mappings: Optional[dict[str, str]] = None,
     database_url: Optional[str] = None,
     skip_ids: Optional[set[str]] = None,
     format: Optional[str] = None,
@@ -236,9 +230,7 @@ def parse_and_decompose_page(
     eff_source_name = source_name or _worker_context.get("source_name", "unknown")
     eff_id_source = id_source or _worker_context.get("id_source", "auto")
     eff_include_items = (
-        include_items
-        if include_items is not None
-        else _worker_context.get("include_items", False)
+        include_items if include_items is not None else _worker_context.get("include_items", False)
     )
     eff_strip_isbd = (
         strip_isbd_punctuation
@@ -246,7 +238,6 @@ def parse_and_decompose_page(
         else _worker_context.get("strip_isbd_punctuation", True)
     )
     eff_isbd_punct = isbd_punctuation or _worker_context.get("isbd_punctuation", " ./,;:")
-    eff_relator_mappings = relator_mappings or _worker_context.get("relator_mappings")
     eff_database_url = database_url or _worker_context.get("db_url")
     eff_skip_ids = skip_ids if skip_ids is not None else _worker_context.get("skip_ids")
     eff_format = format or _worker_context.get("format", "marcxml")
@@ -286,7 +277,6 @@ def parse_and_decompose_page(
         record_origin=eff_source_name,
         id_source=eff_id_source,
         include_items=eff_include_items,
-        relator_mappings=eff_relator_mappings,
         vocab_store=vocab_store,
         strip_isbd_punctuation=eff_strip_isbd,
         isbd_punctuation=eff_isbd_punct,
@@ -297,7 +287,6 @@ def parse_and_decompose_page(
         source_name=eff_source_name,
         id_source=eff_id_source,
         include_items=eff_include_items,
-        relator_mappings=eff_relator_mappings,
         vocab_store=vocab_store,
         strip_isbd_punctuation=eff_strip_isbd,
         isbd_punctuation=eff_isbd_punct,
@@ -529,7 +518,6 @@ async def ingest_oai_pipeline(
     store: WEMIRepository,
     tracker: Optional[ProgressTracker] = None,
     skip_existing: bool = False,
-    relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     resume: bool = True,
     strip_isbd_punctuation: bool = True,
@@ -817,7 +805,6 @@ async def ingest_oai_pipeline(
                 source_name=source_name,
                 id_source=effective_config.id_source,
                 include_items=effective_config.include_items,
-                relator_mappings=relator_mappings,
                 vocab_store=vocab_store,
                 strip_isbd_punctuation=strip_isbd_punctuation,
                 isbd_punctuation=isbd_punctuation,
@@ -846,7 +833,6 @@ async def ingest_oai_pipeline(
                 "include_items": effective_config.include_items,
                 "strip_isbd_punctuation": strip_isbd_punctuation,
                 "isbd_punctuation": isbd_punctuation,
-                "relator_mappings": relator_mappings,
                 "db_url": db_url,
                 "skip_ids": existing_ids if existing_ids else None,
                 "format": effective_config.format,

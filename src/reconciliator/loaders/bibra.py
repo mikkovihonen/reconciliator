@@ -9,9 +9,9 @@ from typing import Any, Iterator, Optional
 from lxml import etree
 from pydantic import BaseModel, ConfigDict, Field
 
-from reconciliator.utils.curie import parse_curie
-from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.models import BibliographicRecord
+from reconciliator.reconciliation import ReconciliationResult
+from reconciliator.utils.curie import parse_curie
 
 
 class BibraPublicationMetadata(BaseModel):

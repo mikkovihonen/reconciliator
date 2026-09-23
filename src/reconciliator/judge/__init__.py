@@ -17,4 +17,3 @@ __all__ = [
     "TwoStageEntityResolver",
     "create_judge_backend",
 ]
-

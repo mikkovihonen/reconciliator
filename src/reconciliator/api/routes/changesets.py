@@ -43,7 +43,9 @@ def list_changesets(
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
         return {"items": [], "total": 0}
-    items, total = repo.list_changesets(status=status_filter, created_by=created_by, limit=limit, offset=offset)
+    items, total = repo.list_changesets(
+        status=status_filter, created_by=created_by, limit=limit, offset=offset
+    )
     return {"items": [item.model_dump() for item in items], "total": total}
 
 
@@ -56,7 +58,10 @@ def create_changeset(
     """Create a new staged review changeset (Curators and Admins)."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database repository uninitialized")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database repository uninitialized",
+        )
 
     return repo.create_changeset(
         title=payload.title,
@@ -78,11 +83,17 @@ def get_changeset(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Changeset not found")
     cs = repo.get_changeset(changeset_id)
     if not cs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Changeset {changeset_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Changeset {changeset_id} not found"
+        )
     return cs
 
 
-@router.post("/{changeset_id}/operations", response_model=ChangesetOperation, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{changeset_id}/operations",
+    response_model=ChangesetOperation,
+    status_code=status.HTTP_201_CREATED,
+)
 def add_operation(
     request: Request,
     changeset_id: int,
@@ -92,13 +103,21 @@ def add_operation(
     """Stage a curation operation inside a draft changeset (Curators and Admins)."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database repository uninitialized")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database repository uninitialized",
+        )
 
     cs = repo.get_changeset(changeset_id)
     if not cs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Changeset {changeset_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Changeset {changeset_id} not found"
+        )
     if cs.status != "draft":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot add operations to a {cs.status} changeset")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot add operations to a {cs.status} changeset",
+        )
 
     return repo.add_changeset_operation(
         changeset_id=changeset_id,
@@ -122,17 +141,26 @@ def delete_operation(
     """Remove a staged operation from a draft changeset (Curators and Admins)."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database repository uninitialized")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database repository uninitialized",
+        )
 
     cs = repo.get_changeset(changeset_id)
     if not cs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Changeset {changeset_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Changeset {changeset_id} not found"
+        )
     if cs.status != "draft":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot modify a {cs.status} changeset")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot modify a {cs.status} changeset"
+        )
 
     success = repo.delete_changeset_operation(operation_id)
     if not success:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Operation {operation_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Operation {operation_id} not found"
+        )
     return {"status": "deleted", "operation_id": operation_id}
 
 
@@ -145,7 +173,10 @@ def commit_changeset(
     """Atomically commit all staged operations and pin decisions (Admin only)."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database repository uninitialized")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database repository uninitialized",
+        )
 
     try:
         committed = repo.commit_changeset(changeset_id, committed_by=user.email)
@@ -153,7 +184,9 @@ def commit_changeset(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Commit failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Commit failed: {e}"
+        ) from e
 
 
 @router.post("/{changeset_id}/revert", response_model=ReviewChangeset)
@@ -165,7 +198,10 @@ def revert_changeset(
     """Rollback a committed changeset and release entity pins (Admin only)."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database repository uninitialized")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database repository uninitialized",
+        )
 
     try:
         reverted = repo.revert_changeset(changeset_id, reverted_by=user.email)
@@ -173,5 +209,6 @@ def revert_changeset(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Revert failed: {e}") from e
-
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Revert failed: {e}"
+        ) from e

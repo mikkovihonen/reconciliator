@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.loaders.marcxml import (
     decode_analytic,
@@ -20,7 +21,6 @@ from reconciliator.loaders.marcxml import (
     extract_marc_analytics,
 )
 from reconciliator.models import EntityKey
-from reconciliator.database import WEMIRepository
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
 

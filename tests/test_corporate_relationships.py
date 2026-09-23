@@ -1,7 +1,7 @@
 """Tests for corporate body relationships in MARC and RDF authorities."""
 
-from lxml import etree
 import rdflib
+from lxml import etree
 
 from reconciliator.loaders.marcxml import decompose_marc_authority
 from reconciliator.loaders.rdf_authority import decompose_rdf_authority
@@ -99,4 +99,3 @@ def test_rdf_corporate_body_relationships():
     assert rel_types.get("http://urn.fi/URN:NBN:fi:au:pn:000032484") == "predecessor_of"
     assert rel_types.get("http://urn.fi/URN:NBN:fi:au:pn:000032486") == "successor_of"
     assert rel_types.get("http://urn.fi/URN:NBN:fi:au:pn:000032480") == "hierarchical_superior_of"
-

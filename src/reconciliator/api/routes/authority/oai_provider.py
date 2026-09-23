@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from lxml import etree
 
 from reconciliator.authority.serializers.marc21 import MARC21AuthoritySerializer
@@ -80,13 +80,17 @@ def handle_oai_request(
         # 1. marc21_authority
         mf1 = etree.SubElement(container, f"{{{OAI_NS}}}metadataFormat")
         etree.SubElement(mf1, f"{{{OAI_NS}}}metadataPrefix").text = "marc21_authority"
-        etree.SubElement(mf1, f"{{{OAI_NS}}}schema").text = "http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd"
+        etree.SubElement(
+            mf1, f"{{{OAI_NS}}}schema"
+        ).text = "http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd"
         etree.SubElement(mf1, f"{{{OAI_NS}}}metadataNamespace").text = MARC_NS
 
         # 2. oai_dc
         mf2 = etree.SubElement(container, f"{{{OAI_NS}}}metadataFormat")
         etree.SubElement(mf2, f"{{{OAI_NS}}}metadataPrefix").text = "oai_dc"
-        etree.SubElement(mf2, f"{{{OAI_NS}}}schema").text = "http://www.openarchives.org/OAI/2.0/oai_dc.xsd"
+        etree.SubElement(
+            mf2, f"{{{OAI_NS}}}schema"
+        ).text = "http://www.openarchives.org/OAI/2.0/oai_dc.xsd"
         etree.SubElement(mf2, f"{{{OAI_NS}}}metadataNamespace").text = OAI_DC_NS
 
         xml_str = etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="utf-8")
@@ -109,7 +113,9 @@ def handle_oai_request(
     # --- Verb: GetRecord ---
     if verb == "GetRecord":
         if not identifier or not metadataPrefix:
-            raise HTTPException(status_code=400, detail="Missing required 'identifier' or 'metadataPrefix'")
+            raise HTTPException(
+                status_code=400, detail="Missing required 'identifier' or 'metadataPrefix'"
+            )
         if not repo:
             raise HTTPException(status_code=404, detail="Repository not initialized")
 
@@ -122,7 +128,9 @@ def handle_oai_request(
         rec_elem = etree.SubElement(container, f"{{{OAI_NS}}}record")
         header = etree.SubElement(rec_elem, f"{{{OAI_NS}}}header")
         etree.SubElement(header, f"{{{OAI_NS}}}identifier").text = identifier
-        etree.SubElement(header, f"{{{OAI_NS}}}datestamp").text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        etree.SubElement(header, f"{{{OAI_NS}}}datestamp").text = datetime.now(
+            timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         etree.SubElement(header, f"{{{OAI_NS}}}setSpec").text = "agents"
 
         meta_container = etree.SubElement(rec_elem, f"{{{OAI_NS}}}metadata")
@@ -132,7 +140,9 @@ def handle_oai_request(
             m_tree = etree.fromstring(m_xml.encode("utf-8"))
             meta_container.append(m_tree)
         else:
-            dc_elem = etree.SubElement(meta_container, f"{{{OAI_DC_NS}}}dc", nsmap={"oai_dc": OAI_DC_NS, "dc": DC_NS})
+            dc_elem = etree.SubElement(
+                meta_container, f"{{{OAI_DC_NS}}}dc", nsmap={"oai_dc": OAI_DC_NS, "dc": DC_NS}
+            )
             etree.SubElement(dc_elem, f"{{{DC_NS}}}title").text = cluster.canonical_name
             etree.SubElement(dc_elem, f"{{{DC_NS}}}identifier").text = cluster.cluster_id
 
@@ -164,14 +174,22 @@ def handle_oai_request(
 
             if verb == "ListIdentifiers":
                 header = etree.SubElement(container, f"{{{OAI_NS}}}header")
-                etree.SubElement(header, f"{{{OAI_NS}}}identifier").text = f"oai:reconciliator:{cid}"
-                etree.SubElement(header, f"{{{OAI_NS}}}datestamp").text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                etree.SubElement(
+                    header, f"{{{OAI_NS}}}identifier"
+                ).text = f"oai:reconciliator:{cid}"
+                etree.SubElement(header, f"{{{OAI_NS}}}datestamp").text = datetime.now(
+                    timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
                 etree.SubElement(header, f"{{{OAI_NS}}}setSpec").text = "agents"
             else:
                 rec_elem = etree.SubElement(container, f"{{{OAI_NS}}}record")
                 header = etree.SubElement(rec_elem, f"{{{OAI_NS}}}header")
-                etree.SubElement(header, f"{{{OAI_NS}}}identifier").text = f"oai:reconciliator:{cid}"
-                etree.SubElement(header, f"{{{OAI_NS}}}datestamp").text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                etree.SubElement(
+                    header, f"{{{OAI_NS}}}identifier"
+                ).text = f"oai:reconciliator:{cid}"
+                etree.SubElement(header, f"{{{OAI_NS}}}datestamp").text = datetime.now(
+                    timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
                 etree.SubElement(header, f"{{{OAI_NS}}}setSpec").text = "agents"
 
                 meta_container = etree.SubElement(rec_elem, f"{{{OAI_NS}}}metadata")
@@ -181,7 +199,11 @@ def handle_oai_request(
                     m_tree = etree.fromstring(m_xml.encode("utf-8"))
                     meta_container.append(m_tree)
                 else:
-                    dc_elem = etree.SubElement(meta_container, f"{{{OAI_DC_NS}}}dc", nsmap={"oai_dc": OAI_DC_NS, "dc": DC_NS})
+                    dc_elem = etree.SubElement(
+                        meta_container,
+                        f"{{{OAI_DC_NS}}}dc",
+                        nsmap={"oai_dc": OAI_DC_NS, "dc": DC_NS},
+                    )
                     etree.SubElement(dc_elem, f"{{{DC_NS}}}title").text = c_name
                     etree.SubElement(dc_elem, f"{{{DC_NS}}}identifier").text = str(cid)
 

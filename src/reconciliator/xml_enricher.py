@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 
 from lxml import etree
@@ -10,19 +9,17 @@ from lxml import etree
 from reconciliator.config import (
     DEFAULT_LANGUAGE,
     DEFAULT_MARC_PREDICATE_PROFILES,
-    EnrichmentTogglesConfig,
-    get_bundled_vocab_defaults,
+    EnrichmentConfig,
+    get_bundled_vocabularies_defaults,
     get_category_default_field_map,
     get_subject_field_category_map,
 )
-from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.loaders.marcxml import (
     MARC_NS,
     _get_controlfield,
     _get_datafields,
     _get_subfields,
 )
-from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
@@ -31,9 +28,14 @@ from reconciliator.models import (
     WorkCluster,
 )
 from reconciliator.normalizers.agent import normalize_agent_name
+from reconciliator.normalizers.relators import RelatorRegistry
+from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
+from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.vocab import VocabFolder, concept_id_to_uri, format_wikidata_uri
 
-_LANG_CODE_MAP: dict[str, str] = dict(get_bundled_vocab_defaults().get("language_code_map") or {})
+_LANG_CODE_MAP: dict[str, str] = dict(
+    get_bundled_vocabularies_defaults().get("language_code_map") or {}
+)
 
 
 def _extract_record_language(record_elem: etree._Element) -> Optional[str]:
@@ -59,8 +61,15 @@ def _extract_record_language(record_elem: etree._Element) -> Optional[str]:
 class MARCXMLEnricher:
     """Mutates MARCXML trees with novel authority links, folded modern terms, and WEMI relationships."""
 
-    def __init__(self, vocab_folder: Optional[VocabFolder] = None) -> None:
+    def __init__(
+        self,
+        vocab_folder: Optional[VocabFolder] = None,
+        relator_registry: Optional[RelatorRegistry] = None,
+    ) -> None:
         self.vocab_folder = vocab_folder or VocabFolder()
+        self.relator_registry = relator_registry or RelatorRegistry(
+            vocab_store=getattr(self.vocab_folder, "vocab_store", None)
+        )
 
     def enrich_record_tree(
         self,
@@ -74,14 +83,14 @@ class MARCXMLEnricher:
         expression_cluster: Optional[ExpressionCluster] = None,
         manifestation_cluster: Optional[ManifestationCluster] = None,
         target_record: Optional[MatchRecord] = None,
-        enrichment_config: Optional[EnrichmentTogglesConfig] = None,
+        enrichment_config: Optional[EnrichmentConfig] = None,
         sibling_ids: Optional[list[str]] = None,
     ) -> etree._Element:
         """Enrich a MARCXML <record> element in-place with novel authority links and modernized subjects."""
         if not enrich and not fold_legacy:
             return record_elem
 
-        toggles = enrichment_config or EnrichmentTogglesConfig()
+        toggles = enrichment_config or EnrichmentConfig()
         record_lang = _extract_record_language(record_elem) or toggles.language or DEFAULT_LANGUAGE
 
         # Determine XML namespace prefix if used
@@ -166,10 +175,19 @@ class MARCXMLEnricher:
                             sub_2 = etree.SubElement(field, subfield_tag, code="2")
                             sub_2.text = target_vocab
 
-                    # Inject modern $0 URI if enrich is active and not already present
-                    if enrich and target_uri and target_uri not in existing_uris:
-                        sub_0 = etree.SubElement(field, subfield_tag, code="0")
-                        sub_0.text = target_uri
+                    # Inject or update modern $0 URI if enrich is active
+                    if enrich and target_uri:
+                        if source_uri and source_uri in existing_uris:
+                            f0_elems = field.findall(
+                                "marc:subfield[@code='0']", MARC_NS
+                            ) or field.findall("subfield[@code='0']")
+                            for elem in f0_elems:
+                                if elem.text and elem.text.strip() == source_uri:
+                                    elem.text = target_uri
+                                    break
+                        elif target_uri not in existing_uris:
+                            sub_0 = etree.SubElement(field, subfield_tag, code="0")
+                            sub_0.text = target_uri
 
                     # Inject $1 Wikidata URI if enrich is active and qid is present
                     if enrich and qid:
@@ -219,10 +237,102 @@ class MARCXMLEnricher:
                                 sub.text = uri
                                 existing_u1.add(uri)
                         else:
-                            if uri not in existing_u0:
+                            # Check if an existing $0 refers to the same entity (e.g. legacy Asteri control number)
+                            from reconciliator.utils.curie import parse_curie, to_curie
+
+                            uri_src, uri_sid = parse_curie(uri)
+                            uri_curie = to_curie(uri_src, uri_sid) if uri_src != "unknown" else uri
+
+                            matched_existing_sub = None
+                            for sub_elem in matched_field.findall(
+                                f".//{subfield_tag}[@code='0']"
+                            ) or matched_field.findall(".//subfield[@code='0']"):
+                                s_text = (sub_elem.text or "").strip()
+                                s_src, s_sid = parse_curie(s_text)
+                                s_curie = to_curie(s_src, s_sid) if s_src != "unknown" else s_text
+                                if s_text == uri or (uri_src != "unknown" and s_curie == uri_curie):
+                                    matched_existing_sub = sub_elem
+                                    break
+
+                            if matched_existing_sub is not None:
+                                matched_existing_sub.text = uri
+                            elif uri not in existing_u0:
                                 sub = etree.SubElement(matched_field, subfield_tag, code="0")
                                 sub.text = uri
                                 existing_u0.add(uri)
+
+        # 2.1 Contributor Role Normalization & Injection ($e/$j and $4)
+        if enrich and (
+            toggles.inject_role_codes
+            or toggles.normalize_role_terms
+            or toggles.inject_missing_role_terms
+        ):
+            for tag in ("100", "700", "110", "710", "111", "711"):
+                term_subfield_code = "j" if tag in ("111", "711") else "e"
+                for field in _get_datafields(record_elem, tag):
+                    term_elements = field.findall(
+                        f".//{subfield_tag}[@code='{term_subfield_code}']"
+                    ) or field.findall(f".//subfield[@code='{term_subfield_code}']")
+                    f4_elements = field.findall(
+                        f".//{subfield_tag}[@code='4']"
+                    ) or field.findall(".//subfield[@code='4']")
+
+                    if term_elements:
+                        for term_elem in term_elements:
+                            raw_term = (term_elem.text or "").strip()
+                            if not raw_term:
+                                continue
+                            canonical_label, code = (
+                                self.relator_registry.normalize_term_to_canonical(
+                                    raw_term,
+                                    lang=record_lang,
+                                    role_format=toggles.role_format,
+                                )
+                            )
+                            if toggles.normalize_role_terms and canonical_label:
+                                term_elem.text = canonical_label
+
+                            if toggles.inject_role_codes and code:
+                                target_id = self.relator_registry.resolve_relator_identifier(
+                                    code, format_mode=toggles.role_format
+                                )
+                                if target_id and not any(
+                                    self.relator_registry.normalize_role((f4.text or "").strip())
+                                    == code
+                                    for f4 in f4_elements
+                                ):
+                                    sub_4 = etree.SubElement(field, subfield_tag, code="4")
+                                    sub_4.text = target_id
+                                    f4_elements.append(sub_4)
+
+                    if not term_elements and f4_elements and toggles.inject_missing_role_terms:
+                        for f4_elem in f4_elements:
+                            f4_text = (f4_elem.text or "").strip()
+                            code = self.relator_registry.normalize_role(f4_text)
+                            if code and len(code) == 3:
+                                canonical_label = self.relator_registry.get_canonical_term(
+                                    code,
+                                    lang=record_lang,
+                                    role_format=toggles.role_format,
+                                )
+                                if canonical_label:
+                                    sub_term = etree.SubElement(
+                                        field, subfield_tag, code=term_subfield_code
+                                    )
+                                    sub_term.text = canonical_label
+                                    term_elements.append(sub_term)
+
+                    # Modernize any existing $4 if inject_role_codes is True
+                    if toggles.inject_role_codes and f4_elements:
+                        for f4_elem in f4_elements:
+                            f4_text = (f4_elem.text or "").strip()
+                            code = self.relator_registry.normalize_role(f4_text)
+                            if code and len(code) == 3:
+                                target_id = self.relator_registry.resolve_relator_identifier(
+                                    code, format_mode=toggles.role_format
+                                )
+                                if target_id and f4_text != target_id:
+                                    f4_elem.text = target_id
 
         # 3. WEMI Graph & Specialized Domain Enrichment
         # Extract WEMI resolution properties
@@ -287,7 +397,7 @@ class MARCXMLEnricher:
 
         # Resolved predicate profiles
         predicate_profiles = toggles.predicate_profiles or DEFAULT_MARC_PREDICATE_PROFILES
-        profiles = [p for p in toggles.marc_predicate_profiles if p in predicate_profiles]
+        profiles = [p for p in toggles.active_profiles if p in predicate_profiles]
         if not profiles:
             profiles = (
                 ["bibframe"]
@@ -710,7 +820,7 @@ class MARCXMLEnricher:
         target_record: Optional[MatchRecord] = None,
         enrich: bool = True,
         fold_legacy: bool = True,
-        enrichment_config: Optional[EnrichmentTogglesConfig] = None,
+        enrichment_config: Optional[EnrichmentConfig] = None,
     ) -> etree._Element:
         """Convenience method explicitly for WEMI graph and cluster enrichment."""
         return self.enrich_record_tree(

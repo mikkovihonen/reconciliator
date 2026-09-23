@@ -20,7 +20,6 @@ from typing import Any, Literal, Optional
 import numpy as np
 
 from reconciliator.config import AppConfig, VectorEngineConfig, load_config
-from reconciliator.utils.device import resolve_device
 from reconciliator.indexer.base import VectorIndex
 from reconciliator.indexer.faiss_engine import FAISSIndexEngine
 from reconciliator.indexer.ipc.protocol import (
@@ -68,6 +67,7 @@ from reconciliator.indexer.ipc.protocol import (
 )
 from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.indexer.usearch_engine import USearchVectorEngine
+from reconciliator.utils.device import resolve_device
 
 logger = logging.getLogger("reconciliator.indexer.ipc.daemon")
 

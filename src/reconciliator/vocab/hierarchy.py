@@ -212,9 +212,7 @@ class HierarchyService:
             concept_a, concept_b, max_depth=self.config.max_traversal_depth
         )
 
-    def compute_distance(
-        self, vocabulary: str, concept_a: str, concept_b: str
-    ) -> Optional[int]:
+    def compute_distance(self, vocabulary: str, concept_a: str, concept_b: str) -> Optional[int]:
         """Compute shortest path distance in the taxonomy."""
         graph = self.get_graph(vocabulary)
         return graph.compute_distance(
@@ -311,4 +309,3 @@ class HierarchyService:
                             return 1.0
 
         return max_sim
-

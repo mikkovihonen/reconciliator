@@ -53,7 +53,6 @@ class Agent(BaseModel):
     relationships: list[dict[str, Any]] = Field(default_factory=list)
     identifiers: list[IdentifierEntity] = Field(default_factory=list)
 
-
     @model_validator(mode="before")
     @classmethod
     def _sync_dates(cls, data: Any) -> Any:
@@ -202,6 +201,11 @@ class VocabConcept(BaseModel):
                 src, sid = parse_curie(str(raw_uri), default_source=data.get("vocabulary", ""))
                 if not data.get("vocabulary") and src and src != "unknown":
                     data["vocabulary"] = src
+                if not sid or sid.startswith(("http://", "https://", "urn:")):
+                    from reconciliator.vocab.detection import extract_concept_id
+
+                    extracted = extract_concept_id(str(raw_uri))
+                    sid = extracted or sid
                 data["concept_id"] = sid
         return data
 
@@ -246,12 +250,22 @@ class ConceptMapping(BaseModel):
                 src, sid = parse_curie(str(raw_l), default_source=data.get("legacy_vocab", ""))
                 if not data.get("legacy_vocab") and src and src != "unknown":
                     data["legacy_vocab"] = src
+                if not sid or sid.startswith(("http://", "https://", "urn:")):
+                    from reconciliator.vocab.detection import extract_concept_id
+
+                    extracted = extract_concept_id(str(raw_l))
+                    sid = extracted or sid
                 data["legacy_id"] = sid
             raw_t = data.get("target_uri") or data.get("target_curie")
             if raw_t and not data.get("target_id"):
                 src, sid = parse_curie(str(raw_t), default_source=data.get("target_vocab", ""))
                 if not data.get("target_vocab") and src and src != "unknown":
                     data["target_vocab"] = src
+                if not sid or sid.startswith(("http://", "https://", "urn:")):
+                    from reconciliator.vocab.detection import extract_concept_id
+
+                    extracted = extract_concept_id(str(raw_t))
+                    sid = extracted or sid
                 data["target_id"] = sid
         return data
 
@@ -320,7 +334,6 @@ class TaskProgress(BaseModel):
     error_message: Optional[str] = None
     error_count: int = 0
     metadata_json: Optional[str] = None
-
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +543,6 @@ class AgentEntity(BaseModel):
     affiliations: list[str] = Field(default_factory=list)
     identifiers: list[IdentifierEntity] = Field(default_factory=list)
 
-
     @model_validator(mode="before")
     @classmethod
     def _sync_agent_dates(cls, data: Any) -> Any:
@@ -626,7 +638,6 @@ class AgentRelationshipEntity(BaseModel):
 
 
 class WorkEntity(BaseModel):
-
     """Abstract intellectual creation (Work tier) in authority.db."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -1050,7 +1061,6 @@ class WorkConsolidation(BaseModel):
     created_at: Optional[str] = None
 
 
-
 class HarvestState(BaseModel):
     """Persistent harvest checkpoint for date-sliced OAI-PMH / ResourceSync."""
 
@@ -1240,7 +1250,6 @@ class WorkCluster(BaseModel):
             return str(v)
         return None
 
-
     @model_validator(mode="before")
     @classmethod
     def _sync_cluster(cls, data: Any) -> Any:
@@ -1390,7 +1399,6 @@ class MultiplexClusterResult(BaseModel):
 
 
 class AgentClusterMember(BaseModel):
-
     """Member agent linked to a canonical agent cluster."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -1437,8 +1445,8 @@ class AgentCluster(BaseModel):
     confidence_score: float = 1.0
     authority_status: Literal["established", "provisional"] = "provisional"
     canonical_access_point: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[str | datetime] = None
+    updated_at: Optional[str | datetime] = None
     members: list[AgentClusterMember] = Field(default_factory=list)
     attributes: list[AgentClusterAttribute] = Field(default_factory=list)
 
@@ -1454,7 +1462,7 @@ class ClusterLifecycleEvent(BaseModel):
     cluster_id: str
     target_cluster_id: Optional[str] = None
     details_json: str = "{}"
-    created_at: Optional[str] = None
+    created_at: Optional[str | datetime] = None
 
 
 class ClusterRedirection(BaseModel):
@@ -1467,8 +1475,7 @@ class ClusterRedirection(BaseModel):
     cluster_type: Literal["agent", "work", "expression"]
     status_code: int = 308
     reason: str = "merge"
-    created_at: Optional[str] = None
-
+    created_at: Optional[str | datetime] = None
 
 
 class AgentClusterResult(BaseModel):
@@ -1483,7 +1490,6 @@ class AgentClusterResult(BaseModel):
 
 
 class EntitySubject(BaseModel):
-
     """Polymorphic link between an entity (work, expression, manifestation, agent) and a subject concept."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -1588,4 +1594,3 @@ class UserProfile(BaseModel):
     is_admin: bool = False
     is_curator: bool = False
     is_reader: bool = True
-

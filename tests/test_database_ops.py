@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 from pydantic import BaseModel
 from sqlalchemy import (
     Column,
@@ -16,7 +14,7 @@ from sqlalchemy import (
     text,
 )
 
-from reconciliator.config import PostgresConfig, StorageConfig
+from reconciliator.config import StorageConfig
 from reconciliator.database import (
     calculate_batch_size,
     get_engine,
@@ -44,9 +42,19 @@ def test_calculate_batch_size():
     assert calculate_batch_size(num_columns=100, max_parameters_per_batch=32767) == 327
 
     # Explicit batch size smaller than safe limit
-    assert calculate_batch_size(num_columns=10, max_parameters_per_batch=32767, explicit_batch_size=500) == 500
+    assert (
+        calculate_batch_size(
+            num_columns=10, max_parameters_per_batch=32767, explicit_batch_size=500
+        )
+        == 500
+    )
     # Explicit batch size exceeding safe limit is clamped
-    assert calculate_batch_size(num_columns=10, max_parameters_per_batch=32767, explicit_batch_size=5000) == 3276
+    assert (
+        calculate_batch_size(
+            num_columns=10, max_parameters_per_batch=32767, explicit_batch_size=5000
+        )
+        == 3276
+    )
 
 
 def test_normalize_row():
@@ -103,8 +111,7 @@ def test_batch_operations_with_postgres(tmp_storage: StorageConfig):
     try:
         # 1. Test insert_batch with returning IDs
         records = [
-            {"sku": f"SKU-{i:03d}", "title": f"Item {i}", "price": i * 10}
-            for i in range(1, 11)
+            {"sku": f"SKU-{i:03d}", "title": f"Item {i}", "price": i * 10} for i in range(1, 11)
         ]
         ids = insert_batch(
             bind=engine,
@@ -193,11 +200,12 @@ def test_batch_operations_with_postgres(tmp_storage: StorageConfig):
 
 def test_container_locale_configuration():
     """Verify that locale and initdb options in PostgresConfig are correctly passed to podman run."""
-    with patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"), \
-         patch("reconciliator.database.container.is_container_running", return_value=False), \
-         patch("reconciliator.database.container.is_container_present", return_value=False), \
-         patch("subprocess.run") as mock_run:
-
+    with (
+        patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"),
+        patch("reconciliator.database.container.is_container_running", return_value=False),
+        patch("reconciliator.database.container.is_container_present", return_value=False),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         start_postgres_container(

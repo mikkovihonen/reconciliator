@@ -1,7 +1,7 @@
 """Bridge vocabulary discovery and parsing.
 
 Bridges foreign metadata vocabularies (e.g. LoC country codes, LoC language codes,
-mode of issuance) to canonical YSO / Finto ontologies via skos:exactMatch.
+LoC relator codes, mode of issuance) to canonical ontologies via skos:exactMatch.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from reconciliator.database import concept_mappings_table
 
@@ -29,6 +29,33 @@ def get_bundled_bridge_files() -> list[Path]:
     return sorted(_BRIDGES_DIR.glob("*.ttl"))
 
 
+def resolve_bridge_files(config: Optional[Any] = None) -> list[Path]:
+    """Resolve bridge vocabulary files based on configuration or bundled defaults."""
+    if config is not None and getattr(config, "enable_bridges", True) is False:
+        return []
+
+    # 1. Explicit list of bridge files
+    custom_files = getattr(config, "bridge_files", None) if config else None
+    if custom_files:
+        return [Path(p) for p in custom_files if Path(p).is_file()]
+
+    # 2. Custom bridge directory
+    custom_dir = getattr(config, "bridge_dir", None) if config else None
+    if custom_dir and Path(custom_dir).is_dir():
+        files = sorted(Path(custom_dir).glob("*.ttl"))
+        if files:
+            return files
+
+    # 3. Bundled files with optional relators override
+    files = list(get_bundled_bridge_files())
+    relators_override = getattr(config, "relators_bridge_file", None) if config else None
+    if relators_override and Path(relators_override).is_file():
+        files = [f for f in files if "relator" not in f.name.lower()]
+        files.append(Path(relators_override))
+
+    return files
+
+
 def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> list[dict[str, Any]]:
     """Parse bridge Turtle content into structured bridge mappings.
 
@@ -36,7 +63,8 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
     - source_uri: e.g. <http://id.loc.gov/vocabulary/countries/fi>
     - target_uri: e.g. <http://www.yso.fi/onto/yso/p94426>
     - notation: e.g. "fi"
-    - pref_label_fi, pref_label_sv, pref_label_en
+    - pref_labels: dict[lang, label]
+    - alt_labels: dict[lang, list[label]]
     """
     if isinstance(content, Path):
         content = content.read_text(encoding="utf-8")
@@ -62,9 +90,6 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
 
     bridges: list[dict[str, Any]] = []
 
-    # Split on triple block boundaries (subject starting at line start followed by properties)
-    # e.g.: loc:fi skos:exactMatch yso:p94426 ;
-    # or <http://...> skos:exactMatch <http://...> ;
     blocks = re.split(r"(?:^|\n)(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+", content)
     if len(blocks) > 1:
         for i in range(1, len(blocks), 2):
@@ -83,9 +108,39 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
                 continue
             target_uri = _resolve(m_match.group(1))
 
-            labels: dict[str, str] = {
-                lang.lower(): val for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', body)
-            }
+            pref_labels: dict[str, str] = {}
+            alt_labels: dict[str, list[str]] = {}
+
+            # Parse skos:prefLabel clauses
+            for pref_m in re.finditer(
+                r"skos:prefLabel\s+((?:\"[^\"]*\"@[a-zA-Z_-]+\s*,\s*)*\"[^\"]*\"@[a-zA-Z_-]+)",
+                body,
+            ):
+                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', pref_m.group(1)):
+                    pref_labels[lang.lower()] = val
+
+            # Parse rdfs:label if prefLabel not found
+            if not pref_labels:
+                for rdfs_m in re.finditer(
+                    r"rdfs:label\s+((?:\"[^\"]*\"@[a-zA-Z_-]+\s*,\s*)*\"[^\"]*\"@[a-zA-Z_-]+)",
+                    body,
+                ):
+                    for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', rdfs_m.group(1)):
+                        pref_labels[lang.lower()] = val
+
+            # Parse skos:altLabel clauses
+            for alt_m in re.finditer(
+                r"skos:altLabel\s+((?:\"[^\"]*\"@[a-zA-Z_-]+\s*,\s*)*\"[^\"]*\"@[a-zA-Z_-]+)",
+                body,
+            ):
+                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', alt_m.group(1)):
+                    alt_labels.setdefault(lang.lower(), []).append(val)
+
+            # Fallback if no specific clauses parsed
+            if not pref_labels:
+                for val, lang in re.findall(r'"([^"]+)"@([a-zA-Z_-]+)', body):
+                    pref_labels.setdefault(lang.lower(), val)
+
             m_not = re.search(r'skos:notation\s+"([^"]+)"', body)
 
             item: dict[str, Any] = {
@@ -93,9 +148,10 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
                 "target_uri": target_uri,
                 "bridge_vocab": bridge_vocab,
                 "notation": m_not.group(1) if m_not else None,
-                "pref_labels": labels,
+                "pref_labels": pref_labels,
+                "alt_labels": alt_labels,
             }
-            for lang, val in labels.items():
+            for lang, val in pref_labels.items():
                 item[f"pref_label_{lang}"] = val
 
             bridges.append(item)
@@ -103,54 +159,77 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
     return bridges
 
 
-_CACHED_MTS_ROLE_MAP: Optional[dict[str, str]] = None
+_CACHED_BRIDGED_ROLE_MAP: Optional[dict[str, str]] = None
 
 
-def get_mts_role_map(vocab_store: Optional[Any] = None) -> dict[str, str]:
-    """Dynamically construct MTS id -> MARC code map from vocab_store or loc-relators-bridge.ttl."""
-    global _CACHED_MTS_ROLE_MAP
+def get_bridged_role_map(
+    vocab_store: Optional[Any] = None,
+    bridge_file: Optional[Path | str] = None,
+) -> dict[str, str]:
+    """Dynamically construct bridged concept / URI / token -> MARC relator code map."""
+    global _CACHED_BRIDGED_ROLE_MAP
+    if bridge_file is None and vocab_store is None and _CACHED_BRIDGED_ROLE_MAP is not None:
+        return _CACHED_BRIDGED_ROLE_MAP
 
-    # 1. If vocab_store is provided, attempt to look up exactMatch links
-    if vocab_store is not None and hasattr(vocab_store, "get_connection"):
+    res: dict[str, str] = {}
+
+    # 1. If vocab_store is provided, look up exactMatch links from concept_mappings
+    if vocab_store is not None and hasattr(vocab_store, "engine"):
         try:
-            with vocab_store.get_connection() as conn:
+            with vocab_store.engine.connect() as conn:
                 stmt = select(
-                    concept_mappings_table.c.legacy_vocab,
+                    concept_mappings_table.c.legacy_uri,
                     concept_mappings_table.c.legacy_id,
-                    concept_mappings_table.c.target_vocab,
+                    concept_mappings_table.c.target_uri,
                     concept_mappings_table.c.target_id,
                 ).where(
-                    or_(
-                        concept_mappings_table.c.legacy_vocab.in_(("loc-relators", "mts")),
-                        concept_mappings_table.c.target_vocab.in_(("loc-relators", "mts")),
-                    ),
                     concept_mappings_table.c.mapping_type == "exact_match",
                 )
                 rows = conn.execute(stmt).fetchall()
-                if rows:
-                    res: dict[str, str] = {}
-                    for row in rows:
-                        l_voc = str(row["legacy_vocab"])
-                        l_id = str(row["legacy_id"]).lower()
-                        t_voc = str(row["target_vocab"])
-                        t_id = str(row["target_id"]).lower()
-                        if l_voc == "loc-relators" and t_voc == "mts":
-                            res[t_id] = l_id
-                        elif t_voc == "loc-relators" and l_voc == "mts":
-                            res[l_id] = t_id
-                    if res:
-                        return res
+                for row in rows:
+                    l_uri = str(row[0] or "")
+                    l_id = str(row[1] or "").lower()
+                    t_uri = str(row[2] or "")
+                    t_id = str(row[3] or "").lower()
+
+                    code = None
+                    other_uri = None
+                    other_id = None
+                    if "relators/" in l_uri.lower():
+                        code = l_uri.rstrip("/").split("/")[-1].lower()
+                        other_uri = t_uri
+                        other_id = t_id
+                    elif "relators/" in t_uri.lower():
+                        code = t_uri.rstrip("/").split("/")[-1].lower()
+                        other_uri = l_uri
+                        other_id = l_id
+
+                    if code and len(code) == 3:
+                        if other_uri:
+                            res[other_uri.lower()] = code
+                            token = (
+                                other_uri.rstrip("/")
+                                .split(":")[-1]
+                                .split("/")[-1]
+                                .split("#")[-1]
+                                .lower()
+                            )
+                            res[token] = code
+                        if other_id:
+                            res[other_id] = code
+                if res:
+                    return res
         except Exception:
             pass
 
-    if _CACHED_MTS_ROLE_MAP is not None:
-        return _CACHED_MTS_ROLE_MAP
-
-    # 2. Parse from bundled loc-relators-bridge.ttl
-    bridge_path = get_bundled_bridge_dir() / "loc-relators-bridge.ttl"
-    if bridge_path.is_file():
-        mappings = parse_bridge_turtle(bridge_path, bridge_vocab="loc-relators")
-        res = {}
+    # 2. Parse from specified bridge file or bundled loc-relators-bridge.ttl
+    b_path = (
+        Path(bridge_file)
+        if bridge_file
+        else get_bundled_bridge_dir() / "loc-relators-bridge.ttl"
+    )
+    if b_path.is_file():
+        mappings = parse_bridge_turtle(b_path, bridge_vocab="loc-relators")
         for b in mappings:
             src = b["source_uri"]
             tgt = b["target_uri"]
@@ -160,46 +239,23 @@ def get_mts_role_map(vocab_store: Optional[Any] = None) -> dict[str, str]:
             )
             if not code:
                 continue
-            token: Optional[str] = None
-            if "urn:nbn:fi:au:mts:" in tgt.lower() or "finto.fi/mts" in tgt.lower():
-                token = tgt.rstrip("/").split(":")[-1].split("/")[-1].lower()
-            elif "urn:nbn:fi:au:mts:" in src.lower() or "finto.fi/mts" in src.lower():
-                token = src.rstrip("/").split(":")[-1].split("/")[-1].lower()
-            if token:
-                res[token] = code
-        if res:
-            _CACHED_MTS_ROLE_MAP = res
-            return _CACHED_MTS_ROLE_MAP
+            code = code.lower()
+            res[tgt.lower()] = code
+            tgt_token = tgt.rstrip("/").split(":")[-1].split("/")[-1].split("#")[-1].lower()
+            res[tgt_token] = code
+            res[src.lower()] = code
+            src_token = src.rstrip("/").split(":")[-1].split("/")[-1].split("#")[-1].lower()
+            res[src_token] = code
 
-    # 3. Static fallback
-    _CACHED_MTS_ROLE_MAP = {
-        "m16": "aut",
-        "m18": "trl",
-        "m20": "ill",
-        "m22": "cmp",
-        "m24": "arr",
-        "m26": "edt",
-        "m28": "lyr",
-        "m30": "pht",
-        "m31": "cnd",
-        "m32": "art",
-        "m71": "drt",
-        "m155": "prf",
-        "m156": "act",
-        "m157": "sng",
-        "m158": "mus",
-        "m163": "pro",
-        "m167": "lbt",
-        "m493": "pbl",
-        "m494": "prt",
-        "m495": "dst",
-    }
-    return _CACHED_MTS_ROLE_MAP
+    if bridge_file is None and vocab_store is None:
+        _CACHED_BRIDGED_ROLE_MAP = res
+    return res
 
 
 __all__ = [
+    "get_bridged_role_map",
     "get_bundled_bridge_dir",
     "get_bundled_bridge_files",
-    "get_mts_role_map",
     "parse_bridge_turtle",
+    "resolve_bridge_files",
 ]

@@ -15,11 +15,11 @@ import pytest
 from rdflib import Graph
 
 from reconciliator.constituents import resolve_for_source
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.loaders.base import LoadContext
 from reconciliator.loaders.bibframe.profiles import get_profile
 from reconciliator.loaders.registry import load_record
-from reconciliator.database import WEMIRepository
 
 SRC = "bffi"
 

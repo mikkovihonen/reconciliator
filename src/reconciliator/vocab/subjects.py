@@ -145,4 +145,3 @@ def fold_subjects(
 def subject_footprint(subjects: Iterable[FoldedSubject]) -> dict[str, int]:
     """The `vocab:concept` histogram stamped on every agent in the record."""
     return dict(Counter(key for s in subjects if (key := s.key)))
-

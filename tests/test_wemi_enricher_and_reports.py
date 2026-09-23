@@ -12,17 +12,17 @@ from typing import Optional
 from lxml import etree
 from rdflib import RDF, Graph, IdentifiedNode, URIRef
 
-from reconciliator.config import AppConfig, EnrichmentTogglesConfig
+from reconciliator.config import AppConfig, EnrichmentConfig
 from reconciliator.loaders.bibframe.enricher import (
     enrich_bibframe_graph,
     enrich_bibframe_jsonld,
 )
-from reconciliator.reconciliation import ConstituentWorkMatch, WEMIMatchResult
 from reconciliator.models import (
     ExpressionEntity,
     MatchRecord,
     WorkEntity,
 )
+from reconciliator.reconciliation import ConstituentWorkMatch, WEMIMatchResult
 from reconciliator.reports import (
     EXPRESSION_TSV_COLUMNS,
     WORK_TSV_COLUMNS,
@@ -472,8 +472,8 @@ def test_marcxml_enricher_predicate_profiles_and_modes():
 
     # 1. Stacked mode with ["bffi", "rda"]
     root_stacked = etree.fromstring(MARC_SAMPLE.encode("utf-8"))
-    cfg_stacked = EnrichmentTogglesConfig(
-        marc_predicate_profiles=["bffi", "rda"],
+    cfg_stacked = EnrichmentConfig(
+        active_profiles=["bffi", "rda"],
         marc_predicate_mode="stacked",
     )
     enriched_stacked = enricher.enrich_wemi_record_tree(
@@ -497,8 +497,8 @@ def test_marcxml_enricher_predicate_profiles_and_modes():
 
     # 2. Distinct mode with ["bffi", "rda"]
     root_distinct = etree.fromstring(MARC_SAMPLE.encode("utf-8"))
-    cfg_distinct = EnrichmentTogglesConfig(
-        marc_predicate_profiles=["bffi", "rda"],
+    cfg_distinct = EnrichmentConfig(
+        active_profiles=["bffi", "rda"],
         marc_predicate_mode="distinct",
     )
     enriched_distinct = enricher.enrich_wemi_record_tree(
@@ -560,7 +560,7 @@ def test_marcxml_enricher_fine_grained_toggles():
     )
 
     # Disable work links, same_as, and component links
-    cfg = EnrichmentTogglesConfig(
+    cfg = EnrichmentConfig(
         inject_work_links=False,
         inject_expression_links=True,
         inject_same_as=False,
@@ -642,7 +642,7 @@ def test_bibframe_enricher_fine_grained_toggles():
     )
 
     # Disable same_as and component links
-    cfg = EnrichmentTogglesConfig(
+    cfg = EnrichmentConfig(
         inject_work_links=True,
         inject_expression_links=True,
         inject_same_as=False,

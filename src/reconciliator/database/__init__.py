@@ -35,6 +35,7 @@ from reconciliator.database.schema import (
     agent_attributes_table,
     agent_relationships_table,
     agents_table,
+    changeset_operations_table,
     concept_aliases_table,
     concept_hierarchy_table,
     concept_labels_table,
@@ -64,7 +65,6 @@ from reconciliator.database.schema import (
     metadata,
     relator_terms_table,
     review_changesets_table,
-    changeset_operations_table,
     sammelband_bindings_table,
     sources_table,
     task_progress_table,
@@ -128,8 +128,10 @@ __all__ = [
     "reset_all_storage",
     # Container Lifecycle
     "get_podman_path",
+    "get_container_storage_mount",
     "is_container_running",
     "is_container_present",
+    "migrate_container_storage_to_host",
     "wait_for_postgres",
     "start_postgres_container",
     "stop_postgres_container",
@@ -142,4 +144,3 @@ __all__ = [
     # Repository
     "WEMIRepository",
 ]
-

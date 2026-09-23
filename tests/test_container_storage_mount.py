@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from reconciliator.config import AppConfig, PostgresConfig
+from reconciliator.config import PostgresConfig
 from reconciliator.database.container import (
     migrate_container_storage_to_host,
     start_postgres_container,
@@ -29,12 +29,13 @@ def test_start_postgres_container_with_bind_mount(tmp_path: Path):
     """Verify start_postgres_container generates the correct Podman -v bind mount arguments."""
     target_data_dir = tmp_path / "pgdata_host"
 
-    with patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"), \
-         patch("reconciliator.database.container.is_container_running", return_value=False), \
-         patch("reconciliator.database.container.is_container_present", return_value=False), \
-         patch("reconciliator.database.container.wait_for_postgres", return_value=True), \
-         patch("subprocess.run") as mock_run:
-
+    with (
+        patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"),
+        patch("reconciliator.database.container.is_container_running", return_value=False),
+        patch("reconciliator.database.container.is_container_present", return_value=False),
+        patch("reconciliator.database.container.wait_for_postgres", return_value=True),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         started = start_postgres_container(
@@ -59,13 +60,14 @@ def test_start_postgres_container_with_bind_mount(tmp_path: Path):
 
 def test_start_postgres_container_recreate_flag():
     """Verify recreate=True removes existing container before launching."""
-    with patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"), \
-         patch("reconciliator.database.container.is_container_running", return_value=False), \
-         patch("reconciliator.database.container.is_container_present", return_value=True), \
-         patch("reconciliator.database.container.remove_postgres_container") as mock_remove, \
-         patch("reconciliator.database.container.wait_for_postgres", return_value=True), \
-         patch("subprocess.run") as mock_run:
-
+    with (
+        patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"),
+        patch("reconciliator.database.container.is_container_running", return_value=False),
+        patch("reconciliator.database.container.is_container_present", return_value=True),
+        patch("reconciliator.database.container.remove_postgres_container") as mock_remove,
+        patch("reconciliator.database.container.wait_for_postgres", return_value=True),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         start_postgres_container(
@@ -82,12 +84,13 @@ def test_migrate_container_storage_to_host(tmp_path: Path):
     """Verify migrate_container_storage_to_host runs podman cp and recreates container."""
     host_target = tmp_path / "migrated_pg"
 
-    with patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"), \
-         patch("reconciliator.database.container.is_container_running", return_value=True), \
-         patch("reconciliator.database.container.stop_postgres_container") as mock_stop, \
-         patch("reconciliator.database.container.start_postgres_container") as mock_start, \
-         patch("subprocess.run") as mock_run:
-
+    with (
+        patch("reconciliator.database.container.get_podman_path", return_value="/usr/bin/podman"),
+        patch("reconciliator.database.container.is_container_running", return_value=True),
+        patch("reconciliator.database.container.stop_postgres_container") as mock_stop,
+        patch("reconciliator.database.container.start_postgres_container") as mock_start,
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_start.return_value = True
 
@@ -100,8 +103,9 @@ def test_migrate_container_storage_to_host(tmp_path: Path):
         assert mock_stop.called
         # Verify podman cp was invoked
         calls = [call[0][0] for call in mock_run.call_args_list]
-        cp_called = any("cp" in cmd and f"test-pg:/var/lib/postgresql/data/." in cmd for cmd in calls)
+        cp_called = any(
+            "cp" in cmd and "test-pg:/var/lib/postgresql/data/." in cmd for cmd in calls
+        )
         assert cp_called is True
         # Verify start_postgres_container called with new target and recreate=True
         mock_start.assert_called_with(name="test-pg", data_dir=host_target.resolve(), recreate=True)
-

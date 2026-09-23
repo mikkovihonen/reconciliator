@@ -1,8 +1,10 @@
 """Tests for agent relationship utilization in reconciliation and selective guards."""
 
-from reconciliator.models import Agent, IdentifierEntity
+from reconciliator.models import Agent
 from reconciliator.reconciliation.agents import (
     AgentFallbackResolver as AgentReconciler,
+)
+from reconciliator.reconciliation.agents import (
     check_agent_relationship,
 )
 

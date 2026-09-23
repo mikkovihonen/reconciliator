@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
-from reconciliator.config import AppConfig, VirtualAuthorityConfig, get_bundled_virtual_authority_defaults
+from reconciliator.config import (
+    AppConfig,
+    VirtualAuthorityConfig,
+    get_bundled_virtual_authority_defaults,
+)
 
 
 def test_virtual_authority_bundled_defaults():
@@ -79,4 +81,3 @@ def test_virtual_authority_custom_overrides():
     assert vaf.serialization.marc21.organization_code == "SE-LIBRIS"
     assert vaf.openrefine.service_name == "Custom OpenRefine Service"
     assert vaf.openrefine.preview_width == 500
-

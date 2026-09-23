@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from reconciliator.config import get_bundled_section_defaults
+from reconciliator.config.defaults import get_bundled_section_defaults
 from reconciliator.funnels.engine import FunnelContext
 
 _AUDIO_DEFAULTS = dict(get_bundled_section_defaults("funnels").get("audiobook") or {})
@@ -33,9 +33,7 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
 
     content_type = str(
         ctx.spec.content_type
-        or _get_audio_param(
-            ctx, "content_type", _AUDIO_DEFAULTS["content_type"]
-        )
+        or _get_audio_param(ctx, "content_type", _AUDIO_DEFAULTS["content_type"])
     )
 
     candidates: list = []
@@ -52,17 +50,13 @@ def tier2(record: Any, ctx: FunnelContext) -> Optional[Any]:
     expressions = ctx.repo.get_expressions_for_work(work.id)
     spoken = [e for e in expressions if e.content_type == content_type]
     expression = (
-        ctx.align_expression(spoken, record.language, content_type=content_type)
-        if spoken
-        else None
+        ctx.align_expression(spoken, record.language, content_type=content_type) if spoken else None
     )
     if not expression:
         default_lang = _get_audio_param(
             ctx, "default_language", _AUDIO_DEFAULTS["default_language"]
         )
-        title_suffix = _get_audio_param(
-            ctx, "title_suffix", _AUDIO_DEFAULTS["title_suffix"]
-        )
+        title_suffix = _get_audio_param(ctx, "title_suffix", _AUDIO_DEFAULTS["title_suffix"])
         und_lang = _get_audio_param(
             ctx, "undefined_language", _AUDIO_DEFAULTS["undefined_language"]
         )

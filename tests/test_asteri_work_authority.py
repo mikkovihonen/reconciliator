@@ -31,9 +31,10 @@ def test_parse_curie_asteri_agent_and_work() -> None:
     # Work authorities (Teka / Asteri work & legacy Aleph FIN13)
     assert parse_curie("(FI-ASTERI-W)000015266") == ("asteri_work", "000015266")
     assert parse_curie("(FIN13)000015266") == ("asteri_work", "000015266")
-    assert parse_curie(
-        "https://melinda.kansalliskirjasto.fi/teka/byid/(FI-ASTERI-W)000015266"
-    ) == ("asteri_work", "000015266")
+    assert parse_curie("https://melinda.kansalliskirjasto.fi/teka/byid/(FI-ASTERI-W)000015266") == (
+        "asteri_work",
+        "000015266",
+    )
     assert parse_curie("https://urn.fi/URN:NBN:fi:au:teka:000015266") == (
         "asteri_work",
         "000015266",
@@ -85,7 +86,9 @@ def test_marcxml_loader_extracts_asteri_work_240() -> None:
     ) = decompose_marc_wemi(elem, source="fennica")
 
     work_id_entities = [
-        ident for ident in identifiers if ident.entity_type == "work" and ident.source == "asteri_work"
+        ident
+        for ident in identifiers
+        if ident.entity_type == "work" and ident.source == "asteri_work"
     ]
     assert len(work_id_entities) == 1
     assert work_id_entities[0].source_id == "000015266"
@@ -165,7 +168,9 @@ def test_matcher_fast_path_prioritizes_asteri_work() -> None:
     mock_work.work_uri = "urn:work:teka:000015266"
 
     # Mock repository returning work on asteri_work lookup
-    def mock_lookup(scheme: str, value: str, authoritative_only: bool = False) -> list[tuple[str, int]]:
+    def mock_lookup(
+        scheme: str, value: str, authoritative_only: bool = False
+    ) -> list[tuple[str, int]]:
         if scheme == "asteri_work" and value == "000015266":
             return [("work", 42)]
         return []
@@ -223,9 +228,7 @@ def test_configurable_multiple_work_authority_sources() -> None:
     assert "000099999" in parsed["identifiers"]["asteri_work"]
 
     # When decomposed, both work authorities produce work IdentifierEntities dynamically
-    *_, identifiers, _, _ = decompose_marc_wemi(
-        elem, work_authority_sources=custom_work_sources
-    )
+    *_, identifiers, _, _ = decompose_marc_wemi(elem, work_authority_sources=custom_work_sources)
     work_entities = [i for i in identifiers if i.entity_type == "work"]
     schemes = {i.scheme: i.source_id for i in work_entities}
 

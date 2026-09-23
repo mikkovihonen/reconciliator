@@ -50,6 +50,5 @@ def test_surname_match_pseudonym_relationship():
     # With relationship knowledge connecting wilja <-> canth
     author_rels = {"wilja": {"canth"}}
     assert (
-        evaluator.check_surname_match(target, candidate, author_relationships=author_rels)
-        is True
+        evaluator.check_surname_match(target, candidate, author_relationships=author_rels) is True
     )

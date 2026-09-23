@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from rdflib import Graph
 
+from reconciliator.database import WEMIRepository
 from reconciliator.loaders.bibframe import (
     build_target_record_from_bibframe,
     decompose_bibframe_work,
@@ -21,7 +22,6 @@ from reconciliator.loaders.bibframe import (
     get_profile,
 )
 from reconciliator.models import EntitySubject, MatchRecord
-from reconciliator.database import WEMIRepository
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

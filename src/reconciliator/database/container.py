@@ -148,7 +148,6 @@ def start_postgres_container(
     If data_dir is provided (or configured in storage.postgres.data_dir / RECONCILIATOR_POSTGRES_DATA_DIR),
     the host directory is bind-mounted to /var/lib/postgresql/data, bypassing Podman's VM root disk limit.
     """
-    import os
 
     cfg = PostgresConfig()
     effective_host = host or cfg.host
@@ -167,9 +166,7 @@ def start_postgres_container(
     effective_initdb_args = initdb_args or cfg.initdb_args
 
     effective_data_dir = (
-        Path(data_dir).expanduser().resolve()
-        if data_dir
-        else cfg.get_effective_data_dir()
+        Path(data_dir).expanduser().resolve() if data_dir else cfg.get_effective_data_dir()
     )
 
     podman = get_podman_path()
@@ -208,7 +205,9 @@ def start_postgres_container(
             raise RuntimeError(f"Failed to start container {effective_name}: {res.stderr}")
     else:
         # Create and launch new container
-        logger.info("Launching new PostgreSQL container %s on port %d...", effective_name, effective_port)
+        logger.info(
+            "Launching new PostgreSQL container %s on port %d...", effective_name, effective_port
+        )
         containers_dir = (
             Path(__file__).resolve().parent.parent.parent.parent / "containers" / "postgres"
         )
@@ -234,11 +233,18 @@ def start_postgres_container(
 
         if effective_data_dir:
             effective_data_dir.mkdir(parents=True, exist_ok=True)
-            logger.info("Bind-mounting host storage directory %s -> /var/lib/postgresql/data", effective_data_dir)
-            cmd.extend([
-                "-e", "PGDATA=/var/lib/postgresql/data",
-                "-v", f"{effective_data_dir}:/var/lib/postgresql/data:Z",
-            ])
+            logger.info(
+                "Bind-mounting host storage directory %s -> /var/lib/postgresql/data",
+                effective_data_dir,
+            )
+            cmd.extend(
+                [
+                    "-e",
+                    "PGDATA=/var/lib/postgresql/data",
+                    "-v",
+                    f"{effective_data_dir}:/var/lib/postgresql/data:Z",
+                ]
+            )
 
         if effective_locale:
             cmd.extend(["-e", f"LANG={effective_locale}"])
@@ -297,10 +303,10 @@ def start_postgres_container(
             timeout_seconds=effective_timeout,
         )
         if not ready:
-            raise TimeoutError(f"Timed out waiting for PostgreSQL to be ready on port {effective_port}")
-        logger.info(
-            "PostgreSQL container %s is ready and accepting connections.", effective_name
-        )
+            raise TimeoutError(
+                f"Timed out waiting for PostgreSQL to be ready on port {effective_port}"
+            )
+        logger.info("PostgreSQL container %s is ready and accepting connections.", effective_name)
 
     return True
 
@@ -383,4 +389,3 @@ __all__ = [
     "remove_postgres_container",
     "migrate_container_storage_to_host",
 ]
-

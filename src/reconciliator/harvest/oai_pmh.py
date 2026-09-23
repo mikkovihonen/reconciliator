@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import AsyncIterator, Optional

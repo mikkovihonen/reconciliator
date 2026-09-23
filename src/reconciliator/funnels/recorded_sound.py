@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from reconciliator.config import get_bundled_section_defaults
+from reconciliator.config.defaults import get_bundled_section_defaults
 from reconciliator.funnels.engine import FunnelContext
 
 _RS_DEFAULTS = dict(get_bundled_section_defaults("funnels").get("recorded_sound") or {})
@@ -100,9 +100,7 @@ def _constituent_matches(work: Any, tracks: set[str], ctx: FunnelContext) -> lis
 def tier3(record: Any, ctx: FunnelContext) -> Optional[Any]:
     from reconciliator.utils import compute_jaccard_overlap, extract_target_track_titles
 
-    jaccard_threshold = float(
-        _get_rs_param(ctx, "jaccard_threshold", DEFAULT_JACCARD_THRESHOLD)
-    )
+    jaccard_threshold = float(_get_rs_param(ctx, "jaccard_threshold", DEFAULT_JACCARD_THRESHOLD))
     match_tier = str(_get_rs_param(ctx, "match_tier", DEFAULT_MATCH_TIER))
 
     tracks = extract_target_track_titles(record)

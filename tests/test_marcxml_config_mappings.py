@@ -143,4 +143,3 @@ def test_custom_content_and_carrier_type_mappings() -> None:
     assert determine_content_type(elem, config=custom_cfg) == "dataset"
     assert determine_work_type(elem, config=custom_cfg) == "dataset"
     assert determine_carrier_type(elem, config=custom_cfg) == "online_resource"
-

@@ -9,8 +9,6 @@ from sqlalchemy import String, Table
 
 from reconciliator.database.schema import (
     agents_table,
-    concept_aliases_table,
-    concept_hierarchy_table,
     concept_labels_table,
     concept_mapping_labels_table,
     concept_mappings_table,
@@ -24,7 +22,6 @@ from reconciliator.database.schema import (
     items_table,
     manifestation_expressions_table,
     manifestations_table,
-    relator_terms_table,
     work_relationships_table,
     works_table,
 )
@@ -113,12 +110,15 @@ def sanitize_entities(
     for entity in entities:
         is_dict = isinstance(entity, dict)
         source = (
-            (entity.get("source") if is_dict else getattr(entity, "source", None))
-            or record_origin
-        )
+            entity.get("source") if is_dict else getattr(entity, "source", None)
+        ) or record_origin
         source_id = (
             (entity.get("source_id") if is_dict else getattr(entity, "source_id", None))
-            or (entity.get("source_record_id") if is_dict else getattr(entity, "source_record_id", None))
+            or (
+                entity.get("source_record_id")
+                if is_dict
+                else getattr(entity, "source_record_id", None)
+            )
             or (entity.get("qid") if is_dict else getattr(entity, "qid", None))
             or (entity.get("id") if is_dict else getattr(entity, "id", None))
             or "unknown"
@@ -217,9 +217,7 @@ def sanitize_vocab_concepts(
     concept_id_max = (
         _resolve_column_limit(concepts_table, "concept_id", config, concepts_limits) or 128
     )
-    vocab_max = (
-        _resolve_column_limit(concepts_table, "vocabulary", config, concepts_limits) or 64
-    )
+    vocab_max = _resolve_column_limit(concepts_table, "vocabulary", config, concepts_limits) or 64
     target_field_max = (
         _resolve_column_limit(concepts_table, "target_field", config, concepts_limits) or 32
     )
@@ -254,11 +252,15 @@ def sanitize_vocab_concepts(
     for c in concepts:
         cid = c.concept_id or c.uri
         if c.concept_id and len(c.concept_id) > concept_id_max:
-            c.concept_id = _truncate_val("concepts", "concept_id", c.concept_id, concept_id_max, cid)
+            c.concept_id = _truncate_val(
+                "concepts", "concept_id", c.concept_id, concept_id_max, cid
+            )
         if c.vocabulary and len(c.vocabulary) > vocab_max:
             c.vocabulary = _truncate_val("concepts", "vocabulary", c.vocabulary, vocab_max, cid)
         if c.target_field and len(c.target_field) > target_field_max:
-            c.target_field = _truncate_val("concepts", "target_field", c.target_field, target_field_max, cid)
+            c.target_field = _truncate_val(
+                "concepts", "target_field", c.target_field, target_field_max, cid
+            )
 
         for lang, lbl in list(c.pref_labels.items()):
             if lbl and len(lbl) > label_max:
@@ -300,7 +302,9 @@ def sanitize_vocab_mappings(
     mapping_limits = get_table_string_limits(concept_mappings_table)
     label_limits = get_table_string_limits(concept_mapping_labels_table)
 
-    label_max = _resolve_column_limit(concept_mapping_labels_table, "label", config, label_limits) or 512
+    label_max = (
+        _resolve_column_limit(concept_mapping_labels_table, "label", config, label_limits) or 512
+    )
     legacy_id_max = (
         _resolve_column_limit(concept_mappings_table, "legacy_id", config, mapping_limits) or 128
     )
@@ -347,15 +351,25 @@ def sanitize_vocab_mappings(
     for m in mappings:
         mid = f"{m.legacy_vocab}:{m.legacy_id}->{m.target_vocab}:{m.target_id}"
         if m.legacy_id and len(m.legacy_id) > legacy_id_max:
-            m.legacy_id = _truncate_val("concept_mappings", "legacy_id", m.legacy_id, legacy_id_max, mid)
+            m.legacy_id = _truncate_val(
+                "concept_mappings", "legacy_id", m.legacy_id, legacy_id_max, mid
+            )
         if m.target_id and len(m.target_id) > target_id_max:
-            m.target_id = _truncate_val("concept_mappings", "target_id", m.target_id, target_id_max, mid)
+            m.target_id = _truncate_val(
+                "concept_mappings", "target_id", m.target_id, target_id_max, mid
+            )
         if m.legacy_vocab and len(m.legacy_vocab) > legacy_vocab_max:
-            m.legacy_vocab = _truncate_val("concept_mappings", "legacy_vocab", m.legacy_vocab, legacy_vocab_max, mid)
+            m.legacy_vocab = _truncate_val(
+                "concept_mappings", "legacy_vocab", m.legacy_vocab, legacy_vocab_max, mid
+            )
         if m.target_vocab and len(m.target_vocab) > target_vocab_max:
-            m.target_vocab = _truncate_val("concept_mappings", "target_vocab", m.target_vocab, target_vocab_max, mid)
+            m.target_vocab = _truncate_val(
+                "concept_mappings", "target_vocab", m.target_vocab, target_vocab_max, mid
+            )
         if m.target_field and len(m.target_field) > target_field_max:
-            m.target_field = _truncate_val("concept_mappings", "target_field", m.target_field, target_field_max, mid)
+            m.target_field = _truncate_val(
+                "concept_mappings", "target_field", m.target_field, target_field_max, mid
+            )
 
         for lang, lbl in list(m.legacy_labels.items()):
             if lbl and len(lbl) > label_max:
@@ -364,4 +378,3 @@ def sanitize_vocab_mappings(
                 )
 
     return truncations
-

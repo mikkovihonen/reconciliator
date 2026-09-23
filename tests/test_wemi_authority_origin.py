@@ -2,11 +2,11 @@
 
 from lxml import etree
 
+from reconciliator.database import WEMIRepository
 from reconciliator.loaders.marcxml import (
     decompose_marc_authority,
     is_marc_authority_record,
 )
-from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     AgentEntity,
     ExpressionEntity,
@@ -16,7 +16,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation import WorkMatcher
 
 
 def test_record_origin_names_the_ingest_source():
@@ -459,9 +459,6 @@ def test_decompose_marc_authority_agent():
     assert any(i.source == "orcid" and i.source_id == "0000-0002-1825-0097" for i in identifiers)
     assert "Jansson, Tove Marika" in ag.variant_names
     assert ag.record_origin == "authority"
-
-
-
 
 
 def test_work_matcher_authority_isolation(tmp_path):

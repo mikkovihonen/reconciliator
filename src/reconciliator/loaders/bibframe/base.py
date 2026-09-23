@@ -11,14 +11,13 @@ from reconciliator.config import (
 )
 from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
 from reconciliator.vocab import get_vocabulary_patterns
-from reconciliator.vocab.bridges import get_mts_role_map
+from reconciliator.vocab.bridges import get_bridged_role_map
 
 
 def normalize_role_uri_or_label(
     role_str: str,
     label: Optional[str] = None,
     profile: Optional[BIBFRAMESchemaProfile] = None,
-    relator_mappings: Optional[dict[str, str]] = None,
 ) -> Optional[str]:
     """Normalize a role URI or label into a MARC relator code.
 
@@ -42,7 +41,7 @@ def normalize_role_uri_or_label(
         return p.role_label_mappings[lbl.lower()]
 
     if not clean:
-        return _shared_role(lbl, relator_mappings) if lbl else None
+        return _shared_role(lbl) if lbl else None
 
     c_lower = clean.lower()
 
@@ -57,16 +56,16 @@ def normalize_role_uri_or_label(
                 .split("/")[-1]
                 .lower()
             )
-            mts_map = get_mts_role_map()
-            if token in mts_map:
-                return mts_map[token]
+            bridged_map = get_bridged_role_map()
+            if token in bridged_map:
+                return bridged_map[token]
             if token in p.role_label_mappings:
                 return p.role_label_mappings[token]
-            return _shared_role(token, relator_mappings)
+            return _shared_role(token)
 
     # 3. If label exists and not mapped yet
     if lbl:
-        return _shared_role(lbl, relator_mappings)
+        return _shared_role(lbl)
 
     # 4. Fall back to URI fragment or tail
     if "#" in clean:
@@ -76,10 +75,10 @@ def normalize_role_uri_or_label(
 
     if tail in p.role_label_mappings:
         return p.role_label_mappings[tail]
-    return _shared_role(tail, relator_mappings)
+    return _shared_role(tail)
 
 
-def _shared_role(token: str, relator_mappings: Optional[dict[str, str]]) -> str:
+def _shared_role(token: str) -> str:
     """The MARC path's normaliser, applied to whatever the profile left alone.
 
     Returns the token casefolded when nothing matches, which is what this
@@ -87,7 +86,7 @@ def _shared_role(token: str, relator_mappings: Optional[dict[str, str]]) -> str:
     """
     from reconciliator.normalizers.relators import normalize_role
 
-    return normalize_role(token, relator_mappings)
+    return normalize_role(token)
 
 
 def extract_provenance_tag(

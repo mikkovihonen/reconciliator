@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from reconciliator.config import ReconcileConfig, RerankConfig
-from reconciliator.reconciliation import WorkMatcher
+from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
@@ -27,7 +27,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation import WorkMatcher
 
 
 @pytest.fixture

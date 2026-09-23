@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from reconciliator.database import WEMIRepository
+from reconciliator.models import Agent
 from reconciliator.reconciliation import (
     AgentFallbackResolver,
     check_homonym_ambiguity,
@@ -14,8 +16,6 @@ from reconciliator.reconciliation import (
     verify_qualifiers,
     verify_subjects,
 )
-from reconciliator.models import Agent
-from reconciliator.database import WEMIRepository
 
 
 def test_verify_life_dates() -> None:

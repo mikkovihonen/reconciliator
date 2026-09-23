@@ -17,8 +17,7 @@ from sqlalchemy import func, select
 
 from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.config import load_config
-from reconciliator.database import work_relationships_table, works_table
-from reconciliator.database import WEMIRepository
+from reconciliator.database import WEMIRepository, work_relationships_table, works_table
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC = "{http://www.loc.gov/MARC21/slim}"
@@ -87,23 +86,25 @@ embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
   template_path: "{templates / "default_serialization.j2"}"
   device: "cpu"
-ingest_vocab:
-  input_path: "{FIXTURES / "sample_finto.ttl"}"
-  vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
-  legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
-ingest_oai:
-  source_a:
-    enabled: true
-    source_type: "file"
-    input_path: "{tmp / "auth_a.xml"}"
-    workers: 1
-    batch_size: 10
-  source_b:
-    enabled: true
-    source_type: "file"
-    input_path: "{tmp / "auth_b.xml"}"
-    workers: 1
-    batch_size: 10
+ingestion:
+  vocab:
+    input_path: "{FIXTURES / "sample_finto.ttl"}"
+    vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
+    legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
+
+  oai:
+    source_a:
+      enabled: true
+      source_type: "file"
+      input_path: "{tmp / "auth_a.xml"}"
+      workers: 1
+      batch_size: 10
+    source_b:
+      enabled: true
+      source_type: "file"
+      input_path: "{tmp / "auth_b.xml"}"
+      workers: 1
+      batch_size: 10
 reconcile:
   target_file: "{tmp / "target.xml"}"
   output_file: "{out_xml}"
@@ -164,7 +165,11 @@ telemetry:
                     for s in df.findall(f"{MARC}subfield")
                     if s.get("code") == "0"
                     and s.text
-                    and (s.text.startswith("source_") or s.text.startswith("reconciliator:work_"))
+                    and (
+                        s.text.startswith("source_")
+                        or s.text.startswith("reconciliator:work_")
+                        or s.text.startswith("urn:reconciliator:work:")
+                    )
                 ]
         exported[rid] = uris
 
@@ -208,7 +213,9 @@ def test_unmatched_work_still_gets_a_stable_internal_uri(linked: dict) -> None:
     """A work absent from every authority source is still linkable within the corpus."""
     clusters, linkages = linked["clusters"], linked["linkages"]
     cluster = clusters[_cluster_of(linkages, "T-TUNT-1")]
-    assert cluster.canonical_work_curie.startswith("reconciliator:work_")
+    assert cluster.canonical_work_curie.startswith(
+        "reconciliator:work_"
+    ) or cluster.canonical_work_curie.startswith("urn:reconciliator:work:")
     assert linked["exported"]["T-TUNT-1"] == [cluster.canonical_work_curie]
 
 
@@ -220,9 +227,10 @@ def test_unmatched_work_still_gets_a_stable_internal_uri(linked: dict) -> None:
 def test_cluster_adopts_an_authority_work_uri(linked: dict) -> None:
     clusters, linkages = linked["clusters"], linked["linkages"]
     cluster = clusters[_cluster_of(linkages, "T-SIN-1")]
-    assert not cluster.canonical_work_curie.startswith("reconciliator:"), (
-        "a cluster matching an authority work should adopt its URI, not mint one"
-    )
+    assert not (
+        cluster.canonical_work_curie.startswith("reconciliator:")
+        or cluster.canonical_work_curie.startswith("urn:reconciliator:")
+    ), "a cluster matching an authority work should adopt its URI, not mint one"
     assert cluster.canonical_work_curie.startswith("source_")
 
 

@@ -12,10 +12,10 @@ from reconciliator.config import (
     RepositoryFTSConfig,
     StorageConfig,
 )
-from reconciliator.indexer import TorchVectorEngine
-from reconciliator.reconciliation import WorkMatcher
-from reconciliator.models import AgentEntity, ExpressionEntity, MatchRecord, WorkEntity
 from reconciliator.database import WEMIRepository
+from reconciliator.indexer import TorchVectorEngine
+from reconciliator.models import AgentEntity, ExpressionEntity, MatchRecord, WorkEntity
+from reconciliator.reconciliation import WorkMatcher
 
 
 def test_fts_config_defaults_and_validation():

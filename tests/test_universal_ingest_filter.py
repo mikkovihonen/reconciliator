@@ -3,46 +3,64 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-import pytest
 
 from reconciliator.config import (
     AppConfig,
     IngestFilterConfig,
+    IngestionConfig,
     OAIIngestConfig,
     ReconcileConfig,
     WikidataIngestConfig,
-    load_config,
 )
 from reconciliator.ingestion.oai import _WEMIBatchAccumulator
 from reconciliator.ingestion.wikidata import decompose_wikidata_entity, parse_wikidata_entity
 from reconciliator.loaders.base import DecomposedRecord
 from reconciliator.models import (
-    MatchRecord,
     ManifestationEntity,
+    MatchRecord,
     WorkEntity,
 )
 from reconciliator.reconciliation.matcher import WorkMatcher
 
 
-def test_ingest_filter_config_accepts() -> None:
-    # 1. Default: accepts all
+def test_ingest_filter_config_defaults() -> None:
     cfg = IngestFilterConfig()
-    assert cfg.accepts(work_type="text", language="fin", year=1995) is True
-    assert cfg.accepts(work_type="music", language=None, year=None) is True
+    # Default is permissive (empty lists / None years)
+    assert cfg.target_work_types == []
+    assert cfg.exclude_work_types == []
+    assert cfg.target_languages == []
+    assert cfg.from_year is None
+    assert cfg.until_year is None
 
-    # 2. Target work types filter
-    cfg_targets = IngestFilterConfig(target_work_types=["text", "thesis"])
-    assert cfg_targets.accepts(work_type="text") is True
-    assert cfg_targets.accepts(work_type="thesis") is True
-    assert cfg_targets.accepts(work_type="music") is False
-    assert cfg_targets.accepts(work_type="moving_image") is False
+    # Blank accept tests
+    assert cfg.accepts(work_type="book", language="fin", year=1995) is True
+    assert cfg.accepts(work_type=None, language=None, year=None) is True
 
-    # 3. Exclude work types filter
-    cfg_exclude = IngestFilterConfig(exclude_work_types=["thesis", "dataset"])
-    assert cfg_exclude.accepts(work_type="text") is True
-    assert cfg_exclude.accepts(work_type="thesis") is False
-    assert cfg_exclude.accepts(work_type="dataset") is False
+
+def test_ingest_filter_criteria() -> None:
+    # 1. Target work types filter
+    cfg_target = IngestFilterConfig(target_work_types=["music", "audio_nonmusic"])
+    assert cfg_target.accepts(work_type="music") is True
+    assert cfg_target.accepts(work_type="audio_nonmusic") is True
+    assert cfg_target.accepts(work_type="book") is False
+    # If work_type is unknown, it is not rejected by target filter
+    assert cfg_target.accepts(work_type=None) is True
+
+    # 2. Exclude work types filter
+    cfg_exclude = IngestFilterConfig(exclude_work_types=["comic", "periodical"])
+    assert cfg_exclude.accepts(work_type="book") is True
+    assert cfg_exclude.accepts(work_type="comic") is False
+    assert cfg_exclude.accepts(work_type="periodical") is False
+
+    # 3. Both target and exclude
+    cfg_combo = IngestFilterConfig(
+        target_work_types=["music", "audio_nonmusic"],
+        exclude_work_types=["music"],
+    )
+    # Exclude takes precedence or rather criteria are ANDed: target must match AND exclude must not match
+    assert cfg_combo.accepts(work_type="music") is False
+    assert cfg_combo.accepts(work_type="audio_nonmusic") is True
+    assert cfg_combo.accepts(work_type="book") is False
 
     # 4. Target languages filter
     cfg_lang = IngestFilterConfig(target_languages=["fin", "swe"])
@@ -65,31 +83,33 @@ def test_ingest_filter_config_accepts() -> None:
 def test_app_config_ingest_filter_propagation() -> None:
     # When global ingest config has filters and source configs do not override, propagate
     app_cfg = AppConfig(
-        ingest=IngestFilterConfig(
-            target_work_types=["music", "audio_nonmusic"],
-            target_languages=["fin"],
-            from_year=1980,
-            until_year=2020,
+        ingestion=IngestionConfig(
+            filter=IngestFilterConfig(
+                target_work_types=["music", "audio_nonmusic"],
+                target_languages=["fin"],
+                from_year=1980,
+                until_year=2020,
+            ),
+            oai={
+                "source_a": OAIIngestConfig(),
+                "source_b": OAIIngestConfig(target_work_types=["comic"]),
+            },
+            wikidata=WikidataIngestConfig(),
         ),
-        ingest_oai={
-            "source_a": OAIIngestConfig(),
-            "source_b": OAIIngestConfig(target_work_types=["comic"]),
-        },
-        ingest_wikidata=WikidataIngestConfig(),
         reconcile=ReconcileConfig(target_file=Path("test.xml")),
     )
 
     # source_a inherits global
-    assert app_cfg.ingest_oai["source_a"].target_work_types == ["music", "audio_nonmusic"]
-    assert app_cfg.ingest_oai["source_a"].target_languages == ["fin"]
-    assert app_cfg.ingest_oai["source_a"].from_year == 1980
+    assert app_cfg.ingestion.oai["source_a"].target_work_types == ["music", "audio_nonmusic"]
+    assert app_cfg.ingestion.oai["source_a"].target_languages == ["fin"]
+    assert app_cfg.ingestion.oai["source_a"].from_year == 1980
 
     # source_b retains its specific override
-    assert app_cfg.ingest_oai["source_b"].target_work_types == ["comic"]
+    assert app_cfg.ingestion.oai["source_b"].target_work_types == ["comic"]
 
     # wikidata inherits global
-    assert app_cfg.ingest_wikidata.target_work_types == ["music", "audio_nonmusic"]
-    assert app_cfg.ingest_wikidata.target_languages == ["fin"]
+    assert app_cfg.ingestion.wikidata.target_work_types == ["music", "audio_nonmusic"]
+    assert app_cfg.ingestion.wikidata.target_languages == ["fin"]
 
     # reconcile inherits global
     assert app_cfg.reconcile.target_work_types == ["music", "audio_nonmusic"]
@@ -163,7 +183,7 @@ def test_work_matcher_filtering_target_record() -> None:
     matcher = WorkMatcher(wemi_repo=None, config=reconcile_cfg)  # type: ignore[arg-type]
 
     # Matching record
-    rec_ok = MatchRecord(
+    _rec_ok = MatchRecord(
         record_id="target_1",
         format="marcxml",
         work_type="text",

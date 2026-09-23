@@ -62,10 +62,10 @@ def test_all_links_policy() -> None:
 
 def test_vocabulary_manager_yaml_defaults() -> None:
     """Test that VocabularyManager cleanly defaults all parameters from YAML defaults without hardcoded fallbacks."""
-    from reconciliator.config import get_bundled_vocab_defaults
+    from reconciliator.config import get_bundled_vocabularies_defaults
     from reconciliator.vocab import get_vocabulary_patterns
 
-    defaults = get_bundled_vocab_defaults()
+    defaults = get_bundled_vocabularies_defaults()
     vm = VocabularyManager()
 
     assert vm.allowed_vocabularies == {v.upper() for v in defaults["vocabularies"]}

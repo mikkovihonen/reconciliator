@@ -21,9 +21,10 @@ def test_cli_ingest_wikidata_wemi_routing(tmp_path: Path) -> None:
 storage:
   data_dir: "{tmp_path}"
 
-ingest_wikidata:
-  dump_path: "{dump_file}"
-  extract_works: true
+ingestion:
+  wikidata:
+    dump_path: "{dump_file}"
+    extract_works: true
 """
     )
 
@@ -62,25 +63,23 @@ embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
   device: "cpu"
 
-ingest_oai:
-  an_authority:
-    enabled: true
-    source_type: "oai"
-    oai_url: "https://example.org/oai"
-    authoritative: true
-  a_corpus:
-    enabled: true
-    source_type: "oai"
-    oai_url: "https://example.org/oai"
-    authoritative: false
+ingestion:
+  oai:
+    an_authority:
+      enabled: true
+      source_type: "oai"
+      oai_url: "https://example.org/oai"
+      authoritative: true
+    a_corpus:
+      enabled: true
+      source_type: "oai"
+      oai_url: "https://example.org/oai"
+      authoritative: false
 """
     )
 
     for source, expected_authoritative in (("an_authority", True), ("a_corpus", False)):
-        with (
-            patch("reconciliator.cli.SentenceEmbedder"),
-            patch("reconciliator.cli.ingest_oai_pipeline") as mock_pipeline,
-        ):
+        with patch("reconciliator.cli.ingest_oai_pipeline") as mock_pipeline:
             mock_pipeline.return_value = 1
             result = runner.invoke(
                 app, ["ingest-oai", "--config", str(cfg_file), "--source", source]

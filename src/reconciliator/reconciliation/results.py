@@ -77,4 +77,3 @@ class WEMIMatchResult:
             self.manifestation_curie = self.manifestation_uri
         elif not self.manifestation_uri and self.manifestation_curie:
             self.manifestation_uri = self.manifestation_curie
-

@@ -11,7 +11,7 @@ from sqlalchemy.exc import DataError
 
 from reconciliator.config import (
     VocabIngestConfig,
-    get_bundled_vocab_defaults,
+    get_bundled_vocabularies_defaults,
     get_category_default_field_map,
 )
 from reconciliator.database.schema import (
@@ -27,12 +27,19 @@ from reconciliator.ingestion.sanitizer import (
 from reconciliator.models import ConceptMapping, VocabConcept
 from reconciliator.normalizers.linguistic import fold_label
 from reconciliator.progress import ProgressTracker
-from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
+from reconciliator.vocab.bridges import (
+    get_bundled_bridge_files,
+    parse_bridge_turtle,
+    resolve_bridge_files,
+)
 from reconciliator.vocab.detection import extract_concept_id
 from reconciliator.vocab.store import VocabStore, is_language_allowed
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_LEGACY_SOURCES: set[str] = set(
+    (get_bundled_vocabularies_defaults().get("legacy_to_modern") or {}).keys()
+)
 
 
 def parse_turtle_simple(
@@ -40,6 +47,8 @@ def parse_turtle_simple(
     pref_label_languages: Optional[Sequence[str] | str] = None,
     alt_label_languages: Optional[Sequence[str] | str] = None,
     vocab_target_fields: Optional[dict[str, str]] = None,
+    legacy_thesauri: Optional[set[str]] = None,
+    default_vocab: Optional[str] = None,
 ) -> tuple[list[VocabConcept], list[ConceptMapping], list[dict[str, Any]]]:
     """
     Fast regex-based parser for SKOS Turtle (.ttl) concepts, mappings, and hierarchy edges.
@@ -49,6 +58,7 @@ def parse_turtle_simple(
     concepts: list[VocabConcept] = []
     mappings: list[ConceptMapping] = []
     hierarchy_edges: list[dict[str, Any]] = []
+    active_legacy = legacy_thesauri if legacy_thesauri is not None else _DEFAULT_LEGACY_SOURCES
 
     # Extract prefix declarations
     prefixes: dict[str, str] = {}
@@ -72,18 +82,28 @@ def parse_turtle_simple(
         content,
     )
     if len(blocks) > 1:
+        lit_pattern = r"(?:\"(?:[^\"\\]|\\.)*\"(?:@[a-zA-Z0-9_-]+)?(?:\^\^[^\s;,.]*)?)"
         for i in range(1, len(blocks), 2):
             uri = _resolve_uri(blocks[i])
-            body = blocks[i + 1]
+            full_body = blocks[i + 1]
+            body = re.split(
+                r"(?:\n|^)\s*(?:<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)\s+a\s+",
+                full_body,
+            )[0]
 
-            # Detect vocabulary from URI
+            # Detect vocabulary from concept scheme or URI
             def _detect_vocab(u: str) -> str:
                 from reconciliator.utils.curie import parse_curie
+                from reconciliator.vocab import detect_vocabulary
 
                 src, _ = parse_curie(u)
                 if src and src != "unknown":
                     return src.lower()
-                for seg in reversed(u.rstrip("/").split("/")):
+                detected = detect_vocabulary(u)
+                if detected:
+                    return detected.lower()
+                u_clean = u.split("#")[0] if "#" in u else u
+                for seg in reversed(u_clean.rstrip("/").split("/")):
                     clean_seg = re.sub(r"[^a-zA-Z0-9_-]", "", seg)
                     if (
                         clean_seg
@@ -91,23 +111,46 @@ def parse_turtle_simple(
                         and len(clean_seg) > 2
                     ):
                         return clean_seg.lower()
-                return "vocab"
+                return default_vocab.lower() if default_vocab else "vocab"
 
-            vocab = _detect_vocab(uri)
+            from reconciliator.vocab import detect_vocabulary
 
-            pref_matches = re.findall(r'skos:prefLabel\s+"([^"]+)"(?:@([a-zA-Z0-9_-]+))?', body)
+            vocab = ""
+            scheme_m = re.search(r"skos:inScheme\s+([^\s;.]+)", body)
+            if scheme_m:
+                raw_scheme = scheme_m.group(1).strip()
+                resolved_scheme = _resolve_uri(raw_scheme)
+                detected_scheme = detect_vocabulary(resolved_scheme) or detect_vocabulary(raw_scheme)
+                if detected_scheme:
+                    vocab = detected_scheme.lower()
+
+            if not vocab:
+                vocab = _detect_vocab(uri)
+
+            if (not vocab or vocab == "vocab") and default_vocab:
+                vocab = default_vocab.lower()
+
             pref_labels: dict[str, str] = {}
-            for lbl, lang in pref_matches:
-                lang_code = (lang or "und").lower()
-                if is_language_allowed(lang_code, pref_label_languages):
-                    pref_labels[lang_code] = lbl
+            for pref_clause in re.findall(
+                rf"skos:prefLabel\s+({lit_pattern}(?:\s*,\s*{lit_pattern})*)", body
+            ):
+                for lbl, lang in re.findall(
+                    r'"((?:[^"\\]|\\.)*)"(?:@([a-zA-Z0-9_-]+))?', pref_clause
+                ):
+                    lang_code = (lang or "und").lower()
+                    if is_language_allowed(lang_code, pref_label_languages):
+                        pref_labels[lang_code] = lbl
 
-            alt_matches = re.findall(r'skos:altLabel\s+"([^"]+)"(?:@([a-zA-Z0-9_-]+))?', body)
             alt_labels: dict[str, list[str]] = {}
-            for lbl, lang in alt_matches:
-                lang_code = (lang or "und").lower()
-                if is_language_allowed(lang_code, alt_label_languages):
-                    alt_labels.setdefault(lang_code, []).append(lbl)
+            for alt_clause in re.findall(
+                rf"skos:altLabel\s+({lit_pattern}(?:\s*,\s*{lit_pattern})*)", body
+            ):
+                for lbl, lang in re.findall(
+                    r'"((?:[^"\\]|\\.)*)"(?:@([a-zA-Z0-9_-]+))?', alt_clause
+                ):
+                    lang_code = (lang or "und").lower()
+                    if is_language_allowed(lang_code, alt_label_languages):
+                        alt_labels.setdefault(lang_code, []).append(lbl)
 
             is_deprecated = bool(
                 re.search(r'owl:deprecated\s+(?:"true"\^\^xsd:boolean|true\b)', body, re.IGNORECASE)
@@ -116,9 +159,9 @@ def parse_turtle_simple(
             active_target_fields = (
                 vocab_target_fields
                 if vocab_target_fields is not None
-                else get_bundled_vocab_defaults().get("vocab_target_fields", {})
+                else get_bundled_vocabularies_defaults().get("vocab_target_fields", {})
             )
-            default_target_field = get_bundled_vocab_defaults()["default_vocab_target_field"]
+            default_target_field = get_bundled_vocabularies_defaults()["default_vocab_target_field"]
             target_field = active_target_fields.get(vocab, default_target_field)
 
             concept = VocabConcept(
@@ -131,26 +174,59 @@ def parse_turtle_simple(
             )
             concepts.append(concept)
 
-            # Check mappings
-            matches = re.findall(
-                r"(?:skos:exactMatch|dct:isReplacedBy)\s+(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)",
-                body,
-            )
-            for raw_match in matches:
-                target_uri = _resolve_uri(raw_match)
-                target_v = _detect_vocab(target_uri)
-                t_field = active_target_fields.get(target_v, default_target_field)
+            # 1. Deprecated replacement concepts (within the same vocabulary)
+            for rep_clause in re.findall(r"(?:dct:isReplacedBy|dc:isReplacedBy)\s+([^;.]+)", body):
+                for raw_rep in re.findall(r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", rep_clause):
+                    target_uri = _resolve_uri(raw_rep)
+                    target_v = _detect_vocab(target_uri)
+                    t_field = active_target_fields.get(target_v, target_field)
+                    mappings.append(
+                        ConceptMapping(
+                            legacy_uri=uri,
+                            legacy_vocab=vocab,
+                            legacy_labels=pref_labels,
+                            target_uri=target_uri,
+                            target_vocab=target_v,
+                            mapping_type="deprecated_replacement",
+                            target_field=t_field,
+                        )
+                    )
 
-                mapping = ConceptMapping(
-                    legacy_uri=uri,
-                    legacy_vocab=vocab,
-                    legacy_labels=pref_labels,
-                    target_uri=target_uri,
-                    target_vocab=target_v,
-                    mapping_type="exact_match",
-                    target_field=t_field,
-                )
-                mappings.append(mapping)
+            # 2. Legacy thesauri mappings
+            for match_clause in re.findall(r"skos:exactMatch\s+([^;.]+)", body):
+                for raw_match in re.findall(
+                    r"(<[^>]+>|[a-zA-Z0-9_-]+:[a-zA-Z0-9_.-]+)", match_clause
+                ):
+                    match_uri = _resolve_uri(raw_match)
+                    match_v = _detect_vocab(match_uri)
+
+                    if match_v in active_legacy and vocab not in active_legacy:
+                        # Inverted: legacy thesaurus maps into this modern canonical concept
+                        mappings.append(
+                            ConceptMapping(
+                                legacy_uri=match_uri,
+                                legacy_vocab=match_v,
+                                legacy_labels=pref_labels,
+                                target_uri=uri,
+                                target_vocab=vocab,
+                                mapping_type="exact_match",
+                                target_field=target_field,
+                            )
+                        )
+                    elif vocab in active_legacy and match_v not in active_legacy:
+                        # Direct: current concept is legacy thesaurus mapping to modern canonical concept
+                        t_field = active_target_fields.get(match_v, default_target_field)
+                        mappings.append(
+                            ConceptMapping(
+                                legacy_uri=uri,
+                                legacy_vocab=vocab,
+                                legacy_labels=pref_labels,
+                                target_uri=match_uri,
+                                target_vocab=match_v,
+                                mapping_type="exact_match",
+                                target_field=t_field,
+                            )
+                        )
 
             # Check hierarchical broader / narrower relations
             cid = concept.concept_id
@@ -192,9 +268,11 @@ def ingest_bridge_files(
     tracker: Optional[ProgressTracker] = None,
 ) -> int:
     """Ingest bundled and optional custom bridge files into concept_mappings and concept_aliases."""
-    bridge_files = get_bundled_bridge_files()
+    bridge_files = resolve_bridge_files(config)
     if extra_bridge_dir and extra_bridge_dir.is_dir():
-        bridge_files.extend(sorted(extra_bridge_dir.glob("*.ttl")))
+        for bf in sorted(extra_bridge_dir.glob("*.ttl")):
+            if bf not in bridge_files:
+                bridge_files.append(bf)
 
     total_bridge_mappings: list[ConceptMapping] = []
     total_bridge_aliases: list[dict[str, Any]] = []
@@ -203,7 +281,7 @@ def ingest_bridge_files(
     cat_defaults = get_category_default_field_map()
     geo_field = cat_defaults["geographic"]
     topical_field = cat_defaults["topical"]
-    vocab_defs = get_bundled_vocab_defaults()
+    vocab_defs = get_bundled_vocabularies_defaults()
     default_topical_vocab = (
         vocab_defs.get("subject_categories", {}).get(topical_field, {}).get("default_vocab") or ""
     )
@@ -242,6 +320,8 @@ def ingest_bridge_files(
                 )
             )
             notation = b.get("notation")
+            alt_labels: dict[str, list[str]] = dict(b.get("alt_labels") or {})
+
             if "relators" in stem:
                 total_bridge_mappings.append(
                     ConceptMapping(
@@ -264,9 +344,27 @@ def ingest_bridge_files(
                                     "raw_term": label,
                                     "lang": lang,
                                     "code": notation,
-                                    "uri": target_uri,
+                                    "source_uri": source_uri,
+                                    "bridged_uri": target_uri,
+                                    "is_preferred": True,
                                 }
                             )
+                for lang, labels in alt_labels.items():
+                    for label in labels:
+                        if label:
+                            folded = fold_label(label)
+                            if folded:
+                                total_bridge_relators.append(
+                                    {
+                                        "folded_term": folded,
+                                        "raw_term": label,
+                                        "lang": lang,
+                                        "code": notation,
+                                        "source_uri": source_uri,
+                                        "bridged_uri": target_uri,
+                                        "is_preferred": False,
+                                    }
+                                )
                 if notation:
                     total_bridge_relators.append(
                         {
@@ -274,7 +372,9 @@ def ingest_bridge_files(
                             "raw_term": notation,
                             "lang": "und",
                             "code": notation,
-                            "uri": target_uri,
+                            "source_uri": source_uri,
+                            "bridged_uri": target_uri,
+                            "is_preferred": False,
                         }
                     )
 
@@ -296,6 +396,25 @@ def ingest_bridge_files(
                             }
                         )
 
+            for lang, labels in alt_labels.items():
+                for label in labels:
+                    if label:
+                        folded = fold_label(label)
+                        if folded:
+                            total_bridge_aliases.append(
+                                {
+                                    "folded_label": folded,
+                                    "raw_label": label,
+                                    "lang": lang,
+                                    "concept_uri": target_uri,
+                                    "wikidata_qid": None,
+                                    "vocabulary": target_v,
+                                    "target_field": target_field,
+                                    "is_preferred": 0,
+                                    "source": "bridge",
+                                }
+                            )
+
             if notation:
                 total_bridge_aliases.append(
                     {
@@ -313,9 +432,23 @@ def ingest_bridge_files(
 
     task_id = tracker.task_id if tracker and tracker.task_id else "vocab-bridge-ingest"
     if config and getattr(config, "truncate_overlong_values", True):
-        sanitize_vocab_mappings(total_bridge_mappings, config=config, task_id=task_id, tracker=tracker)
-        sanitize_entities(total_bridge_aliases, concept_aliases_table, config=config, task_id=task_id, tracker=tracker)
-        sanitize_entities(total_bridge_relators, relator_terms_table, config=config, task_id=task_id, tracker=tracker)
+        sanitize_vocab_mappings(
+            total_bridge_mappings, config=config, task_id=task_id, tracker=tracker
+        )
+        sanitize_entities(
+            total_bridge_aliases,
+            concept_aliases_table,
+            config=config,
+            task_id=task_id,
+            tracker=tracker,
+        )
+        sanitize_entities(
+            total_bridge_relators,
+            relator_terms_table,
+            config=config,
+            task_id=task_id,
+            tracker=tracker,
+        )
 
     if total_bridge_mappings:
         try:
@@ -377,7 +510,6 @@ def ingest_bridge_files(
     return len(total_bridge_mappings)
 
 
-
 def ingest_vocab_file(
     input_path: Path | str,
     vocab_store: VocabStore,
@@ -417,6 +549,16 @@ def ingest_vocab_file(
         vocab_store.config, "vocab_target_fields", None
     )
 
+    legacy_thesauri = set(
+        config.legacy_thesauri
+        if config and config.legacy_thesauri is not None
+        else (
+            vocab_store.config.legacy_to_modern.keys()
+            if hasattr(vocab_store, "config")
+            else _DEFAULT_LEGACY_SOURCES
+        )
+    )
+
     if tracker:
         tracker.start_task(stage="parsing_vocab")
 
@@ -426,11 +568,14 @@ def ingest_vocab_file(
 
     for file_path in files:
         content = file_path.read_text(encoding="utf-8")
+        file_vocab = file_path.stem.lower()
         concepts, mappings, edges = parse_turtle_simple(
             content,
             pref_label_languages=pref_langs,
             alt_label_languages=alt_langs,
             vocab_target_fields=vocab_target_fields,
+            legacy_thesauri=legacy_thesauri,
+            default_vocab=file_vocab,
         )
         total_concepts.extend(concepts)
         total_mappings.extend(mappings)
@@ -569,7 +714,6 @@ def ingest_vocab_file(
 
     # Ingest bundled bridge vocabularies
     ingest_bridge_files(vocab_store, config=config, tracker=tracker)
-
 
     # Rebuild normalized aliases index
     vocab_store.rebuild_aliases_from_concepts()

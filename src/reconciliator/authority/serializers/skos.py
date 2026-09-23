@@ -112,7 +112,7 @@ class SKOSAuthoritySerializer:
         for m in cluster.members:
             if m.source.lower() in ("isni", "viaf", "wikidata", "kanto"):
                 lines[-1] += ";"
-                lines.append(f'    skos:exactMatch <{m.source}:{m.source_id}> ')
+                lines.append(f"    skos:exactMatch <{m.source}:{m.source_id}> ")
 
         lines[-1] += "."
         return "\n".join(lines)
@@ -137,7 +137,10 @@ class SKOSAuthoritySerializer:
         }
 
         if cluster.canonical_author:
-            doc["schema:author"] = {"@type": "schema:Person", "schema:name": cluster.canonical_author}
+            doc["schema:author"] = {
+                "@type": "schema:Person",
+                "schema:name": cluster.canonical_author,
+            }
 
         return doc
 
@@ -167,4 +170,3 @@ class SKOSAuthoritySerializer:
 
         lines[-1] += "."
         return "\n".join(lines)
-

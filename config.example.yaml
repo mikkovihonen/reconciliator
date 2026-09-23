@@ -6,7 +6,7 @@
 # across all subsystems.
 
 # ==============================================================================
-# 1. Compute & Hardware Acceleration
+# 1. Infrastructure: Compute & Hardware Acceleration
 # ==============================================================================
 compute:
   # Hardware device for PyTorch vector indexing, dense sentence embedding inference,
@@ -18,7 +18,7 @@ compute:
   threads: null
 
 # ==============================================================================
-# 2. Storage & Persistence File Paths
+# 2. Infrastructure: Storage & Persistence File Paths
 # ==============================================================================
 storage:
   # Base directory for vector index files and daemon sockets.
@@ -98,13 +98,34 @@ storage:
     prefix_search: false          # Append wildcard * to search terms by default
 
 # ==============================================================================
-# 3. Vector Model Configuration
+# 3. Infrastructure: Telemetry & Progress Monitoring
+# ==============================================================================
+telemetry:
+  heartbeat_interval_seconds: 1.0 # Heartbeat monitor flush interval
+  watch_interval_seconds: 1.0     # Terminal progress watch refresh frequency
+  show_vector_daemon: true        # Show background vector daemon status panel in TUI
+
+# ==============================================================================
+# 4. Infrastructure: Logging
+# ==============================================================================
+logging:
+  level: "INFO"                   # "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+  format: "%(asctime)s [%(levelname)s] [task_id=%(task_id)s] %(name)s: %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  log_file: null                  # Optional destination path (e.g. "data/reconciliator.log")
+  capture_warnings: false         # Redirect Python standard warnings to logging
+  task_id_default: "-"            # Fallback task_id when no active task context is present
+  enable_telemetry_handler: true  # Automatically feed ERROR log records into active task error metrics
+  sanitization_log_level: "ERROR" # Default log level for data sanitization events ("ERROR", "WARNING", "INFO")
+
+# ==============================================================================
+# 5. Vector Model Configuration
 # ==============================================================================
 # Reconciliator builds and queries vector indices (work, manifestation, agent)
 # using either a lightweight SentenceTransformers embedding model OR an
 # autoregressive base LLM (with last-token pooling & KV-branching).
 # Set 'vector_model' explicitly to either "embedding" or "llm".
-vector_model: "embedding"
+vector_model: "llm"
 
 # --- Option A: Fast Embedding Model (SentenceTransformers, CPU/MPS/CUDA) ---
 embedding:
@@ -136,12 +157,12 @@ llm:
   batch_size: 16                         # Batch size for dense vector extraction
   positive_token: "YES"
   negative_token: "NO"
-  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
-  candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\\nQuery: {text}\\n"
+  candidate_suffix_template: "Candidate: {text}\\nDoes this refer to the same work? Answer YES or NO: "
   max_seq_length: 2048                   # Maximum sequence length for context window
 
 # ==============================================================================
-# 4. Linguistic Rules & Text Normalization Conventions
+# 6. Knowledge Base: Linguistic Rules & Text Normalization Conventions
 # ==============================================================================
 linguistic:
   # Default language code used when language is unspecified
@@ -186,7 +207,7 @@ linguistic:
     pattern: null
 
 # ==============================================================================
-# 5. Controlled Vocabularies & Priority Policies
+# 7. Knowledge Base: Controlled Vocabularies & Priority Policies
 # ==============================================================================
 vocabularies:
   # Prioritization order when reconciling agent authorities (Melinda/Asteri, ISNI, VIAF, Wikidata)
@@ -517,7 +538,7 @@ vocabularies:
       prefix: "orcid"
       uri_template: "https://orcid.org/{id}"
       id_patterns:
-        - '(?i)orcid\.org/([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])'
+        - '(?i)orcid\\.org/([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])'
         - '(?i)(?:^|:)orcid:([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])'
         - '^([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])$'
       canonical_id_case: "preserve"
@@ -540,7 +561,7 @@ vocabularies:
     orcid: "P496"      # ORCID
 
 # ==============================================================================
-# 6. Record Normalization Heuristics
+# 8. Knowledge Base: Record Normalization Heuristics
 # ==============================================================================
 record_normalization:
   # Trailing ISBD presentation punctuation on a MARC $a heading: "Waltari, Mika,"
@@ -747,7 +768,7 @@ record_normalization:
   control_number_strip_prefixes: null
 
   # Regex pattern for matching URN identifiers
-  urn_pattern: "(urn:nbn:[^\\s]+)"
+  urn_pattern: "(urn:nbn:[^\\\\s]+)"
 
   # URI templates for expanding source record identifiers
   source_identifier_templates:
@@ -776,168 +797,274 @@ record_normalization:
         - "https://dx.doi.org/"
         - "http://dx.doi.org/"
         - "doi:"
-      pattern: '(?i)(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)'
+      pattern: '(?i)(10\\.\\d{4,9}/[-._;()/:A-Za-z0-9]+)'
       wikidata_properties: ["P356"]
     urn:
       patterns:
-        - '(?i)(urn:nbn:[^\s]+)'
-        - '(?i)(urn:[a-z0-9][a-z0-9-]{0,31}:[^\s]+)'
-
-  # MARC relator terms mapped to standard 3-letter MARC code
-  relator_mappings:
-    kirjoittaja: "aut"
-    toimittaja: "edt"
-    kuvittaja: "ill"
-    kääntäjä: "trl"
-    suomentaja: "trl"
-    säveltäjä: "cmp"
-    sovittaja: "arr"
-    sanoittaja: "lyr"
-    ohjaaja: "drt"
-    tuottaja: "pro"
-    näyttelijä: "act"
-    esiintyjä: "prf"
-    esittäjä: "prf"
-    laulaja: "sng"
-    laulu: "sng"
-    muusikko: "mus"
-    valokuvaaja: "pht"
-    käsikirjoittaja: "aus"
-    tutkija: "res"
-    kustantaja: "pbl"
-    haastattelija: "ivr"
-    haastateltava: "ive"
-    kertoja: "nrt"
-    taiteilija: "art"
-    taittaja: "bkd"
-    graafikko: "art"
-    kartantekijä: "ctg"
-    kartograafi: "ctg"
-    puheenjohtaja: "pbd"
-    selostaja: "cmm"
-    juontaja: "ann"
-    kuraattori: "cur"
-    libretisti: "lbt"
-    kapellimestari: "cnd"
-    johtaja: "cnd"
-    kirj.: "aut"
-    toim.: "edt"
-    kuv.: "ill"
-    suom.: "trl"
-    käänt.: "trl"
-    säv.: "cmp"
-    sov.: "arr"
-    san.: "lyr"
-    esitt.: "prf"
-    ohj.: "drt"
-    valok.: "pht"
-    käsik.: "aus"
-    näytt.: "act"
-    tait.: "art"
-    author: "aut"
-    editor: "edt"
-    illustrator: "ill"
-    translator: "trl"
-    composer: "cmp"
-    arranger: "arr"
-    lyricist: "lyr"
-    director: "drt"
-    producer: "pro"
-    actor: "act"
-    performer: "prf"
-    singer: "sng"
-    musician: "mus"
-    photographer: "pht"
-    screenwriter: "aus"
-    researcher: "res"
-    publisher: "pbl"
-    interviewer: "ivr"
-    interviewee: "ive"
-    narrator: "nrt"
-    artist: "art"
-    conductor: "cnd"
-    librettist: "lbt"
-    curator: "cur"
-    cartographer: "ctg"
-    ed.: "edt"
-    trans.: "trl"
-    comp.: "cmp"
-    författare: "aut"
-    redaktör: "edt"
-    illustratör: "ill"
-    översättare: "trl"
-    utgivare: "pbl"
-    tonsättare: "cmp"
-    musiker: "mus"
-    sångare: "sng"
-    skådespelare: "act"
-    regissör: "drt"
-    producent: "pro"
-    fotograf: "pht"
-    forskare: "res"
-    berättare: "nrt"
-    konstnär: "art"
-    förf.: "aut"
-    red.: "edt"
-    övers.: "trl"
-    ill.: "ill"
-    komp.: "cmp"
-    arr.: "arr"
+        - '(?i)(urn:nbn:[^\\s]+)'
+        - '(?i)(urn:[a-z0-9][a-z0-9-]{0,31}:[^\\s]+)'
 
   custom_relator_terms: {}
 
 # ==============================================================================
-# 7. Value Vocabularies Downloader (Skosmos REST API)
+# 9. Knowledge Base: Output Enrichment Configuration
 # ==============================================================================
-download_skosmos:
-  finto:
+enrichment:
+  inject_work_links: true
+  inject_expression_links: true
+  inject_hub_links: true
+  inject_same_as: true
+  inject_component_links: true
+  inject_role_codes: true
+  normalize_role_terms: true
+  role_format: "bridged_uri"
+  inject_missing_role_terms: false
+  marc_predicate_mode: "stacked" # "stacked" ($4 relators combined) or "distinct" (separate subfields)
+  active_profiles:
+    - "bibframe"
+    - "bffi"
+    - "rda"
+  predicate_profiles:
+    bffi:
+      work: ["http://urn.fi/URN:NBN:fi:schema:bffi:workManifested", "bffi"]
+      expression: ["http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested", "bffi"]
+    bibframe:
+      work: ["http://id.loc.gov/ontologies/bibframe/instanceOf", "lcba"]
+      expression: ["http://id.loc.gov/ontologies/bibframe/expressionOf", "lcba"]
+    rda:
+      work: ["http://rdaregistry.info/Elements/m/P30135", "rda"]
+      expression: ["http://rdaregistry.info/Elements/m/P30139", "rda"]
+  thesis_institution_uri: "http://urn.fi/URN:NBN:fi:au:pn:dgg_institution"
+  surrogate_title_keywords:
+    - "surrogate"
+    - "näköispainos"
+    - "faksimile"
+    - "faksimil"
+  schemes:
+    fingerprint:
+      default: "feigb"
+      accepted: ["feigb", "stcn", "fingb"]
+    web_harvest:
+      default: "memento"
+      accepted: ["memento", "wayback", "archive-it"]
+    manuscript_fragment:
+      default: "fragmenta"
+      accepted: ["fragmenta", "fragmentarium"]
+    geodata_spatial:
+      default: "epsg"
+      accepted: ["epsg", "wgs84", "etrs89"]
+    numismatics:
+      default: "km"
+      accepted: ["km", "michel", "scott", "ric"]
+  domain_concepts:
+    ephemera: "slm:s1492"
+    thesis_relator: "mts:m352"
+    tactile_concept: "yso:p19350"
+    tactile_genre: "slm:s1422"
+  accessibility:
+    tactile:
+      content_summary: "tactileText"
+      mode: "braille"
+      notes:
+        fi: "Saavutettava aineisto / Pistekirjoitus"
+        sv: "Tillgängligt material / Punktskrift"
+        en: "Accessible resource / Braille"
+  linking_labels:
+    fi:
+      work_manifested: "Ilmentymän teos"
+      expression_manifested: "Ilmentymän ekspressio"
+      host_item: "Sisältyy julkaisuun"
+      other_manifestation: "Toinen ilmentymä"
+      reproduction: "Säilytyskopio tai digitaalinen kaksonen"
+      bound_with: "Sidottu yhteen"
+    sv:
+      work_manifested: "Manifesterat verk"
+      expression_manifested: "Manifesterat uttryck"
+      host_item: "Ingår i"
+      other_manifestation: "Annan manifestation"
+      reproduction: "Bevarandeexemplar eller digital tvilling"
+      bound_with: "Inbunden med"
+    en:
+      work_manifested: "Work manifested"
+      expression_manifested: "Expression manifested"
+      host_item: "Contained in"
+      other_manifestation: "Other edition"
+      reproduction: "Preservation copy or digital surrogate"
+      bound_with: "Bound with"
+
+# ==============================================================================
+# 10. Ingestion Subsystems (Filters, Defaults, Sources, Vocabularies)
+# ==============================================================================
+ingestion:
+  # Universal Ingest Filters (applied across all harvesting pathways)
+  filter:
+    target_work_types: []
+    exclude_work_types: []
+    target_languages: []
+    from_year: null
+    until_year: null
+
+  # Shared OAI-PMH Harvesting Defaults
+  oai_defaults:
+    workers: 4
+    max_concurrent_requests: 16
+    slice_days: 7
+    batch_size: 1000
+    batch_flush_interval_seconds: 2.0
+    batch_queue_size: 32
+    request_delay: 0.0
+    timeout: 60.0
+    max_retries: 5
+    base_delay: 1.0
+    http2: true
+    prefetch: true
+    checkpoint_interval_records: 10000
+    checkpoint_interval_seconds: 30.0
+    use_synchronous_commit_off: true
+    drop_indexes_during_replace: false
+    truncate_overlong_values: true
+    truncation_marker: ""
+    default_max_field_length: null
+    adopt_previous_task_id: true
+
+  # Configured OAI-PMH / ResourceSync Endpoints & Local Sources
+  oai:
+    melinda:
+      enabled: true
+      source_type: "oai"           # "oai", "file", or "resourcesync"
+      oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
+      metadata_prefix: "marc21"
+      set_spec: null
+      # Whether this source's records may be used as authority when matching.
+      authoritative: true
+      # What a re-ingest does to rows this source wrote before: "accumulate" or "replace"
+      ingest_mode: "accumulate"
+      # Constituent profile: "marc_enhanced", "bibframe_haspart", path to profile, or "off"
+      constituents: "marc_enhanced"
+      constituents_mode: "keys_only"
+      id_source: "marc_001"
+      control_number_prefix: "(FI-MELINDA)"
+      control_number_padding_digits: 9
+      workers: 8
+      slice_days: 30               # Width of each concurrent date slice
+      batch_queue_size: 4          # Decomposed batches buffered ahead of DB writes
+      batch_size: 500              # Records per database write
+      request_delay: 0.1           # Pause between pagination requests
+      timeout: 60.0
+      truncate_overlong_values: true
+      truncation_marker: ""
+      default_max_field_length: null
+      field_length_overrides: {}
+
+  # Wikidata JSON Dump Ingestion
+  wikidata:
     enabled: true
-    api_url: "https://api.finto.fi/rest/v1"
-    output_dir: "data/vocabularies"
+    dump_path: "dumps/latest-all.json.gz"
+    batch_size: 5000                   # Chunk and transaction batch size
+    pass1_only: false                  # Pre-scan and persist author/agent entities only
+    extract_works: true                # Extract works, expressions, and manifestations
+    require_author_authority_id: true  # Filter out human entities lacking library authority IDs
+    author_authority_properties:
+      - "P3595"
+      - "P213"
+      - "P214"
+      - "P227"
+      - "P244"
+      - "P906"
+      - "P496"
+    target_work_types: []
+    exclude_work_types: []
+    target_languages: []
+    from_year: null
+    until_year: null
+    creative_work_types:
+      Q7725634: "text"
+      Q571: "text"
+      Q47461344: "text"
+      Q3331189: "text"
+      Q2188189: "music"
+      Q7366: "music"
+      Q105543609: "music"
+      Q134556: "music"
+      Q11424: "moving_image"
+      Q5398426: "moving_image"
+      Q40063: "drama"
+      Q1004: "comic"
+      Q8274: "comic"
+      Q131569: "legal"
+      Q3284440: "legal"
+      Q7889: "interactive_game"
+      Q131436: "board_game"
+      Q11436: "moving_image"
+      Q24856: "still_image"
+      Q125191: "still_image"
+      Q3305213: "still_image"
+      Q40446: "cartography"
+      Q2472587: "podcast"
+    human_and_entity_types:
+      - "Q5"
+      - "Q2085381"
+      - "Q4830453"
+      - "Q43229"
+      - "Q515"
+      - "Q6256"
+    use_pigz: true                     # Use pigz (parallel gzip) if available on host
+    pigz_path: null                    # Custom path to pigz binary (null = auto-discover)
+    pigz_threads: 0                    # Decompression threads (0 = auto-allocate cores)
+    workers: 0                         # Parsing worker processes (0 = auto-allocate cores, 1 = synchronous)
+    lru_cache_size: 500000             # Maximum in-memory LRU cache entries for hydrated QIDs
+    progress_throttle_interval: 32768  # Frequency of progress heartbeat calculations in lines
+    use_synchronous_commit_off: true   # Transaction-local synchronous_commit = 'off' for faster bulk writes
+    truncate_overlong_values: true     # Truncate values exceeding schema limits and log error with task_id
+    truncation_marker: ""              # Suffix appended to truncated values
+    default_max_field_length: null     # Global fallback cap for unconstrained String columns
+    field_length_overrides: {}         # Explicit overrides, e.g. {"agents.name": 255}
+    languages: null                    # Explicit Wikidata languages to extract (null = all)
+    subject_mappings:
+      topical: "yso"
+      genre_form: "slm"
+      geographic: "yso"
+      temporal: "yso-aika"
+      medium_of_performance: "seko"
+
+  # Value Vocabularies Ingestion into Relational DB
+  vocab:
+    input_path: "data/vocabularies"
     # vocabularies: null (automatically uses vocabularies.download_list)
-    dump_urls:
-      yso: "https://api.finto.fi/download/yso/yso-skos.ttl"
-      yso-paikat: "https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl"
-      yso-aika: "https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl"
-      finaf: "https://api.finto.fi/download/finaf/finaf-skos.ttl"
-      kauno: "https://api.finto.fi/download/kauno/kauno-skos.ttl"
-      kaunokki: "https://api.finto.fi/download/kaunokki/kaunokki-skos.ttl"
-      muso: "https://api.finto.fi/download/muso/muso-skos.ttl"
-      slm: "https://api.finto.fi/download/slm/slm-skos.ttl"
-      allars: "https://api.finto.fi/download/allars/allars-skos.ttl"
-      ysa: "https://api.finto.fi/download/ysa/ysa-skos.ttl"
-      musa: "https://api.finto.fi/download/musa/musa-skos.ttl"
-      seko: "https://api.finto.fi/download/seko/seko-skos.ttl"
-      mts: "https://api.finto.fi/download/metatietosanasto/metatietosanasto-skos.ttl"
-    format: "text/turtle"
-    timeout_seconds: 120.0
-    overwrite: false
+    # legacy_thesauri: null (automatically uses vocabularies.legacy_to_modern keys)
+    truncate_overlong_values: true
+    truncation_marker: ""
+    default_max_field_length: null
+    field_length_overrides: {}
+
+  # Value Vocabularies Downloader (Skosmos REST API)
+  skosmos:
+    finto:
+      enabled: true
+      api_url: "https://api.finto.fi/rest/v1"
+      output_dir: "data/vocabularies"
+      # vocabularies: null (automatically uses vocabularies.download_list)
+      dump_urls:
+        yso: "https://api.finto.fi/download/yso/yso-skos.ttl"
+        yso-paikat: "https://api.finto.fi/download/yso-paikat/yso-paikat-skos.ttl"
+        yso-aika: "https://api.finto.fi/download/yso-aika/yso-aika-skos.ttl"
+        finaf: "https://api.finto.fi/download/finaf/finaf-skos.ttl"
+        kauno: "https://api.finto.fi/download/kauno/kauno-skos.ttl"
+        kaunokki: "https://api.finto.fi/download/kaunokki/kaunokki-skos.ttl"
+        muso: "https://api.finto.fi/download/muso/muso-skos.ttl"
+        slm: "https://api.finto.fi/download/slm/slm-skos.ttl"
+        allars: "https://api.finto.fi/download/allars/allars-skos.ttl"
+        ysa: "https://api.finto.fi/download/ysa/ysa-skos.ttl"
+        musa: "https://api.finto.fi/download/musa/musa-skos.ttl"
+        seko: "https://api.finto.fi/download/seko/seko-skos.ttl"
+        mts: "https://api.finto.fi/download/metatietosanasto/metatietosanasto-skos.ttl"
+      format: "text/turtle"
+      timeout_seconds: 120.0
+      overwrite: false
 
 # ==============================================================================
-# 8. Value Vocabularies Ingestion into vocab.db
+# 11. Authority & Structure: Constituent Extraction
 # ==============================================================================
-ingest_vocab:
-  input_path: "data/vocabularies"
-  # vocabularies: null (automatically uses vocabularies.download_list)
-  # legacy_thesauri: null (automatically uses vocabularies.legacy_to_modern keys)
-
-  # Overlong string value truncation
-  truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
-  truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
-  default_max_field_length: null # Global fallback cap for unconstrained String columns
-  field_length_overrides: {}     # Explicit overrides, e.g. {"concept_labels.label": 500}
-
-
-# ==============================================================================
-# 8b. Constituent extraction (albums, anthologies, articles)
-# ==============================================================================
-# What a publication *contains*: an album's tracks, an anthology's stories, an
-# article inside a journal issue. Two sources in the same format do not agree
-# about how they record it, so the fields to read belong to the source and this
-# is only the default for sources that name nothing.
-#
-# The shipped default is the empty profile, so a source nobody has described
-# behaves exactly as it did before this existed.
 constituents:
   # A bundled profile name, a path to a YAML profile, or "off".
   #   none | off        look for nothing (default)
@@ -953,420 +1080,14 @@ constituents:
   mode: "keys_only"
 
   # Whether constituent works enter the work vector index.
-  #
-  # Off by default, measured rather than assumed: on 200 albums of 12 tracks
-  # they are 82% of the work index, and a title-only query returns six tracks
-  # and no album, so tier 3's top-k window fills with things that are not what
-  # the target is. Constituents stay reachable exactly - by their
-  # `analytic_title` key and from a matched container - so nothing is lost.
-  #
-  # Turn it on for a source whose *targets* are tracks rather than releases.
   index_works: false
 
 # ==============================================================================
-# 9. OAI-PMH & MARCXML Authority Sources Ingestion
-# ==============================================================================
-ingest_oai:
-  melinda:
-    enabled: true
-    source_type: "oai"           # "oai", "file", or "resourcesync"
-    oai_url: "https://oai-pmh.api.melinda.kansalliskirjasto.fi/bib"
-    metadata_prefix: "marc21"
-    set_spec: null
-    # Whether this source's records may be used as authority when matching.
-    # A corpus you are reconciling is ingested exactly like any other source,
-    # with authoritative: false, rather than through a separate staging path.
-    # record_origin on every row is the source name, and the `sources` table
-    # records which names are authoritative.
-    authoritative: true
-
-    # What a re-ingest does to rows this source wrote before:
-    #   accumulate  add to them (default, and the historical behaviour)
-    #   replace     remove this source's rows first, leaving other sources alone
-    #
-    # `replace` clears once, before the first batch, and only when the run is not
-    # continuing an earlier one - a resumed or incremental harvest would otherwise
-    # delete exactly what its own completed slices had just written. Use
-    # `ingest-oai --restart` to force a full re-harvest with a clear.
-    #
-    # Deterministic ids are what make `replace` a refresh rather than a churn of
-    # identity: the same input yields the same work, expression, manifestation
-    # and agent URIs, so re-ingesting returns the store to the same state.
-    ingest_mode: "accumulate"
-
-    # How this source records what a publication contains, overriding the global
-    # `constituents` block above. A bundled name, a path to a YAML profile of
-    # this source's own, or "off".
-    #
-    #   constituents: "marc_enhanced"
-    #   constituents: "profiles/fono.yaml"
-    #   constituents: "off"
-    #
-    # A profile is declarative - tags, indicators and subfield codes - and may
-    # name an `extractor` for a source whose conventions cannot be described that
-    # way. That value is either a built-in name or a path to a Python file, the
-    # same rule as a funnel's `handler`:
-    #
-    #   extractor: fono_tracks
-    #   extractor: src/reconciliator/constituents/fono.py
-    #   extractor: /opt/site/constituents/kavi.py
-    #
-    # Profiles and extractors resolve when this file loads, so a bad name or a
-    # missing file is a startup error naming the source.
-    constituents: "marc_enhanced"
-    constituents_mode: "keys_only"
-
-    id_source: "marc_001"
-    control_number_prefix: "(FI-MELINDA)"
-    control_number_padding_digits: 9
-    # >1 harvests date slices concurrently. Needs a resolvable date window:
-    # from_date, or an endpoint answering Identify with earliestDatestamp.
-    # Otherwise one continuous resumptionToken stream is followed.
-    workers: 8
-    slice_days: 30               # Width of each concurrent date slice
-    batch_queue_size: 4          # Decomposed batches buffered ahead of DB writes
-    batch_size: 500              # Records per database write
-    request_delay: 0.1           # Pause between pagination requests
-    timeout: 60.0
-
-    # Overlong string value truncation
-    truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
-    truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
-    default_max_field_length: null # Global fallback cap for unconstrained String columns
-    field_length_overrides: {}     # Explicit overrides, e.g. {"entity_subjects.raw_label": 500}
-
-
-# ==============================================================================
-# 10. Wikidata Authority Ingestion
-# ==============================================================================
-ingest_wikidata:
-  dump_path: "dumps/latest-all.json.gz"
-  batch_size: 5000                   # Chunk and transaction batch size for Pass 1 and Pass 2
-  pass1_only: false                  # Pre-scan and persist author/agent entities only
-  extract_works: true                # Extract works, expressions, and manifestations
-  require_author_authority_id: true  # Filter out human entities lacking library authority IDs
-  # author_authority_properties: null # Uses default library authority properties (P3595, P213, etc.)
-
-  # Performance and Parallelism
-  use_pigz: true                     # Use pigz (parallel gzip) if available on host
-  pigz_path: null                    # Custom path to pigz binary (null = auto-discover)
-  pigz_threads: 0                    # Decompression threads (0 = auto-allocate cores)
-  workers: 0                         # Parsing worker processes (0 = auto-allocate cores, 1 = synchronous)
-  lru_cache_size: 500000             # Maximum in-memory LRU cache entries for hydrated QIDs
-  progress_throttle_interval: 32768  # Frequency of progress heartbeat calculations in lines
-  use_synchronous_commit_off: true   # Transaction-local synchronous_commit = 'off' for faster bulk writes
-
-  # Overlong string value truncation
-  truncate_overlong_values: true     # Truncate values exceeding schema limits and log error with task_id
-  truncation_marker: ""              # Suffix appended to truncated values (e.g. "..." or empty string)
-  default_max_field_length: null     # Global fallback cap for unconstrained String columns
-  field_length_overrides: {}         # Explicit overrides, e.g. {"agents.name": 255}
-
-
-# ==============================================================================
-# 11. Cross-Source Work Consolidation
-# ==============================================================================
-# Every source mints its own urn:work:{source}:{id}, so one work held by three
-# catalogues is three rows. `reconciliator consolidate-works` elects one canonical
-# row per equivalence group and records same_work_as edges explaining why; nothing
-# is deleted, and the command is repeatable after ingesting further sources.
-# Matching then resolves through that election, so a record links to the same work
-# no matter which source it happened to match.
-consolidation:
-  enabled: true
-
-  # Evidence admitted when deciding two work rows are the same work.
-  use_wikidata_qid: true         # Shared QID is decisive; differing QIDs veto a merge
-  use_shared_identifiers: true   # A strong identifier shared by their manifestations
-  use_metadata: true             # Title + creator + work type, for identifier-free corpora
-
-  # Identifier schemes strong enough to assert work identity on their own.
-  # Source-local schemes such as control_number are deliberately excluded.
-  strong_identifier_schemes:
-    - "isbn"
-    - "issn"
-    - "ismn"
-    - "isrc"
-    - "ean"
-    - "doi"
-    - "urn"
-    - "asteri"
-    - "asteri_work"
-    - "kanto"
-
-  # Metadata agreement required when no identifier or QID is shared.
-  # 0.6 * title similarity + 0.4 * creator similarity, both 0..1.
-  metadata_threshold: 0.93
-
-  # Also consolidate duplicates held by one source, not just across sources.
-  include_same_source: false
-
-  # Sources preferred as the canonical representative, best first. A work carrying
-  # a wikidata_qid always outranks one without; ties break on work_uri so the
-  # election is stable across runs.
-  canonical_source_priority: []
-    # - "melinda"
-    # - "finna"
-
-# ==============================================================================
-# 12. Target Reconciliation, Matching & Native Tree Enrichment
-# ==============================================================================
-reconcile:
-  target_file: "tests/fixtures/sample_target.xml"
-  format: "auto"                 # "auto", "marcxml", "bibra", or "bibframe"
-  output_file: "data/enriched_records.xml" # Destination for reconciled, enriched records
-  enrich: true                   # true: inject novel $0/$1 URIs; false: audit/report only
-  fold_legacy: true              # Reconcile and fold legacy headings against vocab.db
-  threshold: 0.85                # Minimum hybrid score for candidate acceptance
-  link_policy: "priority_fallback" # "priority_fallback" (best authority) or "all"
-
-  # Name the reconciled corpus is stored under. It becomes record_origin on the
-  # corpus's WEMI rows, registered non-authoritative, so the corpus is ingested
-  # like any other source. Defaults to the target file's stem.
-  corpus_source_name: null
-
-  # Overlong string value truncation for corpus ingestion
-  truncate_overlong_values: true # Truncate values exceeding schema limits and log error with task_id
-  truncation_marker: ""          # Suffix appended to truncated values (e.g. "..." or empty string)
-  default_max_field_length: null # Global fallback cap for unconstrained String columns
-  field_length_overrides: {}     # Explicit overrides, e.g. {"works.title": 500}
-
-
-  # ---------------------------------------------------------------------------
-  # Domain funnels
-  # ---------------------------------------------------------------------------
-  # 42 funnels ship built in and need no configuration. This section overrides or
-  # extends them: an entry whose `id` matches a built-in replaces it *in place*,
-  # keeping its precedence; an entry with a new id goes where its `before` says,
-  # or just ahead of the fall-through funnel when it says nothing. Order is
-  # precedence - the first funnel whose `when` claims a record wins, so a new
-  # funnel that overlaps a built-in needs `before` to be reachable at all.
-  #
-  # `when` is a list of alternatives, and each alternative is a conjunction:
-  # the funnel claims a record when ANY alternative matches and ALL of that
-  # alternative's conditions hold. An empty `when` matches everything, which is
-  # what the fall-through funnel uses.
-  #
-  # Available conditions: work_type, is_component, has_key, has_identifier,
-  # title_matches (regex), key_matches (key_type -> regex),
-  # identifier_matches (scheme -> regex).
-  funnels: []
-  # Example 1 - retune a built-in without changing when it applies:
-  #
-  # funnels:
-  #   - id: funnel_l_cartography
-  #     when: { work_type: [cartography] }
-  #     identifier_schemes: [sheet_number, isbn]
-  #     work_types: [cartography]
-  #     content_type: cartographic_image
-  #     align_expression: true
-  #     confidence: 0.85            # was 0.90
-  #     fallback_work_type: cartography
-  #
-  # Example 2 - a new funnel claiming records the built-ins would not, with a
-  # regex on an identifier value:
-  #
-  #   - id: funnel_local_theses
-  #     before: funnel_k_thesis     # REQUIRED to beat the built-in thesis funnel.
-  #     when:                       # Without it this lands after funnel_k_thesis,
-  #       - work_type: [thesis]     # which already claims every thesis, so this
-  #         identifier_matches: { urn: "(?i)urn:nbn:fi:oulu" }   # would never run.
-  #     identifier_schemes: [urn, handle]
-  #     work_types: [thesis, text]
-  #     match_tier: tier2_local_repository
-  #     confidence: 0.95
-  #     align_expression: true
-  #
-  # Example 3 - a funnel with real logic. `handler` is either a built-in name
-  # (recorded_sound, notated_music, audiobook) or a path to a Python file,
-  # absolute or relative to THIS config file. The module may define tier1, tier2
-  # and/or tier3; whichever it omits falls back to the generic template.
-  #
-  #   - id: funnel_b_music_sound
-  #     when: { work_type: [music] }
-  #     identifier_schemes: [publisher_number, isrc, ean, upc]
-  #     work_types: [music]
-  #     content_type: audio_music
-  #     align_expression: true
-  #     handler: recorded_sound
-  #     # handler: src/reconciliator/funnels/recorded_sound.py
-  #     # handler: /opt/site/funnels/my_rule.py
-
-  # Base directory for output reconciliation reports
-  # Automatically sets agent_reports and subject_reports file paths
-  reports_dir: "data/reports"
-
-  # Standalone Agent Fallback (Tier 3)
-  fallback_agent_reconciliation: true # Enable fallback queries to agent.index
-  agent_fallback_threshold: 0.90      # Dense similarity threshold for agent candidates
-  verify_chronology: true             # Enforce publication year vs author lifespan bounds
-  chronology_min_author_age: 12       # Minimum author age at publication
-  chronology_max_posthumous_years: 70 # Maximum years post mortem for publication
-  strict_homonym_guard: true          # Reject ambiguous candidates sharing identical names
-
-  # Candidate evaluation, reranking and metadata discriminators
-  rerank:
-    enabled: true                # Toggle candidate reranker
-    engine: "cascade"            # Reranking engine: "cascade", "llm_judge", "bm25", "cross_encoder", "fuzzy", "noop"
-    model_name: null             # HuggingFace model path (required when engine is cross_encoder)
-    batch_size: 16               # Batch inference size for cross-encoder rerankers
-    dense_weight: 0.6            # Dense semantic similarity weight (dense_weight + rerank_weight = 1.0)
-    rerank_weight: 0.4           # Reranker score weight
-    top_k: 50                    # Dense candidates retrieved for reranking
-    short_circuit:
-      enabled: true              # Bypass reranking for high-confidence candidates
-      threshold: 0.98            # Dense score threshold for short-circuiting
-    require_volume_match: true   # Reject conflicting volume numbers
-    require_surname_match: true  # Require at least one matching author surname token
-    max_year_difference: 5       # Max allowable publication year discrepancy
-    year_penalty_threshold: 1    # Year discrepancy after which proximity penalty begins
-    apply_pre_veto: true         # Run hard discriminators before LLM suffix inference (when engine is llm_judge or cascade)
-
-    # Cascading Dual-Route Router (used when engine is "cascade")
-    cascade:
-      heuristic_engine: "bm25"   # Fast initial scorer ("bm25", "cross_encoder", "fuzzy", "noop")
-      high_confidence_threshold: 0.90 # Resolve via fast heuristic if score >= threshold and hard pass (0 GPU cost)
-      low_confidence_threshold: 0.55  # Reject via heuristic if score < threshold (0 GPU cost)
-      ambiguity_margin: 0.08     # Escalate to LLM judge if top 2 candidate scores are within this margin
-      uncertainty_band_min: 0.60 # Lower bound of uncertainty band triggering LLM judge escalation
-      uncertainty_band_max: 0.88 # Upper bound of uncertainty band triggering LLM judge escalation
-      max_escalated_candidates: 5 # Maximum number of candidate contenders to evaluate on GPU per target
-
-    # Autoregressive LLM Judge with KV-branching and zero-copy truncation (used with "llm_judge" and "cascade")
-    judge:
-      backend: "auto"            # Backend: "auto" (MLX on Apple Silicon, PyTorch on CUDA/CPU), "mlx", "torch"
-      model_name: "Qwen/Qwen2.5-7B-Instruct" # Base model path (e.g. mlx-community/Qwen2.5-7B-Instruct-8bit on Apple Silicon)
-      quantization: "8bit"       # Optional quantization: "4bit", "8bit" (used with mlx backend)
-      device: "auto"             # Device: "auto", "cuda", "mps", "cpu"
-      torch_dtype: "auto"        # Precision: "auto", "float16", "bfloat16", "float32"
-      attn_implementation: "auto"# Attention kernel: "auto", "sdpa", "flash_attention_2"
-      pooling_strategy: "last_token" # "last_token" or "mean"
-      batch_size: 16             # Batch size for offline index dense encoding
-      positive_token: "YES"      # Target classification token for matches
-      negative_token: "NO"       # Target classification token for non-matches
-      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
-      candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
-      max_seq_length: 2048
-
-  # Tier 3 PostgreSQL full-text search fallback when exact and dense matches fail
-  fts_fallback:
-    enabled: true
-    limit: 5
-    confidence_score: 0.80
-
-  # Serialization templates for WEMI entities
-  templates:
-    work: "reconciliator/templates/work_serialization.j2"
-    expression: "reconciliator/templates/expression_serialization.j2"
-    manifestation: "reconciliator/templates/manifestation_serialization.j2"
-    agent: "reconciliator/templates/agent_serialization.j2"
-
-  # Output Enrichment Configuration
-  enrichment:
-    inject_work_links: true
-    inject_expression_links: true
-    inject_hub_links: true
-    inject_same_as: true
-    inject_component_links: true
-    marc_predicate_mode: "stacked" # "stacked" ($4 relators combined) or "distinct" (separate subfields)
-    active_profiles:
-      - "bibframe"
-      - "bffi"
-      - "rda"
-    predicate_profiles:
-      bffi:
-        work: ["http://urn.fi/URN:NBN:fi:schema:bffi:workManifested", "bffi"]
-        expression: ["http://urn.fi/URN:NBN:fi:schema:bffi:expressionManifested", "bffi"]
-      bibframe:
-        work: ["http://id.loc.gov/ontologies/bibframe/instanceOf", "lcba"]
-        expression: ["http://id.loc.gov/ontologies/bibframe/expressionOf", "lcba"]
-      rda:
-        work: ["http://rdaregistry.info/Elements/m/P30135", "rda"]
-        expression: ["http://rdaregistry.info/Elements/m/P30139", "rda"]
-    thesis_institution_uri: "http://urn.fi/URN:NBN:fi:au:pn:dgg_institution"
-    surrogate_title_keywords:
-      - "surrogate"
-      - "näköispainos"
-      - "faksimile"
-      - "faksimil"
-    schemes:
-      fingerprint:
-        default: "feigb"
-        accepted: ["feigb", "stcn", "fingb"]
-      web_harvest:
-        default: "memento"
-        accepted: ["memento", "wayback", "archive-it"]
-      manuscript_fragment:
-        default: "fragmenta"
-        accepted: ["fragmenta", "fragmentarium"]
-      geodata_spatial:
-        default: "epsg"
-        accepted: ["epsg", "wgs84", "etrs89"]
-      numismatics:
-        default: "km"
-        accepted: ["km", "michel", "scott", "ric"]
-    domain_concepts:
-      ephemera: "slm:s1492"
-      thesis_relator: "mts:m352"
-      tactile_concept: "yso:p19350"
-      tactile_genre: "slm:s1422"
-    accessibility:
-      tactile:
-        content_summary: "tactileText"
-        mode: "braille"
-        notes:
-          fi: "Saavutettava aineisto / Pistekirjoitus"
-          sv: "Tillgängligt material / Punktskrift"
-          en: "Accessible resource / Braille"
-    linking_labels:
-      fi:
-        work_manifested: "Ilmentymän teos"
-        expression_manifested: "Ilmentymän ekspressio"
-        host_item: "Sisältyy julkaisuun"
-        other_manifestation: "Toinen ilmentymä"
-        reproduction: "Säilytyskopio tai digitaalinen kaksonen"
-        bound_with: "Sidottu yhteen"
-      sv:
-        work_manifested: "Manifesterat verk"
-        expression_manifested: "Manifesterat uttryck"
-        host_item: "Ingår i"
-        other_manifestation: "Annan manifestation"
-        reproduction: "Bevarandeexemplar eller digital tvilling"
-        bound_with: "Inbunden med"
-      en:
-        work_manifested: "Work manifested"
-        expression_manifested: "Expression manifested"
-        host_item: "Contained in"
-        other_manifestation: "Other edition"
-        reproduction: "Preservation copy or digital surrogate"
-        bound_with: "Bound with"
-
-# ==============================================================================
-# 12. Telemetry & Progress Monitoring
-# ==============================================================================
-telemetry:
-  heartbeat_interval_seconds: 1.0 # Heartbeat monitor flush interval
-  watch_interval_seconds: 1.0     # Terminal progress watch refresh frequency
-  show_vector_daemon: true        # Show background vector daemon status panel in TUI
-
-# ==============================================================================
-# 13. Logging Infrastructure
-# ==============================================================================
-logging:
-  level: "INFO"                   # "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
-  format: "%(asctime)s [%(levelname)s] [task_id=%(task_id)s] %(name)s: %(message)s"
-  date_format: "%Y-%m-%d %H:%M:%S"
-  log_file: null                  # Optional destination path (e.g. "data/reconciliator.log")
-  capture_warnings: false         # Redirect Python standard warnings to logging
-  task_id_default: "-"            # Fallback task_id when no active task context is present
-  enable_telemetry_handler: true  # Automatically feed ERROR log records into active task error metrics
-  sanitization_log_level: "ERROR" # Default log level for data sanitization events ("ERROR", "WARNING", "INFO")
-# ==============================================================================
-# 14. Agent Authority (Kanto / Asteri & Finto RDF/XML)
+# 12. Authority & Structure: Agent Authority Rules
 # ==============================================================================
 agent_authority:
   qualifiers:
-    qualifier_pattern: "\\(([^)]+)\\)$"
+    qualifier_pattern: "\\\\(([^)]+)\\\\)$"
     qualifier_subfields:
       - "c"
     strip_enclosing_brackets: true
@@ -1441,7 +1162,7 @@ agent_authority:
       "http://rdaregistry.info/Elements/u/P60457": "related_family"
       "http://www.w3.org/2004/02/skos/core#related": "related_to"
     note_semantic_patterns:
-      - pattern: "(?i)todellinen\\s+nimi"
+      - pattern: "(?i)todellinen\\\\s+nimi"
         rel_type: "pseudonym_of"
       - pattern: "(?i)salanimi"
         rel_type: "real_identity_of"
@@ -1462,3 +1183,232 @@ agent_authority:
       - "http://rdaregistry.info/Elements/c/C10008"
       - "http://rdaregistry.info/Elements/c/C10006"
       - "http://id.loc.gov/ontologies/bibframe/Family"
+
+# ==============================================================================
+# 13. Authority & Structure: Agent Entity Clustering
+# ==============================================================================
+agent_clustering:
+  enabled: true
+  similarity_threshold: 0.85
+  date_tolerance_years: 1
+  major_date_discrepancy_veto_years: 2
+  require_corroboration_for_date_discrepancy: true
+  min_career_overlap_tolerance_years: 40
+  batch_size: 1000
+  token_matching_algorithm: "token_set_ratio"
+  affiliation_fuzzy_threshold: 80.0
+  affiliation_fuzzy_score: 0.85
+  enable_hierarchical_concepts: true
+  concept_similarity_weight: 0.85
+  max_blocking_bucket_size: 200
+  date_tolerance_score: 0.7
+  date_missing_score: 0.5
+  coalesce_pseudonyms: false
+  coalesce_corporate_subdivisions: false
+
+# ==============================================================================
+# 14. Authority & Structure: Virtual Authority & PID Minting
+# ==============================================================================
+virtual_authority:
+  enabled: true
+  base_uri: "urn:reconciliator:"
+  uri_templates:
+    agent: "urn:reconciliator:agent:{id}"
+    work: "urn:reconciliator:work:{id}"
+    expression: "urn:reconciliator:expression:{id}"
+    concept: "urn:reconciliator:concept:{id}"
+  pid_generator: "uuidv7"
+  provenance_sources_priority:
+    - "asteri"
+    - "kanto"
+    - "isni"
+    - "viaf"
+    - "wikidata"
+  lifecycle:
+    auto_redirect_on_merge: true
+    redirect_status_code: 308
+    tombstone_dissolved_clusters: true
+    split_policy: "retire_and_mint_both"
+    tombstone_retention_days: 365
+  status_flags:
+    active: "active"
+    redirected: "redirected"
+    tombstone: "tombstone"
+
+# ==============================================================================
+# 15. Matching & Funnels: Domain Funnel Settings
+# ==============================================================================
+funnels:
+  default_match_tier: "tier2_domain_key"
+  default_confidence: 0.90
+  audiobook:
+    default_language: "fin"
+    title_suffix: " (äänikirja)"
+    undefined_language: "und"
+    source_id_suffix: "_audio"
+    expression_uri_prefix: "#spoken_word_"
+    content_type: "spoken_word"
+  recorded_sound:
+    jaccard_threshold: 0.75
+    max_candidates: 50
+    match_tier: "tier3_tracklist_jaccard"
+  notated_music:
+    fallback_match_tier: "tier2_domain_key"
+  patterns:
+    notated_music_title: '(?i)score|partituuri|nuotti|stemma'
+    podcast_title: '(?i)podcast|jakso'
+    legal_statute_title: '(?i)laki|asetus|säädös'
+
+# ==============================================================================
+# 16. Matching & Funnels: Cross-Source Work Consolidation
+# ==============================================================================
+consolidation:
+  enabled: true
+  use_wikidata_qid: true         # Shared QID is decisive; differing QIDs veto a merge
+  use_shared_identifiers: true   # A strong identifier shared by their manifestations
+  use_metadata: true             # Title + creator + work type, for identifier-free corpora
+  strong_identifier_schemes:
+    - "isbn"
+    - "issn"
+    - "ismn"
+    - "isrc"
+    - "ean"
+    - "doi"
+    - "urn"
+    - "asteri"
+    - "asteri_work"
+    - "kanto"
+  metadata_threshold: 0.93
+  include_same_source: false
+  canonical_source_priority: []
+    # - "melinda"
+    # - "finna"
+
+# ==============================================================================
+# 17. Matching & Funnels: Target Reconciliation & Candidate Evaluation
+# ==============================================================================
+reconcile:
+  target_file: "tests/fixtures/sample_target.xml"
+  format: "auto"                 # "auto", "marcxml", "bibra", or "bibframe"
+  output_file: "data/enriched_records.xml" # Destination for reconciled, enriched records
+  enrich: true                   # true: inject novel $0/$1 URIs; false: audit/report only
+  fold_legacy: true              # Reconcile and fold legacy headings against vocab.db
+  threshold: 0.85                # Minimum hybrid score for candidate acceptance
+  link_policy: "priority_fallback" # "priority_fallback" (best authority) or "all"
+  corpus_source_name: null
+  truncate_overlong_values: true
+  truncation_marker: ""
+  default_max_field_length: null
+  field_length_overrides: {}
+
+  # Domain funnels overrides and extensions
+  funnels: []
+
+  # Base directory for output reconciliation reports
+  reports_dir: "data/reports"
+
+  # Standalone Agent Fallback (Tier 3)
+  fallback_agent_reconciliation: true # Enable fallback queries to agent.index
+  agent_fallback_threshold: 0.90      # Dense similarity threshold for agent candidates
+  verify_chronology: true             # Enforce publication year vs author lifespan bounds
+  chronology_min_author_age: 12       # Minimum author age at publication
+  chronology_max_posthumous_years: 70 # Maximum years post mortem for publication
+  strict_homonym_guard: true          # Reject ambiguous candidates sharing identical names
+
+  # Candidate evaluation, reranking and metadata discriminators
+  rerank:
+    enabled: true                # Toggle candidate reranker
+    engine: "cascade"            # Reranking engine: "cascade", "llm_judge", "bm25", "cross_encoder", "fuzzy", "noop"
+    model_name: null             # HuggingFace model path (required when engine is cross_encoder)
+    batch_size: 16               # Batch inference size for cross-encoder rerankers
+    dense_weight: 0.6            # Dense semantic similarity weight (dense_weight + rerank_weight = 1.0)
+    rerank_weight: 0.4           # Reranker score weight
+    top_k: 50                    # Dense candidates retrieved for reranking
+    short_circuit:
+      enabled: true              # Bypass reranking for high-confidence candidates
+      threshold: 0.98            # Dense score threshold for short-circuiting
+    require_volume_match: true   # Reject conflicting volume numbers
+    require_surname_match: true  # Require at least one matching author surname token
+    max_year_difference: 5       # Max allowable publication year discrepancy
+    year_penalty_threshold: 1    # Year discrepancy after which proximity penalty begins
+    apply_pre_veto: true         # Run hard discriminators before LLM suffix inference (when engine is llm_judge or cascade)
+
+    # Cascading Dual-Route Router (used when engine is "cascade")
+    cascade:
+      heuristic_engine: "bm25"   # Fast initial scorer ("bm25", "cross_encoder", "fuzzy", "noop")
+      high_confidence_threshold: 0.90 # Resolve via fast heuristic if score >= threshold and hard pass (0 GPU cost)
+      low_confidence_threshold: 0.55  # Reject via heuristic if score < threshold (0 GPU cost)
+      ambiguity_margin: 0.08     # Escalate to LLM judge if top 2 candidate scores are within this margin
+      uncertainty_band_min: 0.60 # Lower bound of uncertainty band triggering LLM judge escalation
+      uncertainty_band_max: 0.88 # Upper bound of uncertainty band triggering LLM judge escalation
+      max_escalated_candidates: 5 # Maximum number of candidate contenders to evaluate on GPU per target
+
+    # Autoregressive LLM Judge with KV-branching and zero-copy truncation (used with "llm_judge" and "cascade")
+    judge:
+      backend: "auto"            # Backend: "auto" (MLX on Apple Silicon, PyTorch on CUDA/CPU), "mlx", "torch"
+      model_name: "Qwen/Qwen2.5-7B-Instruct" # Base model path (e.g. mlx-community/Qwen2.5-7B-Instruct-8bit on Apple Silicon)
+      quantization: "8bit"       # Optional quantization: "4bit", "8bit" (used with mlx backend)
+      device: "auto"             # Device: "auto", "cuda", "mps", "cpu"
+      torch_dtype: "auto"        # Precision: "auto", "float16", "bfloat16", "float32"
+      attn_implementation: "auto"# Attention kernel: "auto", "sdpa", "flash_attention_2"
+      pooling_strategy: "last_token" # "last_token" or "mean"
+      batch_size: 16             # Batch size for offline index dense encoding
+      positive_token: "YES"      # Target classification token for matches
+      negative_token: "NO"       # Target classification token for non-matches
+      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\\nQuery: {text}\\n"
+      candidate_suffix_template: "Candidate: {text}\\nDoes this refer to the same work? Answer YES or NO: "
+      max_seq_length: 2048
+
+  # Tier 3 PostgreSQL full-text search fallback when exact and dense matches fail
+  fts_fallback:
+    enabled: true
+    limit: 5
+    confidence_score: 0.80
+
+  # Serialization templates for WEMI entities
+  templates:
+    work: "reconciliator/templates/work_serialization.j2"
+    expression: "reconciliator/templates/expression_serialization.j2"
+    manifestation: "reconciliator/templates/manifestation_serialization.j2"
+    agent: "reconciliator/templates/agent_serialization.j2"
+
+# ==============================================================================
+# 18. Tooling: Bruno API Collection Export
+# ==============================================================================
+bruno:
+  collection_name: "Reconciliator API"
+  version: "1"
+  environment_name: "local"
+  base_url: "http://localhost:8000"
+  include_assertions: true
+  default_timeout_ms: 5000
+
+# ==============================================================================
+# 19. Tooling: External Authority & Identifier Sources Registry
+# ==============================================================================
+sources:
+  wikidata:
+    uri_patterns:
+      - "^https?://(?:www\\.)?wikidata\\.org/(?:wiki|entity)/"
+    canonical_uri_template: "http://www.wikidata.org/entity/{identifier}"
+    tag_prefixes: []
+    aliases: []
+    identifier_pattern: "^Q\\d+$"
+    uppercase_identifier: true
+    subfield: "1"
+  isni:
+    uri_patterns:
+      - "^https?://(?:www\\.)?isni\\.org/isni/"
+    canonical_uri_template: "https://isni.org/isni/{identifier}"
+    tag_prefixes:
+      - "isni"
+    aliases: []
+    subfield: "0"
+  viaf:
+    uri_patterns:
+      - "^https?://viaf\\.org/viaf/"
+    canonical_uri_template: "http://viaf.org/viaf/{identifier}"
+    tag_prefixes:
+      - "viaf"
+    aliases: []
+    subfield: "0"

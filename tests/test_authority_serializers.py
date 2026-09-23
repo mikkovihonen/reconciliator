@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from lxml import etree
 import pytest
+from lxml import etree
 
 from reconciliator.authority.serializers.marc21 import MARC21AuthoritySerializer
 from reconciliator.authority.serializers.skos import SKOSAuthoritySerializer
-from reconciliator.config import VirtualAuthorityConfig
 from reconciliator.models import (
     AgentCluster,
     AgentClusterAttribute,
@@ -207,4 +206,3 @@ def test_skos_work_cluster_serialization(sample_work_cluster: WorkCluster):
     turtle = serializer.serialize_work_cluster_turtle(sample_work_cluster)
     assert 'schema:name "Sinuhe egyptiläinen"' in turtle
     assert 'schema:creator "Waltari, Mika"' in turtle
-

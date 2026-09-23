@@ -11,12 +11,12 @@ from reconciliator.normalizers.relators import (
     get_default_relator_registry,
     normalize_role,
 )
+from reconciliator.vocab import VocabStore, concept_id_to_uri, normalize_concept_id
 from reconciliator.vocab.bridges import (
+    get_bridged_role_map,
     get_bundled_bridge_files,
-    get_mts_role_map,
     parse_bridge_turtle,
 )
-from reconciliator.vocab import VocabStore, concept_id_to_uri, normalize_concept_id
 
 
 def test_loc_relators_bridge_file_exists_and_parses() -> None:
@@ -36,8 +36,8 @@ def test_loc_relators_bridge_file_exists_and_parses() -> None:
     assert aut_mapping["pref_label_en"] == "author agent"
 
 
-def test_get_mts_role_map_dynamic() -> None:
-    role_map = get_mts_role_map()
+def test_get_bridged_role_map_dynamic() -> None:
+    role_map = get_bridged_role_map()
     assert isinstance(role_map, dict)
     assert role_map.get("m552") == "aut"
     assert role_map.get("m23") == "trl"

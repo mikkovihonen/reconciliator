@@ -7,7 +7,7 @@ import contextvars
 import logging
 import logging.handlers
 import threading
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from reconciliator.progress import ProgressTracker
@@ -72,9 +72,6 @@ def get_task_tracker(task_id: str) -> Optional[ProgressTracker]:
         return _active_trackers.get(task_id)
 
 
-
-
-
 class TaskLogFilter(logging.Filter):
     """Logging filter that injects the current task_id into all LogRecords."""
 
@@ -107,7 +104,6 @@ class TaskLogFormatter(logging.Formatter):
             ctx_id = get_current_task_id()
             record.task_id = ctx_id if ctx_id != _DEFAULT_TASK_ID else self.default_task_id
         return super().format(record)
-
 
 
 class TelemetryLogHandler(logging.Handler):

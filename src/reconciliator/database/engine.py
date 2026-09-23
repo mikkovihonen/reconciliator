@@ -11,7 +11,6 @@ from typing import Any, Optional, Sequence
 
 from sqlalchemy import (
     Engine,
-    MetaData,
     Table,
     create_engine,
     func,
@@ -105,10 +104,9 @@ def get_engine(
             pass
         connect_args["options"] = f"-csearch_path={schema},public"
 
-    use_null_pool = (
-        effective_pool_size == 0
-        or os.environ.get("RECONCILIATOR_NULL_POOL", "").lower() in ("1", "true", "yes")
-    )
+    use_null_pool = effective_pool_size == 0 or os.environ.get(
+        "RECONCILIATOR_NULL_POOL", ""
+    ).lower() in ("1", "true", "yes")
 
     if use_null_pool:
         engine = create_engine(
@@ -350,4 +348,3 @@ __all__ = [
     "get_metadata",
     "reset_all_storage",
 ]
-

@@ -181,18 +181,18 @@ normalization:
         f"""
 storage:
   data_dir: "data"
-ingest_oai:
-  my_source: "{oai_file.as_posix()}"
-normalization:
-  record:
-    default_language: "fi"
+ingestion:
+  oai:
+    my_source: "{oai_file.as_posix()}"
+record_normalization:
+  default_language: "fi"
 """,
         encoding="utf-8",
     )
 
     loaded = load_config(root_cfg_file)
-    assert "my_source" in loaded.ingest_oai
-    src_cfg = loaded.ingest_oai["my_source"]
+    assert "my_source" in loaded.ingestion.oai
+    src_cfg = loaded.ingestion.oai["my_source"]
     assert src_cfg.source_type == "file"
     assert src_cfg.normalization is not None
     assert src_cfg.normalization.control_number_prefix == "(EXT-SOURCE)"
@@ -201,16 +201,14 @@ normalization:
     assert loaded.storage.data_dir == (tmp_path / "data").resolve()
 
 
-def test_custom_roman_numerals_and_relator_mappings() -> None:
+def test_custom_roman_numerals_and_relators() -> None:
     # Custom roman numerals
     custom_roman = {"xiii": 13, "xiv": 14, "xv": 15}
     vol = normalize_volume("osa XIV", roman_numerals=custom_roman)
     assert vol == "osa 14"
 
-    # Custom relator mappings in RecordNormalizationConfig
     cfg = RecordNormalizationConfig(
         roman_numerals={"xx": 20},
-        relator_mappings={"redaktör-ledare": "edt", "huvudförfattare": "aut"},
     )
     normalizer = RecordNormalizer(config=cfg)
 
@@ -218,14 +216,14 @@ def test_custom_roman_numerals_and_relator_mappings() -> None:
         "source_id": "999",
         "title": "Samlade Skrifter : Del XX",
         "agents": [
-            {"name": "Lindgren, Astrid", "role": "huvudförfattare"},
-            {"name": "Andersson, Sven", "role": "redaktör-ledare"},
+            {"name": "Lindgren, Astrid", "role": "författare"},
+            {"name": "Andersson, Sven", "role": "redaktör"},
         ],
     }
     rec = normalizer.normalize(raw_data)
     assert rec.volume_designation == "osa 20"
-    assert normalizer.relator_registry.normalize_role("huvudförfattare") == "aut"
-    assert normalizer.relator_registry.normalize_role("redaktör-ledare") == "edt"
+    assert normalizer.relator_registry.normalize_role("författare") == "aut"
+    assert normalizer.relator_registry.normalize_role("redaktör") == "edt"
 
 
 def test_clean_publisher_default_suffixes() -> None:
@@ -284,10 +282,10 @@ def test_load_config_with_external_and_omitted_normalization(tmp_path: Path) -> 
     # 1. Test load_config on the canonical config.example.yaml with external global normalization
     root_example = Path(__file__).parent.parent / "config.example.yaml"
     cfg = load_config(root_example)
-    assert cfg.normalization is not None
-    assert cfg.normalization.record.default_language == "fi"
-    assert cfg.normalization.record.classification_priority == ["ykl", "udk", "dewey", "lc"]
-    assert cfg.normalization.vocab.default_field_vocabularies["650"] == "yso"
+    assert cfg.record_normalization is not None
+    assert cfg.record_normalization.default_language == "fi"
+    assert cfg.record_normalization.classification_priority == ["ykl", "udk", "dewey", "lc"]
+    assert cfg.vocabularies.default_field_vocabularies["650"] == "yso"
 
     # 2. Test config with normalization completely omitted -> defaults apply
     cfg_file = tmp_path / "test_no_norm.yaml"
@@ -299,6 +297,5 @@ storage:
         encoding="utf-8",
     )
     loaded = load_config(cfg_file)
-    assert loaded.normalization is not None
-    assert loaded.normalization.record.default_language == "fi"
-    assert "kirjoittaja" in loaded.normalization.record.relator_mappings
+    assert loaded.record_normalization is not None
+    assert loaded.record_normalization.strip_isbd_punctuation is True

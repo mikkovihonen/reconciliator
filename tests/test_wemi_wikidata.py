@@ -6,12 +6,12 @@ from pathlib import Path
 import orjson
 
 from reconciliator.config import WikidataIngestConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.ingestion.wikidata import (
     _prescan_authors,
     decompose_wikidata_entity,
     ingest_wikidata_wemi_pipeline,
 )
-from reconciliator.database import WEMIRepository
 
 
 def test_wikidata_author_prescan(tmp_path: Path):
@@ -299,14 +299,14 @@ def test_decompose_wikidata_entity_diverse_work_types(tmp_path: Path):
     w_repo = WEMIRepository(db_path=auth_db)
 
     test_cases = [
-        ("Q101", "Q131569", "legal"),           # statute
-        ("Q102", "Q3284440", "legal"),          # act of parliament
-        ("Q103", "Q7889", "interactive_game"),   # video game
-        ("Q104", "Q131436", "board_game"),      # board game
-        ("Q105", "Q40063", "drama"),            # drama
-        ("Q106", "Q2188189", "music"),          # musical work
-        ("Q107", "Q11424", "moving_image"),     # film
-        ("Q108", "Q1004", "comic"),             # comic
+        ("Q101", "Q131569", "legal"),  # statute
+        ("Q102", "Q3284440", "legal"),  # act of parliament
+        ("Q103", "Q7889", "interactive_game"),  # video game
+        ("Q104", "Q131436", "board_game"),  # board game
+        ("Q105", "Q40063", "drama"),  # drama
+        ("Q106", "Q2188189", "music"),  # musical work
+        ("Q107", "Q11424", "moving_image"),  # film
+        ("Q108", "Q1004", "comic"),  # comic
     ]
 
     for qid, instance_qid, expected_work_type in test_cases:
@@ -320,23 +320,35 @@ def test_decompose_wikidata_entity_diverse_work_types(tmp_path: Path):
         res = decompose_wikidata_entity(entity, store=w_repo)
         assert res is not None, f"Failed to decompose {qid}"
         work = res[0]
-        assert work.work_type == expected_work_type, f"Expected {expected_work_type} for {instance_qid}, got {work.work_type}"
+        assert work.work_type == expected_work_type, (
+            f"Expected {expected_work_type} for {instance_qid}, got {work.work_type}"
+        )
 
 
 def test_work_entity_type_strict_validation():
     """Verify WorkEntity strictly enforces canonical WorkType literals and rejects invalid types."""
     import pytest
     from pydantic import ValidationError
+
     from reconciliator.models import WorkEntity
 
     # Valid canonical type works
-    w = WorkEntity(source="wikidata", source_id="Q1", title="Test Law", title_normalized="test law", work_type="legal")
+    w = WorkEntity(
+        source="wikidata",
+        source_id="Q1",
+        title="Test Law",
+        title_normalized="test law",
+        work_type="legal",
+    )
     assert w.work_type == "legal"
 
     # Non-canonical / invalid types must raise ValidationError
     for invalid in ("statute", "video_game", "something_completely_invalid"):
         with pytest.raises(ValidationError):
-            WorkEntity(source="wikidata", source_id="Q2", title="Invalid", title_normalized="invalid", work_type=invalid)  # type: ignore
-
-
-
+            WorkEntity(
+                source="wikidata",
+                source_id="Q2",
+                title="Invalid",
+                title_normalized="invalid",
+                work_type=invalid,
+            )  # type: ignore

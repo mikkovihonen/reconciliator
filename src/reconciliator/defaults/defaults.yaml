@@ -3,6 +3,120 @@
 # Single Source of Truth for baseline linguistic rules, controlled vocabularies,
 # record normalization heuristics, and native format enrichment settings.
 
+compute:
+  device: "auto"
+  threads: null
+
+storage:
+  data_dir: "data"
+  postgres:
+    host: "localhost"
+    port: 5432
+    database: "reconciliator"
+    user: "postgres"
+    password: "postgres"
+    database_url: null
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30.0
+    pool_recycle: 1800
+    pool_pre_ping: true
+    shared_buffers: "1GB"
+    work_mem: "64MB"
+    maintenance_work_mem: "256MB"
+    effective_cache_size: "3GB"
+    random_page_cost: 1.1
+    synchronous_commit: "off"
+    container_name: "reconciliator-pg"
+    container_image: "docker.io/library/postgres:16-alpine"
+    container_timeout_seconds: 30.0
+    auto_start_container: true
+    locale: null
+    lc_collate: null
+    lc_ctype: null
+    initdb_args: null
+    max_parameters_per_batch: 32767
+    default_chunk_size: null
+    data_dir: null
+  vector_engine:
+    backend: "auto"
+    device: "auto"
+    mode: "embedded"
+    threads: null
+    torch:
+      dtype: "float32"
+      mmap: false
+      chunk_size: 50000
+      initial_capacity: 10000
+    faiss:
+      index_type: "flat"
+      mmap: false
+      nprobe: 16
+      nlist: 2048
+    usearch:
+      metric: "cos"
+      dtype: "f16"
+      connectivity: 16
+      expansion_add: 128
+      expansion_search: 64
+      mmap: true
+    daemon:
+      enabled: true
+      socket_path: null
+      auto_start: true
+      idle_timeout_seconds: 1800
+      auto_save_interval_seconds: 60
+      heartbeat_interval_seconds: 2.0
+      max_batch_bytes: 67108864
+  fts:
+    ranking_function: "bm25"
+    column_weights: null
+    default_limit: 20
+    prefix_search: false
+
+telemetry:
+  heartbeat_interval_seconds: 60.0
+  watch_interval_seconds: 5.0
+  stale_heartbeat_timeout_seconds: 120.0
+  adopt_previous_task_id: true
+  show_vector_daemon: true
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  log_file: null
+  capture_warnings: false
+
+vector_model: "embedding"
+
+embedding:
+  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
+  template_path: "reconciliator/templates/default_serialization.j2"
+  device: "auto"
+  batch_size: 64
+  vector_dim: null
+  force_template: false
+  max_seq_length: null
+  cuda_batch_scale: 4
+  mps_batch_scale: 2
+  num_cpu_threads: null
+
+llm:
+  backend: "auto"
+  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  quantization: "8bit"
+  device: "auto"
+  torch_dtype: "auto"
+  attn_implementation: "auto"
+  pooling_strategy: "last_token"
+  batch_size: 16
+  positive_token: "YES"
+  negative_token: "NO"
+  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
+  candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+  max_seq_length: 2048
+
 linguistic:
   default_language: "fi"
   preserved_diacritics: "åäöÅÄÖ"
@@ -169,12 +283,16 @@ vocabularies:
       - "yso:"
     YSO-AIKA:
       - "yso.fi/onto/yso-aika/"
+      - "yso.fi/onto/yso/aika"
       - "(fi-yso-aika)"
       - "yso-aika:"
+      - "yso:aika"
     YSO-PAIKAT:
       - "yso.fi/onto/yso-paikat/"
+      - "yso.fi/onto/yso/places"
       - "(fi-yso-paikat)"
       - "yso-paikat:"
+      - "yso:places"
       - "ysop:"
     MUSO:
       - "yso.fi/onto/muso/"
@@ -361,6 +479,10 @@ vocabularies:
       - "muso"
       - "slm"
       - "seko"
+
+  default_classification_scheme: "ykl"
+  digital_repository_patterns:
+    - "^https?://urn\\.fi/"
 
 record_normalization:
   strip_isbd_punctuation: true
@@ -625,106 +747,6 @@ record_normalization:
     xi: 11
     xii: 12
 
-  relator_mappings:
-    kirjoittaja: "aut"
-    toimittaja: "edt"
-    kuvittaja: "ill"
-    kääntäjä: "trl"
-    suomentaja: "trl"
-    säveltäjä: "cmp"
-    sovittaja: "arr"
-    sanoittaja: "lyr"
-    ohjaaja: "drt"
-    tuottaja: "pro"
-    näyttelijä: "act"
-    esiintyjä: "prf"
-    esittäjä: "prf"
-    laulaja: "sng"
-    laulu: "sng"
-    muusikko: "mus"
-    valokuvaaja: "pht"
-    käsikirjoittaja: "aus"
-    tutkija: "res"
-    kustantaja: "pbl"
-    haastattelija: "ivr"
-    haastateltava: "ive"
-    kertoja: "nrt"
-    taiteilija: "art"
-    taittaja: "bkd"
-    graafikko: "art"
-    kartantekijä: "ctg"
-    kartograafi: "ctg"
-    puheenjohtaja: "pbd"
-    selostaja: "cmm"
-    juontaja: "ann"
-    kuraattori: "cur"
-    libretisti: "lbt"
-    kapellimestari: "cnd"
-    johtaja: "cnd"
-    kirj.: "aut"
-    toim.: "edt"
-    kuv.: "ill"
-    suom.: "trl"
-    käänt.: "trl"
-    säv.: "cmp"
-    sov.: "arr"
-    san.: "lyr"
-    esitt.: "prf"
-    ohj.: "drt"
-    valok.: "pht"
-    käsik.: "aus"
-    näytt.: "act"
-    tait.: "art"
-    author: "aut"
-    editor: "edt"
-    illustrator: "ill"
-    translator: "trl"
-    composer: "cmp"
-    arranger: "arr"
-    lyricist: "lyr"
-    director: "drt"
-    producer: "pro"
-    actor: "act"
-    performer: "prf"
-    singer: "sng"
-    musician: "mus"
-    photographer: "pht"
-    screenwriter: "aus"
-    researcher: "res"
-    publisher: "pbl"
-    interviewer: "ivr"
-    interviewee: "ive"
-    narrator: "nrt"
-    artist: "art"
-    conductor: "cnd"
-    librettist: "lbt"
-    curator: "cur"
-    cartographer: "ctg"
-    ed.: "edt"
-    trans.: "trl"
-    comp.: "cmp"
-    författare: "aut"
-    redaktör: "edt"
-    illustratör: "ill"
-    översättare: "trl"
-    utgivare: "pbl"
-    tonsättare: "cmp"
-    musiker: "mus"
-    sångare: "sng"
-    skådespelare: "act"
-    regissör: "drt"
-    producent: "pro"
-    fotograf: "pht"
-    forskare: "res"
-    berättare: "nrt"
-    konstnär: "art"
-    förf.: "aut"
-    red.: "edt"
-    övers.: "trl"
-    ill.: "ill"
-    komp.: "cmp"
-    arr.: "arr"
-
   custom_relator_terms: {}
 
 enrichment:
@@ -733,6 +755,10 @@ enrichment:
   inject_hub_links: true
   inject_same_as: true
   inject_component_links: true
+  inject_role_codes: true
+  normalize_role_terms: true
+  role_format: "bridged_uri"
+  inject_missing_role_terms: false
   marc_predicate_mode: "stacked"
   active_profiles:
     - "bibframe"
@@ -820,6 +846,547 @@ enrichment:
       other_manifestation: "Other edition"
       reproduction: "Preservation copy or digital surrogate"
       bound_with: "Bound with"
+
+ingestion:
+  filter:
+    target_work_types: []
+    exclude_work_types: []
+    target_languages: []
+    from_year: null
+    until_year: null
+
+
+  oai_defaults:
+    workers: 4
+    max_concurrent_requests: 16
+    slice_days: 7
+    batch_size: 1000
+    batch_flush_interval_seconds: 2.0
+    batch_queue_size: 32
+    request_delay: 0.0
+    timeout: 60.0
+    max_retries: 5
+    base_delay: 1.0
+    http2: true
+    prefetch: true
+    checkpoint_interval_records: 10000
+    checkpoint_interval_seconds: 30.0
+    use_synchronous_commit_off: true
+    drop_indexes_during_replace: false
+    truncate_overlong_values: true
+    truncation_marker: ""
+    default_max_field_length: null
+    adopt_previous_task_id: true
+
+
+  wikidata:
+    enabled: true
+    dump_path: "dumps/latest-all.json.gz"
+    batch_size: 5000
+    pass1_only: false
+    extract_works: true
+    require_author_authority_id: true
+    author_authority_properties:
+      - "P3595"
+      - "P213"
+      - "P214"
+      - "P227"
+      - "P244"
+      - "P906"
+      - "P496"
+    target_work_types: []
+    exclude_work_types: []
+    target_languages: []
+    from_year: null
+    until_year: null
+    creative_work_types:
+      Q7725634: "text"
+      Q571: "text"
+      Q47461344: "text"
+      Q3331189: "text"
+      Q2188189: "music"
+      Q7366: "music"
+      Q105543609: "music"
+      Q134556: "music"
+      Q11424: "moving_image"
+      Q5398426: "moving_image"
+      Q40063: "drama"
+      Q1004: "comic"
+      Q8274: "comic"
+      Q131569: "legal"
+      Q3284440: "legal"
+      Q7889: "interactive_game"
+      Q131436: "board_game"
+      Q11436: "moving_image"
+      Q24856: "still_image"
+      Q125191: "still_image"
+      Q3305213: "still_image"
+      Q40446: "cartography"
+      Q2472587: "podcast"
+    human_and_entity_types:
+      - "Q5"
+      - "Q2085381"
+      - "Q4830453"
+      - "Q43229"
+      - "Q515"
+      - "Q6256"
+    use_pigz: true
+    pigz_path: null
+    pigz_threads: 0
+    workers: 0
+    lru_cache_size: 500000
+    progress_throttle_interval: 32768
+    use_synchronous_commit_off: true
+    truncate_overlong_values: true
+    truncation_marker: ""
+    default_max_field_length: null
+    field_length_overrides: {}
+
+    languages:
+      Q1412: "fin"
+      Q9027: "swe"
+      Q1860: "eng"
+      Q188: "ger"
+      Q150: "fre"
+      Q7737: "rus"
+      Q25167: "sme"
+      Q33454: "smn"
+      Q33987: "sms"
+      Q9056: "est"
+      Q25258: "dan"
+      Q9043: "nor"
+    subject_mappings:
+      topical: "yso"
+      genre_form: "slm"
+      geographic: "yso-paikat"
+      temporal: "yso-aika"
+      medium_of_performance: "seko"
+
+  vocab:
+    enabled: true
+    input_path: "data/vocabularies"
+    vocabularies: null
+    legacy_thesauri: null
+    relators_bridge_file: null
+    bridge_files: null
+    bridge_dir: null
+    enable_bridges: true
+
+  skosmos:
+    finto:
+      enabled: true
+      api_url: "https://api.finto.fi/rest/v1"
+      output_dir: "data/vocabularies"
+      vocabularies: null
+
+constituents:
+  profile: null
+  mode: "keys_only"
+  index_works: false
+
+agent_authority:
+  qualifiers:
+    qualifier_pattern: "\\(([^)]+)\\)$"
+    qualifier_subfields:
+      - "c"
+    strip_enclosing_brackets: true
+    bracket_pairs:
+      - ["(", ")"]
+      - ["[", "]"]
+    corporate_category_as_qualifier: true
+  marc_relationships:
+    code_mappings:
+      a: "predecessor_of"
+      b: "successor_of"
+      t: "hierarchical_superior_of"
+      n: "related_corporate_body"
+    designation_patterns:
+      - pattern: "(?i)edeltäjä|predecessor|föregående"
+        rel_type: "predecessor_of"
+      - pattern: "(?i)seuraaja|successor|efterföljande"
+        rel_type: "successor_of"
+      - pattern: "(?i)emoyhteisö|parent body|moderorganisation"
+        rel_type: "hierarchical_superior_of"
+      - pattern: "(?i)alayhteisö|subordinate body|underorganisation"
+        rel_type: "hierarchical_subordinate_of"
+      - pattern: "(?i)liitännäisyhteisö|affiliated|ansluten"
+        rel_type: "affiliated_with"
+      - pattern: "(?i)salanimi|pseudonym|salapoliisinimi"
+        rel_type: "pseudonym_of"
+      - pattern: "(?i)todellinen\\s+(henkilöllisyys|nimi)|real identity|verklig identitet"
+        rel_type: "real_identity_of"
+      - pattern: "(?i)jäsen|member|medlem"
+        rel_type: "member_of"
+      - pattern: "(?i)suku|family|familj"
+        rel_type: "related_family"
+    default_relationship_type: "related_to"
+  rda_relationships:
+    predicate_mappings:
+      "http://rdaregistry.info/Elements/a/P50012": "predecessor_of"
+      "http://rdaregistry.info/Elements/u/P60060": "predecessor_of"
+      "http://rdaregistry.info/Elements/a/P50016": "successor_of"
+      "http://rdaregistry.info/Elements/u/P60061": "successor_of"
+      "http://rdaregistry.info/Elements/a/P50336": "related_corporate_body"
+      "http://rdaregistry.info/Elements/u/P60456": "related_corporate_body"
+      "http://rdaregistry.info/Elements/a/P50007": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/u/P60057": "hierarchical_superior_of"
+      "http://rdaregistry.info/Elements/a/P50008": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/u/P60058": "hierarchical_subordinate_of"
+      "http://rdaregistry.info/Elements/a/P50009": "sponsor_of"
+      "http://rdaregistry.info/Elements/u/P60064": "sponsor_of"
+      "http://rdaregistry.info/Elements/a/P50010": "sponsored_by"
+      "http://rdaregistry.info/Elements/u/P60065": "sponsored_by"
+      "http://rdaregistry.info/Elements/a/P50014": "founding_corporate_body_of"
+      "http://rdaregistry.info/Elements/u/P60068": "founding_corporate_body_of"
+      "http://rdaregistry.info/Elements/a/P50015": "founded_corporate_body_of"
+      "http://rdaregistry.info/Elements/u/P60069": "founded_corporate_body_of"
+      "http://rdaregistry.info/Elements/a/P50095": "member_of"
+      "http://rdaregistry.info/Elements/u/P60074": "member_of"
+      "http://rdaregistry.info/Elements/a/P50028": "has_member"
+      "http://rdaregistry.info/Elements/u/P60075": "has_member"
+      "http://rdaregistry.info/Elements/a/P50029": "chief_executive_of"
+      "http://rdaregistry.info/Elements/u/P60076": "chief_executive_of"
+      "http://rdaregistry.info/Elements/a/P50030": "chief_executive"
+      "http://rdaregistry.info/Elements/u/P60077": "chief_executive"
+      "http://rdaregistry.info/Elements/a/P50018": "component_corporate_body_of"
+      "http://rdaregistry.info/Elements/u/P60070": "component_corporate_body_of"
+      "http://rdaregistry.info/Elements/a/P50096": "component_corporate_body"
+      "http://rdaregistry.info/Elements/u/P60071": "component_corporate_body"
+      "http://rdaregistry.info/Elements/a/P50316": "related_person"
+      "http://rdaregistry.info/Elements/u/P60455": "related_person"
+      "http://rdaregistry.info/Elements/a/P50107": "pseudonym_of"
+      "http://rdaregistry.info/Elements/u/P60443": "pseudonym_of"
+      "http://rdaregistry.info/Elements/a/P50108": "real_identity_of"
+      "http://rdaregistry.info/Elements/u/P60444": "real_identity_of"
+      "http://rdaregistry.info/Elements/a/P50109": "alternate_identity_of"
+      "http://rdaregistry.info/Elements/u/P60445": "alternate_identity_of"
+      "http://rdaregistry.info/Elements/a/P50110": "collaborator_of"
+      "http://rdaregistry.info/Elements/u/P60446": "collaborator_of"
+      "http://rdaregistry.info/Elements/a/P50317": "related_family"
+      "http://rdaregistry.info/Elements/a/P50337": "related_family"
+      "http://rdaregistry.info/Elements/a/P50057": "has_member"
+      "http://rdaregistry.info/Elements/u/P60457": "related_family"
+      "http://www.w3.org/2004/02/skos/core#related": "related_to"
+    note_semantic_patterns:
+      - pattern: "(?i)todellinen\\s+nimi"
+        rel_type: "real_identity_of"
+      - pattern: "(?i)salanimi|salapoliisinimi"
+        rel_type: "pseudonym_of"
+    corporate_classes:
+      - "http://rdaregistry.info/Elements/c/C10005"
+      - "http://urn.fi/URN:NBN:fi:schema:bffi:CorporateName"
+      - "http://id.loc.gov/ontologies/bibframe/Organization"
+      - "http://id.loc.gov/ontologies/bibframe/Corporate"
+      - "http://xmlns.com/foaf/0.1/Organization"
+      - "http://schema.org/Organization"
+    person_classes:
+      - "http://rdaregistry.info/Elements/c/C10004"
+      - "http://urn.fi/URN:NBN:fi:schema:bffi:Person"
+      - "http://id.loc.gov/ontologies/bibframe/Person"
+      - "http://xmlns.com/foaf/0.1/Person"
+      - "http://schema.org/Person"
+    family_classes:
+      - "http://rdaregistry.info/Elements/c/C10008"
+      - "http://rdaregistry.info/Elements/c/C10006"
+      - "http://id.loc.gov/ontologies/bibframe/Family"
+
+agent_clustering:
+  enabled: true
+  similarity_threshold: 0.85
+  date_tolerance_years: 1
+  major_date_discrepancy_veto_years: 2
+  require_corroboration_for_date_discrepancy: true
+  min_career_overlap_tolerance_years: 40
+  batch_size: 1000
+  token_matching_algorithm: "token_set_ratio"
+  affiliation_fuzzy_threshold: 80.0
+  affiliation_fuzzy_score: 0.85
+  enable_hierarchical_concepts: true
+  concept_similarity_weight: 0.85
+  max_blocking_bucket_size: 200
+  date_tolerance_score: 0.70
+  date_missing_score: 0.50
+  coalesce_pseudonyms: false
+  coalesce_corporate_lineage: false
+  link_cluster_relationships: true
+  relationship_corroboration_score: 0.90
+
+  source_authority_precedence:
+    - "asteri"
+    - "kanto"
+    - "isni"
+    - "viaf"
+    - "wikidata"
+
+  override_identifiers:
+    - "isni"
+    - "viaf"
+    - "orcid"
+    - "kanto"
+    - "wikidata"
+
+  blocking_keys:
+    - "name_normalized"
+    - "surname_decade"
+    - "folded_surname"
+    - "variant_names"
+
+  scoring_weights:
+    name_weight: 0.35
+    dates_weight: 0.20
+    work_cluster_weight: 0.20
+    coauthor_weight: 0.10
+    affiliation_weight: 0.05
+    concept_weight: 0.05
+    qualifier_weight: 0.05
+
+virtual_authority:
+  enabled: true
+  base_uri: "urn:reconciliator:"
+  uri_templates:
+    agent: "urn:reconciliator:agent:{id}"
+    work: "urn:reconciliator:work:{id}"
+    expression: "urn:reconciliator:expression:{id}"
+    concept: "urn:reconciliator:concept:{id}"
+  pid_generator: "uuidv7"
+  provenance_sources_priority:
+    - "asteri"
+    - "kanto"
+    - "isni"
+    - "viaf"
+    - "wikidata"
+  lifecycle:
+    auto_redirect_on_merge: true
+    redirect_status_code: 308
+    tombstone_dissolved_clusters: true
+    split_policy: "retire_and_mint_both"
+    tombstone_retention_days: 365
+  status_policy:
+    authoritative_origins:
+      - "asteri"
+      - "kanto"
+      - "isni"
+      - "viaf"
+      - "wikidata"
+    established_status_name: "established"
+    provisional_status_name: "provisional"
+  serialization:
+    marc21:
+      organization_code: "FI-NL"
+      rules_code: "rda"
+      subject_system_code: "yso"
+      default_indicator_1: "1"
+      standard_id_source_codes:
+        isni: "isni"
+        wikidata: "wikidata"
+        kanto: "fikan"
+        asteri: "fikan"
+        viaf: "viaf"
+        orcid: "orcid"
+    skos:
+      default_namespace: "http://www.w3.org/2004/02/skos/core#"
+      schema_namespace: "http://schema.org/"
+      context_url: "https://schema.org/docs/jsonldcontext.json"
+  openrefine:
+    service_name: "Reconciliator Virtual Authority File"
+    identifier_space: "urn:reconciliator:"
+    schema_space: "http://www.w3.org/2004/02/skos/core#"
+    preview_width: 430
+    preview_height: 300
+    max_candidates: 10
+    default_types:
+      - id: "agent"
+        name: "Agent / Person / Organization"
+      - id: "work"
+        name: "Work / Intellectual Entity"
+  oai_pmh_server:
+    repository_name: "Reconciliator Virtual Authority OAI Provider"
+    admin_email: "admin@reconciliator.local"
+    records_per_page: 100
+    earliest_datestamp: "2000-01-01T00:00:00Z"
+    supported_metadata_prefixes:
+      - "marc21_authority"
+      - "oai_dc"
+
+funnels:
+  default_match_tier: "tier2_domain_key"
+  default_confidence: 0.90
+  audiobook:
+    default_language: "fin"
+    title_suffix: " (äänikirja)"
+    undefined_language: "und"
+    source_id_suffix: "_audio"
+    expression_uri_prefix: "#spoken_word_"
+    content_type: "spoken_word"
+  recorded_sound:
+    jaccard_threshold: 0.75
+    max_candidates: 50
+    match_tier: "tier3_tracklist_jaccard"
+  notated_music:
+    fallback_match_tier: "tier2_domain_key"
+  patterns:
+    notated_music_title: "(?i)score|partituuri|nuotti|stemma"
+    podcast_title: "podcast"
+    parallel_translators_signature: "(?i)parallel"
+    government_valto_urn: "(?i)valto"
+    exhibition_title: "näyttely"
+    legal_statute_title: '(?i)laki|asetus|säädös'
+
+consolidation:
+  enabled: true
+  use_wikidata_qid: true
+  use_shared_identifiers: true
+  use_metadata: true
+  strong_identifier_schemes:
+    - "isbn"
+    - "issn"
+    - "ismn"
+    - "isrc"
+    - "ean"
+    - "doi"
+    - "urn"
+    - "asteri"
+    - "asteri_work"
+    - "kanto"
+  metadata_threshold: 0.93
+  include_same_source: false
+  canonical_source_priority: []
+
+reconcile:
+  target_work_types: []
+  exclude_work_types: []
+  target_languages: []
+  from_year: null
+  until_year: null
+  threshold: 0.85
+  format: "marcxml"
+  enrich: true
+  fold_legacy: true
+  link_policy: "priority_fallback"
+  allow_pseudonym_author_match: true
+  pseudonym_author_match_weight: 0.95
+  rerank:
+    enabled: true
+    engine: "cascade"
+    dense_weight: 0.5
+    rerank_weight: 0.5
+    top_k: 20
+    short_circuit:
+      enabled: false
+      threshold: 0.98
+    require_volume_match: true
+    require_surname_match: true
+    max_year_difference: 5
+    year_penalty_threshold: 1
+    device: "auto"
+    batch_size: 16
+    apply_pre_veto: true
+    cascade:
+      heuristic_engine: "bm25"
+      high_confidence_threshold: 0.90
+      low_confidence_threshold: 0.55
+      ambiguity_margin: 0.08
+      uncertainty_band_min: 0.60
+      uncertainty_band_max: 0.88
+      max_escalated_candidates: 5
+  cluster:
+    enabled: false
+    similarity_threshold: 0.85
+    multiplex: false
+    multiplex_layers:
+      - "primary_author_title"
+      - "isbn"
+      - "issn"
+      - "ismn"
+      - "isrc"
+      - "ean"
+      - "doi"
+      - "urn"
+      - "record_id"
+      - "work_key"
+      - "music_work_key"
+      - "standard_key"
+    message_passing: true
+    reconcile_items: false
+    scoring:
+      with_author:
+        title: 0.45
+        author: 0.35
+        year: 0.10
+        type: 0.10
+      without_author:
+        title: 0.70
+        year: 0.15
+        type: 0.15
+      author_missing_similarity: 0.60
+      year_missing_similarity: 0.80
+      year_max_difference: 20.0
+      cross_format_type_similarity: 0.95
+      default_type_similarity: 0.50
+    music_score:
+      terms:
+        - "score"
+        - "partituuri"
+        - "nuotti"
+        - "part"
+        - "stemma"
+      standard_key_terms:
+        - "ismn"
+        - "plate"
+    common_schemes:
+      - "isbn"
+      - "issn"
+      - "doi"
+      - "urn"
+      - "ismn"
+      - "isrc"
+      - "ean"
+      - "upc"
+      - "publisher_number"
+      - "plate_number"
+      - "patent_number"
+      - "swhid"
+      - "fingerprint"
+      - "bgg"
+      - "guid_rss"
+      - "fragmenta"
+      - "michel"
+      - "scott"
+      - "km"
+    domain_key_types:
+      - "patent"
+      - "statute"
+      - "swhid"
+      - "fingerprint"
+      - "game"
+      - "board_game"
+      - "podcast"
+      - "citation"
+      - "music_work"
+      - "fragment_codex"
+      - "numismatic"
+      - "numismatic_issue"
+      - "heritage_model"
+  fts_fallback:
+    enabled: false
+    threshold: 0.70
+    min_word_len: 3
+  max_editions_compared: 25
+  translator_alignment_threshold: 0.70
+  agent_aligner_threshold: 85.0
+  life_date_tolerance_years: 1
+  homonym_score_margin: 0.03
+  qualifier_similarity_threshold: 80.0
+  distribution_match_threshold: 80.0
+  surname_similarity_threshold: 85.0
+
+bruno:
+  collection_name: "Reconciliator API"
+  version: "1"
+  environment_name: "local"
+  base_url: "http://localhost:8000"
+  include_assertions: true
+  default_timeout_ms: 5000
 
 sources:
   wikidata:
@@ -986,643 +1553,3 @@ sources:
     canonical_uri_template: "https://d-nb.info/gnd/{identifier}"
     tag_prefixes: ["gnd"]
 
-classification:
-  default_scheme: "ykl"
-
-digital_repositories:
-  uri_patterns:
-    - "^https?://urn\\.fi/"
-
-wikidata:
-  languages:
-    Q1412: "fin"
-    Q9027: "swe"
-    Q1860: "eng"
-    Q188: "ger"
-    Q150: "fre"
-    Q7737: "rus"
-    Q25167: "sme"
-    Q33454: "smn"
-    Q33987: "sms"
-    Q9056: "est"
-    Q25258: "dan"
-    Q9043: "nor"
-  subject_mappings:
-    topical: "yso"
-    genre_form: "slm"
-    geographic: "yso"
-    temporal: "yso-aika"
-    medium_of_performance: "seko"
-
-ingest:
-  target_work_types: []
-  exclude_work_types: []
-  target_languages: []
-  from_year: null
-  until_year: null
-
-ingest_oai:
-  workers: 4
-  max_concurrent_requests: 16
-  slice_days: 7
-  batch_size: 1000
-  batch_flush_interval_seconds: 2.0
-  batch_queue_size: 32
-  request_delay: 0.0
-  timeout: 60.0
-  max_retries: 5
-  base_delay: 1.0
-  http2: true
-  prefetch: true
-  checkpoint_interval_records: 10000
-  checkpoint_interval_seconds: 30.0
-  use_synchronous_commit_off: true
-  drop_indexes_during_replace: false
-  truncate_overlong_values: true
-  truncation_marker: ""
-  default_max_field_length: null
-  adopt_previous_task_id: true
-
-ingest_wikidata:
-  dump_path: "dumps/latest-all.json.gz"
-  batch_size: 5000
-  pass1_only: false
-  extract_works: true
-  require_author_authority_id: true
-  author_authority_properties:
-    - "P3595"
-    - "P213"
-    - "P214"
-    - "P227"
-    - "P244"
-    - "P906"
-    - "P496"
-  target_work_types: []
-  exclude_work_types: []
-  target_languages: []
-  from_year: null
-  until_year: null
-  creative_work_types:
-    Q7725634: "text"
-    Q571: "text"
-    Q47461344: "text"
-    Q3331189: "text"
-    Q2188189: "music"
-    Q7366: "music"
-    Q105543609: "music"
-    Q134556: "music"
-    Q11424: "moving_image"
-    Q5398426: "moving_image"
-    Q40063: "drama"
-    Q1004: "comic"
-    Q8274: "comic"
-    Q131569: "legal"
-    Q3284440: "legal"
-    Q7889: "interactive_game"
-    Q131436: "board_game"
-    Q11436: "moving_image"
-    Q24856: "still_image"
-    Q125191: "still_image"
-    Q3305213: "still_image"
-    Q40446: "cartography"
-    Q2472587: "podcast"
-  human_and_entity_types:
-    - "Q5"
-    - "Q2085381"
-    - "Q4830453"
-    - "Q43229"
-    - "Q515"
-    - "Q6256"
-  use_pigz: true
-  pigz_path: null
-  pigz_threads: 0
-  workers: 0
-  lru_cache_size: 500000
-  progress_throttle_interval: 32768
-  use_synchronous_commit_off: true
-  truncate_overlong_values: true
-  truncation_marker: ""
-  default_max_field_length: null
-  field_length_overrides: {}
-
-compute:
-  device: "auto"
-  threads: null
-
-storage:
-  data_dir: "data"
-  postgres:
-    host: "localhost"
-    port: 5432
-    database: "reconciliator"
-    user: "postgres"
-    password: "postgres"
-    database_url: null
-    pool_size: 10
-    max_overflow: 20
-    pool_timeout: 30.0
-    pool_recycle: 1800
-    pool_pre_ping: true
-    shared_buffers: "1GB"
-    work_mem: "64MB"
-    maintenance_work_mem: "256MB"
-    effective_cache_size: "3GB"
-    random_page_cost: 1.1
-    synchronous_commit: "off"
-    container_name: "reconciliator-pg"
-    container_image: "docker.io/library/postgres:16-alpine"
-    container_timeout_seconds: 30.0
-    auto_start_container: true
-    locale: null
-    lc_collate: null
-    lc_ctype: null
-    initdb_args: null
-    max_parameters_per_batch: 32767
-    default_chunk_size: null
-    data_dir: null
-  vector_engine:
-    backend: "auto"
-    device: "auto"
-    mode: "embedded"
-    threads: null
-    torch:
-      dtype: "float32"
-      mmap: false
-      chunk_size: 50000
-      initial_capacity: 10000
-    faiss:
-      index_type: "flat"
-      mmap: false
-      nprobe: 16
-      nlist: 2048
-    usearch:
-      metric: "cos"
-      dtype: "f16"
-      connectivity: 16
-      expansion_add: 128
-      expansion_search: 64
-      mmap: true
-    daemon:
-      enabled: true
-      socket_path: null
-      auto_start: true
-      idle_timeout_seconds: 1800
-      auto_save_interval_seconds: 60
-      heartbeat_interval_seconds: 2.0
-      max_batch_bytes: 67108864
-  fts:
-    ranking_function: "bm25"
-    column_weights: null
-    default_limit: 20
-    prefix_search: false
-
-vector_model: "embedding"
-
-embedding:
-  model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
-  template_path: "reconciliator/templates/default_serialization.j2"
-  device: "auto"
-  batch_size: 64
-  vector_dim: null
-  force_template: false
-  max_seq_length: null
-  cuda_batch_scale: 4
-  mps_batch_scale: 2
-  num_cpu_threads: null
-
-llm:
-  backend: "auto"
-  model_name: "Qwen/Qwen2.5-7B-Instruct"
-  quantization: "8bit"
-  device: "auto"
-  torch_dtype: "auto"
-  attn_implementation: "auto"
-  pooling_strategy: "last_token"
-  batch_size: 16
-  positive_token: "YES"
-  negative_token: "NO"
-  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
-  candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
-  max_seq_length: 2048
-
-reconcile:
-  target_work_types: []
-  exclude_work_types: []
-  target_languages: []
-  from_year: null
-  until_year: null
-  threshold: 0.85
-  format: "marcxml"
-  enrich: true
-  fold_legacy: true
-  link_policy: "priority_fallback"
-  allow_pseudonym_author_match: true
-  pseudonym_author_match_weight: 0.95
-  rerank:
-    enabled: true
-    engine: "cascade"
-    dense_weight: 0.5
-    rerank_weight: 0.5
-    top_k: 20
-    short_circuit:
-      enabled: false
-      threshold: 0.98
-    require_volume_match: true
-    require_surname_match: true
-    max_year_difference: 5
-    year_penalty_threshold: 1
-    device: "auto"
-    batch_size: 16
-    apply_pre_veto: true
-    cascade:
-      heuristic_engine: "bm25"
-      high_confidence_threshold: 0.90
-      low_confidence_threshold: 0.55
-      ambiguity_margin: 0.08
-      uncertainty_band_min: 0.60
-      uncertainty_band_max: 0.88
-      max_escalated_candidates: 5
-  cluster:
-    enabled: false
-    similarity_threshold: 0.85
-    multiplex: false
-    multiplex_layers:
-      - "primary_author_title"
-      - "isbn"
-      - "issn"
-      - "ismn"
-      - "isrc"
-      - "ean"
-      - "doi"
-      - "urn"
-      - "record_id"
-      - "work_key"
-      - "music_work_key"
-      - "standard_key"
-    message_passing: true
-    reconcile_items: false
-    scoring:
-      with_author:
-        title: 0.45
-        author: 0.35
-        year: 0.10
-        type: 0.10
-      without_author:
-        title: 0.70
-        year: 0.15
-        type: 0.15
-      author_missing_similarity: 0.60
-      year_missing_similarity: 0.80
-      year_max_difference: 20.0
-      cross_format_type_similarity: 0.95
-      default_type_similarity: 0.50
-    music_score:
-      terms:
-        - "score"
-        - "partituuri"
-        - "nuotti"
-        - "part"
-        - "stemma"
-      standard_key_terms:
-        - "ismn"
-        - "plate"
-    common_schemes:
-      - "isbn"
-      - "issn"
-      - "doi"
-      - "urn"
-      - "ismn"
-      - "isrc"
-      - "ean"
-      - "upc"
-      - "publisher_number"
-      - "plate_number"
-      - "patent_number"
-      - "swhid"
-      - "fingerprint"
-      - "bgg"
-      - "guid_rss"
-      - "fragmenta"
-      - "michel"
-      - "scott"
-      - "km"
-    domain_key_types:
-      - "patent"
-      - "statute"
-      - "swhid"
-      - "fingerprint"
-      - "game"
-      - "board_game"
-      - "podcast"
-      - "citation"
-      - "music_work"
-      - "fragment_codex"
-      - "numismatic"
-      - "numismatic_issue"
-      - "heritage_model"
-  fts_fallback:
-    enabled: false
-    threshold: 0.70
-    min_word_len: 3
-  max_editions_compared: 25
-  translator_alignment_threshold: 0.70
-  agent_aligner_threshold: 85.0
-  life_date_tolerance_years: 1
-  homonym_score_margin: 0.03
-  qualifier_similarity_threshold: 80.0
-  distribution_match_threshold: 80.0
-  surname_similarity_threshold: 85.0
-
-consolidation:
-  enabled: true
-  use_wikidata_qid: true
-  use_shared_identifiers: true
-  use_metadata: true
-  strong_identifier_schemes:
-    - "isbn"
-    - "issn"
-    - "ismn"
-    - "isrc"
-    - "ean"
-    - "doi"
-    - "urn"
-    - "asteri"
-    - "asteri_work"
-    - "kanto"
-  metadata_threshold: 0.93
-  include_same_source: false
-  canonical_source_priority: []
-
-telemetry:
-  heartbeat_interval_seconds: 60.0
-  watch_interval_seconds: 5.0
-  stale_heartbeat_timeout_seconds: 120.0
-  adopt_previous_task_id: true
-  show_vector_daemon: true
-
-logging:
-  level: "INFO"
-  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-  date_format: "%Y-%m-%d %H:%M:%S"
-  log_file: null
-  capture_warnings: false
-
-constituents:
-  profile: null
-  mode: "keys_only"
-  index_works: false
-
-funnels:
-  default_match_tier: "tier2_domain_key"
-  default_confidence: 0.90
-  audiobook:
-    default_language: "fin"
-    title_suffix: " (äänikirja)"
-    undefined_language: "und"
-    source_id_suffix: "_audio"
-    expression_uri_prefix: "#spoken_word_"
-    content_type: "spoken_word"
-  recorded_sound:
-    jaccard_threshold: 0.75
-    max_candidates: 50
-    match_tier: "tier3_tracklist_jaccard"
-  notated_music:
-    fallback_match_tier: "tier2_domain_key"
-  patterns:
-    notated_music_title: "(?i)score|partituuri|nuotti|stemma"
-    podcast_title: "podcast"
-    parallel_translators_signature: "(?i)parallel"
-    government_valto_urn: "(?i)valto"
-    exhibition_title: "näyttely"
-
-agent_clustering:
-  enabled: true
-  similarity_threshold: 0.85
-  date_tolerance_years: 1
-  major_date_discrepancy_veto_years: 2
-  require_corroboration_for_date_discrepancy: true
-  min_career_overlap_tolerance_years: 40
-  batch_size: 1000
-  token_matching_algorithm: "token_set_ratio"
-  affiliation_fuzzy_threshold: 80.0
-  affiliation_fuzzy_score: 0.85
-  enable_hierarchical_concepts: true
-  concept_similarity_weight: 0.85
-  max_blocking_bucket_size: 200
-  date_tolerance_score: 0.70
-  date_missing_score: 0.50
-  coalesce_pseudonyms: false
-  coalesce_corporate_lineage: false
-  link_cluster_relationships: true
-  relationship_corroboration_score: 0.90
-
-  source_authority_precedence:
-    - "asteri"
-    - "kanto"
-    - "isni"
-    - "viaf"
-    - "wikidata"
-
-  override_identifiers:
-    - "isni"
-    - "viaf"
-    - "orcid"
-    - "kanto"
-    - "wikidata"
-
-  blocking_keys:
-    - "name_normalized"
-    - "surname_decade"
-    - "folded_surname"
-    - "variant_names"
-
-  scoring_weights:
-    name_weight: 0.35
-    dates_weight: 0.20
-    work_cluster_weight: 0.20
-    coauthor_weight: 0.10
-    affiliation_weight: 0.05
-    concept_weight: 0.05
-    qualifier_weight: 0.05
-
-virtual_authority:
-  enabled: true
-  base_uri: "urn:reconciliator:"
-  uri_templates:
-    agent: "urn:reconciliator:agent:{id}"
-    work: "urn:reconciliator:work:{id}"
-    expression: "urn:reconciliator:expression:{id}"
-    concept: "urn:reconciliator:concept:{id}"
-  pid_generator: "uuidv7"
-  provenance_sources_priority:
-    - "asteri"
-    - "kanto"
-    - "isni"
-    - "viaf"
-    - "wikidata"
-  lifecycle:
-    auto_redirect_on_merge: true
-    redirect_status_code: 308
-    tombstone_dissolved_clusters: true
-    split_policy: "retire_and_mint_both"
-    tombstone_retention_days: 365
-  status_policy:
-    authoritative_origins:
-      - "asteri"
-      - "kanto"
-      - "isni"
-      - "viaf"
-      - "wikidata"
-    established_status_name: "established"
-    provisional_status_name: "provisional"
-  serialization:
-    marc21:
-      organization_code: "FI-NL"
-      rules_code: "rda"
-      subject_system_code: "yso"
-      default_indicator_1: "1"
-      standard_id_source_codes:
-        isni: "isni"
-        wikidata: "wikidata"
-        kanto: "fikan"
-        asteri: "fikan"
-        viaf: "viaf"
-        orcid: "orcid"
-    skos:
-      default_namespace: "http://www.w3.org/2004/02/skos/core#"
-      schema_namespace: "http://schema.org/"
-      context_url: "https://schema.org/docs/jsonldcontext.json"
-  openrefine:
-    service_name: "Reconciliator Virtual Authority File"
-    identifier_space: "urn:reconciliator:"
-    schema_space: "http://www.w3.org/2004/02/skos/core#"
-    preview_width: 430
-    preview_height: 300
-    max_candidates: 10
-    default_types:
-      - id: "agent"
-        name: "Agent / Person / Organization"
-      - id: "work"
-        name: "Work / Intellectual Entity"
-  oai_pmh_server:
-    repository_name: "Reconciliator Virtual Authority OAI Provider"
-    admin_email: "admin@reconciliator.local"
-    records_per_page: 100
-    earliest_datestamp: "2000-01-01T00:00:00Z"
-    supported_metadata_prefixes:
-      - "marc21_authority"
-      - "oai_dc"
-
-bruno:
-  collection_name: "Reconciliator API"
-  version: "1"
-  environment_name: "local"
-  base_url: "http://localhost:8000"
-  include_assertions: true
-  default_timeout_ms: 5000
-
-agent_authority:
-  qualifiers:
-    qualifier_pattern: "\\(([^)]+)\\)$"
-    qualifier_subfields:
-      - "c"
-    strip_enclosing_brackets: true
-    bracket_pairs:
-      - ["(", ")"]
-      - ["[", "]"]
-    corporate_category_as_qualifier: true
-  marc_relationships:
-    code_mappings:
-      a: "predecessor_of"
-      b: "successor_of"
-      t: "hierarchical_superior_of"
-      n: "related_corporate_body"
-    designation_patterns:
-      - pattern: "(?i)edeltäjä|predecessor|föregående"
-        rel_type: "predecessor_of"
-      - pattern: "(?i)seuraaja|successor|efterföljande"
-        rel_type: "successor_of"
-      - pattern: "(?i)emoyhteisö|parent body|moderorganisation"
-        rel_type: "hierarchical_superior_of"
-      - pattern: "(?i)alayhteisö|subordinate body|underorganisation"
-        rel_type: "hierarchical_subordinate_of"
-      - pattern: "(?i)liitännäisyhteisö|affiliated|ansluten"
-        rel_type: "affiliated_with"
-      - pattern: "(?i)salanimi|pseudonym|salapoliisinimi"
-        rel_type: "pseudonym_of"
-      - pattern: "(?i)todellinen\\s+(henkilöllisyys|nimi)|real identity|verklig identitet"
-        rel_type: "real_identity_of"
-      - pattern: "(?i)jäsen|member|medlem"
-        rel_type: "member_of"
-      - pattern: "(?i)suku|family|familj"
-        rel_type: "related_family"
-    default_relationship_type: "related_to"
-  rda_relationships:
-    predicate_mappings:
-      "http://rdaregistry.info/Elements/a/P50012": "predecessor_of"
-      "http://rdaregistry.info/Elements/u/P60060": "predecessor_of"
-      "http://rdaregistry.info/Elements/a/P50016": "successor_of"
-      "http://rdaregistry.info/Elements/u/P60061": "successor_of"
-      "http://rdaregistry.info/Elements/a/P50336": "related_corporate_body"
-      "http://rdaregistry.info/Elements/u/P60456": "related_corporate_body"
-      "http://rdaregistry.info/Elements/a/P50007": "hierarchical_superior_of"
-      "http://rdaregistry.info/Elements/u/P60057": "hierarchical_superior_of"
-      "http://rdaregistry.info/Elements/a/P50008": "hierarchical_subordinate_of"
-      "http://rdaregistry.info/Elements/u/P60058": "hierarchical_subordinate_of"
-      "http://rdaregistry.info/Elements/a/P50009": "sponsor_of"
-      "http://rdaregistry.info/Elements/u/P60064": "sponsor_of"
-      "http://rdaregistry.info/Elements/a/P50010": "sponsored_by"
-      "http://rdaregistry.info/Elements/u/P60065": "sponsored_by"
-      "http://rdaregistry.info/Elements/a/P50014": "founding_corporate_body_of"
-      "http://rdaregistry.info/Elements/u/P60068": "founding_corporate_body_of"
-      "http://rdaregistry.info/Elements/a/P50015": "founded_corporate_body_of"
-      "http://rdaregistry.info/Elements/u/P60069": "founded_corporate_body_of"
-      "http://rdaregistry.info/Elements/a/P50095": "member_of"
-      "http://rdaregistry.info/Elements/u/P60074": "member_of"
-      "http://rdaregistry.info/Elements/a/P50028": "has_member"
-      "http://rdaregistry.info/Elements/u/P60075": "has_member"
-      "http://rdaregistry.info/Elements/a/P50029": "chief_executive_of"
-      "http://rdaregistry.info/Elements/u/P60076": "chief_executive_of"
-      "http://rdaregistry.info/Elements/a/P50030": "chief_executive"
-      "http://rdaregistry.info/Elements/u/P60077": "chief_executive"
-      "http://rdaregistry.info/Elements/a/P50018": "component_corporate_body_of"
-      "http://rdaregistry.info/Elements/u/P60070": "component_corporate_body_of"
-      "http://rdaregistry.info/Elements/a/P50096": "component_corporate_body"
-      "http://rdaregistry.info/Elements/u/P60071": "component_corporate_body"
-      "http://rdaregistry.info/Elements/a/P50316": "related_person"
-      "http://rdaregistry.info/Elements/u/P60455": "related_person"
-      "http://rdaregistry.info/Elements/a/P50107": "pseudonym_of"
-      "http://rdaregistry.info/Elements/u/P60443": "pseudonym_of"
-      "http://rdaregistry.info/Elements/a/P50108": "real_identity_of"
-      "http://rdaregistry.info/Elements/u/P60444": "real_identity_of"
-      "http://rdaregistry.info/Elements/a/P50109": "alternate_identity_of"
-      "http://rdaregistry.info/Elements/u/P60445": "alternate_identity_of"
-      "http://rdaregistry.info/Elements/a/P50110": "collaborator_of"
-      "http://rdaregistry.info/Elements/u/P60446": "collaborator_of"
-      "http://rdaregistry.info/Elements/a/P50317": "related_family"
-      "http://rdaregistry.info/Elements/a/P50337": "related_family"
-      "http://rdaregistry.info/Elements/a/P50057": "has_member"
-      "http://rdaregistry.info/Elements/u/P60457": "related_family"
-      "http://www.w3.org/2004/02/skos/core#related": "related_to"
-    note_semantic_patterns:
-      - pattern: "(?i)todellinen\\s+nimi"
-        rel_type: "real_identity_of"
-      - pattern: "(?i)salanimi|salapoliisinimi"
-        rel_type: "pseudonym_of"
-    corporate_classes:
-      - "http://rdaregistry.info/Elements/c/C10005"
-      - "http://urn.fi/URN:NBN:fi:schema:bffi:CorporateName"
-      - "http://id.loc.gov/ontologies/bibframe/Organization"
-      - "http://id.loc.gov/ontologies/bibframe/Corporate"
-      - "http://xmlns.com/foaf/0.1/Organization"
-      - "http://schema.org/Organization"
-    person_classes:
-      - "http://rdaregistry.info/Elements/c/C10004"
-      - "http://urn.fi/URN:NBN:fi:schema:bffi:Person"
-      - "http://id.loc.gov/ontologies/bibframe/Person"
-      - "http://xmlns.com/foaf/0.1/Person"
-      - "http://schema.org/Person"
-    family_classes:
-      - "http://rdaregistry.info/Elements/c/C10008"
-      - "http://rdaregistry.info/Elements/c/C10006"
-      - "http://id.loc.gov/ontologies/bibframe/Family"

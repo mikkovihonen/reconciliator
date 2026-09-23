@@ -8,10 +8,10 @@ Covers:
 """
 
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import String, Table
 
 from reconciliator.config import (
     ReconcileConfig,
@@ -21,14 +21,7 @@ from reconciliator.config import (
 from reconciliator.database.schema import (
     agents_table,
     concept_hierarchy_table,
-    concept_mapping_labels_table,
-    concept_mappings_table,
-    concept_labels_table,
-    concepts_table,
-    get_table_string_limits,
-    manifestations_table,
     relator_terms_table,
-    works_table,
 )
 from reconciliator.ingestion.sanitizer import (
     sanitize_batch_payload,
@@ -36,7 +29,7 @@ from reconciliator.ingestion.sanitizer import (
     sanitize_vocab_concepts,
     sanitize_vocab_mappings,
 )
-from reconciliator.models import ConceptMapping, VocabConcept, WorkEntity, ManifestationEntity
+from reconciliator.models import ConceptMapping, ManifestationEntity, VocabConcept, WorkEntity
 
 
 def test_vocab_concepts_truncation(caplog: pytest.LogCaptureFixture) -> None:
@@ -44,10 +37,10 @@ def test_vocab_concepts_truncation(caplog: pytest.LogCaptureFixture) -> None:
     concept = VocabConcept(
         uri="http://example.org/concept/1",
         vocabulary="V" * 100,  # schema limit is 64
-        concept_id="C" * 200,   # schema limit is 128
+        concept_id="C" * 200,  # schema limit is 128
         target_field="T" * 50,  # schema limit is 32
         pref_labels={"fi": "P" * 600, "en": "Short Label"},  # schema limit is 512
-        alt_labels={"fi": ["A" * 700, "Valid Alt"]},         # schema limit is 512
+        alt_labels={"fi": ["A" * 700, "Valid Alt"]},  # schema limit is 512
     )
 
     config = VocabIngestConfig(
@@ -58,7 +51,9 @@ def test_vocab_concepts_truncation(caplog: pytest.LogCaptureFixture) -> None:
     tracker.task_id = "test-vocab-task-1"
 
     with caplog.at_level(logging.ERROR):
-        count = sanitize_vocab_concepts([concept], config=config, task_id="test-vocab-task-1", tracker=tracker)
+        count = sanitize_vocab_concepts(
+            [concept], config=config, task_id="test-vocab-task-1", tracker=tracker
+        )
 
     # 5 fields truncated: vocabulary, concept_id, target_field, pref_labels["fi"], alt_labels["fi"][0]
     assert count == 5
@@ -85,14 +80,14 @@ def test_vocab_mappings_truncation(caplog: pytest.LogCaptureFixture) -> None:
     """Verify ConceptMapping fields and legacy_labels are sanitized."""
     mapping = ConceptMapping(
         legacy_uri="http://example.org/legacy/1",
-        legacy_vocab="LV" * 50,    # limit 64
-        legacy_id="LID" * 100,     # limit 128
+        legacy_vocab="LV" * 50,  # limit 64
+        legacy_id="LID" * 100,  # limit 128
         target_uri="http://example.org/target/1",
-        target_vocab="TV" * 50,    # limit 64
-        target_id="TID" * 100,     # limit 128
-        target_field="TF" * 30,    # limit 32
+        target_vocab="TV" * 50,  # limit 64
+        target_id="TID" * 100,  # limit 128
+        target_field="TF" * 30,  # limit 32
         mapping_type="exact_match",
-        legacy_labels={"fi": "L" * 600}, # limit 512
+        legacy_labels={"fi": "L" * 600},  # limit 512
     )
 
     config = VocabIngestConfig(
@@ -103,7 +98,9 @@ def test_vocab_mappings_truncation(caplog: pytest.LogCaptureFixture) -> None:
     tracker.task_id = "vocab-map-task"
 
     with caplog.at_level(logging.ERROR):
-        count = sanitize_vocab_mappings([mapping], config=config, task_id="vocab-map-task", tracker=tracker)
+        count = sanitize_vocab_mappings(
+            [mapping], config=config, task_id="vocab-map-task", tracker=tracker
+        )
 
     assert count == 6
     assert len(mapping.legacy_vocab) == 64
@@ -122,16 +119,16 @@ def test_sanitize_entities_hierarchy_and_relators() -> None:
     """Verify generic sanitize_entities works for concept_hierarchy and relator_terms."""
     edges = [
         {
-            "vocabulary": "V" * 100,         # limit 64
-            "concept_id": "C" * 200,         # limit 128
-            "broader_concept_id": "B" * 200, # limit 128
+            "vocabulary": "V" * 100,  # limit 64
+            "concept_id": "C" * 200,  # limit 128
+            "broader_concept_id": "B" * 200,  # limit 128
             "relation_type": "broader",
         }
     ]
     relators = [
         {
             "folded_term": "F" * 200,  # limit 128
-            "raw_term": "R" * 400,     # limit 256
+            "raw_term": "R" * 400,  # limit 256
             "lang": "fi",
             "code": "aut",
             "uri": "http://example.org/relator/aut",
@@ -141,13 +138,17 @@ def test_sanitize_entities_hierarchy_and_relators() -> None:
     config = VocabIngestConfig(truncate_overlong_values=True)
     tracker = MagicMock()
 
-    c_edges = sanitize_entities(edges, concept_hierarchy_table, config=config, task_id="edge-task", tracker=tracker)
+    c_edges = sanitize_entities(
+        edges, concept_hierarchy_table, config=config, task_id="edge-task", tracker=tracker
+    )
     assert c_edges == 3
     assert len(edges[0]["vocabulary"]) == 64
     assert len(edges[0]["concept_id"]) == 128
     assert len(edges[0]["broader_concept_id"]) == 128
 
-    c_rel = sanitize_entities(relators, relator_terms_table, config=config, task_id="rel-task", tracker=tracker)
+    c_rel = sanitize_entities(
+        relators, relator_terms_table, config=config, task_id="rel-task", tracker=tracker
+    )
     assert c_rel == 2
     assert len(relators[0]["folded_term"]) == 128
     assert len(relators[0]["raw_term"]) == 256
@@ -174,7 +175,9 @@ def test_wikidata_author_sanitization() -> None:
     tracker = MagicMock()
     tracker.task_id = "wiki-author-task"
 
-    count = sanitize_entities(authors, agents_table, config=config, task_id="wiki-author-task", tracker=tracker)
+    count = sanitize_entities(
+        authors, agents_table, config=config, task_id="wiki-author-task", tracker=tracker
+    )
     assert count == 2
     assert len(authors[0]["name"]) == 80
     assert authors[0]["name"].endswith("...")
@@ -216,7 +219,9 @@ def test_wikidata_wemi_batch_sanitization() -> None:
     tracker = MagicMock()
     tracker.task_id = "wiki-wemi-task"
 
-    count = sanitize_batch_payload(payload, config=config, task_id="wiki-wemi-task", tracker=tracker)
+    count = sanitize_batch_payload(
+        payload, config=config, task_id="wiki-wemi-task", tracker=tracker
+    )
     assert count == 2
     assert len(work.title) == 50
     assert len(manifestation.publication_place) == 60
@@ -246,7 +251,9 @@ def test_reconcile_corpus_sanitization() -> None:
     tracker = MagicMock()
     tracker.task_id = "reconcile-corpus-task"
 
-    count = sanitize_batch_payload(payload, config=config, task_id="reconcile-corpus-task", tracker=tracker)
+    count = sanitize_batch_payload(
+        payload, config=config, task_id="reconcile-corpus-task", tracker=tracker
+    )
     assert count == 1
     assert len(work.title) == 150
     assert work.title.endswith("[CUT]")
@@ -269,9 +276,13 @@ def test_truncation_disabled_across_configs() -> None:
     assert len(c.pref_labels["fi"]) == 600
 
     # Wikidata / Reconcile
-    w = WorkEntity(id=1, source="s", source_id="1", work_type="text", title="T" * 500, title_normalized="t")
+    w = WorkEntity(
+        id=1, source="s", source_id="1", work_type="text", title="T" * 500, title_normalized="t"
+    )
     payload = {"works": [w]}
-    r_cfg = ReconcileConfig(target_file="dummy.xml", truncate_overlong_values=False, default_max_field_length=100)
+    r_cfg = ReconcileConfig(
+        target_file="dummy.xml", truncate_overlong_values=False, default_max_field_length=100
+    )
     assert sanitize_batch_payload(payload, config=r_cfg, task_id="t2") == 0
     assert len(w.title) == 500
 
@@ -321,7 +332,9 @@ def test_ingest_vocab_file_truncation_integration(tmp_path: Path) -> None:
 def test_wikidata_author_prescan_truncation_integration(tmp_path: Path) -> None:
     """Integration test: _prescan_authors truncates overlong fields and logs error telemetry."""
     import gzip
+
     import orjson
+
     from reconciliator.database import WEMIRepository
     from reconciliator.ingestion.wikidata import _prescan_authors
 
@@ -359,4 +372,3 @@ def test_wikidata_author_prescan_truncation_integration(tmp_path: Path) -> None:
     assert author["name"].endswith("...")
 
     tracker.record_error.assert_called()
-

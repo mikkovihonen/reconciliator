@@ -28,7 +28,9 @@ def resolve_agent_authority(
     """Resolve and dereference an agent cluster with HTTP content negotiation and redirection support."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authority cluster not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Authority cluster not found"
+        )
 
     # 1. Check Redirection / Split / Tombstone ledger
     redirection = repo.get_cluster_redirection(cluster_id)
@@ -46,7 +48,9 @@ def resolve_agent_authority(
     # 2. Load full cluster with attributes and members
     cluster = repo.get_agent_cluster_full(cluster_id)
     if not cluster:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent cluster {cluster_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent cluster {cluster_id} not found"
+        )
 
     # 3. Content Negotiation via Accept header
     accept = (request.headers.get("accept") or "").lower()
@@ -72,7 +76,9 @@ def resolve_agent_authority(
     c_dict = cluster.model_dump()
     c_dict["members"] = [m.model_dump() for m in cluster.members]
     c_dict["attributes"] = [a.model_dump() for a in cluster.attributes]
-    c_dict["lifecycle_events"] = [e.model_dump() for e in repo.get_cluster_lifecycle_events(cluster_id)]
+    c_dict["lifecycle_events"] = [
+        e.model_dump() for e in repo.get_cluster_lifecycle_events(cluster_id)
+    ]
     return c_dict
 
 
@@ -84,7 +90,9 @@ def resolve_work_authority(
     """Resolve and dereference a work cluster with HTTP content negotiation and redirection support."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authority cluster not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Authority cluster not found"
+        )
 
     # 1. Check Redirection ledger
     redirection = repo.get_cluster_redirection(cluster_id)
@@ -102,7 +110,9 @@ def resolve_work_authority(
     # 2. Load work cluster
     cluster = repo.get_work_cluster_full(cluster_id)
     if not cluster:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Work cluster {cluster_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Work cluster {cluster_id} not found"
+        )
 
     # 3. Content Negotiation via Accept header
     accept = (request.headers.get("accept") or "").lower()
@@ -125,6 +135,7 @@ def resolve_work_authority(
         return Response(content=turtle_content, media_type="text/turtle")
 
     c_dict = cluster.model_dump()
-    c_dict["lifecycle_events"] = [e.model_dump() for e in repo.get_cluster_lifecycle_events(cluster_id)]
+    c_dict["lifecycle_events"] = [
+        e.model_dump() for e in repo.get_cluster_lifecycle_events(cluster_id)
+    ]
     return c_dict
-

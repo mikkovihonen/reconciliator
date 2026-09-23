@@ -82,12 +82,8 @@ agent_relationships_table = Table(
     "agent_relationships",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column(
-        "source_agent_id", Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
-    ),
-    Column(
-        "target_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
-    ),
+    Column("source_agent_id", Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False),
+    Column("target_agent_id", Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
     Column("target_name", String, nullable=True),
     Column("target_uri", String, nullable=True),
     Column("relationship_type", String, nullable=False),
@@ -429,12 +425,18 @@ concept_mapping_labels_table = Table(
 relator_terms_table = Table(
     "relator_terms",
     metadata,
-    Column("folded_term", String(128), primary_key=True),
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("folded_term", String(128), nullable=False),
     Column("raw_term", String(256), nullable=False),
     Column("lang", String(16), nullable=False),
-    Column("code", String(32), nullable=True),
-    Column("uri", String(512), nullable=True),
-    Index("idx_relators_lang", "lang"),
+    Column("code", String(32), nullable=False),
+    Column("source_uri", String(512), nullable=True),
+    Column("bridged_uri", String(512), nullable=True),
+    Column("is_preferred", Boolean, default=True, nullable=False),
+    UniqueConstraint("folded_term", "code", "lang", name="uq_relator_folded_code_lang"),
+    Index("idx_relators_folded", "folded_term"),
+    Index("idx_relators_code", "code"),
+    Index("idx_relators_code_lang_pref", "code", "lang", "is_preferred"),
 )
 
 concept_aliases_table = Table(
@@ -460,8 +462,12 @@ concept_hierarchy_table = Table(
     Column("vocabulary", String(64), nullable=False),
     Column("concept_id", String(128), nullable=False),
     Column("broader_concept_id", String(128), nullable=False),
-    Column("relation_type", String(32), nullable=False, default="broader", server_default="broader"),
-    UniqueConstraint("vocabulary", "concept_id", "broader_concept_id", name="uq_concept_hierarchy_edge"),
+    Column(
+        "relation_type", String(32), nullable=False, default="broader", server_default="broader"
+    ),
+    UniqueConstraint(
+        "vocabulary", "concept_id", "broader_concept_id", name="uq_concept_hierarchy_edge"
+    ),
     Index("idx_concept_hierarchy_child", "vocabulary", "concept_id"),
     Index("idx_concept_hierarchy_parent", "vocabulary", "broader_concept_id"),
     Index("idx_concept_hierarchy_vocab", "vocabulary"),
@@ -543,10 +549,21 @@ corpus_work_clusters_table = Table(
     Column("canonical_work_source_id", String, nullable=True),
     Column("canonical_title", String, nullable=False),
     Column("canonical_author", String, nullable=True),
-    Column("authority_status", String(32), nullable=False, default="provisional", server_default="provisional"),
+    Column(
+        "authority_status",
+        String(32),
+        nullable=False,
+        default="provisional",
+        server_default="provisional",
+    ),
     Column("canonical_access_point", Text, nullable=True),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
-    Column("updated_at", DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp()),
+    Column(
+        "updated_at",
+        DateTime,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    ),
 )
 
 
@@ -634,10 +651,21 @@ corpus_agent_clusters_table = Table(
     Column("work_count", Integer, nullable=False, default=0, server_default="0"),
     Column("manifestation_count", Integer, nullable=False, default=0, server_default="0"),
     Column("confidence_score", Float, nullable=False, default=1.0, server_default="1.0"),
-    Column("authority_status", String(32), nullable=False, default="provisional", server_default="provisional"),
+    Column(
+        "authority_status",
+        String(32),
+        nullable=False,
+        default="provisional",
+        server_default="provisional",
+    ),
     Column("canonical_access_point", Text, nullable=True),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
-    Column("updated_at", DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp()),
+    Column(
+        "updated_at",
+        DateTime,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    ),
     Index("idx_agent_cluster_canonical_id", "canonical_agent_id"),
     Index("idx_agent_cluster_canonical_uri", "canonical_uri"),
     Index("idx_agent_cluster_authority_status", "authority_status"),
@@ -868,6 +896,3 @@ __all__ = [
     "entity_pins_table",
     "PG_SEARCH_DDL_STATEMENTS",
 ]
-
-
-

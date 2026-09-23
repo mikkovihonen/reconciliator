@@ -10,7 +10,7 @@ from sqlalchemy.exc import DataError
 from reconciliator.config import OAIIngestConfig
 from reconciliator.database import WEMIRepository
 from reconciliator.ingestion.oai import write_wemi_batch
-from reconciliator.models import EntitySubject, TaskProgress
+from reconciliator.models import EntitySubject
 from reconciliator.progress import (
     ProgressTracker,
     format_task_table,
@@ -65,7 +65,9 @@ def test_write_wemi_batch_truncation_with_tracker() -> None:
 def test_write_wemi_batch_data_error_recovery(caplog: pytest.LogCaptureFixture) -> None:
     """Verify write_wemi_batch recovers from DataError when truncation enabled and logs with task_id."""
     repo = MagicMock(spec=WEMIRepository)
-    repo.insert_wemi_batch.side_effect = DataError("value too long for type character varying(50)", {}, None)
+    repo.insert_wemi_batch.side_effect = DataError(
+        "value too long for type character varying(50)", {}, None
+    )
 
     tracker = MagicMock(spec=ProgressTracker)
     tracker.task_id = "task-recovering-1"

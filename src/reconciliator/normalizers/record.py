@@ -282,7 +282,6 @@ class RecordNormalizer:
         self.template_engine = template_engine
         self.relator_registry = relator_registry or RelatorRegistry(
             vocab_store=getattr(self.vocab_folder, "vocab_store", None),
-            relator_mappings=self.config.relator_mappings,
         )
         self.date_pattern = build_biographical_date_pattern(
             prefixes=self.config.biographical_date_prefixes,
@@ -546,7 +545,6 @@ class RecordNormalizer:
                         identifiers=idents,
                     )
                 )
-
 
         # Fallback agents from 245$c if no agents present
         if not agents and raw_data.get("statement_of_responsibility"):

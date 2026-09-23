@@ -76,4 +76,3 @@ def configure_mixed_precision(device: str) -> bool:
         logger.info("Enabling CUDA automatic mixed precision (fp16)")
         return True
     return False
-

@@ -1,7 +1,5 @@
 """Unit tests for WEMI domain entities, controlled vocabularies, and schemas."""
 
-import json
-
 import pytest
 from pydantic import ValidationError
 

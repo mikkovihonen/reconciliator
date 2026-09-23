@@ -33,18 +33,19 @@ embedding:
   batch_size: 16
   force_template: false
 
-ingest_vocab:
-  input_path: "{sample_finto}"
-  vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
-  legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
+ingestion:
+  vocab:
+    input_path: "{sample_finto}"
+    vocabularies: ["yso", "kauno", "muso", "slm", "seko"]
+    legacy_thesauri: ["ysa", "allars", "kaunokki", "musa"]
 
-ingest_oai:
-  melinda:
-    enabled: true
-    source_type: "file"
-    input_path: "{sample_melinda}"
-    workers: 1
-    batch_size: 10
+  oai:
+    melinda:
+      enabled: true
+      source_type: "file"
+      input_path: "{sample_melinda}"
+      workers: 1
+      batch_size: 10
 
 reconcile:
   target_file: "{sample_target}"

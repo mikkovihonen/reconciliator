@@ -5,4 +5,3 @@ from reconciliator.api.routes.authority.reconcile import router as reconcile_rou
 from reconciliator.api.routes.authority.resolver import router as resolver_router
 
 __all__ = ["reconcile_router", "resolver_router", "oai_router"]
-

@@ -5,13 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from rapidfuzz import fuzz
 
 from reconciliator.config import AppConfig, OpenRefineConfig
 from reconciliator.database import WEMIRepository
-from reconciliator.models import AgentCluster, WorkCluster
 
 router = APIRouter(prefix="/api/v1/reconcile", tags=["OpenRefine Reconciliation API"])
 
@@ -41,6 +40,7 @@ async def reconcile(
             if "application/x-www-form-urlencoded" in content_type:
                 body_bytes = await request.body()
                 from urllib.parse import parse_qs
+
                 parsed_qs = parse_qs(body_bytes.decode("utf-8"))
                 if "queries" in parsed_qs:
                     raw_queries = parsed_qs["queries"][0]
@@ -172,7 +172,7 @@ h2 {{ margin: 0 0 4px 0; font-size: 15px; color: #0f172a; font-weight: 600; }}
 <body>
     <div style="display: flex; justify-content: space-between; align-items: baseline;">
         <h2>{agent_cluster.canonical_name}</h2>
-        <span class="badge {'badge-est' if agent_cluster.authority_status == 'established' else 'badge-prov'}">{agent_cluster.authority_status.upper()}</span>
+        <span class="badge {"badge-est" if agent_cluster.authority_status == "established" else "badge-prov"}">{agent_cluster.authority_status.upper()}</span>
     </div>
     <div style="color: #64748b; margin-bottom: 8px;">{dates_display}</div>
     <div class="prop"><span class="label">Cluster PID:</span> <span class="uri">{agent_cluster.cluster_id}</span></div>
@@ -204,7 +204,7 @@ h2 {{ margin: 0 0 4px 0; font-size: 15px; color: #0f172a; font-weight: 600; }}
         <h2>{work_cluster.canonical_title}</h2>
         <span class="badge badge-est">{work_cluster.authority_status.upper()}</span>
     </div>
-    <div style="color: #64748b; margin-bottom: 8px;">{work_cluster.canonical_author or 'Unknown Author'}</div>
+    <div style="color: #64748b; margin-bottom: 8px;">{work_cluster.canonical_author or "Unknown Author"}</div>
     <div class="prop"><span class="label">Cluster PID:</span> {work_cluster.cluster_id}</div>
     <div class="prop"><span class="label">Work Type:</span> {work_cluster.work_type}</div>
 </body>

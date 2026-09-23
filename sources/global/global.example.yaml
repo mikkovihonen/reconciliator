@@ -244,22 +244,4 @@ record_normalization:
     x: 10
     xi: 11
     xii: 12
-
-  relator_mappings:
-    kirjoittaja: "aut"
-    toimittaja: "edt"
-    kuvittaja: "ill"
-    kääntäjä: "trl"
-    suomentaja: "trl"
-    säveltäjä: "cmp"
-    author: "aut"
-    editor: "edt"
-    illustrator: "ill"
-    translator: "trl"
-    composer: "cmp"
-    författare: "aut"
-    redaktör: "edt"
-    illustratör: "ill"
-    översättare: "trl"
-
   custom_relator_terms: {}

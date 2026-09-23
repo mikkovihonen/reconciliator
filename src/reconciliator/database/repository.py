@@ -428,6 +428,12 @@ class WEMIRepository:
                 stmt = pg_insert(agent_relationships_table).values(chunk)
                 c.execute(stmt)
 
+        if conn is not None:
+            _exec(conn)
+        else:
+            with self.get_connection() as c:
+                _exec(c)
+
     def insert_corpus_agent_relationships_batch(
         self,
         relationships: list[dict[str, Any]],

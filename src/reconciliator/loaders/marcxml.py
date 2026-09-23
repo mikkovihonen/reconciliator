@@ -273,7 +273,6 @@ def parse_marc_record_elem(
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
     work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
-    relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
@@ -646,7 +645,7 @@ def parse_marc_record_elem(
                     for r in (_get_subfields(f, "4") + _get_subfields(f, "e"))
                     if r.strip(" ,;.")
                 ]
-                norm_roles = [normalize_role(r, relator_mappings) for r in raw_roles]
+                norm_roles = [normalize_role(r) for r in raw_roles]
                 norm_roles = [r for r in norm_roles if r]
                 if not norm_roles and tag in MAIN_ENTRY_TAGS:
                     # A main entry with no $e or $4 is the creator; MARC leaves
@@ -701,7 +700,6 @@ def parse_marc_record_elem(
                     }
                 )
 
-
     for tag in ("110", "710", "111", "711"):
         for f in _get_datafields(record_elem, tag):
             name = strip_isbd(_get_subfield(f, "a"), strip_isbd_punctuation, isbd_punctuation)
@@ -716,7 +714,7 @@ def parse_marc_record_elem(
                     for r in (_get_subfields(f, "4") + _get_subfields(f, "e"))
                     if r.strip(" ,;.")
                 ]
-                norm_roles = [normalize_role(r, relator_mappings) for r in raw_roles]
+                norm_roles = [normalize_role(r) for r in raw_roles]
                 norm_roles = [r for r in norm_roles if r]
                 if not norm_roles and tag in MAIN_ENTRY_TAGS:
                     # A main entry with no $e or $4 is the creator; MARC leaves
@@ -770,7 +768,6 @@ def parse_marc_record_elem(
                         "subject_counts": {},
                     }
                 )
-
 
     # Subjects
     subject_field_category_map = get_subject_field_category_map()
@@ -935,16 +932,8 @@ def determine_work_type(
     config: Optional[Any] = None,
 ) -> WorkType:
     """Determine WEMI WorkType from Leader/06-07, 007, 008, 336, 502, and 655."""
-    gw_types = (
-        genre_work_types
-        if genre_work_types is not None
-        else get_genre_work_types(config)
-    )
-    gp_patterns = (
-        genre_patterns
-        if genre_patterns is not None
-        else get_genre_patterns(config)
-    )
+    gw_types = genre_work_types if genre_work_types is not None else get_genre_work_types(config)
+    gp_patterns = genre_patterns if genre_patterns is not None else get_genre_patterns(config)
     ct_work_types = (
         content_type_work_types
         if content_type_work_types is not None
@@ -1083,11 +1072,7 @@ def determine_content_type(
     config: Optional[Any] = None,
 ) -> ExpressionContentType:
     """Determine WEMI ExpressionContentType from 336 $b, Leader/06, or work_type."""
-    rc_types = (
-        rda_content_types
-        if rda_content_types is not None
-        else get_rda_content_types(config)
-    )
+    rc_types = rda_content_types if rda_content_types is not None else get_rda_content_types(config)
     for f in _get_datafields(record_elem, "336"):
         for sub in _get_subfields(f, "b"):
             resolved = rc_types.get(sub.lower().strip())
@@ -1326,8 +1311,16 @@ def resolve_marc_relationship_type(
     i_clean = i_desig.strip()
     if i_clean:
         for pat_entry in designation_patterns:
-            pat = pat_entry.get("pattern", "") if isinstance(pat_entry, dict) else getattr(pat_entry, "pattern", "")
-            r_type = pat_entry.get("rel_type", "") if isinstance(pat_entry, dict) else getattr(pat_entry, "rel_type", "")
+            pat = (
+                pat_entry.get("pattern", "")
+                if isinstance(pat_entry, dict)
+                else getattr(pat_entry, "pattern", "")
+            )
+            r_type = (
+                pat_entry.get("rel_type", "")
+                if isinstance(pat_entry, dict)
+                else getattr(pat_entry, "rel_type", "")
+            )
             if pat and r_type and re.search(pat, i_clean):
                 return r_type
 
@@ -1661,7 +1654,9 @@ def decompose_marc_authority(
             for f in _get_datafields(record_elem, "368"):
                 cat_val = _get_subfield(f, "a") or _get_subfield(f, "b")
                 if cat_val:
-                    cat_clean = strip_isbd(cat_val, strip_isbd_punctuation, isbd_punctuation) or cat_val
+                    cat_clean = (
+                        strip_isbd(cat_val, strip_isbd_punctuation, isbd_punctuation) or cat_val
+                    )
                     if cat_clean and cat_clean not in parsed_qualifiers:
                         parsed_qualifiers.append(cat_clean)
 
@@ -1729,8 +1724,7 @@ def decompose_marc_authority(
                     uri.strip(), default_source="wikidata" if sub_code == "1" else "uri"
                 )
                 if not val or any(
-                    (i.source == scheme and i.source_id == val)
-                    or i.source_id == uri.strip()
+                    (i.source == scheme and i.source_id == val) or i.source_id == uri.strip()
                     for i in identifiers
                 ):
                     continue
@@ -1819,7 +1813,6 @@ def decompose_marc_authority(
                         )
                     )
 
-
         if subject_sink is not None:
             for f in _get_datafields(record_elem, "372"):
                 val = _get_subfield(f, "a")
@@ -1902,7 +1895,6 @@ def decompose_marc_wemi(
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
     work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
-    relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     key_sink: Optional[list[EntityKey]] = None,
     subject_sink: Optional[list[EntitySubject]] = None,
@@ -1940,7 +1932,6 @@ def decompose_marc_wemi(
         supported_subject_vocabularies=supported_subject_vocabularies,
         work_authority_sources=work_authority_sources,
         legacy_to_modern=legacy_to_modern,
-        relator_mappings=relator_mappings,
         vocab_store=vocab_store,
         strip_isbd_punctuation=strip_isbd_punctuation,
         isbd_punctuation=isbd_punctuation,
@@ -2353,7 +2344,6 @@ def decompose_marc_wemi(
                 qualifiers=list(a.get("qualifiers") or []),
             )
         )
-
 
         # The agent's own role, from the histogram the parse already built. This
         # read `a.get("role")`, which no code ever set, so every contribution row
@@ -2821,7 +2811,6 @@ def build_target_record_from_marc(
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
     work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
-    relator_mappings: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
@@ -2834,7 +2823,6 @@ def build_target_record_from_marc(
         supported_subject_vocabularies=supported_subject_vocabularies,
         work_authority_sources=work_authority_sources,
         legacy_to_modern=legacy_to_modern,
-        relator_mappings=relator_mappings,
         vocab_store=vocab_store,
         strip_isbd_punctuation=strip_isbd_punctuation,
         isbd_punctuation=isbd_punctuation,

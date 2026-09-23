@@ -2,7 +2,6 @@
 
 from lxml import etree
 
-from reconciliator.models import EntitySubject
 from reconciliator.loaders.marcxml import (
     build_target_record_from_marc,
     decompose_marc_wemi,
@@ -11,6 +10,7 @@ from reconciliator.loaders.marcxml import (
     determine_work_type,
     parse_marc_items,
 )
+from reconciliator.models import EntitySubject
 
 
 def _build_marc_record(

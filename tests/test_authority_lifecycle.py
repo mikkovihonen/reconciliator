@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.config import VirtualAuthorityConfig
 
@@ -59,7 +57,9 @@ def test_access_point_formatting():
     mgr = ClusterIdentityManager(mock_repo)
 
     # Agent access points
-    ap1 = mgr.format_agent_access_point(name="Waltari, Mika", dates="1908-1979", fuller_name="Mika Toimi")
+    ap1 = mgr.format_agent_access_point(
+        name="Waltari, Mika", dates="1908-1979", fuller_name="Mika Toimi"
+    )
     assert ap1 == "Waltari, Mika(Mika Toimi), 1908-1979"
 
     ap2 = mgr.format_agent_access_point(name="Virtanen, Jukka", qualifiers=["kirjailija"])
@@ -78,7 +78,13 @@ def test_resolve_agent_cluster_identity_mint_continuity_merge():
     mock_repo = MagicMock()
     mgr = ClusterIdentityManager(mock_repo)
 
-    canon = {"id": 1, "source": "asteri", "source_id": "00001234", "name": "Waltari, Mika", "dates": "1908-1979"}
+    canon = {
+        "id": 1,
+        "source": "asteri",
+        "source_id": "00001234",
+        "name": "Waltari, Mika",
+        "dates": "1908-1979",
+    }
     member_1 = {"id": 1, "source": "asteri", "source_id": "00001234", "name": "Waltari, Mika"}
     member_2 = {"id": 2, "source": "melinda", "source_id": "999888", "name": "Mika Waltari"}
 
@@ -108,10 +114,12 @@ def test_resolve_agent_cluster_identity_mint_continuity_merge():
 
     # 3. Many-to-1 Merge (members previously in distinct clusters C_A and C_B)
     existing_map_split = {1: "va_agent_old_1", 2: "va_agent_old_2"}
-    cid_merge, status_merge, ap_merge, events_merge, redirs_merge = mgr.resolve_agent_cluster_identity(
-        canonical_agent=canon,
-        member_agents=[member_1, member_2],
-        existing_cluster_map=existing_map_split,
+    cid_merge, status_merge, ap_merge, events_merge, redirs_merge = (
+        mgr.resolve_agent_cluster_identity(
+            canonical_agent=canon,
+            member_agents=[member_1, member_2],
+            existing_cluster_map=existing_map_split,
+        )
     )
     assert cid_merge == "va_agent_old_1"  # elected primary
     assert len(redirs_merge) == 1
@@ -119,4 +127,3 @@ def test_resolve_agent_cluster_identity_mint_continuity_merge():
     assert redirs_merge[0].target_cluster_id == "va_agent_old_1"
     assert len(events_merge) == 1
     assert events_merge[0].event_type == "merge"
-

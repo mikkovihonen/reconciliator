@@ -263,6 +263,9 @@ def reset_cmd(
     yes: bool = typer.Option(False, "--yes", "-y", help="Bypass interactive confirmation prompt"),
 ) -> None:
     """Reset all storage: PostgreSQL database tables, vector indices, and the vector daemon."""
+    # Typer's OptionInfo defaults are truthy, so guard for direct invocation.
+    yes = yes if isinstance(yes, bool) else False
+
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
@@ -659,13 +662,13 @@ def download_skosmos_cmd(
     if list_vocabs:
         effective_api_url = api_url
         if not effective_api_url:
-            if source and source in cfg.download_skosmos:
-                effective_api_url = cfg.download_skosmos[source].api_url
-            elif cfg.download_skosmos:
-                effective_api_url = next(iter(cfg.download_skosmos.values())).api_url
+            if source and source in cfg.ingestion.skosmos:
+                effective_api_url = cfg.ingestion.skosmos[source].api_url
+            elif cfg.ingestion.skosmos:
+                effective_api_url = next(iter(cfg.ingestion.skosmos.values())).api_url
             else:
                 console.print(
-                    "[red]Error: No Skosmos API URL provided and no source configured under 'download_skosmos'.[/red]"
+                    "[red]Error: No Skosmos API URL provided and no source configured under 'ingestion.skosmos'.[/red]"
                 )
                 raise typer.Exit(code=1)
 
@@ -682,15 +685,15 @@ def download_skosmos_cmd(
         return
 
     if all_sources:
-        if not cfg.download_skosmos:
+        if not cfg.ingestion.skosmos:
             console.print(
-                "[yellow]No Skosmos sources configured under 'download_skosmos'.[/yellow]"
+                "[yellow]No Skosmos sources configured under 'ingestion.skosmos'.[/yellow]"
             )
             return
-        enabled_sources = {k: v for k, v in cfg.download_skosmos.items() if v.enabled}
+        enabled_sources = {k: v for k, v in cfg.ingestion.skosmos.items() if v.enabled}
         if not enabled_sources:
             console.print(
-                "[yellow]No Skosmos sources are currently enabled under 'download_skosmos'.[/yellow]"
+                "[yellow]No Skosmos sources are currently enabled under 'ingestion.skosmos'.[/yellow]"
             )
             return
         for name, dl_cfg in enabled_sources.items():
@@ -709,28 +712,28 @@ def download_skosmos_cmd(
 
     # Single source selection
     if source:
-        if source not in cfg.download_skosmos:
+        if source not in cfg.ingestion.skosmos:
             console.print(
-                f"[red]Error: Source '{source}' not found in configuration 'download_skosmos'.[/red]"
+                f"[red]Error: Source '{source}' not found in configuration 'ingestion.skosmos'.[/red]"
             )
-            console.print(f"Available sources: {', '.join(cfg.download_skosmos.keys()) or 'None'}")
+            console.print(f"Available sources: {', '.join(cfg.ingestion.skosmos.keys()) or 'None'}")
             raise typer.Exit(code=1)
         src_name = source
-        dl_cfg = cfg.download_skosmos[source]
+        dl_cfg = cfg.ingestion.skosmos[source]
     else:
-        enabled_sources = {k: v for k, v in cfg.download_skosmos.items() if v.enabled}
+        enabled_sources = {k: v for k, v in cfg.ingestion.skosmos.items() if v.enabled}
         if enabled_sources:
             src_name = next(iter(enabled_sources.keys()))
             dl_cfg = enabled_sources[src_name]
-        elif cfg.download_skosmos:
-            src_name = next(iter(cfg.download_skosmos.keys()))
-            dl_cfg = cfg.download_skosmos[src_name]
+        elif cfg.ingestion.skosmos:
+            src_name = next(iter(cfg.ingestion.skosmos.keys()))
+            dl_cfg = cfg.ingestion.skosmos[src_name]
         else:
             console.print(
-                "[red]Error: No Skosmos source specified and none configured in 'download_skosmos'.[/red]"
+                "[red]Error: No Skosmos source specified and none configured in 'ingestion.skosmos'.[/red]"
             )
             console.print(
-                "Please specify --source or configure at least one source under 'download_skosmos'."
+                "Please specify --source or configure at least one source under 'ingestion.skosmos'."
             )
             raise typer.Exit(code=1)
 
@@ -757,8 +760,8 @@ def ingest_vocab_cmd(
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
-    if not cfg.ingest_vocab:
-        console.print("[red]No ingest_vocab section found in configuration.[/red]")
+    if not cfg.ingestion.vocab or not cfg.ingestion.vocab.enabled:
+        console.print("[red]No ingestion.vocab section found or enabled in configuration.[/red]")
         raise typer.Exit(code=1)
 
     vocab_store = VocabStore(cfg.storage.database_url)
@@ -769,8 +772,10 @@ def ingest_vocab_cmd(
         heartbeat_interval=cfg.telemetry.heartbeat_interval_seconds,
     )
 
-    console.print(f"[cyan]Ingesting vocabularies from {cfg.ingest_vocab.input_path}...[/cyan]")
-    c_count, m_count = ingest_vocab_file(cfg.ingest_vocab.input_path, vocab_store, tracker=tracker)
+    console.print(f"[cyan]Ingesting vocabularies from {cfg.ingestion.vocab.input_path}...[/cyan]")
+    c_count, m_count = ingest_vocab_file(
+        cfg.ingestion.vocab.input_path, vocab_store, tracker=tracker
+    )
     console.print(
         f"[green]Successfully ingested {c_count} concepts and {m_count} mappings.[/green]"
     )
@@ -836,11 +841,29 @@ def ingest_oai_cmd(
     --restart to discard that checkpoint. --skip-existing filters individual
     records instead, and is independent of harvest checkpointing.
     """
+    # Typer's OptionInfo defaults are truthy, so guard for direct invocation.
+    source = source if isinstance(source, str) else None
+    all_sources = all_sources if isinstance(all_sources, bool) else False
+    from_date = from_date if isinstance(from_date, str) else None
+    until_date = until_date if isinstance(until_date, str) else None
+    workers = workers if isinstance(workers, int) else None
+    slice_days = slice_days if isinstance(slice_days, int) else None
+    max_concurrent_requests = (
+        max_concurrent_requests if isinstance(max_concurrent_requests, int) else None
+    )
+    prefetch = prefetch if isinstance(prefetch, bool) else None
+    skip_existing = skip_existing if isinstance(skip_existing, bool) else False
+    restart = restart if isinstance(restart, bool) else False
+    task_id = task_id if isinstance(task_id, str) else None
+    adopt_previous_task_id = (
+        adopt_previous_task_id if isinstance(adopt_previous_task_id, bool) else None
+    )
+
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
-    if not cfg.ingest_oai:
-        console.print("[red]No ingest_oai section found in configuration.[/red]")
+    if not cfg.ingestion.oai:
+        console.print("[red]No ingestion.oai section found in configuration.[/red]")
         raise typer.Exit(code=1)
 
     mark_stale_tasks(
@@ -850,31 +873,30 @@ def ingest_oai_cmd(
 
     targets: dict[str, OAIIngestConfig] = {}
     if all_sources:
-        targets = {name: src for name, src in cfg.ingest_oai.items() if src.enabled}
+        targets = {name: src for name, src in cfg.ingestion.oai.items() if src.enabled}
         if not targets:
-            console.print("[yellow]No enabled sources found under ingest_oai.[/yellow]")
+            console.print("[yellow]No enabled sources found under ingestion.oai.[/yellow]")
             return
     elif source:
-        if source not in cfg.ingest_oai:
-            available = ", ".join(cfg.ingest_oai.keys())
+        if source not in cfg.ingestion.oai:
+            available = ", ".join(cfg.ingestion.oai.keys())
             console.print(
-                f"[red]Source '{source}' not found in ingest_oai config. Available sources: {available}[/red]"
+                f"[red]Source '{source}' not found in ingestion.oai config. Available sources: {available}[/red]"
             )
             raise typer.Exit(code=1)
-        targets = {source: cfg.ingest_oai[source]}
-    elif len(cfg.ingest_oai) == 1:
-        targets = {k: v for k, v in cfg.ingest_oai.items() if v.enabled}
+        targets = {source: cfg.ingestion.oai[source]}
+    elif len(cfg.ingestion.oai) == 1:
+        targets = {k: v for k, v in cfg.ingestion.oai.items() if v.enabled}
     else:
-        available = ", ".join(cfg.ingest_oai.keys())
+        available = ", ".join(cfg.ingestion.oai.keys())
         console.print(
             f"[red]Multiple OAI sources configured ({available}). Please specify --source <name> or --all.[/red]"
         )
         raise typer.Exit(code=1)
 
     # Decomposition folds legacy subject headings and normalizes relator codes, so
-    # ingest needs the same vocabulary store and relator mappings reconcile uses.
+    # ingest needs the same vocabulary store reconcile uses.
     vocab_store = VocabStore(cfg.storage.database_url)
-    relator_mappings = getattr(cfg.normalization.record, "relator_mappings", None)
     for src_name, src_cfg in targets.items():
         if isinstance(from_date, str):
             src_cfg.from_date = from_date
@@ -927,7 +949,6 @@ def ingest_oai_cmd(
                 store=wemi_repo,
                 tracker=tracker,
                 skip_existing=bool(skip_existing) if isinstance(skip_existing, bool) else False,
-                relator_mappings=relator_mappings,
                 vocab_store=vocab_store,
                 strip_isbd_punctuation=cfg.record_normalization.strip_isbd_punctuation,
                 isbd_punctuation=cfg.record_normalization.isbd_punctuation,
@@ -952,8 +973,8 @@ def ingest_wikidata_cmd(
     resolved_config = _resolve_cli_config(config)
     cfg = load_config(resolved_config)
     configure_logging(cfg.logging)
-    if not cfg.ingest_wikidata:
-        console.print("[red]No ingest_wikidata section found in configuration.[/red]")
+    if not cfg.ingestion.wikidata or not cfg.ingestion.wikidata.enabled:
+        console.print("[red]No ingestion.wikidata section found or enabled in configuration.[/red]")
         raise typer.Exit(code=1)
 
     tracker = ProgressTracker(
@@ -965,7 +986,7 @@ def ingest_wikidata_cmd(
 
     wemi_repo = _wemi_repo(cfg)
     console.print("[cyan]Streaming Wikidata entities into WEMI authority repository...[/cyan]")
-    total = ingest_wikidata_pipeline(cfg.ingest_wikidata, wemi_repo, tracker=tracker)
+    total = ingest_wikidata_pipeline(cfg.ingestion.wikidata, wemi_repo, tracker=tracker)
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
 
 
@@ -1286,8 +1307,8 @@ def reconcile_cmd(
 
     vocab_store = VocabStore(cfg.storage.database_url)
     vocab_cfg = (
-        cfg.ingest_vocab.normalization if cfg.ingest_vocab else None
-    ) or cfg.normalization.vocab
+        cfg.ingestion.vocab.normalization if cfg.ingestion.vocab else None
+    ) or cfg.vocabularies
     vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
     from reconciliator.embedding import create_vector_embedder
     from reconciliator.embedding.template import RecordTemplateEngine
@@ -1301,7 +1322,7 @@ def reconcile_cmd(
     template_engine = getattr(embedder, "template_engine", None) or RecordTemplateEngine(
         template_path
     )
-    rec_norm_cfg = r_cfg.normalization or cfg.normalization.record
+    rec_norm_cfg = r_cfg.normalization or cfg.record_normalization
     normalizer = RecordNormalizer(
         vocab_folder=vocab_folder,
         template_engine=template_engine,
@@ -1444,7 +1465,6 @@ def reconcile_cmd(
                         vocab_cfg, "supported_subject_vocabularies", None
                     ),
                     legacy_to_modern=getattr(vocab_cfg, "legacy_to_modern", None),
-                    relator_mappings=getattr(rec_norm_cfg, "relator_mappings", None),
                     vocab_store=vocab_store,
                 )
                 yield "marcxml", r_elem, raw_rec_item, b_offset
@@ -1791,7 +1811,7 @@ def reconcile_cmd(
                         work_cluster=w_cluster,
                         expression_cluster=e_cluster,
                         manifestation_cluster=m_cluster,
-                        enrichment_config=r_cfg.enrichment_toggles,
+                        enrichment_config=r_cfg.enrichment,
                     )
                     out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
                     out_f.write(b"\n")
@@ -1812,7 +1832,7 @@ def reconcile_cmd(
                         expression_cluster=e_cluster,
                         manifestation_cluster=m_cluster,
                         target_record=target_wemi,
-                        enrichment_config=r_cfg.enrichment_toggles,
+                        enrichment_config=r_cfg.enrichment,
                         sibling_ids=sibs,
                     )
                     out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
@@ -1832,7 +1852,7 @@ def reconcile_cmd(
                     work_cluster=w_cluster,
                     expression_cluster=e_cluster,
                     manifestation_cluster=m_cluster,
-                    enrichment_config=r_cfg.enrichment_toggles,
+                    enrichment_config=r_cfg.enrichment,
                 )
 
             tracker.update_progress(
@@ -1979,6 +1999,9 @@ def cluster_agents_cmd(
     ),
 ) -> None:
     """Cluster agent entities across sources into canonical agent clusters."""
+    # Typer's OptionInfo defaults are truthy, so guard for direct invocation.
+    threshold = threshold if isinstance(threshold, (int, float)) else None
+
     from reconciliator.clustering import AgentClusterer
 
     resolved_config = _resolve_cli_config(config)
@@ -2056,9 +2079,13 @@ def build_index_cmd(
     embedder = create_vector_embedder(cfg)
     wemi_repo = _wemi_repo(cfg, embedder=embedder)
 
-    chosen = str(tier).lower()
+    tier_val = tier.default if hasattr(tier, "default") else tier
+    batch_size_val = batch_size.default if hasattr(batch_size, "default") else batch_size
+    batch_size = int(batch_size_val)
+
+    chosen = str(tier_val).lower()
     if chosen not in ("all", "work", "manifestation"):
-        console.print(f"[red]Unknown tier '{tier}'. Use work, manifestation, or all.[/red]")
+        console.print(f"[red]Unknown tier '{tier_val}'. Use work, manifestation, or all.[/red]")
         raise typer.Exit(code=2)
 
     work_indexer = manifestation_indexer = None
@@ -2102,17 +2129,23 @@ def run_cmd(
     configure_logging(cfg.logging)
 
     steps: list[tuple[str, Any, dict[str, Any]]] = []
-    if cfg.ingest_vocab:
+    if cfg.ingestion.vocab and cfg.ingestion.vocab.enabled:
         steps.append(("ingest-vocab", ingest_vocab_cmd, {"config": config}))
-    if cfg.ingest_oai:
+    if cfg.ingestion.oai:
         steps.append(("ingest-oai", ingest_oai_cmd, {"config": config, "all_sources": True}))
-    if cfg.ingest_wikidata:
+    if cfg.ingestion.wikidata and cfg.ingestion.wikidata.enabled:
         steps.append(("ingest-wikidata", ingest_wikidata_cmd, {"config": config}))
     if cfg.reconcile:
         # Between ingest and reconcile: the matcher's dense tier searches the work
         # index, and ingest does not populate it. Without this step the pipeline
         # would reconcile against an empty index and silently reach only FTS.
-        steps.append(("build-index", build_index_cmd, {"config_path": config}))
+        steps.append(
+            (
+                "build-index",
+                build_index_cmd,
+                {"config_path": config, "tier": "all", "batch_size": 128},
+            )
+        )
         steps.append(("reconcile", reconcile_cmd, {"config": config}))
 
     if not steps:

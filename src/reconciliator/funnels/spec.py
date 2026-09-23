@@ -64,13 +64,13 @@ class FunnelWhen(BaseModel):
 
 
 def _default_match_tier() -> str:
-    from reconciliator.config import get_bundled_section_defaults
+    from reconciliator.config.defaults import get_bundled_section_defaults
 
     return str(get_bundled_section_defaults("funnels")["default_match_tier"])
 
 
 def _default_confidence() -> float:
-    from reconciliator.config import get_bundled_section_defaults
+    from reconciliator.config.defaults import get_bundled_section_defaults
 
     return float(get_bundled_section_defaults("funnels")["default_confidence"])
 

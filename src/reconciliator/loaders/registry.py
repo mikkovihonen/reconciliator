@@ -47,7 +47,6 @@ class MarcBibliographicLoader(RecordLoader):
             serialization_engine=ctx.serialization_engine,
             supported_subject_vocabularies=ctx.supported_subject_vocabularies,
             legacy_to_modern=ctx.legacy_to_modern,
-            relator_mappings=ctx.relator_mappings,
             vocab_store=ctx.vocab_store,
             strip_isbd_punctuation=ctx.strip_isbd_punctuation,
             isbd_punctuation=ctx.isbd_punctuation,
@@ -182,7 +181,6 @@ class BibframeLoader(RecordLoader):
             profile=ctx.profile,
             source=ctx.source,
             serialization_engine=ctx.serialization_engine,
-            relator_mappings=ctx.relator_mappings,
             supported_subject_vocabularies=ctx.supported_subject_vocabularies,
             legacy_to_modern=ctx.legacy_to_modern,
             vocab_store=ctx.vocab_store,
@@ -388,6 +386,7 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
 
     from reconciliator.loaders.marcxml import (
         CONTENT_TYPE_WORK_TYPES,
+        GENRE_PATTERNS,
         GENRE_WORK_TYPES,
         RDA_CONTENT_TYPES,
         derive_domain_keys,
@@ -405,10 +404,13 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         and isinstance(n.value, ast.Constant)
         and isinstance(n.value.value, str)
     }
-    genre_work_type_values = {
-        wt for v in GENRE_WORK_TYPES.values() for wt in v.values()
-    }
-    work_types = literals | genre_work_type_values | set(CONTENT_TYPE_WORK_TYPES.values())
+    genre_work_type_values = {wt for v in GENRE_WORK_TYPES.values() for wt in v.values()}
+    work_types = (
+        literals
+        | genre_work_type_values
+        | set(GENRE_PATTERNS.keys())
+        | set(CONTENT_TYPE_WORK_TYPES.values())
+    )
 
     key_types: set[str] = set()
     if keys:
@@ -436,7 +438,7 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
             "rather than subject terms needing folding to a modern ontology"
         )
         not_produced["relator_normalisation"] = (
-            "takes no relator_mappings; authority headings carry no relator codes"
+            "authority headings carry no relator codes"
         )
         not_produced["constituents"] = (
             "an authority record describes a work, not a publication with contents"
@@ -531,7 +533,7 @@ def _bibframe_capabilities() -> LoaderCapabilities:
         folds_subject_vocabularies=True,
         # The profile still resolves roles first, so a deployment can override
         # any of them; what it does not resolve now goes to the same relator
-        # registry the MARC path uses, and ctx.relator_mappings reaches it.
+        # registry the MARC path uses.
         normalises_relators=True,
         not_produced={
             "citation": "BIBFRAME has no host-item concept equivalent to MARC 773",
@@ -560,7 +562,18 @@ def _rdf_authority_capabilities() -> LoaderCapabilities:
         normalises_isbd=True,
         folds_subject_vocabularies=False,
         normalises_relators=False,
-        not_produced={},
+        not_produced={
+            "subject_vocabulary_folding": (
+                "takes no vocab_store: RDF authority records carry their own concepts/entities "
+                "rather than subject terms needing folding"
+            ),
+            "relator_normalisation": (
+                "RDF authority records do not carry relator codes"
+            ),
+            "constituents": (
+                "an RDF authority record describes an agent/concept, not a publication with contents"
+            ),
+        },
     )
 
 

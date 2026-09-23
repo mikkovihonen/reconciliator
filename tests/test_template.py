@@ -4,14 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from reconciliator.models import (
-    Agent,
-    BibliographicRecord,
-    ClassificationItem,
-    RecordIdentifiers,
-    SubjectItem,
-    SubjectsContainer,
-)
 from reconciliator.embedding.template import (
     RecordTemplateEngine,
     collapse_ws,
@@ -20,6 +12,14 @@ from reconciliator.embedding.template import (
     join_names,
     join_surnames,
     primary_code,
+)
+from reconciliator.models import (
+    Agent,
+    BibliographicRecord,
+    ClassificationItem,
+    RecordIdentifiers,
+    SubjectItem,
+    SubjectsContainer,
 )
 
 
@@ -126,8 +126,8 @@ def test_custom_filters() -> None:
 
 
 def test_wemi_serialization_engine() -> None:
-    from reconciliator.models import ExpressionEntity, ManifestationEntity, WorkEntity
     from reconciliator.embedding.template import WEMISerializationEngine
+    from reconciliator.models import ExpressionEntity, ManifestationEntity, WorkEntity
 
     engine = WEMISerializationEngine()
 

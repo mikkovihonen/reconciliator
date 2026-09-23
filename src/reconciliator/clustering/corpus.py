@@ -8,7 +8,6 @@ connected-component graph clustering, and external authority URI hoisting.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import time
 from collections import defaultdict
@@ -16,9 +15,9 @@ from typing import Optional
 
 from rapidfuzz import fuzz
 
+from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.config import ClusterConfig
 from reconciliator.database import WEMIRepository
-from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     ClusterEdge,
     ClusterLifecycleEvent,
@@ -31,7 +30,7 @@ from reconciliator.models import (
     SammelbandBinding,
     WorkCluster,
 )
-from reconciliator.authority.lifecycle import ClusterIdentityManager
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import (
     UnionFind,
     clean_alphanumeric,
@@ -188,7 +187,9 @@ class CorpusClusterer:
 
         if r1.author_key and r2.author_key:
             w = scoring.with_author
-            score = w.title * title_sim + w.author * author_sim + w.year * year_sim + w.type * type_sim
+            score = (
+                w.title * title_sim + w.author * author_sim + w.year * year_sim + w.type * type_sim
+            )
         else:
             w = scoring.without_author
             score = w.title * title_sim + w.year * year_sim + w.type * type_sim
@@ -397,8 +398,10 @@ class CorpusClusterer:
         existing_work_map: dict[str, str] = {}
         try:
             with self.corpus_repo.get_corpus_connection() as conn:
-                from reconciliator.database.schema import corpus_linkages_table
                 from sqlalchemy import select
+
+                from reconciliator.database.schema import corpus_linkages_table
+
                 stmt_prev = select(
                     corpus_linkages_table.c.record_id,
                     corpus_linkages_table.c.work_cluster_id,
@@ -568,4 +571,3 @@ class CorpusClusterer:
             records_clustered=len(records),
             elapsed_seconds=round(elapsed, 4),
         )
-

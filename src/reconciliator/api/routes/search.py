@@ -21,7 +21,9 @@ def search(
     mode: Literal["lexical", "semantic", "hybrid"] = Query("lexical", description="Search mode"),
     entity_type: Literal["all", "work", "manifestation", "agent"] = Query("all", alias="type"),
     source: Optional[str] = Query(None, description="Filter by record origin / source catalogue"),
-    work_type: Optional[str] = Query(None, description="Filter by work type (e.g. text, sound_recording)"),
+    work_type: Optional[str] = Query(
+        None, description="Filter by work type (e.g. text, sound_recording)"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
@@ -42,9 +44,7 @@ def search(
 
     work_idx = getattr(repo, "work_indexer", None)
     vector_available = (
-        embedder is not None
-        and work_idx is not None
-        and getattr(work_idx, "total_vectors", 0) > 0
+        embedder is not None and work_idx is not None and getattr(work_idx, "total_vectors", 0) > 0
     )
 
     actual_mode = mode
@@ -121,4 +121,3 @@ def search(
         "manifestations": manifestations_results,
         "agents": agents_results,
     }
-

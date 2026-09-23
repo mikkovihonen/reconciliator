@@ -35,4 +35,3 @@ def get_auth_config(request: Request) -> dict[str, Any]:
 def get_me(user: UserProfile = Depends(get_current_user)) -> UserProfile:
     """Retrieve the currently authenticated user profile and roles."""
     return user
-

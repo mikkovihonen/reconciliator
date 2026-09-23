@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 
 from lxml import etree
 
-from reconciliator.reconciliation import AgentAligner, ReconciliationResult
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_bridge_files
 from reconciliator.ingestion.wikidata import extract_wikidata_yso_aliases
@@ -32,8 +31,9 @@ from reconciliator.normalizers.linguistic import (
     strip_biographical_dates,
 )
 from reconciliator.normalizers.relators import RelatorRegistry
-from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
+from reconciliator.reconciliation import AgentAligner, ReconciliationResult
 from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
+from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 # ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ def test_marc_loader_tags_fictional_agents() -> None:
     assert len(raw_dict["agents"]) == 3
     assert raw_dict["agents"][0]["name"] == "Ankka, Aku"
     assert raw_dict["agents"][0]["is_fictional"] is True
-    assert raw_dict["agents"][1]["name"] == "Muumipeikko (fiktiivinen hahmo)"
+    assert raw_dict["agents"][1]["name"] == "Muumipeikko"
     assert raw_dict["agents"][1]["is_fictional"] is True
     assert raw_dict["agents"][2]["name"] == "Waltari, Mika"
     assert raw_dict["agents"][2]["is_fictional"] is False

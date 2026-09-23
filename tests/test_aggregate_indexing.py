@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 
 from reconciliator.config import AppConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer.torch_engine import TorchVectorEngine
 from reconciliator.models import (
     ExpressionEntity,
@@ -35,7 +36,6 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.database import WEMIRepository
 
 SRC = "fono"
 

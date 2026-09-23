@@ -36,9 +36,7 @@ class CascadeScorer:
     def should_escalate_single(self, heuristic_score: float) -> bool:
         """Determine if an individual heuristic score falls into the uncertainty band."""
         return (
-            self.config.uncertainty_band_min
-            <= heuristic_score
-            <= self.config.uncertainty_band_max
+            self.config.uncertainty_band_min <= heuristic_score <= self.config.uncertainty_band_max
         )
 
     def score(
@@ -139,11 +137,7 @@ class CascadeScorer:
                     top_score,
                 )
         # Condition C: Top score falls in the uncertainty band [min, max]
-        elif (
-            self.config.uncertainty_band_min
-            <= top_score
-            <= self.config.uncertainty_band_max
-        ):
+        elif self.config.uncertainty_band_min <= top_score <= self.config.uncertainty_band_max:
             logger.debug(
                 "CascadeRouter: Top score %.4f in uncertainty band [%.2f, %.2f]; escalating contenders",
                 top_score,
@@ -162,9 +156,9 @@ class CascadeScorer:
         # Apply maximum escalation cap
         if len(escalate_indices) > self.config.max_escalated_candidates:
             # Keep top-scored candidates up to the cap
-            sorted_escalated = sorted(
-                escalate_indices, key=lambda i: heur_scores[i], reverse=True
-            )[: self.config.max_escalated_candidates]
+            sorted_escalated = sorted(escalate_indices, key=lambda i: heur_scores[i], reverse=True)[
+                : self.config.max_escalated_candidates
+            ]
             escalate_indices = set(sorted_escalated)
 
         # 3. GPU forward pass only on escalated candidate subset

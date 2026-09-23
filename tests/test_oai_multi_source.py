@@ -11,10 +11,9 @@ from typer.testing import CliRunner
 
 from reconciliator.cli import app
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
-from reconciliator.database import agents_table, manifestations_table, works_table
+from reconciliator.database import WEMIRepository, agents_table, manifestations_table, works_table
 from reconciliator.embedding.embedder import SentenceEmbedder
 from reconciliator.ingestion.oai import ingest_oai_pipeline
-from reconciliator.database import WEMIRepository
 from reconciliator.vocab import VocabStore
 
 SAMPLE_OAI_SOURCE_A = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -195,19 +194,20 @@ embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
   device: "cpu"
 
-ingest_oai:
-  source_one:
-    enabled: true
-    source_type: "oai"
-    oai_url: "https://source1.example.org/oai"
-    workers: 1
-    batch_size: 10
-  source_two:
-    enabled: false
-    source_type: "oai"
-    oai_url: "https://source2.example.org/oai"
-    workers: 1
-    batch_size: 10
+ingestion:
+  oai:
+    source_one:
+      enabled: true
+      source_type: "oai"
+      oai_url: "https://source1.example.org/oai"
+      workers: 1
+      batch_size: 10
+    source_two:
+      enabled: false
+      source_type: "oai"
+      oai_url: "https://source2.example.org/oai"
+      workers: 1
+      batch_size: 10
 """
     )
 

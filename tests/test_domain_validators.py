@@ -1,12 +1,11 @@
 """Unit and regression tests for core data validators and sanitizers."""
 
 import numpy as np
-import pytest
 
+from reconciliator.indexer.usearch_engine import USearchVectorEngine
 from reconciliator.models import Agent, AgentEntity
 from reconciliator.reconciliation.consolidation import WorkConsolidator, WorkSignature
 from reconciliator.utils.strings import sanitize_control_characters
-from reconciliator.indexer.usearch_engine import USearchVectorEngine
 
 
 def test_sanitize_control_characters() -> None:
@@ -124,7 +123,9 @@ def test_wemi_foreign_key_quarantine(tmp_path) -> None:
         manifestation_indexer=m_idx,
     )
 
-    work = WorkEntity(source="src", source_id="w1", title="Valid Work", title_normalized="valid work")
+    work = WorkEntity(
+        source="src", source_id="w1", title="Valid Work", title_normalized="valid work"
+    )
 
     # Valid manifestation referencing work
     valid_manif = ManifestationEntity(

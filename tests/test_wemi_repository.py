@@ -6,13 +6,14 @@ from typing import Any
 import numpy as np
 import pytest
 
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
     EntityKey,
-    ExpressionEntity,
     EntitySubject,
+    ExpressionEntity,
     HarvestState,
     IdentifierEntity,
     ItemEntity,
@@ -22,7 +23,6 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.database import WEMIRepository
 from tests.conftest import persist_match_records
 
 
@@ -717,8 +717,8 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
     """Verify that agent attributes (qualifiers, variant names) are stored relationally
     and idempotently without count pollution, and identifiers are stored in identifiers_table.
     """
-    from reconciliator.models import IdentifierEntity
     from reconciliator.database import WEMIRepository
+    from reconciliator.models import IdentifierEntity
 
     repo = WEMIRepository(
         db_path=tmp_storage.database_url,
@@ -790,7 +790,6 @@ def test_wemi_repository_agent_relational_attributes_and_identifiers(tmp_storage
     ident_sources = {i.source: i.source_id for i in fetched2.identifiers}
     assert "isni" in ident_sources
     assert "viaf" in ident_sources
-
 
     # Test lookup via identifiers table
     matches = repo.lookup_by_identifier("isni", "0000000121487654")

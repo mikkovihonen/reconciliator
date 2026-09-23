@@ -1,8 +1,8 @@
 """Tests for optimized single-pass MARCXML indexing and field extraction."""
 
 from lxml import etree
-import pytest
 
+from reconciliator.ingestion.oai import _WEMIBatchAccumulator
 from reconciliator.loaders.marcxml import (
     _get_controlfield,
     _get_datafields,
@@ -13,8 +13,7 @@ from reconciliator.loaders.marcxml import (
     extract_marc_source_id,
     parse_marc_record_elem,
 )
-from reconciliator.ingestion.oai import _WEMIBatchAccumulator
-from reconciliator.models import WorkEntity, AgentEntity, ManifestationEntity
+from reconciliator.models import AgentEntity, ManifestationEntity, WorkEntity
 
 SAMPLE_BIB_XML = b"""<record xmlns="http://www.loc.gov/MARC21/slim">
   <leader>01234nam a2200349 c 4500</leader>

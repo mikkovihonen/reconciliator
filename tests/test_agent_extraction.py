@@ -77,7 +77,6 @@ def test_marcxml_agent_rich_fields_extraction() -> None:
     assert norm_agent.fuller_name == "Matti Ilmari"
 
 
-
 def test_wikidata_author_rich_extraction() -> None:
     entity = {
         "id": "Q12345",

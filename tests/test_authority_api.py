@@ -52,7 +52,9 @@ def mock_repo():
         ],
     )
 
-    repo.get_agent_cluster_full.side_effect = lambda cid: sample_cluster if cid == "va_agent_test_001" else None
+    repo.get_agent_cluster_full.side_effect = lambda cid: (
+        sample_cluster if cid == "va_agent_test_001" else None
+    )
     repo.get_agent_clusters_paginated.return_value = ([sample_cluster], 1)
     repo.get_cluster_lifecycle_events.return_value = []
 
@@ -146,19 +148,25 @@ def test_authority_content_negotiation(client: TestClient):
     assert resp_json.json()["cluster_id"] == "va_agent_test_001"
 
     # 2. MARCXML
-    resp_xml = client.get("/authority/agent/va_agent_test_001", headers={"Accept": "application/marcxml+xml"})
+    resp_xml = client.get(
+        "/authority/agent/va_agent_test_001", headers={"Accept": "application/marcxml+xml"}
+    )
     assert resp_xml.status_code == 200
     assert "application/marcxml+xml" in resp_xml.headers["content-type"]
     assert "<leader>" in resp_xml.text
     assert "Waltari, Mika" in resp_xml.text
 
     # 3. JSON-LD
-    resp_jsonld = client.get("/authority/agent/va_agent_test_001", headers={"Accept": "application/ld+json"})
+    resp_jsonld = client.get(
+        "/authority/agent/va_agent_test_001", headers={"Accept": "application/ld+json"}
+    )
     assert resp_jsonld.status_code == 200
     assert resp_jsonld.json()["@type"] == ["skos:Concept", "schema:Person"]
 
     # 4. Turtle
-    resp_turtle = client.get("/authority/agent/va_agent_test_001", headers={"Accept": "text/turtle"})
+    resp_turtle = client.get(
+        "/authority/agent/va_agent_test_001", headers={"Accept": "text/turtle"}
+    )
     assert resp_turtle.status_code == 200
     assert "@prefix skos:" in resp_turtle.text
 
@@ -192,4 +200,3 @@ def test_oai_pmh_provider_verbs(client: TestClient):
     resp_sets = client.get("/oai/authority?verb=ListSets")
     assert resp_sets.status_code == 200
     assert "<setSpec>agents</setSpec>" in resp_sets.text
-

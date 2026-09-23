@@ -1,9 +1,7 @@
 """Tests for MARC Authority agent relationships, qualifiers, and affiliations."""
 
-import pytest
 from lxml import etree
 
-from reconciliator.config import AppConfig
 from reconciliator.loaders.marcxml import (
     decompose_marc_authority,
     extract_agent_qualifiers,
@@ -101,4 +99,3 @@ def test_decompose_marc_authority_qualifiers_and_affiliations():
     assert len(identity_rels) == 1
     assert identity_rels[0].target_name == "Valasvaara, Petja"
     assert identity_rels[0].target_agent_curie == "http://urn.fi/URN:NBN:fi:au:pn:000191840"
-

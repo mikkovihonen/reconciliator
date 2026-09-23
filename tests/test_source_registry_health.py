@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from reconciliator.models import WorkEntity
 from reconciliator.database import WEMIRepository
+from reconciliator.models import WorkEntity
 
 
 @pytest.fixture

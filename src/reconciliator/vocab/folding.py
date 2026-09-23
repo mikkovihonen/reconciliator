@@ -172,8 +172,28 @@ class VocabFolder:
             )
             return target_field, formatted_vocab, source_uri or "", clean_heading, "none", None
 
-        # 1. Check legacy URI in concept_mappings or canonical URI in concepts
+        # 1. Check if source_uri is already a modern canonical concept URI
         if source_uri:
+            concept = self.vocab_store.find_concept_by_uri(source_uri)
+            if concept and not concept.is_deprecated:
+                pref_label = self._select_pref_label(concept, lang, clean_heading)
+                target_field = self._resolve_target_field(
+                    concept.vocabulary, source_field, concept.target_field
+                )
+                tgt_v = self._enforce_valid_field_vocab(target_field, concept.vocabulary)
+                target_vocab = format_target_vocab(
+                    tgt_v, source_vocab, lang=lang, config=self.config
+                )
+                return (
+                    target_field,
+                    target_vocab,
+                    concept.uri,
+                    pref_label,
+                    "existing_canonical",
+                    None,
+                )
+
+            # If not already canonical or if deprecated, check legacy mapping
             mapping = self.vocab_store.find_legacy_mapping_by_uri(source_uri)
             if mapping:
                 concept = self.vocab_store.find_concept_by_uri(mapping.target_uri)
@@ -195,26 +215,6 @@ class VocabFolder:
                     mapping.target_uri,
                     pref_label,
                     mapping.mapping_type,
-                    None,
-                )
-
-            # Check if source_uri is already a modern canonical concept URI
-            concept = self.vocab_store.find_concept_by_uri(source_uri)
-            if concept:
-                pref_label = self._select_pref_label(concept, lang, clean_heading)
-                target_field = self._resolve_target_field(
-                    concept.vocabulary, source_field, concept.target_field
-                )
-                tgt_v = self._enforce_valid_field_vocab(target_field, concept.vocabulary)
-                target_vocab = format_target_vocab(
-                    tgt_v, source_vocab, lang=lang, config=self.config
-                )
-                return (
-                    target_field,
-                    target_vocab,
-                    concept.uri,
-                    pref_label,
-                    "existing_canonical",
                     None,
                 )
 
@@ -338,4 +338,3 @@ class VocabFolder:
             default_target_vocab, source_vocab, lang=lang, config=self.config
         )
         return source_field, formatted_default, source_uri or "", clean_heading, "none", None
-

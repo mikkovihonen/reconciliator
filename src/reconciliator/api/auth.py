@@ -165,4 +165,3 @@ def require_reader(user: UserProfile = Depends(get_current_user)) -> UserProfile
             detail="Reader privileges required for this action",
         )
     return user
-

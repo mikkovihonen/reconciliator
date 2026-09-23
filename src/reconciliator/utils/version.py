@@ -24,7 +24,7 @@ def get_version() -> str:
 
     try:
         return version("reconciliator")
-    except (PackageNotFoundError, Exception):
+    except PackageNotFoundError, Exception:
         return "0.1.0"
 
 
@@ -34,4 +34,3 @@ __version__ = get_version()
 def get_default_user_agent() -> str:
     """Return canonical User-Agent header string for Reconciliator HTTP clients."""
     return f"reconciliator/{get_version()}"
-

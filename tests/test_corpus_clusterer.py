@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from reconciliator.clustering import CorpusClusterer
-from reconciliator.reconciliation import WorkMatcher
+from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     ExpressionEntity,
     IdentifierEntity,
@@ -20,7 +20,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import UnionFind, extract_identifiers_from_target
 from tests.conftest import persist_match_records
 

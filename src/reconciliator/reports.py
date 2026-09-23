@@ -863,13 +863,15 @@ class ReportGenerator:
                 source_thesauri_counts[norm_s] = source_thesauri_counts.get(norm_s, 0) + 1
         thesauri_denom = max(1, total_headings)
 
-        vocab_norm_cfg = (
-            self.config.normalization.vocab if self.config and self.config.normalization else None
-        )
+        vocab_norm_cfg = self.config.vocabularies if self.config else None
         if vocab_norm_cfg and vocab_norm_cfg.legacy_to_modern:
             legacy_thesauri = list(vocab_norm_cfg.legacy_to_modern.keys())
-        elif self.config and self.config.ingest_vocab and self.config.ingest_vocab.legacy_thesauri:
-            legacy_thesauri = [th.lower() for th in self.config.ingest_vocab.legacy_thesauri]
+        elif (
+            self.config
+            and self.config.ingestion.vocab
+            and self.config.ingestion.vocab.legacy_thesauri
+        ):
+            legacy_thesauri = [th.lower() for th in self.config.ingestion.vocab.legacy_thesauri]
         else:
             default_thesauri = _get_model_field_default(VocabIngestConfig, "legacy_thesauri")
             legacy_thesauri = [th.lower() for th in default_thesauri]

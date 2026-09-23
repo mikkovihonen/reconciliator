@@ -10,9 +10,10 @@ from reconciliator.database import (
     entity_subjects_table,
     get_db_connection,
     get_engine,
+    get_podman_path,
+    is_container_running,
     metadata,
 )
-from reconciliator.database import get_podman_path, is_container_running
 
 
 def test_postgres_config_defaults():

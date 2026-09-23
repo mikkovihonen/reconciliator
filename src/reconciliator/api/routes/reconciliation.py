@@ -37,7 +37,9 @@ def get_reconciliation_record(
 
     linkage = repo.get_corpus_linkage(record_id)
     if not linkage:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Reconciled record {record_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Reconciled record {record_id} not found"
+        )
 
     result: dict[str, Any] = {
         "record_id": record_id,
@@ -70,4 +72,3 @@ def get_reconciliation_record(
                 break
 
     return result
-

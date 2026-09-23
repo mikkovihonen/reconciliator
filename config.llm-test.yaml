@@ -1,0 +1,136 @@
+# ==============================================================================
+# Local LLM Vector Model Test Configuration
+# ==============================================================================
+# Test configuration executing end-to-end reconciliation on a small sample corpus
+# using an autoregressive base LLM (Qwen2.5-0.5B-Instruct) for vector index building,
+# dense semantic fallback retrieval, and LLM Judge reranking with KV-cache branching.
+# ==============================================================================
+
+# Explicitly select the LLM vector model (instead of "embedding")
+vector_model: "llm"
+
+# ------------------------------------------------------------------------------
+# 1. Storage & Database
+# ------------------------------------------------------------------------------
+storage:
+  data_dir: "data/llm_test"
+  work_index: "data/llm_test/work.index"
+  manifestation_index: "data/llm_test/manifestation.index"
+  agent_index: "data/llm_test/agent.index"
+
+  postgres:
+    host: "localhost"
+    port: 5432
+    database: "reconciliator"
+    user: "postgres"
+    password: "postgres"
+
+  vector_engine:
+    backend: "torch"                 # 'torch' or 'usearch'
+    normalize_vectors: true
+    distance_metric: "cosine"
+    threads: 0
+
+# ------------------------------------------------------------------------------
+# 2. Base LLM Judge & Dense Retriever Configuration
+# ------------------------------------------------------------------------------
+llm:
+  # Compact, fast 0.5B instruction-tuned model (~400MB)
+  model_name: "Qwen/Qwen2.5-0.5B-Instruct"
+  backend: "auto"                    # 'auto', 'mlx' (Apple Silicon native), or 'torch'
+  device: "auto"                     # 'auto' (resolves to 'mps' on Apple Silicon, or 'cpu')
+  torch_dtype: "auto"
+  attn_implementation: "auto"
+  pooling_strategy: "last_token"
+  batch_size: 8                      # Batch size for dense vector extraction
+  max_seq_length: 1024
+  positive_token: "YES"
+  negative_token: "NO"
+
+# ------------------------------------------------------------------------------
+# 3. Ingestion: Full Controlled Vocabularies
+# ------------------------------------------------------------------------------
+ingestion:
+  vocab:
+    input_path: "data/vocabularies"
+    vocabularies:
+      - "yso"
+      - "yso-aika"
+      - "yso-paikat"
+      - "kauno"
+      - "muso"
+      - "slm"
+      - "seko"
+    legacy_thesauri:
+      - "ysa"
+      - "allars"
+      - "kaunokki"
+      - "bella"
+      - "musa"
+      - "cilla"
+
+# ------------------------------------------------------------------------------
+# 4. Reconciliation, Matching, & LLM Judge Reranking
+# ------------------------------------------------------------------------------
+reconcile:
+  target_file: "tests/fixtures/corpus_1000.marcxml"
+  output_file: "data/llm_test/enriched.xml"
+  enrich: true
+  fold_legacy: true
+  threshold: 0.80
+
+  work_reports:
+    detailed_file: "data/llm_test/reports/work_uris.tsv"
+    summary_file: "data/llm_test/reports/work_summary.tsv"
+  agent_reports:
+    detailed_file: "data/llm_test/reports/agent_uris.tsv"
+    summary_file: "data/llm_test/reports/agent_summary.tsv"
+  subject_reports:
+    detailed_file: "data/llm_test/reports/subject_uris.tsv"
+    summary_file: "data/llm_test/reports/subject_summary.tsv"
+
+  rerank:
+    enabled: true
+    engine: "llm_judge"              # Autoregressive KV-cache branch evaluation
+    dense_weight: 0.6
+    rerank_weight: 0.4
+    top_k: 5
+    short_circuit:
+      enabled: true
+      threshold: 0.98
+
+  link_policy: "priority_fallback"
+  vocabularies:
+    - "KANTO"
+    - "YSO"
+    - "YSO-AIKA"
+    - "YSO-PAIKAT"
+    - "KAUNO"
+    - "MUSO"
+    - "SLM"
+    - "SEKO"
+    - "VIAF"
+    - "ISNI"
+  agent_priority:
+    - "KANTO"
+    - "ISNI"
+    - "VIAF"
+  subject_priority:
+    - "YSO"
+    - "YSO-AIKA"
+    - "YSO-PAIKAT"
+    - "KAUNO"
+    - "MUSO"
+    - "SLM"
+    - "SEKO"
+
+# ------------------------------------------------------------------------------
+# 5. Telemetry & Logging
+# ------------------------------------------------------------------------------
+telemetry:
+  heartbeat_interval_seconds: 0.5
+  watch_interval_seconds: 0.5
+
+logging:
+  level: "INFO"
+

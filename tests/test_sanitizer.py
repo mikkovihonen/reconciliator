@@ -17,7 +17,7 @@ from reconciliator.ingestion.sanitizer import (
     _resolve_column_limit,
     sanitize_batch_payload,
 )
-from reconciliator.models import EntitySubject, WorkEntity
+from reconciliator.models import EntitySubject
 
 
 def test_schema_limits_dynamically_derived() -> None:
@@ -165,4 +165,3 @@ def test_sanitize_dict_entity() -> None:
 
     assert count == 1
     assert len(payload["entity_subjects"][0]["raw_label"]) == 512
-

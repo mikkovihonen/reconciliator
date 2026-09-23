@@ -8,10 +8,10 @@ from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from reconciliator.config import OAIIngestConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester
 from reconciliator.ingestion.oai import ingest_oai_pipeline
 from reconciliator.models import HarvestState
-from reconciliator.database import WEMIRepository
 
 
 async def _collect(gen: AsyncIterator[Any]) -> list[Any]:

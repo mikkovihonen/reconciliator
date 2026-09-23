@@ -3,8 +3,8 @@ from pathlib import Path
 from lxml import etree
 
 from reconciliator.loaders.marcxml import _get_subfields
-from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.models import Agent, BibliographicRecord
+from reconciliator.reconciliation import ReconciliationResult
 from reconciliator.xml_enricher import MARCXMLEnricher
 
 
@@ -100,16 +100,16 @@ def test_iter_marc_record_elements(tmp_path: Path) -> None:
 def test_marc_predicate_profiles_configuration() -> None:
     from reconciliator.config import (
         DEFAULT_MARC_PREDICATE_PROFILES,
-        EnrichmentTogglesConfig,
-        get_bundled_record_defaults,
+        EnrichmentConfig,
+        get_bundled_enrichment_defaults,
     )
 
     # 1. Defaults loaded from YAML
-    yaml_defaults = get_bundled_record_defaults()
-    assert "marc_predicate_profiles" in yaml_defaults
-    assert "bffi" in yaml_defaults["marc_predicate_profiles"]
-    assert "bibframe" in yaml_defaults["marc_predicate_profiles"]
-    assert "rda" in yaml_defaults["marc_predicate_profiles"]
+    yaml_defaults = get_bundled_enrichment_defaults()
+    assert "predicate_profiles" in yaml_defaults
+    assert "bffi" in yaml_defaults["predicate_profiles"]
+    assert "bibframe" in yaml_defaults["predicate_profiles"]
+    assert "rda" in yaml_defaults["predicate_profiles"]
 
     assert "bffi" in DEFAULT_MARC_PREDICATE_PROFILES
     assert DEFAULT_MARC_PREDICATE_PROFILES["bffi"]["work"] == (
@@ -117,20 +117,20 @@ def test_marc_predicate_profiles_configuration() -> None:
         "bffi",
     )
 
-    # 2. EnrichmentTogglesConfig accepts custom predicate_profiles
+    # 2. EnrichmentConfig accepts custom predicate_profiles
     custom_profiles = {
         "custom": {
             "work": ("http://example.org/pred/work", "custom-scheme"),
             "expression": ("http://example.org/pred/expression", "custom-scheme"),
         }
     }
-    toggles = EnrichmentTogglesConfig(
-        marc_predicate_profiles=["custom"],
+    toggles = EnrichmentConfig(
+        active_profiles=["custom"],
         predicate_profiles=custom_profiles,
         marc_predicate_mode="distinct",
     )
     assert "custom" in toggles.predicate_profiles
-    assert toggles.marc_predicate_profiles == ["custom"]
+    assert toggles.active_profiles == ["custom"]
 
     # 3. Test tree enrichment with custom profile
     xml_str = """
@@ -229,7 +229,7 @@ def test_scheme_definition_and_deduplication() -> None:
 
 
 def test_multilingual_linking_labels() -> None:
-    from reconciliator.config import EnrichmentTogglesConfig
+    from reconciliator.config import EnrichmentConfig
     from reconciliator.models import MatchRecord, WorkCluster
 
     enricher = MARCXMLEnricher()
@@ -278,7 +278,7 @@ def test_multilingual_linking_labels() -> None:
     </record>
     """
     elem_eng = etree.fromstring(xml_eng.strip())
-    toggles_en = EnrichmentTogglesConfig(language="en")
+    toggles_en = EnrichmentConfig(language="en")
     enriched_eng = enricher.enrich_record_tree(
         elem_eng,
         target_record=tr,

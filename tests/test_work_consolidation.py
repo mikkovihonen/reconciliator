@@ -23,8 +23,7 @@ from reconciliator.cli import (
     reset_cmd,
 )
 from reconciliator.config import VectorEngineConfig, WorkConsolidationConfig, load_config
-from reconciliator.reconciliation.consolidation import WorkConsolidator
-from reconciliator.database import works_table
+from reconciliator.database import WEMIRepository, works_table
 from reconciliator.models import (
     AgentEntity,
     ContributionEntity,
@@ -33,7 +32,7 @@ from reconciliator.models import (
     ManifestationEntity,
     WorkEntity,
 )
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation.consolidation import WorkConsolidator
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC = "{http://www.loc.gov/MARC21/slim}"
@@ -411,21 +410,23 @@ embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
   template_path: "{templates / "default_serialization.j2"}"
   device: "cpu"
-ingest_vocab:
-  input_path: "{FIXTURES / "sample_finto.ttl"}"
-  vocabularies: ["yso"]
-  legacy_thesauri: ["ysa"]
-ingest_oai:
-  source_a:
-    enabled: true
-    source_type: "file"
-    input_path: "{tmp_path / "auth_a.xml"}"
-    batch_size: 10
-  source_b:
-    enabled: true
-    source_type: "file"
-    input_path: "{tmp_path / "auth_b.xml"}"
-    batch_size: 10
+ingestion:
+  vocab:
+    input_path: "{FIXTURES / "sample_finto.ttl"}"
+    vocabularies: ["yso"]
+    legacy_thesauri: ["ysa"]
+
+  oai:
+    source_a:
+      enabled: true
+      source_type: "file"
+      input_path: "{tmp_path / "auth_a.xml"}"
+      batch_size: 10
+    source_b:
+      enabled: true
+      source_type: "file"
+      input_path: "{tmp_path / "auth_b.xml"}"
+      batch_size: 10
 reconcile:
   target_file: "{tmp_path / "target.xml"}"
   output_file: "{out_xml}"

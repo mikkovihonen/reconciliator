@@ -55,4 +55,3 @@ def test_curie_parse_roundtrip() -> None:
     parsed_src, parsed_id = parse_curie(curie)
     assert parsed_src == "source"
     assert parsed_id == "id{with}braces"
-

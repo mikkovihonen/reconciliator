@@ -36,15 +36,16 @@ embedding:
   device: "cpu"
   batch_size: 16
 
-ingest_oai:
-  melinda_bffi:
-    enabled: true
-    source_type: "file"
-    format: "bibframe"
-    schema_profile: "bffi_1"
-    input_path: "{sample_bffi}"
-    workers: 1
-    batch_size: 10
+ingestion:
+  oai:
+    melinda_bffi:
+      enabled: true
+      source_type: "file"
+      format: "bibframe"
+      schema_profile: "bffi_1"
+      input_path: "{sample_bffi}"
+      workers: 1
+      batch_size: 10
 
 reconcile:
   target_file: "{sample_bffi}"
@@ -171,14 +172,15 @@ embedding:
   device: "cpu"
   batch_size: 16
 
-ingest_oai:
-  jsonld_source:
-    enabled: true
-    source_type: "file"
-    format: "bibframe"
-    input_path: "{sample_jsonld}"
-    workers: 1
-    batch_size: 10
+ingestion:
+  oai:
+    jsonld_source:
+      enabled: true
+      source_type: "file"
+      format: "bibframe"
+      input_path: "{sample_jsonld}"
+      workers: 1
+      batch_size: 10
 
 reconcile:
   target_file: "{sample_jsonld}"

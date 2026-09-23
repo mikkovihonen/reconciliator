@@ -96,6 +96,7 @@ class ProgressTracker:
 
         if self.task_id:
             from reconciliator.logging import register_task_tracker, set_current_task_id
+
             register_task_tracker(self.task_id, self)
             set_current_task_id(self.task_id)
 
@@ -113,6 +114,7 @@ class ProgressTracker:
                 set_current_task_id,
                 unregister_task_tracker,
             )
+
             unregister_task_tracker(self.task_id)
             if get_current_task_id() == self.task_id:
                 set_current_task_id(None)
@@ -155,6 +157,7 @@ class ProgressTracker:
         """Start tracking and emit the initial status entry in progress.db."""
         if self.task_id:
             from reconciliator.logging import register_task_tracker, set_current_task_id
+
             register_task_tracker(self.task_id, self)
             set_current_task_id(self.task_id)
         with self._lock:
@@ -177,7 +180,11 @@ class ProgressTracker:
                     ).where(task_progress_table.c.task_id == self.task_id)
                 ).first()
                 if existing:
-                    if items_processed is None and self._items_processed == 0 and existing.items_processed:
+                    if (
+                        items_processed is None
+                        and self._items_processed == 0
+                        and existing.items_processed
+                    ):
                         self._items_processed = existing.items_processed
                     if existing.start_time:
                         try:
@@ -186,7 +193,9 @@ class ProgressTracker:
                         except Exception:
                             pass
 
-                meta_json = json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
+                meta_json = (
+                    json.dumps(self._metadata, ensure_ascii=False) if self._metadata else None
+                )
                 stmt = pg_insert(task_progress_table).values(
                     task_id=self.task_id,
                     task_type=self.task_type,
@@ -408,7 +417,10 @@ def find_latest_task_for_source(
             for r in rows:
                 tid = r["task_id"]
                 matched = False
-                if tid.startswith(f"oai-ingest-{source_name}-") or tid == f"oai-ingest-{source_name}":
+                if (
+                    tid.startswith(f"oai-ingest-{source_name}-")
+                    or tid == f"oai-ingest-{source_name}"
+                ):
                     matched = True
                 elif r["metadata_json"]:
                     try:
@@ -502,7 +514,9 @@ def prune_tasks(
 
             if status:
                 if status == "terminated":
-                    conditions.append(task_progress_table.c.status.in_(["completed", "failed", "interrupted"]))
+                    conditions.append(
+                        task_progress_table.c.status.in_(["completed", "failed", "interrupted"])
+                    )
                 else:
                     conditions.append(task_progress_table.c.status == status)
 
@@ -857,7 +871,6 @@ def render_telemetry_tui(
     if total_skipped > 0:
         summary_text.append(f"| Skipped: {total_skipped:,}  ", style="bold cyan")
     summary_text.append(f"| Aggregate Throughput: {total_rate:,.1f} items/s", style="bold cyan")
-
 
     summary = Panel(summary_text, title="Telemetry Summary", style="dim")
 

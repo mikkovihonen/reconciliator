@@ -4,7 +4,7 @@ import logging
 
 from rdflib import Graph
 
-from reconciliator.database import get_db_connection, init_authority_db
+from reconciliator.database import WEMIRepository, get_db_connection, init_authority_db
 from reconciliator.ingestion.wikidata import (
     AUTHOR_INDICATORS,
     _has_author_indicator,
@@ -16,7 +16,6 @@ from reconciliator.models import (
     ExpressionEntity,
     WorkEntity,
 )
-from reconciliator.database import WEMIRepository
 
 
 def test_work_type_hub_constraint(tmp_path):
@@ -313,7 +312,9 @@ def test_reconcile_config_defaults():
     # M-02: Concrete default for templates
     assert cfg.templates is not None
     assert cfg.templates.work == Path("reconciliator/embedding/templates/work_serialization.j2")
-    assert cfg.templates.expression == Path("reconciliator/embedding/templates/expression_serialization.j2")
+    assert cfg.templates.expression == Path(
+        "reconciliator/embedding/templates/expression_serialization.j2"
+    )
     assert cfg.templates.manifestation == Path(
         "reconciliator/embedding/templates/manifestation_serialization.j2"
     )
@@ -325,10 +326,9 @@ def test_reconcile_config_defaults():
 
 def test_funnels_dispatch_anthology_conference_government(tmp_path):
     """Verify H-25: match_target dispatches to anthology, conference, and government funnels."""
-    from reconciliator.database import get_db_connection, init_authority_db
-    from reconciliator.reconciliation import WorkMatcher
+    from reconciliator.database import WEMIRepository, get_db_connection, init_authority_db
     from reconciliator.models import MatchRecord
-    from reconciliator.database import WEMIRepository
+    from reconciliator.reconciliation import WorkMatcher
 
     db_path = tmp_path / "test_authority.db"
     with get_db_connection(db_path) as conn:
@@ -394,9 +394,9 @@ def test_funnels_dispatch_anthology_conference_government(tmp_path):
 def test_record_identifiers_and_repository_doi_matching(tmp_path):
     """Verify H-26 and M-17: DOI on RecordIdentifiers and Tier 1 exact matching."""
     from reconciliator.config import VectorEngineConfig
+    from reconciliator.database import WEMIRepository
     from reconciliator.models import IdentifierEntity, ManifestationEntity, RecordIdentifiers
     from reconciliator.normalizers.record import RecordNormalizer
-    from reconciliator.database import WEMIRepository
 
     # 1. RecordIdentifiers contains doi
     ids = RecordIdentifiers(doi=["10.1000/182"])
@@ -456,17 +456,17 @@ def test_record_identifiers_and_repository_doi_matching(tmp_path):
 
 
 def test_marc_predicate_profiles_default():
-    """Verify EnrichmentTogglesConfig defaults include bibframe, bffi, and rda."""
-    from reconciliator.config import EnrichmentTogglesConfig
+    """Verify EnrichmentConfig defaults include bibframe, bffi, and rda."""
+    from reconciliator.config import EnrichmentConfig
 
-    cfg = EnrichmentTogglesConfig()
-    assert cfg.marc_predicate_profiles == ["bibframe", "bffi", "rda"]
+    cfg = EnrichmentConfig()
+    assert cfg.active_profiles == ["bibframe", "bffi", "rda"]
 
 
 def test_render_work_original_title():
     """Verify M-23: render_work dynamically includes original_title."""
-    from reconciliator.models import WorkEntity
     from reconciliator.embedding.template import WEMISerializationEngine
+    from reconciliator.models import WorkEntity
 
     engine = WEMISerializationEngine()
     work = WorkEntity(
@@ -485,10 +485,9 @@ def test_render_work_original_title():
 
 def test_translator_alignment_via_agent_aligner(tmp_path):
     """Verify H-31: _align_expression uses AgentAligner to match translators."""
-    from reconciliator.database import get_db_connection, init_authority_db
-    from reconciliator.reconciliation import WorkMatcher
+    from reconciliator.database import WEMIRepository, get_db_connection, init_authority_db
     from reconciliator.models import AgentEntity, ContributionEntity, ExpressionEntity, WorkEntity
-    from reconciliator.database import WEMIRepository
+    from reconciliator.reconciliation import WorkMatcher
 
     db_path = tmp_path / "wemi_auth.db"
     with get_db_connection(db_path) as conn:
@@ -598,8 +597,8 @@ def test_translator_alignment_via_agent_aligner(tmp_path):
 def test_blocking_key_families_coverage(tmp_path):
     """Verify H-29: generate_blocking_keys covers material-specific blocking families."""
     from reconciliator.clustering import CorpusClusterer
-    from reconciliator.models import MatchRecord
     from reconciliator.database import WEMIRepository
+    from reconciliator.models import MatchRecord
 
     db_path = tmp_path / "authority.db"
     repo = WEMIRepository(db_path)
@@ -701,7 +700,9 @@ def test_version_resolution_exception_handling():
     from reconciliator.utils.version import get_version
 
     with patch("reconciliator.utils.version.Path.is_file", return_value=False):
-        with patch("reconciliator.utils.version.version", side_effect=Exception("Metadata corrupted")):
+        with patch(
+            "reconciliator.utils.version.version", side_effect=Exception("Metadata corrupted")
+        ):
             v = get_version()
             assert v == "0.1.0"
 
@@ -718,10 +719,11 @@ def test_run_cmd_pipeline_execution_and_reporting(tmp_path):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
         """
-ingest_vocab:
-  input_path: "vocabs/"
-ingest_wikidata:
-  dump_path: "dump.json"
+ingestion:
+  vocab:
+    input_path: "vocabs/"
+  wikidata:
+    dump_path: "dump.json"
 """
     )
 

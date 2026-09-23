@@ -31,7 +31,7 @@ def test_task_id_context() -> None:
     """Verify set_current_task_id, get_current_task_id, and task_context."""
     assert get_current_task_id() == "-"
 
-    token = set_current_task_id("task-100")
+    set_current_task_id("task-100")
     assert get_current_task_id() == "task-100"
 
     with task_context("task-200"):
@@ -51,9 +51,7 @@ def test_task_log_filter() -> None:
         filter_.filter(record)
         assert record.task_id == "active-task-99"
 
-    record_no_task = logging.LogRecord(
-        "test", logging.INFO, "test.py", 1, "test message", (), None
-    )
+    record_no_task = logging.LogRecord("test", logging.INFO, "test.py", 1, "test message", (), None)
     filter_.filter(record_no_task)
     assert record_no_task.task_id == "no-task"
 
@@ -64,16 +62,12 @@ def test_telemetry_log_handler_notifies_tracker() -> None:
     register_task_tracker("test-task-err", tracker)
     try:
         handler = TelemetryLogHandler(level=logging.ERROR)
-        record_info = logging.LogRecord(
-            "test", logging.INFO, "test.py", 1, "info msg", (), None
-        )
+        record_info = logging.LogRecord("test", logging.INFO, "test.py", 1, "info msg", (), None)
         record_info.task_id = "test-task-err"
         handler.emit(record_info)
         tracker.record_error.assert_not_called()
 
-        record_err = logging.LogRecord(
-            "test", logging.ERROR, "test.py", 1, "error msg", (), None
-        )
+        record_err = logging.LogRecord("test", logging.ERROR, "test.py", 1, "error msg", (), None)
         record_err.task_id = "test-task-err"
         handler.emit(record_err)
         tracker.record_error.assert_called_once_with(n=1)
@@ -105,8 +99,13 @@ def test_log_sanitization_and_validation_formats(caplog: pytest.LogCaptureFixtur
                 tracker=tracker,
             )
 
-    assert "[sanitization] truncate test_table.col (source_id=item-123): exceeded limit" in caplog.text
-    assert "[validation] quarantine test_table.fk (source_id=item-456): unresolvable parent" in caplog.text
+    assert (
+        "[sanitization] truncate test_table.col (source_id=item-123): exceeded limit" in caplog.text
+    )
+    assert (
+        "[validation] quarantine test_table.fk (source_id=item-456): unresolvable parent"
+        in caplog.text
+    )
     assert tracker.record_error.call_count == 2
 
 

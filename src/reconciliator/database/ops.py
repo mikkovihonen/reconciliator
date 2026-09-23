@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, TypeVar
 
 from sqlalchemy import Engine, Table
-from sqlalchemy.engine import Connection
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Connection
 
 from reconciliator.config import PostgresConfig
 
@@ -142,9 +142,7 @@ def upsert_batch(
                         set_=set_clause,
                     )
                 else:
-                    stmt = stmt.on_conflict_do_nothing(
-                        index_elements=list(conflict_index_elements)
-                    )
+                    stmt = stmt.on_conflict_do_nothing(index_elements=list(conflict_index_elements))
 
             if return_ids:
                 stmt = stmt.returning(table.c[id_column_name])
@@ -201,9 +199,7 @@ def insert_batch(
 
             if on_conflict_do_nothing:
                 if conflict_index_elements:
-                    stmt = stmt.on_conflict_do_nothing(
-                        index_elements=list(conflict_index_elements)
-                    )
+                    stmt = stmt.on_conflict_do_nothing(index_elements=list(conflict_index_elements))
                 else:
                     stmt = stmt.on_conflict_do_nothing()
 

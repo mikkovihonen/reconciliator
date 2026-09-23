@@ -33,7 +33,9 @@ def get_work_consolidation_graph(
     """Retrieve Cytoscape node-link graph data for an equivalence group."""
     repo: WEMIRepository = getattr(request.app.state, "repo", None)
     if not repo:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consolidation group not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Consolidation group not found"
+        )
     graph = repo.get_consolidation_group_graph(canonical_id)
     return graph
 
@@ -69,4 +71,3 @@ def get_agent_cluster(
     c_dict["members"] = [m.model_dump() for m in repo.get_agent_cluster_members(cluster_id)]
     c_dict["attributes"] = [a.model_dump() for a in repo.get_agent_cluster_attributes(cluster_id)]
     return c_dict
-

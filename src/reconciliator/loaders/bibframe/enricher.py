@@ -7,10 +7,8 @@ from typing import Any, Optional
 
 from rdflib import RDF, RDFS, Graph, IdentifiedNode, URIRef
 
-from reconciliator.config import EnrichmentTogglesConfig
-from reconciliator.utils.curie import extract_wikidata_qid, format_wikidata_uri
+from reconciliator.config import EnrichmentConfig
 from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile, get_profile
-from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
 from reconciliator.models import (
     BibliographicRecord,
     CorpusLinkage,
@@ -18,6 +16,8 @@ from reconciliator.models import (
     ManifestationCluster,
     WorkCluster,
 )
+from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
+from reconciliator.utils.curie import extract_wikidata_qid, format_wikidata_uri
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def enrich_bibframe_graph(
     work_cluster: Optional[WorkCluster] = None,
     expression_cluster: Optional[ExpressionCluster] = None,
     manifestation_cluster: Optional[ManifestationCluster] = None,
-    enrichment_config: Optional[EnrichmentTogglesConfig] = None,
+    enrichment_config: Optional[EnrichmentConfig] = None,
 ) -> Graph:
     """Enrich an RDF graph in-place with resolved authority, vocabulary, and WEMI graph URIs.
 
@@ -46,7 +46,7 @@ def enrich_bibframe_graph(
         return g
 
     p = profile or get_profile()
-    toggles = enrichment_config or EnrichmentTogglesConfig()
+    toggles = enrichment_config or EnrichmentConfig()
     instance_node, expression_node, work_node = nodes
 
     owl_same_as = URIRef(p.expand_curie(p.same_as_predicate))
@@ -218,10 +218,10 @@ def enrich_bibframe_jsonld(
     work_cluster: Optional[WorkCluster] = None,
     expression_cluster: Optional[ExpressionCluster] = None,
     manifestation_cluster: Optional[ManifestationCluster] = None,
-    enrichment_config: Optional[EnrichmentTogglesConfig] = None,
+    enrichment_config: Optional[EnrichmentConfig] = None,
 ) -> dict[str, Any]:
     """Enrich a JSON-LD record dictionary in-place with resolved authority URIs and reconciliation metadata."""
-    toggles = enrichment_config or EnrichmentTogglesConfig()
+    toggles = enrichment_config or EnrichmentConfig()
     rec: Optional[BibliographicRecord] = None
     if isinstance(result, ReconciliationResult):
         rec = target_record or result.target_record

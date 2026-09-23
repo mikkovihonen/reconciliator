@@ -8,6 +8,7 @@ import pytest
 
 from reconciliator.clustering import AgentClusterer
 from reconciliator.config import AgentClusterConfig, AppConfig
+from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     AgentEntity,
     AgentRelationshipEntity,
@@ -16,7 +17,6 @@ from reconciliator.models import (
     IdentifierEntity,
     WorkEntity,
 )
-from reconciliator.database import WEMIRepository
 
 
 @pytest.fixture
@@ -362,10 +362,13 @@ def test_authority_hoisting_and_attribute_consensus(repo: WEMIRepository) -> Non
     clusterer = AgentClusterer(repo=repo)
     clusterer.cluster_agents()
 
-    members = repo.get_agent_cluster_members("ac_asteri_ast_tove")
+    cid = repo.get_agent_cluster_id(aids[1])
+    assert cid is not None
+
+    members = repo.get_agent_cluster_members(cid)
     assert len(members) == 2
 
-    cluster = repo.get_agent_cluster("ac_asteri_ast_tove")
+    cluster = repo.get_agent_cluster(cid)
     assert cluster is not None
     # Asteri must be canonical per source_authority_precedence
     assert cluster.canonical_agent_source == "asteri"
@@ -373,7 +376,7 @@ def test_authority_hoisting_and_attribute_consensus(repo: WEMIRepository) -> Non
     assert cluster.member_count == 2
 
     # Check aggregated cluster attributes with frequency
-    attrs = repo.get_agent_cluster_attributes("ac_asteri_ast_tove")
+    attrs = repo.get_agent_cluster_attributes(cid)
     variant_attrs = {a.value: a for a in attrs if a.attribute_type == "variant_name"}
     assert "Jansson, Tove Marika" in variant_attrs
     assert variant_attrs["Jansson, Tove Marika"].is_canonical is True
@@ -392,4 +395,3 @@ def test_authority_hoisting_and_attribute_consensus(repo: WEMIRepository) -> Non
     occ_attrs = [a for a in attrs if a.attribute_type == "occupation"]
     assert len(occ_attrs) == 1
     assert occ_attrs[0].value == "p4811" or occ_attrs[0].value == "kirjailijat"
-

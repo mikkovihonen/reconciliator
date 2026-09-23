@@ -20,7 +20,7 @@ from rdflib import Graph, URIRef
 from reconciliator.cli import reconcile_cmd, reset_cmd
 from reconciliator.clustering import CorpusClusterer
 from reconciliator.config import AppConfig
-from reconciliator.reconciliation import WorkMatcher
+from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     ExpressionEntity,
     IdentifierEntity,
@@ -28,6 +28,7 @@ from reconciliator.models import (
     MatchRecord,
     WorkEntity,
 )
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.reports import (
     EXPRESSION_TSV_COLUMNS,
     WORK_TSV_COLUMNS,
@@ -35,7 +36,6 @@ from reconciliator.reports import (
     ReportGenerator,
     WorkReportRow,
 )
-from reconciliator.database import WEMIRepository
 from reconciliator.xml_enricher import MARCXMLEnricher
 from tests.conftest import persist_match_records
 

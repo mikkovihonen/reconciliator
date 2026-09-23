@@ -100,7 +100,9 @@ class BrunoCollectionGenerator:
     ) -> str:
         """Construct the plaintext content of a .bru request file with automated assertions."""
         method_lower = method.lower()
-        summary = operation.get("summary") or operation.get("operationId") or f"{method.upper()} {path}"
+        summary = (
+            operation.get("summary") or operation.get("operationId") or f"{method.upper()} {path}"
+        )
         name = summary.replace("\n", " ").strip()
 
         # Parse parameters
@@ -112,7 +114,12 @@ class BrunoCollectionGenerator:
             param_name = param.get("name")
             param_in = param.get("in")
             schema = param.get("schema", {})
-            sample_val = str(schema.get("default", schema.get("example", "1" if schema.get("type") == "integer" else "test")))
+            sample_val = str(
+                schema.get(
+                    "default",
+                    schema.get("example", "1" if schema.get("type") == "integer" else "test"),
+                )
+            )
 
             if param_in == "query":
                 query_params.append((param_name, sample_val))
@@ -219,7 +226,15 @@ class BrunoCollectionGenerator:
 
         for path, methods in sorted(paths.items()):
             for method, operation in methods.items():
-                if method.lower() not in ["get", "post", "put", "delete", "patch", "options", "head"]:
+                if method.lower() not in [
+                    "get",
+                    "post",
+                    "put",
+                    "delete",
+                    "patch",
+                    "options",
+                    "head",
+                ]:
                     continue
                 if not isinstance(operation, dict):
                     continue
@@ -231,7 +246,9 @@ class BrunoCollectionGenerator:
                 seq = tag_sequences[folder_name]
                 tag_sequences[folder_name] += 1
 
-                op_id = operation.get("operationId") or operation.get("summary") or f"{method}_{path}"
+                op_id = (
+                    operation.get("operationId") or operation.get("summary") or f"{method}_{path}"
+                )
                 filename = f"{seq:02d}-{slugify(op_id)}.bru"
                 rel_path = f"{folder_name}/{filename}"
 
@@ -279,4 +296,3 @@ def get_bruno_json(app: FastAPI, config: Optional[BrunoConfig] = None) -> dict[s
     """Convenience helper to extract OpenAPI and return structured JSON representation."""
     generator = BrunoCollectionGenerator(app.openapi(), config=config)
     return generator.generate_json_export()
-

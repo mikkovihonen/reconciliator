@@ -155,7 +155,6 @@ class LoadContext:
     # Normalisation, uniform across formats.
     strip_isbd_punctuation: bool = True
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION
-    relator_mappings: Optional[dict[str, str]] = None
     vocab_store: Optional[Any] = None
     supported_subject_vocabularies: Optional[Iterable[str]] = None
     legacy_to_modern: Optional[dict[str, str]] = None
@@ -377,9 +376,7 @@ class RecordLoader(ABC):
             # another catalogue - and an unfolded heading looks identical to a
             # folded one in the stored row.
             unfolded = [
-                es.raw_label
-                for es in record.entity_subjects
-                if es.concept_id and not es.vocabulary
+                es.raw_label for es in record.entity_subjects if es.concept_id and not es.vocabulary
             ]
             if unfolded:
                 findings.append(

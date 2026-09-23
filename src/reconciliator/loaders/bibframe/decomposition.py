@@ -25,6 +25,7 @@ from reconciliator.config import (
     get_category_default_field_map,
     get_subject_field_category_map,
 )
+from reconciliator.embedding.template import WEMISerializationEngine
 from reconciliator.loaders.bibframe.base import (
     normalize_role_uri_or_label,
 )
@@ -55,10 +56,10 @@ from reconciliator.normalizers.blocking import (
     compute_title_stem,
     compute_work_blocking_key,
 )
-from reconciliator.embedding.template import WEMISerializationEngine
 from reconciliator.utils import to_manifestation_entity_keys
 from reconciliator.vocab import (
     detect_vocabulary,
+    extract_concept_id,
     fold_subjects,
     vocabulary_hint_from_uri,
 )
@@ -187,7 +188,6 @@ def _extract_node_agents(
     node: IdentifiedNode,
     profile: BIBFRAMESchemaProfile,
     source: str = "bibframe",
-    relator_mappings: Optional[dict[str, str]] = None,
 ) -> list[tuple[AgentEntity, str, bool, Optional[str]]]:
     """Extract agents associated with a node.
 
@@ -241,7 +241,6 @@ def _extract_node_agents(
                         role_text,
                         label=role_label,
                         profile=profile,
-                        relator_mappings=relator_mappings,
                     )
                     if norm:
                         role = norm
@@ -603,7 +602,6 @@ def decompose_bibframe_work(
     profile: Optional[BIBFRAMESchemaProfile] = None,
     source: str = "bibframe",
     serialization_engine: Optional[WEMISerializationEngine] = None,
-    relator_mappings: Optional[dict[str, str]] = None,
     supported_subject_vocabularies: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
@@ -953,7 +951,7 @@ def decompose_bibframe_work(
     extracted_agents_with_role: list[tuple[AgentEntity, str]] = []
     for n in nodes_to_scan:
         extracted = _extract_node_agents(
-            g, n, profile, source=source, relator_mappings=relator_mappings
+            g, n, profile, source=source
         )
         for agent_ent, role, is_primary, marc_key in extracted:
             existing = all_agents_map.get(agent_ent.agent_uri)

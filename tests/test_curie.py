@@ -52,11 +52,7 @@ def test_format_wikidata_uri() -> None:
 
 def test_utils_reexports() -> None:
     from reconciliator.utils import (
-        clear_curie_cache,
-        extract_source_identifier,
         extract_wikidata_qid,
-        format_source_uri,
-        format_wikidata_uri,
         parse_curie,
         to_curie,
     )
@@ -64,4 +60,3 @@ def test_utils_reexports() -> None:
     assert to_curie("wikidata", "Q42") == "wikidata:Q42"
     assert parse_curie("wikidata:Q42") == ("wikidata", "Q42")
     assert extract_wikidata_qid("Q42") == "Q42"
-

@@ -7,4 +7,3 @@ __all__ = [
     "MARC21AuthoritySerializer",
     "SKOSAuthoritySerializer",
 ]
-

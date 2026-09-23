@@ -6,20 +6,20 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from reconciliator.database import WEMIRepository
 from reconciliator.indexer import TorchVectorEngine
-from reconciliator.reconciliation import WorkMatcher
 from reconciliator.models import (
     AgentEntity,
+    EntitySubject,
     ExpressionEntity,
     IdentifierEntity,
-    EntitySubject,
     ManifestationEntity,
     ManifestationExpressionAssociation,
     MatchRecord,
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.database import WEMIRepository
+from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import compute_jaccard_overlap, extract_identifiers_from_target
 
 
@@ -257,7 +257,9 @@ def test_work_matcher_monograph_author_title_and_vector_fallback(repo: WEMIRepos
 
     # 2. Vector fallback for uncataloged edition with altered wording
     mock_embedder = MagicMock()
-    mock_embedder.embed_texts.return_value = np.array([[0.99, 0.05, 0.0, 0.0]], dtype=np.float32)
+    vec = np.array([[0.99, 0.05, 0.0, 0.0]], dtype=np.float32)
+    mock_embedder.embed_texts.return_value = vec
+    mock_embedder.encode_target.return_value.dense_vector = vec
     matcher_vec = WorkMatcher(wemi_repo=repo, embedder=mock_embedder)
 
     target_uncataloged = MatchRecord(

@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from reconciliator.api.app import create_app
-from reconciliator.api.bruno import BrunoCollectionGenerator, get_bruno_json, get_bruno_zip
+from reconciliator.api.bruno import BrunoCollectionGenerator
 from reconciliator.config import AppConfig, BrunoConfig
 
 
@@ -113,7 +113,9 @@ def test_bruno_custom_query_params():
     app = create_app()
     client = TestClient(app)
 
-    response = client.get("/api/v1/system/bruno/json?base_url=http://dev.local:9000&include_assertions=false")
+    response = client.get(
+        "/api/v1/system/bruno/json?base_url=http://dev.local:9000&include_assertions=false"
+    )
     assert response.status_code == 200
     data = response.json()
 
@@ -153,4 +155,3 @@ def test_bruno_cli_syntax_validation(tmp_path: Path):
     # The output should NOT report syntax/parsing errors
     assert "SyntaxError" not in res.stderr
     assert "Unable to parse" not in res.stderr
-

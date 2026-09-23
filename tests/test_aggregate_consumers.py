@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     AgentEntity,
     ExpressionEntity,
@@ -26,7 +27,6 @@ from reconciliator.models import (
     WorkEntity,
     WorkRelationship,
 )
-from reconciliator.database import WEMIRepository
 
 SRC = "fono"
 
@@ -261,11 +261,11 @@ def test_constituents_are_reported_from_every_tier(store: WEMIRepository, tmp_pa
 
     from reconciliator.config import ReconcileConfig, RerankConfig
     from reconciliator.constituents import resolve_for_source
+    from reconciliator.embedding.template import WEMISerializationEngine
     from reconciliator.loaders.base import LoadContext
     from reconciliator.loaders.marcxml import build_target_record_from_marc
     from reconciliator.loaders.registry import load_record
     from reconciliator.reconciliation import WorkMatcher
-    from reconciliator.embedding.template import WEMISerializationEngine
 
     anthology = """<record xmlns="http://www.loc.gov/MARC21/slim">
       <leader>00000cam a2200000 i 4500</leader>

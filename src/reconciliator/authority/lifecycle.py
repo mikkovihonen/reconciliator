@@ -112,7 +112,9 @@ class ClusterIdentityManager:
         redirections: list[ClusterRedirection] = []
 
         member_ids = [m["id"] for m in member_agents if "id" in m]
-        member_origins = [str(m.get("source") or m.get("record_origin") or "") for m in member_agents]
+        member_origins = [
+            str(m.get("source") or m.get("record_origin") or "") for m in member_agents
+        ]
         status = self.determine_authority_status(member_origins)
 
         # Detect previous cluster associations of participating members
@@ -263,4 +265,3 @@ class ClusterIdentityManager:
             self.repo.insert_cluster_lifecycle_events_batch(events)
         if redirections:
             self.repo.insert_cluster_redirections_batch(redirections)
-

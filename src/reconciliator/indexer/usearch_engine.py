@@ -124,6 +124,7 @@ class USearchVectorEngine:
         vectors = np.ascontiguousarray(vectors, dtype=np.float32)
         if not np.all(np.isfinite(vectors)):
             import logging
+
             from reconciliator.logging import log_validation
 
             log_validation(

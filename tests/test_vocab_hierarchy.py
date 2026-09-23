@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import pytest
 
-from reconciliator.config import HierarchyConfig, VocabulariesConfig
+from reconciliator.config import HierarchyConfig
 from reconciliator.ingestion.vocab import parse_turtle_simple
 from reconciliator.vocab import ConceptGraph, HierarchyService, VocabStore
 
@@ -102,11 +101,17 @@ def test_path_decay_and_wu_palmer_similarity() -> None:
     # Path decay similarity: decay_factor^distance
     assert graph.compute_path_decay_similarity("viulut", "viulut", decay_factor=0.85) == 1.0
     assert (
-        abs(graph.compute_path_decay_similarity("viulut", "jousisoittimet", decay_factor=0.85) - 0.85)
+        abs(
+            graph.compute_path_decay_similarity("viulut", "jousisoittimet", decay_factor=0.85)
+            - 0.85
+        )
         < 1e-6
     )
     assert (
-        abs(graph.compute_path_decay_similarity("viulut", "alttoviulut", decay_factor=0.85) - (0.85**2))
+        abs(
+            graph.compute_path_decay_similarity("viulut", "alttoviulut", decay_factor=0.85)
+            - (0.85**2)
+        )
         < 1e-6
     )
     assert graph.compute_path_decay_similarity("viulut", "unconnected", decay_factor=0.85) == 0.0
@@ -125,7 +130,11 @@ def test_hierarchy_service_concept_expansion(tmp_path: Path) -> None:
     edges = [
         {"vocabulary": "seko", "concept_id": "s_barokkiviulut", "broader_concept_id": "s_viulut"},
         {"vocabulary": "seko", "concept_id": "s_viulut", "broader_concept_id": "s_jousisoittimet"},
-        {"vocabulary": "seko", "concept_id": "s_jousisoittimet", "broader_concept_id": "s_soittimet"},
+        {
+            "vocabulary": "seko",
+            "concept_id": "s_jousisoittimet",
+            "broader_concept_id": "s_soittimet",
+        },
     ]
     store.insert_hierarchy_batch(edges)
 
@@ -145,7 +154,11 @@ def test_hierarchy_service_concepts_similarity(tmp_path: Path) -> None:
     """Test set similarity evaluation between agent concept footprints."""
     store = VocabStore(tmp_path / "vocab.db")
     edges = [
-        {"vocabulary": "yso", "concept_id": "p_oopperalaulajat", "broader_concept_id": "p_laulajat"},
+        {
+            "vocabulary": "yso",
+            "concept_id": "p_oopperalaulajat",
+            "broader_concept_id": "p_laulajat",
+        },
         {"vocabulary": "yso", "concept_id": "p_laulajat", "broader_concept_id": "p_muusikot"},
         {"vocabulary": "yso", "concept_id": "p_pianistit", "broader_concept_id": "p_muusikot"},
         {"vocabulary": "slm", "concept_id": "s_ooppera", "broader_concept_id": "s_musiikki"},
@@ -156,7 +169,9 @@ def test_hierarchy_service_concepts_similarity(tmp_path: Path) -> None:
     service = HierarchyService(store, config=cfg)
 
     # 1. Exact match in sets -> 1.0
-    assert service.concepts_similarity({"yso:p_laulajat"}, {"yso:p_laulajat", "yso:p_tohtorit"}) == 1.0
+    assert (
+        service.concepts_similarity({"yso:p_laulajat"}, {"yso:p_laulajat", "yso:p_tohtorit"}) == 1.0
+    )
 
     # 2. Parent-child match (oopperalaulajat <-> laulajat, dist 1 -> 0.85)
     sim = service.concepts_similarity({"yso:p_oopperalaulajat"}, {"yso:p_laulajat"})
@@ -221,4 +236,3 @@ def test_store_recursive_cte_broader_and_narrower(tmp_path: Path) -> None:
     # 3. Max depth limit respected
     broader_limited = store.get_broader_concepts("yso", "p3", max_depth=1)
     assert broader_limited == [("p2", 1)]
-

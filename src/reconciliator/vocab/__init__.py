@@ -65,4 +65,3 @@ __all__ = [
     "HierarchyService",
     "ConceptGraph",
 ]
-
