@@ -34,7 +34,7 @@ from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.reconciliation import AgentAligner, ReconciliationResult
 from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 
 # ---------------------------------------------------------------------------
 # 1. Native Diacritic Folding

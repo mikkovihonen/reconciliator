@@ -7,7 +7,7 @@ from lxml import etree
 
 from reconciliator.config import EnrichmentConfig
 from reconciliator.normalizers.relators import RelatorRegistry
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_relator_registry_canonical_and_formats() -> None:

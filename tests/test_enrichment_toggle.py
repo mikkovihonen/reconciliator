@@ -5,7 +5,7 @@ from lxml import etree
 from reconciliator.loaders.marcxml import _get_subfields
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.reconciliation import ReconciliationResult
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_enrichment_mode_injects_novel_only() -> None:
@@ -34,7 +34,7 @@ def test_enrichment_mode_injects_novel_only() -> None:
     )
 
     kanto_uri = "https://urn.fi/URN:NBN:fi:au:pn:000123456"
-    viaf_uri = "http://viaf.org/viaf/111079447"
+    viaf_uri = "https://viaf.org/viaf/111079447"
 
     res = ReconciliationResult(
         target_record=rec,

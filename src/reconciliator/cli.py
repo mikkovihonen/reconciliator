@@ -41,11 +41,14 @@ from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
+from reconciliator.enrichment import (
+    MARCXMLEnricher,
+    enrich_bibframe_graph,
+    enrich_bibframe_jsonld,
+)
 from reconciliator.loaders.bibframe import (
     BIBFRAMESchemaProfile,
     build_target_record_from_bibframe,
-    enrich_bibframe_graph,
-    enrich_bibframe_jsonld,
     get_profile,
     iter_bibframe_records,
     iter_jsonld_bibframe_records,
@@ -96,7 +99,6 @@ from reconciliator.reports import (
 from reconciliator.utils import parse_duration_seconds
 from reconciliator.utils.curie import extract_wikidata_qid
 from reconciliator.vocab import VocabFolder, VocabStore, detect_vocabulary
-from reconciliator.xml_enricher import MARCXMLEnricher
 
 app = typer.Typer(
     help="Reconciliator: High-Performance Finnish Bibliographic Authority Reconciliation Engine"

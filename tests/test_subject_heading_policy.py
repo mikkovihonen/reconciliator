@@ -14,7 +14,7 @@ from lxml import etree
 
 from reconciliator.config import VocabulariesConfig
 from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC_NS = "http://www.loc.gov/MARC21/slim"

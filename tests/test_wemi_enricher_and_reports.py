@@ -13,7 +13,8 @@ from lxml import etree
 from rdflib import RDF, Graph, IdentifiedNode, URIRef
 
 from reconciliator.config import AppConfig, EnrichmentConfig
-from reconciliator.loaders.bibframe.enricher import (
+from reconciliator.enrichment import (
+    MARCXMLEnricher,
     enrich_bibframe_graph,
     enrich_bibframe_jsonld,
 )
@@ -30,7 +31,6 @@ from reconciliator.reports import (
     ReportGenerator,
     WorkReportRow,
 )
-from reconciliator.xml_enricher import MARCXMLEnricher
 
 OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")
 BF_INSTANCE_OF = URIRef("http://id.loc.gov/ontologies/bibframe/instanceOf")

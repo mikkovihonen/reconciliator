@@ -144,12 +144,12 @@ After macro-clustering completes:
 
 Enrichment translates resolved constituent authority URIs back into native source formats:
 
-### 5.1 MARCXML Enrichment ([`MARCXMLEnricher`](../src/reconciliator/xml_enricher.py))
+### 5.1 MARCXML Enrichment ([`MARCXMLEnricher`](../src/reconciliator/enrichment/marcxml.py))
 - Reads `corpus_constituent_linkages` by `record_id`.
 - Locates matching `730`, `700`, or `740` analytical fields by title matching.
 - Injects `$0 <final_work_uri>` directly into the matched field.
 
-### 5.2 BFFI RDF Enrichment ([`enrich_bibframe_graph`](../src/reconciliator/loaders/bibframe/enricher.py))
+### 5.2 BFFI RDF Enrichment ([`enrich_bibframe_graph`](../src/reconciliator/enrichment/bibframe.py))
 - Resolves dialect title predicates (`p.expanded_title_predicates` and `p.expanded_main_title_predicates`).
 - Matches constituent nodes under `bffi:hasPart` / `bf:hasPart`.
 - Injects `(part_node, owl:sameAs, final_work_uri)`.

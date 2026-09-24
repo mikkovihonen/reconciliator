@@ -8,8 +8,7 @@ import pytest
 from lxml import etree
 from rdflib import Graph, Literal, Namespace, RDF, URIRef
 
-from reconciliator.xml_enricher import MARCXMLEnricher
-from reconciliator.loaders.bibframe.enricher import enrich_bibframe_graph
+from reconciliator.enrichment import MARCXMLEnricher, enrich_bibframe_graph
 from reconciliator.loaders.bibframe.profiles import get_profile
 from reconciliator.models import CorpusConstituentLinkage, CorpusLinkage
 
@@ -49,7 +48,7 @@ def test_marcxml_constituent_enrichment():
             constituent_work_id="cw_1",
             title="Laula, tyttö!",
             field_tag="730",
-            final_work_uri="http://urn.fi/URN:NBN:fi:au:pn:song1",
+            final_work_uri="https://urn.fi/URN:NBN:fi:au:pn:song1",
         ),
         CorpusConstituentLinkage(
             id=2,
@@ -58,7 +57,7 @@ def test_marcxml_constituent_enrichment():
             constituent_work_id="cw_2",
             title="Oi muistatko vielä sen virren",
             field_tag="700",
-            final_work_uri="http://urn.fi/URN:NBN:fi:au:pn:song2",
+            final_work_uri="https://urn.fi/URN:NBN:fi:au:pn:song2",
         ),
     ]
 
@@ -75,7 +74,7 @@ def test_marcxml_constituent_enrichment():
         f730 = tree.find(".//datafield[@tag='730']")
     assert f730 is not None
     sf0_730 = [sf.text for sf in f730.findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='0']") or f730.findall(".//subfield[@code='0']")]
-    assert "http://urn.fi/URN:NBN:fi:au:pn:song1" in sf0_730
+    assert "https://urn.fi/URN:NBN:fi:au:pn:song1" in sf0_730
 
     # Verify 700 has $0
     f700 = tree.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='700']")
@@ -83,7 +82,7 @@ def test_marcxml_constituent_enrichment():
         f700 = tree.find(".//datafield[@tag='700']")
     assert f700 is not None
     sf0_700 = [sf.text for sf in f700.findall(".//{http://www.loc.gov/MARC21/slim}subfield[@code='0']") or f700.findall(".//subfield[@code='0']")]
-    assert "http://urn.fi/URN:NBN:fi:au:pn:song2" in sf0_700
+    assert "https://urn.fi/URN:NBN:fi:au:pn:song2" in sf0_700
 
 
 def test_bffi_rdf_constituent_enrichment_without_bflc():

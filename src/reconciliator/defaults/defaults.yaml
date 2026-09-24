@@ -1612,7 +1612,22 @@ sources:
     uri_patterns:
       - "^http://id\\.loc\\.gov/vocabulary/relators/"
     canonical_uri_template: "http://id.loc.gov/vocabulary/relators/{identifier}"
-    tag_prefixes: ["relator", "marcrelator"]
+    tag_prefixes: ["relator", "marcrelator", "loc-relators"]
+  loc-countries:
+    uri_patterns:
+      - "^http://id\\.loc\\.gov/vocabulary/countries/"
+    canonical_uri_template: "http://id.loc.gov/vocabulary/countries/{identifier}"
+    tag_prefixes: ["countries", "loc-countries"]
+  loc-languages:
+    uri_patterns:
+      - "^http://id\\.loc\\.gov/vocabulary/languages/"
+    canonical_uri_template: "http://id.loc.gov/vocabulary/languages/{identifier}"
+    tag_prefixes: ["languages", "loc-languages"]
+  loc-issuance:
+    uri_patterns:
+      - "^http://id\\.loc\\.gov/vocabulary/issuance/"
+    canonical_uri_template: "http://id.loc.gov/vocabulary/issuance/{identifier}"
+    tag_prefixes: ["issuance", "loc-issuance"]
   bnf:
     uri_patterns:
       - "^https?://data\\.bnf\\.fr/ark:/12148/cb"
@@ -1623,4 +1638,5 @@ sources:
       - "^https?://d-nb\\.info/gnd/"
     canonical_uri_template: "https://d-nb.info/gnd/{identifier}"
     tag_prefixes: ["gnd"]
+
 

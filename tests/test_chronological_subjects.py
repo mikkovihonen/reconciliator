@@ -14,7 +14,7 @@ from reconciliator.models import (
 )
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.vocab import VocabFolder, VocabStore
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_subjects_container_helpers() -> None:

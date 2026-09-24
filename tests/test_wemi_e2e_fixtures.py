@@ -36,7 +36,7 @@ from reconciliator.reports import (
     ReportGenerator,
     WorkReportRow,
 )
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 from tests.conftest import persist_match_records
 
 OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")

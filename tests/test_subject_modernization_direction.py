@@ -5,7 +5,7 @@ from lxml import etree
 from reconciliator.ingestion.vocab import parse_turtle_simple
 from reconciliator.models import BibliographicRecord, ConceptMapping, VocabConcept
 from reconciliator.vocab import VocabFolder, VocabStore
-from reconciliator.xml_enricher import MARCXMLEnricher
+from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_parse_turtle_simple_inverts_legacy_thesaurus_mappings(tmp_path) -> None:

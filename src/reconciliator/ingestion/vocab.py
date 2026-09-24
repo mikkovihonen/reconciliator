@@ -267,6 +267,8 @@ def ingest_bridge_files(
             target_uri = b["target_uri"]
             from reconciliator.utils.curie import parse_curie
 
+            s_src, _ = parse_curie(source_uri)
+            legacy_v = s_src if s_src and s_src != "unknown" else stem.removesuffix("-bridge")
             t_src, _ = parse_curie(target_uri)
             target_v = t_src if t_src and t_src != "unknown" else default_topical_vocab
 
@@ -278,7 +280,7 @@ def ingest_bridge_files(
             total_bridge_mappings.append(
                 ConceptMapping(
                     legacy_uri=source_uri,
-                    legacy_vocab=stem,
+                    legacy_vocab=legacy_v,
                     legacy_labels=legacy_labels,
                     target_uri=target_uri,
                     target_vocab=target_v,
