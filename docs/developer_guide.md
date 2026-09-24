@@ -287,7 +287,7 @@ The native Rust components target hot loops where Python interpreter overhead, r
 ### 6.2 Working with the LLM Judge & Reranking Architecture
 
 When working with or extending the candidate evaluation and reranking pipeline (`src/reconciliator/rerank/` and `src/reconciliator/judge/`):
-- **Consult the Architectural Specifications**: Review [`docs/two_stage_llm_judge_architecture.md`](two_stage_llm_judge_architecture.md) and [`docs/cascading_dual_route_reranker_architecture.md`](cascading_dual_route_reranker_architecture.md).
+- **Consult the Architectural Specifications**: Review [`docs/two_stage_llm_judge_architecture.md`](two_stage_llm_judge_architecture.md) (which details the unified two-stage resolution pipeline, target-record micro-batching, and KV-branching judge) and [`docs/cascading_dual_route_reranker_architecture.md`](cascading_dual_route_reranker_architecture.md).
 - **1D Dense Vectors vs. KV Cache Suffixes**:
   - The **1D dense vectors** stored in the database index (FAISS/USearch) are used *only* for coarse vector retrieval in Stage 1.
   - The **LLM judge** evaluates candidates via text tokens appended to the frozen target prompt KV cache.
@@ -304,4 +304,5 @@ Before submitting a Pull Request:
 - [ ] `pytest tests/test_rust_core.py tests/test_normalizers.py` passes.
 - [ ] `ruff check` and `ruff format --check` pass on modified Python files.
 - [ ] Any new PyO3 functions or classes have matching signatures in `src/reconciliator/_core.pyi`.
+
 

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import time
+from itertools import islice
 from pathlib import Path
 from typing import IO, Any, Iterator, Optional
 
@@ -34,6 +36,11 @@ from reconciliator.database import (
     start_postgres_container,
     stop_postgres_container,
 )
+from reconciliator.enrichment import (
+    MARCXMLEnricher,
+    enrich_bibframe_graph,
+    enrich_bibframe_jsonld,
+)
 from reconciliator.indexer.ipc.client import DaemonLifecycleManager
 from reconciliator.indexer.ipc.protocol import get_default_socket_path
 from reconciliator.ingestion.oai import ingest_oai_pipeline
@@ -41,11 +48,6 @@ from reconciliator.ingestion.sanitizer import sanitize_batch_payload
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file
 from reconciliator.ingestion.wikidata import ingest_wikidata_pipeline
-from reconciliator.enrichment import (
-    MARCXMLEnricher,
-    enrich_bibframe_graph,
-    enrich_bibframe_jsonld,
-)
 from reconciliator.loaders.bibframe import (
     BIBFRAMESchemaProfile,
     build_target_record_from_bibframe,
@@ -1549,7 +1551,7 @@ def reconcile_cmd(
                     legacy_to_modern=getattr(vocab_cfg, "legacy_to_modern", None),
                     vocab_store=vocab_store,
                 )
-                yield "marcxml", r_elem, raw_rec_item, b_offset
+                yield "marcxml", copy.deepcopy(r_elem), raw_rec_item, b_offset
 
     linkage_map: dict[str, CorpusLinkage] = {}
     work_cluster_map: dict[str, WorkCluster] = {}
@@ -1596,306 +1598,370 @@ def reconcile_cmd(
             for mc in corpus_repo.get_all_manifestation_clusters():
                 manifestation_cluster_map[mc.cluster_id] = mc
 
+    target_const_prof = None
+    if r_cfg.constituents and r_cfg.constituents.mode != "off":
+        from reconciliator.constituents import get_constituent_profile
+
+        try:
+            if bf_profile and bf_profile.name == "bffi_1":
+                target_const_prof = get_constituent_profile(
+                    r_cfg.constituents.bffi_profile or "bffi_haspart"
+                )
+            else:
+                target_const_prof = get_constituent_profile(
+                    r_cfg.constituents.bibframe_profile or "bibframe_haspart"
+                )
+        except Exception:
+            pass
+
+    reconcile_batch_size = max(1, getattr(r_cfg, "batch_size", 32))
+
+    def _chunked_iter(iterable: Iterator[Any], size: int) -> Iterator[list[Any]]:
+        it = iter(iterable)
+        while True:
+            chunk = list(islice(it, size))
+            if not chunk:
+                break
+            yield chunk
+
     total_records = 0
     try:
-        for rec_fmt, orig_payload, raw_rec, byte_offset in _iter_records():
-            total_records += 1
-            target_record = normalizer.normalize(raw_rec)
+        for batch in _chunked_iter(_iter_records(), reconcile_batch_size):
+            batch_items = []
+            wemi_targets = []
+            for rec_fmt, orig_payload, raw_rec, byte_offset in batch:
+                target_record = normalizer.normalize(raw_rec)
+                target_wemi = _to_target_record(
+                    rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
+                )
+                batch_items.append((rec_fmt, orig_payload, raw_rec, byte_offset, target_record, target_wemi))
+                wemi_targets.append(target_wemi)
 
-            target_const_prof = None
-            if r_cfg.constituents and r_cfg.constituents.mode != "off":
-                from reconciliator.constituents import get_constituent_profile
+            wemi_results = work_matcher.match_targets_batch(wemi_targets)
 
-                try:
-                    if bf_profile and bf_profile.name == "bffi_1":
-                        target_const_prof = get_constituent_profile(
-                            r_cfg.constituents.bffi_profile or "bffi_haspart"
+            for (
+                rec_fmt,
+                orig_payload,
+                raw_rec,
+                byte_offset,
+                target_record,
+                target_wemi,
+            ), wemi_res in zip(batch_items, wemi_results):
+                total_records += 1
+                res = work_matcher.resolve_agents(wemi_res, target_record)
+                if res.accepted_candidates:
+                    reporter.matched_records += 1
+
+                # Record agent report rows
+                best_match = res.matches[0] if res.matches else None
+                match_tier = best_match.match_tier if best_match else "unmatched"
+                match_score = best_match.match_score if best_match else 0.0
+                dense_score = best_match.dense_score if best_match else None
+                rerank_score = best_match.rerank_score if best_match else None
+
+                for idx, agent in enumerate(target_record.agents):
+                    selected = res.selected_agent_uris.get(idx, [])
+                    suppressed = res.suppressed_agent_uris.get(idx, [])
+                    existing = set(agent.uri_subfield_0 + agent.uri_subfield_1)
+                    discovered_map = {u.uri: u for u in res.discovered_agent_uris.get(idx, [])}
+
+                    # Field tag determination: use recorded field_tag, or fallback by is_personal / position
+                    field_tag = agent.field_tag
+                    if not field_tag:
+                        if agent.is_personal:
+                            field_tag = "100" if idx == 0 else "700"
+                        else:
+                            field_tag = "110" if idx == 0 else "710"
+
+                    for uri in selected:
+                        is_novel = uri not in existing
+                        action = (
+                            "injected"
+                            if (r_cfg.enrich and is_novel)
+                            else ("existing" if not is_novel else "proposed")
                         )
-                    else:
-                        target_const_prof = get_constituent_profile(
-                            r_cfg.constituents.bibframe_profile or "bibframe_haspart"
+                        reporter.add_agent_row(
+                            _make_agent_report_row(
+                                target_record,
+                                agent,
+                                field_tag,
+                                idx + 1,
+                                uri=uri,
+                                action=action,
+                                is_novel=is_novel,
+                                discovered_map=discovered_map,
+                                accepted_candidates=res.accepted_candidates,
+                                match_tier=match_tier,
+                                match_score=match_score,
+                                dense_score=dense_score,
+                                rerank_score=rerank_score,
+                            )
                         )
-                except Exception:
-                    pass
 
-            target_wemi = _to_target_record(
-                rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
-            )
-            wemi_res = work_matcher.match_target(target_wemi)
+                    for uri in suppressed:
+                        reporter.add_agent_row(
+                            _make_agent_report_row(
+                                target_record,
+                                agent,
+                                field_tag,
+                                idx + 1,
+                                uri=uri,
+                                action="suppressed_by_priority",
+                                is_novel=True,
+                                discovered_map=discovered_map,
+                                accepted_candidates=res.accepted_candidates,
+                                match_tier=match_tier,
+                                match_score=match_score,
+                                dense_score=dense_score,
+                                rerank_score=rerank_score,
+                            )
+                        )
 
-            res = work_matcher.resolve_agents(wemi_res, target_record)
-            if res.accepted_candidates:
-                reporter.matched_records += 1
+                    # An agent with no candidate URI is left untouched in the record,
+                    # but must still appear in the report: without a row there is no
+                    # way to tell an agent that failed to link from one never seen,
+                    # and no way to measure link coverage over a corpus.
+                    if not selected and not suppressed:
+                        reporter.add_agent_row(
+                            _make_agent_report_row(
+                                target_record,
+                                agent,
+                                field_tag,
+                                idx + 1,
+                                action="unmatched",
+                                is_novel=False,
+                                match_tier=match_tier,
+                                match_score=match_score,
+                                dense_score=dense_score,
+                                rerank_score=rerank_score,
+                            )
+                        )
 
-            # Record agent report rows
-            best_match = res.matches[0] if res.matches else None
-            match_tier = best_match.match_tier if best_match else "unmatched"
-            match_score = best_match.match_score if best_match else 0.0
-            dense_score = best_match.dense_score if best_match else None
-            rerank_score = best_match.rerank_score if best_match else None
+                # Record subject report rows
+                all_subjects = target_record.subjects.all_items()
+                for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
+                    s_tag = sub_item.source_field or default_tag
+                    t_tag = sub_item.target_field or default_tag
+                    s_vocab = sub_item.source_vocab or ""
+                    s_uri = sub_item.source_uri or ""
+                    t_vocab = sub_item.vocabulary or ""
+                    t_uri = sub_item.uri or ""
+                    s_heading = sub_item.source_heading or sub_item.pref_label
+                    m_type = sub_item.mapping_type or "pref_label_lookup"
+                    tag_changed = s_tag != t_tag
 
-            for idx, agent in enumerate(target_record.agents):
-                selected = res.selected_agent_uris.get(idx, [])
-                suppressed = res.suppressed_agent_uris.get(idx, [])
-                existing = set(agent.uri_subfield_0 + agent.uri_subfield_1)
-                discovered_map = {u.uri: u for u in res.discovered_agent_uris.get(idx, [])}
-
-                # Field tag determination: use recorded field_tag, or fallback by is_personal / position
-                field_tag = agent.field_tag
-                if not field_tag:
-                    if agent.is_personal:
-                        field_tag = "100" if idx == 0 else "700"
+                    if not t_uri:
+                        action = "unmapped"
+                        is_novel = False
+                    elif s_uri and s_uri == t_uri:
+                        action = "existing"
+                        is_novel = False
+                    elif r_cfg.enrich:
+                        action = "injected"
+                        is_novel = True
                     else:
-                        field_tag = "110" if idx == 0 else "710"
+                        action = "proposed"
+                        is_novel = True
 
-                for uri in selected:
-                    is_novel = uri not in existing
-                    action = (
-                        "injected"
-                        if (r_cfg.enrich and is_novel)
-                        else ("existing" if not is_novel else "proposed")
-                    )
-                    reporter.add_agent_row(
-                        _make_agent_report_row(
-                            target_record,
-                            agent,
-                            field_tag,
-                            idx + 1,
-                            uri=uri,
+                    reporter.add_subject_row(
+                        SubjectReportRow(
+                            target_record_id=target_record.source_id,
+                            target_title=target_record.title,
+                            source_field_tag=s_tag,
+                            field_occurrence=s_idx + 1,
+                            source_heading=s_heading,
+                            source_vocab=s_vocab,
+                            source_uri=s_uri,
+                            language=target_record.language or cfg.linguistic.default_language,
+                            target_field_tag=t_tag,
+                            target_vocab=t_vocab,
+                            target_uri=t_uri,
+                            target_pref_label=sub_item.pref_label,
+                            mapping_type=m_type,
                             action=action,
                             is_novel=is_novel,
-                            discovered_map=discovered_map,
-                            accepted_candidates=res.accepted_candidates,
-                            match_tier=match_tier,
-                            match_score=match_score,
-                            dense_score=dense_score,
-                            rerank_score=rerank_score,
+                            tag_changed=tag_changed,
                         )
                     )
 
-                for uri in suppressed:
-                    reporter.add_agent_row(
-                        _make_agent_report_row(
-                            target_record,
-                            agent,
-                            field_tag,
-                            idx + 1,
-                            uri=uri,
-                            action="suppressed_by_priority",
-                            is_novel=True,
-                            discovered_map=discovered_map,
-                            accepted_candidates=res.accepted_candidates,
-                            match_tier=match_tier,
-                            match_score=match_score,
-                            dense_score=dense_score,
-                            rerank_score=rerank_score,
-                        )
-                    )
-
-                # An agent with no candidate URI is left untouched in the record,
-                # but must still appear in the report: without a row there is no
-                # way to tell an agent that failed to link from one never seen,
-                # and no way to measure link coverage over a corpus.
-                if not selected and not suppressed:
-                    reporter.add_agent_row(
-                        _make_agent_report_row(
-                            target_record,
-                            agent,
-                            field_tag,
-                            idx + 1,
-                            action="unmatched",
-                            is_novel=False,
-                            match_tier=match_tier,
-                            match_score=match_score,
-                            dense_score=dense_score,
-                            rerank_score=rerank_score,
-                        )
-                    )
-
-            # Record subject report rows
-            all_subjects = target_record.subjects.all_items()
-            for s_idx, (default_tag, sub_item) in enumerate(all_subjects):
-                s_tag = sub_item.source_field or default_tag
-                t_tag = sub_item.target_field or default_tag
-                s_vocab = sub_item.source_vocab or ""
-                s_uri = sub_item.source_uri or ""
-                t_vocab = sub_item.vocabulary or ""
-                t_uri = sub_item.uri or ""
-                s_heading = sub_item.source_heading or sub_item.pref_label
-                m_type = sub_item.mapping_type or "pref_label_lookup"
-                tag_changed = s_tag != t_tag
-
-                if not t_uri:
-                    action = "unmapped"
-                    is_novel = False
-                elif s_uri and s_uri == t_uri:
-                    action = "existing"
-                    is_novel = False
-                elif r_cfg.enrich:
-                    action = "injected"
-                    is_novel = True
-                else:
-                    action = "proposed"
-                    is_novel = True
-
-                reporter.add_subject_row(
-                    SubjectReportRow(
-                        target_record_id=target_record.source_id,
-                        target_title=target_record.title,
-                        source_field_tag=s_tag,
-                        field_occurrence=s_idx + 1,
-                        source_heading=s_heading,
-                        source_vocab=s_vocab,
-                        source_uri=s_uri,
-                        language=target_record.language or cfg.linguistic.default_language,
-                        target_field_tag=t_tag,
-                        target_vocab=t_vocab,
-                        target_uri=t_uri,
-                        target_pref_label=sub_item.pref_label,
-                        mapping_type=m_type,
-                        action=action,
-                        is_novel=is_novel,
-                        tag_changed=tag_changed,
-                    )
+                # Modern WEMI resolution and reporting, from the single match above.
+                linkage = linkage_map.get(target_wemi.record_id)
+                w_cluster = work_cluster_map.get(linkage.work_cluster_id) if linkage else None
+                e_cluster = (
+                    expression_cluster_map.get(linkage.expression_cluster_id) if linkage else None
+                )
+                m_cluster = (
+                    manifestation_cluster_map.get(linkage.manifestation_cluster_id) if linkage else None
                 )
 
-            # Modern WEMI resolution and reporting, from the single match above.
-            linkage = linkage_map.get(target_wemi.record_id)
-            w_cluster = work_cluster_map.get(linkage.work_cluster_id) if linkage else None
-            e_cluster = (
-                expression_cluster_map.get(linkage.expression_cluster_id) if linkage else None
-            )
-            m_cluster = (
-                manifestation_cluster_map.get(linkage.manifestation_cluster_id) if linkage else None
-            )
+                # Add WorkReportRow
+                is_clustered = linkage is not None and linkage.work_cluster_id is not None
 
-            # Add WorkReportRow
-            is_clustered = linkage is not None and linkage.work_cluster_id is not None
-
-            # Precedence must match the enricher's, which lets the work cluster's
-            # canonical URI win: every member of a work cluster has to carry the
-            # same work URI, and the report has to state the URI actually written.
-            # Sibling records can match different authority sources, so the
-            # record's own resolution is kept alongside as provenance.
-            record_level_w_uri = wemi_res.work_uri if wemi_res else None
-            matched_w_uri = (
-                (w_cluster.canonical_work_uri if w_cluster else None)
-                or (linkage.final_work_uri if linkage else None)
-                or record_level_w_uri
-            )
-            qid = None
-            if wemi_res and wemi_res.matched_work and wemi_res.matched_work.source == "wikidata":
-                qid = wemi_res.matched_work.source_id
-            if not qid and matched_w_uri:
-                qid = extract_wikidata_qid(matched_w_uri)
-            w_action = (
-                "injected"
-                if (r_cfg.enrich and matched_w_uri)
-                else ("proposed" if matched_w_uri else "unmatched")
-            )
-            if is_clustered and not (wemi_res and wemi_res.matched_work):
+                # Precedence must match the enricher's, which lets the work cluster's
+                # canonical URI win: every member of a work cluster has to carry the
+                # same work URI, and the report has to state the URI actually written.
+                # Sibling records can match different authority sources, so the
+                # record's own resolution is kept alongside as provenance.
+                record_level_w_uri = wemi_res.work_uri if wemi_res else None
+                matched_w_uri = (
+                    (w_cluster.canonical_work_uri if w_cluster else None)
+                    or (linkage.final_work_uri if linkage else None)
+                    or record_level_w_uri
+                )
+                qid = None
+                if wemi_res and wemi_res.matched_work and wemi_res.matched_work.source == "wikidata":
+                    qid = wemi_res.matched_work.source_id
+                if not qid and matched_w_uri:
+                    qid = extract_wikidata_qid(matched_w_uri)
                 w_action = (
-                    "hoisted"
-                    if (
-                        w_cluster
-                        and w_cluster.canonical_work_uri
-                        and not w_cluster.canonical_work_uri.startswith("urn:reconciliator:")
+                    "injected"
+                    if (r_cfg.enrich and matched_w_uri)
+                    else ("proposed" if matched_w_uri else "unmatched")
+                )
+                if is_clustered and not (wemi_res and wemi_res.matched_work):
+                    w_action = (
+                        "hoisted"
+                        if (
+                            w_cluster
+                            and w_cluster.canonical_work_uri
+                            and not w_cluster.canonical_work_uri.startswith("urn:reconciliator:")
+                        )
+                        else "minted"
                     )
-                    else "minted"
-                )
 
-            reporter.add_work_row(
-                WorkReportRow(
-                    target_record_id=target_wemi.record_id,
-                    work_type=target_wemi.work_type,
-                    target_title=target_wemi.title,
-                    target_author=target_wemi.author_key,
-                    target_year=target_wemi.year,
-                    work_blocking_key=target_wemi.work_blocking_key,
-                    matched_work_uri=matched_w_uri,
-                    wikidata_qid=qid,
-                    match_tier=wemi_res.match_tier if wemi_res else "unmatched",
-                    funnel_used=wemi_res.funnel_used if wemi_res else "none",
-                    confidence_score=wemi_res.confidence_score if wemi_res else 0.0,
-                    is_clustered=is_clustered,
-                    cluster_id=linkage.work_cluster_id if linkage else None,
-                    action=w_action,
-                    record_level_work_uri=record_level_w_uri,
-                )
-            )
-
-            # Add ExpressionReportRow
-            matched_e_uri = (
-                (wemi_res.expression_uri if wemi_res else None)
-                or (linkage.final_expression_uri if linkage else None)
-                or (e_cluster.canonical_expression_uri if e_cluster else None)
-            )
-            e_action = (
-                "injected"
-                if (r_cfg.enrich and matched_e_uri)
-                else ("proposed" if matched_e_uri else "unmatched")
-            )
-            e_content_type = (
-                (
-                    wemi_res.matched_expression.content_type
-                    if (wemi_res and wemi_res.matched_expression)
-                    else None
-                )
-                or (e_cluster.content_type if e_cluster else None)
-                or "text"
-            )
-            e_lang = (
-                (
-                    wemi_res.matched_expression.language
-                    if (
-                        wemi_res
-                        and wemi_res.matched_expression
-                        and wemi_res.matched_expression.language
+                reporter.add_work_row(
+                    WorkReportRow(
+                        target_record_id=target_wemi.record_id,
+                        work_type=target_wemi.work_type,
+                        target_title=target_wemi.title,
+                        target_author=target_wemi.author_key,
+                        target_year=target_wemi.year,
+                        work_blocking_key=target_wemi.work_blocking_key,
+                        matched_work_uri=matched_w_uri,
+                        wikidata_qid=qid,
+                        match_tier=wemi_res.match_tier if wemi_res else "unmatched",
+                        funnel_used=wemi_res.funnel_used if wemi_res else "none",
+                        confidence_score=wemi_res.confidence_score if wemi_res else 0.0,
+                        is_clustered=is_clustered,
+                        cluster_id=linkage.work_cluster_id if linkage else None,
+                        action=w_action,
+                        record_level_work_uri=record_level_w_uri,
                     )
-                    else None
                 )
-                or (e_cluster.language if e_cluster else None)
-                or target_wemi.language
-                or "und"
-            )
-            e_version = (
-                (
-                    wemi_res.matched_expression.version_designation
-                    if (wemi_res and wemi_res.matched_expression)
-                    else None
-                )
-                or (e_cluster.version_designation if e_cluster else None)
-                or target_wemi.volume_designation
-            )
 
-            reporter.add_expression_row(
-                ExpressionReportRow(
-                    target_record_id=target_wemi.record_id,
-                    work_uri=matched_w_uri,
-                    expression_uri=matched_e_uri,
-                    content_type=e_content_type,
-                    language=e_lang,
-                    version_designation=e_version,
-                    translators=None,
-                    performers=None,
-                    match_tier=wemi_res.match_tier if wemi_res else "unmatched",
-                    confidence_score=wemi_res.confidence_score if wemi_res else 0.0,
-                    cluster_id=linkage.expression_cluster_id if linkage else None,
-                    action=e_action,
+                # Add ExpressionReportRow
+                matched_e_uri = (
+                    (wemi_res.expression_uri if wemi_res else None)
+                    or (linkage.final_expression_uri if linkage else None)
+                    or (e_cluster.canonical_expression_uri if e_cluster else None)
                 )
-            )
-
-            # Mutate / serialize and stream write if output_file requested
-            if out_f is not None:
-                if rec_fmt == "bibra":
-                    enriched_json = enrich_bibra_json(
-                        orig_payload, res, target_record=target_record
+                e_action = (
+                    "injected"
+                    if (r_cfg.enrich and matched_e_uri)
+                    else ("proposed" if matched_e_uri else "unmatched")
+                )
+                e_content_type = (
+                    (
+                        wemi_res.matched_expression.content_type
+                        if (wemi_res and wemi_res.matched_expression)
+                        else None
                     )
-                    out_f.write(json.dumps(enriched_json, ensure_ascii=False).encode("utf-8"))
-                    out_f.write(b"\n")
-                elif rec_fmt == "bibframe_jsonld":
-                    enriched_doc = enrich_bibframe_jsonld(
-                        orig_payload,
+                    or (e_cluster.content_type if e_cluster else None)
+                    or "text"
+                )
+                e_lang = (
+                    (
+                        wemi_res.matched_expression.language
+                        if (
+                            wemi_res
+                            and wemi_res.matched_expression
+                            and wemi_res.matched_expression.language
+                        )
+                        else None
+                    )
+                    or (e_cluster.language if e_cluster else None)
+                    or target_wemi.language
+                    or "und"
+                )
+                e_version = (
+                    (
+                        wemi_res.matched_expression.version_designation
+                        if (wemi_res and wemi_res.matched_expression)
+                        else None
+                    )
+                    or (e_cluster.version_designation if e_cluster else None)
+                    or target_wemi.volume_designation
+                )
+
+                reporter.add_expression_row(
+                    ExpressionReportRow(
+                        target_record_id=target_wemi.record_id,
+                        work_uri=matched_w_uri,
+                        expression_uri=matched_e_uri,
+                        content_type=e_content_type,
+                        language=e_lang,
+                        version_designation=e_version,
+                        translators=None,
+                        performers=None,
+                        match_tier=wemi_res.match_tier if wemi_res else "unmatched",
+                        confidence_score=wemi_res.confidence_score if wemi_res else 0.0,
+                        cluster_id=linkage.expression_cluster_id if linkage else None,
+                        action=e_action,
+                    )
+                )
+
+                # Mutate / serialize and stream write if output_file requested
+                if out_f is not None:
+                    if rec_fmt == "bibra":
+                        enriched_json = enrich_bibra_json(
+                            orig_payload, res, target_record=target_record
+                        )
+                        out_f.write(json.dumps(enriched_json, ensure_ascii=False).encode("utf-8"))
+                        out_f.write(b"\n")
+                    elif rec_fmt == "bibframe_jsonld":
+                        enriched_doc = enrich_bibframe_jsonld(
+                            orig_payload,
+                            res,
+                            profile=bf_profile,
+                            target_record=target_record,
+                            enrich=r_cfg.enrich,
+                            fold_legacy=r_cfg.fold_legacy,
+                            wemi_result=wemi_res,
+                            linkage=linkage,
+                            work_cluster=w_cluster,
+                            expression_cluster=e_cluster,
+                            manifestation_cluster=m_cluster,
+                            enrichment_config=r_cfg.enrichment,
+                        )
+                        out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
+                        out_f.write(b"\n")
+                    elif rec_fmt == "marcxml":
+                        sibs = (
+                            corpus_repo.get_sibling_manifestation_record_ids(target_wemi.record_id)
+                            if is_clustered and corpus_repo
+                            else []
+                        )
+                        enricher.enrich_record_tree(
+                            orig_payload,
+                            res,
+                            enrich=r_cfg.enrich,
+                            fold_legacy=r_cfg.fold_legacy,
+                            wemi_result=wemi_res,
+                            linkage=linkage,
+                            work_cluster=w_cluster,
+                            expression_cluster=e_cluster,
+                            manifestation_cluster=m_cluster,
+                            target_record=target_wemi,
+                            enrichment_config=r_cfg.enrichment,
+                            sibling_ids=sibs,
+                        )
+                        out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
+                        out_f.write(b"\n")
+                elif rec_fmt == "bibframe_rdf":
+                    g, nodes = orig_payload
+                    enrich_bibframe_graph(
+                        g,
+                        nodes,
                         res,
                         profile=bf_profile,
                         target_record=target_record,
@@ -1908,52 +1974,11 @@ def reconcile_cmd(
                         manifestation_cluster=m_cluster,
                         enrichment_config=r_cfg.enrichment,
                     )
-                    out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
-                    out_f.write(b"\n")
-                elif rec_fmt == "marcxml":
-                    sibs = (
-                        corpus_repo.get_sibling_manifestation_record_ids(target_wemi.record_id)
-                        if is_clustered and corpus_repo
-                        else []
-                    )
-                    enricher.enrich_record_tree(
-                        orig_payload,
-                        res,
-                        enrich=r_cfg.enrich,
-                        fold_legacy=r_cfg.fold_legacy,
-                        wemi_result=wemi_res,
-                        linkage=linkage,
-                        work_cluster=w_cluster,
-                        expression_cluster=e_cluster,
-                        manifestation_cluster=m_cluster,
-                        target_record=target_wemi,
-                        enrichment_config=r_cfg.enrichment,
-                        sibling_ids=sibs,
-                    )
-                    out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
-                    out_f.write(b"\n")
-            elif rec_fmt == "bibframe_rdf":
-                g, nodes = orig_payload
-                enrich_bibframe_graph(
-                    g,
-                    nodes,
-                    res,
-                    profile=bf_profile,
-                    target_record=target_record,
-                    enrich=r_cfg.enrich,
-                    fold_legacy=r_cfg.fold_legacy,
-                    wemi_result=wemi_res,
-                    linkage=linkage,
-                    work_cluster=w_cluster,
-                    expression_cluster=e_cluster,
-                    manifestation_cluster=m_cluster,
-                    enrichment_config=r_cfg.enrichment,
-                )
 
-            tracker.update_progress(
-                items_increment=1,
-                bytes_processed=byte_offset,
-            )
+                tracker.update_progress(
+                    items_increment=1,
+                    bytes_processed=byte_offset,
+                )
     finally:
         if out_f is not None:
             if is_marcxml:

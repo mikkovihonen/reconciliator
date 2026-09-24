@@ -139,6 +139,14 @@ class ReconcileConfig(IngestFilterConfig, FieldTruncationConfig):
     chronology_min_author_age: int = 12
     chronology_max_posthumous_years: int = 70
     strict_homonym_guard: bool = True
+    batch_size: int = Field(
+        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("batch_size", 32)),
+        ge=1,
+    )
+    entity_cache_size: int = Field(
+        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("entity_cache_size", 50000)),
+        ge=1,
+    )
     max_editions_compared: int = Field(
         default_factory=lambda: int(_RECONCILE_DEFAULTS.get("max_editions_compared", 50))
     )

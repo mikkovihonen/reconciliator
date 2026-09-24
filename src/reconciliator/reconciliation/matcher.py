@@ -34,8 +34,10 @@ from reconciliator.models import (
     AgentEntity,
     AgentURI,
     BibliographicRecord,
+    ContributionEntity,
     CorpusLinkage,
     ExpressionEntity,
+    IdentifierEntity,
     ManifestationEntity,
     MatchRecord,
     ReconciliationMatch,
@@ -54,7 +56,6 @@ from reconciliator.utils import (
 )
 from reconciliator.vocab import (
     VocabularyManager,
-    format_wikidata_uri,
     normalize_subject_vocabulary,
 )
 
@@ -473,60 +474,103 @@ class WorkMatcher:
         target: MatchRecord,
         identifiers: Optional[dict[str, list[str]]] = None,
     ) -> WEMIMatchResult:
-        """Resolve a staged MatchRecord and map the result to its canonical work.
+        """Resolve a staged MatchRecord and map the result to its canonical work."""
+        batch_ids = [identifiers] if identifiers else None
+        return self.match_targets_batch([target], batch_identifiers=batch_ids)[0]
 
-        Canonicalisation happens here rather than at each call site so that every
-        consumer - the corpus clusterer's authority hoisting and the reconcile
-        loop alike - resolves a work the same way. Without it, records matching
-        different sources that hold the same work would disagree about its URI.
-        """
-        result = self._dispatch_match(target, identifiers)
-        return self._canonicalize_match(result)
-
-    def _dispatch_match(
+    def match_targets_batch(
         self,
-        target: MatchRecord,
-        identifiers: Optional[dict[str, list[str]]] = None,
-    ) -> WEMIMatchResult:
-        """Route a record to the first funnel whose predicate claims it.
+        targets: list[MatchRecord],
+        batch_identifiers: Optional[list[Optional[dict[str, list[str]]]]] = None,
+    ) -> list[WEMIMatchResult]:
+        """Resolve a batch of MatchRecord instances through the 3 tiers with bulk vectorization.
 
-        Replaces a 44-condition if-chain in which precedence was implied by
-        statement order. Specs are ordered, first match wins, and the one marked
-        `default` claims whatever nothing else did.
+        1. Filter by config accepts().
+        2. Pre-warm identifier cache via bulk lookup_by_identifiers_batch.
+        3. Dispatch targets to matching funnels with pre-warmed cache hits.
+        4. Canonicalize all results.
         """
-        if self.config is not None and not self.config.accepts(
-            work_type=target.work_type,
-            language=target.language,
-            year=target.year,
-        ):
-            return WEMIMatchResult(
-                target_record_id=target.record_id,
-                match_tier="skipped_filtered_work_type",
-                confidence_score=0.0,
+        if not targets:
+            return []
+
+        results: list[Optional[WEMIMatchResult]] = [None] * len(targets)
+        batch_extracted: list[dict[str, list[str]]] = []
+
+        # 1. Config acceptance check & identifier extraction
+        for i, target in enumerate(targets):
+            if self.config is not None and not self.config.accepts(
+                work_type=target.work_type,
+                language=target.language,
+                year=target.year,
+            ):
+                results[i] = WEMIMatchResult(
+                    target_record_id=target.record_id,
+                    match_tier="skipped_filtered_work_type",
+                    confidence_score=0.0,
+                )
+                batch_extracted.append({})
+                continue
+
+            extracted = extract_identifiers_from_target(target)
+            extra_ids = (
+                batch_identifiers[i]
+                if batch_identifiers and i < len(batch_identifiers)
+                else None
+            )
+            if extra_ids:
+                for scheme, values in extra_ids.items():
+                    bucket = extracted.setdefault(scheme.lower().strip(), [])
+                    for val in values:
+                        if val not in bucket:
+                            bucket.append(val)
+            batch_extracted.append(extracted)
+
+        # 2. Bulk identifier lookup to pre-warm cache in a single SQL query
+        id_pairs_to_lookup: list[tuple[str, str]] = []
+        for i, target in enumerate(targets):
+            if results[i] is not None:
+                continue
+            for scheme, vals in batch_extracted[i].items():
+                for v in vals:
+                    id_pairs_to_lookup.append((scheme, v))
+
+        if id_pairs_to_lookup and hasattr(self.repo, "lookup_by_identifiers_batch"):
+            self.repo.lookup_by_identifiers_batch(
+                id_pairs_to_lookup, authoritative_only=self.authoritative_only
             )
 
-        extracted = extract_identifiers_from_target(target)
-        if identifiers:
-            for scheme, values in identifiers.items():
-                bucket = extracted.setdefault(scheme.lower().strip(), [])
-                for value in values:
-                    if value not in bucket:
-                        bucket.append(value)
+        # 3. Route targets through their respective funnels
+        for i, target in enumerate(targets):
+            if results[i] is not None:
+                continue
+            extracted = batch_extracted[i]
+            spec, handler = self._select_funnel(target, extracted)
+            ctx = FunnelContext(
+                spec=spec,
+                repo=self.repo,
+                config=self.config,
+                identifiers=extracted,
+                align_expression=self._align_expression,
+                try_identifiers=self._try_fast_path_identifiers,
+                vector_or_fts=self._vector_or_fts_fallback,
+                rank_candidates=self._rank_candidates,
+                result_cls=WEMIMatchResult,
+                constituent_cls=ConstituentWorkMatch,
+            )
+            results[i] = run_funnel(spec, target, ctx, handler)
 
-        spec, handler = self._select_funnel(target, extracted)
-        ctx = FunnelContext(
-            spec=spec,
-            repo=self.repo,
-            config=self.config,
-            identifiers=extracted,
-            align_expression=self._align_expression,
-            try_identifiers=self._try_fast_path_identifiers,
-            vector_or_fts=self._vector_or_fts_fallback,
-            rank_candidates=self._rank_candidates,
-            result_cls=WEMIMatchResult,
-            constituent_cls=ConstituentWorkMatch,
-        )
-        return run_funnel(spec, target, ctx, handler)
+        # 4. Canonicalize all results
+        canonicalized: list[WEMIMatchResult] = []
+        for i, r in enumerate(results):
+            if r is None:
+                r = WEMIMatchResult(
+                    target_record_id=targets[i].record_id,
+                    match_tier="unmatched",
+                    confidence_score=0.0,
+                )
+            canonicalized.append(self._canonicalize_match(r))
+
+        return canonicalized
 
     def _select_funnel(
         self, target: MatchRecord, identifiers: dict[str, list[str]]
@@ -999,7 +1043,10 @@ class WorkMatcher:
             identifiers=identifiers,
             agents=agents,
         )
-        if hasattr(self, "_hydration_cache") and len(self._hydration_cache) < 20000:
+        max_cache = (
+            getattr(self.config, "entity_cache_size", 50000) if self.config else 50000
+        )
+        if hasattr(self, "_hydration_cache") and len(self._hydration_cache) < max_cache:
             self._hydration_cache[cache_key] = candidate_record
         return candidate_record
 

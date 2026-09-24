@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
@@ -184,6 +184,7 @@ class WEMIRepository:
         work_indexer: Optional[VectorIndex] = None,
         manifestation_indexer: Optional[VectorIndex] = None,
         engine: Optional[Engine] = None,
+        entity_cache_size: Optional[int] = None,
     ) -> None:
         if engine is not None:
             self.engine = engine
@@ -199,6 +200,22 @@ class WEMIRepository:
             from reconciliator.config import RepositoryFTSConfig
 
             self.fts_config = RepositoryFTSConfig()
+
+        if entity_cache_size is not None:
+            self.entity_cache_size = entity_cache_size
+        else:
+            from reconciliator.config.defaults import get_bundled_reconcile_defaults
+
+            self.entity_cache_size = int(
+                get_bundled_reconcile_defaults().get("entity_cache_size", 50000)
+            )
+
+        self._work_cache: OrderedDict[int, WorkEntity] = OrderedDict()
+        self._manifestation_cache: OrderedDict[int, ManifestationEntity] = OrderedDict()
+        self._expressions_for_work_cache: OrderedDict[int, list[ExpressionEntity]] = OrderedDict()
+        self._identifier_lookup_cache: OrderedDict[
+            tuple[str, str, bool], list[tuple[EntityType, int]]
+        ] = OrderedDict()
 
         init_authority_db(self.engine)
 
@@ -232,6 +249,17 @@ class WEMIRepository:
     def get_connection(self) -> Any:
         """Obtain connection with an active transaction."""
         return self.engine.begin()
+
+    def get_read_connection(self) -> Any:
+        """Obtain lightweight read connection without transaction wrapping."""
+        return self.engine.connect()
+
+    def clear_entity_caches(self) -> None:
+        """Clear all in-memory LRU entity and lookup caches."""
+        self._work_cache.clear()
+        self._manifestation_cache.clear()
+        self._expressions_for_work_cache.clear()
+        self._identifier_lookup_cache.clear()
 
     def get_corpus_connection(self) -> Any:
         """Corpus staging shares the authority database.
@@ -1908,11 +1936,46 @@ class WEMIRepository:
         return work
 
     def get_work(self, work_id: int) -> Optional[WorkEntity]:
-        """Fetch WorkEntity by ID."""
+        """Fetch WorkEntity by ID with in-memory LRU caching."""
+        if work_id in self._work_cache:
+            self._work_cache.move_to_end(work_id)
+            return self._work_cache[work_id]
+
         stmt = select(works_table).where(works_table.c.id == work_id)
-        with self.get_connection() as conn:
+        with self.get_read_connection() as conn:
             row = conn.execute(stmt).fetchone()
-            return self._enrich_work_identifiers(conn, _row_to_work(row)) if row else None
+            work = self._enrich_work_identifiers(conn, _row_to_work(row)) if row else None
+
+        if work is not None:
+            self._work_cache[work_id] = work
+            if len(self._work_cache) > self.entity_cache_size:
+                self._work_cache.popitem(last=False)
+        return work
+
+    def get_works_by_ids(self, work_ids: list[int]) -> dict[int, WorkEntity]:
+        """Fetch multiple WorkEntity instances by IDs, leveraging LRU cache."""
+        if not work_ids:
+            return {}
+        result: dict[int, WorkEntity] = {}
+        missing_ids: list[int] = []
+        for wid in work_ids:
+            if wid in self._work_cache:
+                self._work_cache.move_to_end(wid)
+                result[wid] = self._work_cache[wid]
+            else:
+                missing_ids.append(wid)
+
+        if missing_ids:
+            stmt = select(works_table).where(works_table.c.id.in_(missing_ids))
+            with self.get_read_connection() as conn:
+                for row in conn.execute(stmt):
+                    w = self._enrich_work_identifiers(conn, _row_to_work(row))
+                    if w and w.id:
+                        result[w.id] = w
+                        self._work_cache[w.id] = w
+                        if len(self._work_cache) > self.entity_cache_size:
+                            self._work_cache.popitem(last=False)
+        return result
 
     def get_work_by_curie(self, curie_or_uri: str) -> Optional[WorkEntity]:
         """Fetch WorkEntity by CURIE or URI."""
@@ -1927,7 +1990,7 @@ class WEMIRepository:
             works_table.c.source == source,
             works_table.c.source_id == source_id,
         )
-        with self.get_connection() as conn:
+        with self.get_read_connection() as conn:
             row = conn.execute(stmt).fetchone()
             return self._enrich_work_identifiers(conn, _row_to_work(row)) if row else None
 
@@ -1945,8 +2008,44 @@ class WEMIRepository:
         )
 
     def get_manifestation(self, manifestation_id: int) -> Optional[ManifestationEntity]:
-        """Fetch ManifestationEntity by ID."""
-        return self._get_entity_by_id(manifestations_table, _row_to_manifestation, manifestation_id)
+        """Fetch ManifestationEntity by ID with in-memory LRU caching."""
+        if manifestation_id in self._manifestation_cache:
+            self._manifestation_cache.move_to_end(manifestation_id)
+            return self._manifestation_cache[manifestation_id]
+
+        manif = self._get_entity_by_id(manifestations_table, _row_to_manifestation, manifestation_id)
+        if manif is not None:
+            self._manifestation_cache[manifestation_id] = manif
+            if len(self._manifestation_cache) > self.entity_cache_size:
+                self._manifestation_cache.popitem(last=False)
+        return manif
+
+    def get_manifestations_by_ids(
+        self, manifestation_ids: list[int]
+    ) -> dict[int, ManifestationEntity]:
+        """Fetch multiple ManifestationEntity instances by IDs, leveraging LRU cache."""
+        if not manifestation_ids:
+            return {}
+        result: dict[int, ManifestationEntity] = {}
+        missing_ids: list[int] = []
+        for mid in manifestation_ids:
+            if mid in self._manifestation_cache:
+                self._manifestation_cache.move_to_end(mid)
+                result[mid] = self._manifestation_cache[mid]
+            else:
+                missing_ids.append(mid)
+
+        if missing_ids:
+            stmt = select(manifestations_table).where(manifestations_table.c.id.in_(missing_ids))
+            with self.get_read_connection() as conn:
+                for row in conn.execute(stmt):
+                    m = _row_to_manifestation(row)
+                    if m and m.id:
+                        result[m.id] = m
+                        self._manifestation_cache[m.id] = m
+                        if len(self._manifestation_cache) > self.entity_cache_size:
+                            self._manifestation_cache.popitem(last=False)
+        return result
 
     def get_manifestation_by_source(
         self, source: str, source_id: str
@@ -1960,13 +2059,23 @@ class WEMIRepository:
         self, work_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ExpressionEntity]:
         """Fetch all Expression entities linked to a given work_id, with optional record_origin filter."""
+        if record_origin is None and work_id in self._expressions_for_work_cache:
+            self._expressions_for_work_cache.move_to_end(work_id)
+            return self._expressions_for_work_cache[work_id]
+
         stmt = select(expressions_table).where(expressions_table.c.work_id == work_id)
         if record_origin is not None:
             stmt = stmt.where(expressions_table.c.record_origin == record_origin)
         stmt = stmt.order_by(expressions_table.c.id)
-        with self.get_connection() as conn:
+        with self.get_read_connection() as conn:
             rows = conn.execute(stmt).fetchall()
-            return [_row_to_expression(r) for r in rows]
+            exps = [_row_to_expression(r) for r in rows]
+
+        if record_origin is None:
+            self._expressions_for_work_cache[work_id] = exps
+            if len(self._expressions_for_work_cache) > self.entity_cache_size:
+                self._expressions_for_work_cache.popitem(last=False)
+        return exps
 
     def get_constituent_works(self, work_id: int) -> list[WorkEntity]:
         """The works this one contains, by stored whole-part edges."""
@@ -2328,51 +2437,128 @@ class WEMIRepository:
         self, scheme: str, value: str, authoritative_only: bool = False
     ) -> list[tuple[EntityType, int]]:
         """Look up entity types and IDs carrying an identifier, optionally authoritative only."""
-        src = scheme.lower()
-        if src == "wikidata_qid":
-            src = "wikidata"
-        val_clean = value.strip()
-        norm_val = val_clean.lower()
-        alnum_val = re.sub(r"[^0-9a-zA-Z]", "", val_clean).lower()
-        stmt = select(identifiers_table.c.entity_type, identifiers_table.c.entity_id).where(
-            identifiers_table.c.source == src,
-            or_(
-                identifiers_table.c.source_id_normalized == norm_val,
-                identifiers_table.c.source_id_normalized == alnum_val,
-                identifiers_table.c.source_id == val_clean,
-            ),
-        )
-        with self.get_connection() as conn:
+        cache_key = (scheme.lower().strip(), value.strip().lower(), authoritative_only)
+        if cache_key in self._identifier_lookup_cache:
+            self._identifier_lookup_cache.move_to_end(cache_key)
+            return self._identifier_lookup_cache[cache_key]
+
+        res = self.lookup_by_identifiers_batch([(scheme, value)], authoritative_only=authoritative_only)
+        ans = res.get((scheme, value), [])
+        return ans
+
+    def lookup_by_identifiers_batch(
+        self, pairs: list[tuple[str, str]], authoritative_only: bool = False
+    ) -> dict[tuple[str, str], list[tuple[EntityType, int]]]:
+        """Look up entity types and IDs for multiple (scheme, value) pairs in bulk."""
+        if not pairs:
+            return {}
+
+        results: dict[tuple[str, str], list[tuple[EntityType, int]]] = {}
+        needed_pairs: list[tuple[str, str]] = []
+
+        for pair in pairs:
+            scheme, val = pair
+            cache_key = (scheme.lower().strip(), val.strip().lower(), authoritative_only)
+            if cache_key in self._identifier_lookup_cache:
+                self._identifier_lookup_cache.move_to_end(cache_key)
+                results[pair] = self._identifier_lookup_cache[cache_key]
+            else:
+                needed_pairs.append(pair)
+                results[pair] = []
+
+        if not needed_pairs:
+            return results
+
+        conds = []
+        source_map: dict[str, list[tuple[str, str, str, tuple[str, str]]]] = defaultdict(list)
+        for scheme, val in needed_pairs:
+            src = scheme.lower().strip()
+            if src == "wikidata_qid":
+                src = "wikidata"
+            val_clean = val.strip()
+            norm_val = val_clean.lower()
+            alnum_val = re.sub(r"[^0-9a-zA-Z]", "", val_clean).lower()
+            source_map[src].append((val_clean, norm_val, alnum_val, (scheme, val)))
+
+        for src, item_list in source_map.items():
+            norm_vals = {norm_val for _, norm_val, _, _ in item_list}
+            alnum_vals = {alnum_val for _, _, alnum_val, _ in item_list if alnum_val}
+            clean_vals = {clean_val for clean_val, _, _, _ in item_list}
+            combined_norms = list(norm_vals | alnum_vals)
+            conds.append(
+                and_(
+                    identifiers_table.c.source == src,
+                    or_(
+                        identifiers_table.c.source_id_normalized.in_(combined_norms),
+                        identifiers_table.c.source_id.in_(list(clean_vals)),
+                    ),
+                )
+            )
+
+        if not conds:
+            return results
+
+        stmt = select(
+            identifiers_table.c.source,
+            identifiers_table.c.source_id,
+            identifiers_table.c.source_id_normalized,
+            identifiers_table.c.entity_type,
+            identifiers_table.c.entity_id,
+        ).where(or_(*conds))
+
+        allowed = set(self.authoritative_sources()) if authoritative_only else None
+        if not allowed:
+            allowed = None
+
+        with self.get_read_connection() as conn:
             rows = conn.execute(stmt).mappings().fetchall()
-            candidates = [(r["entity_type"], r["entity_id"]) for r in rows]
-            if not authoritative_only:
-                return candidates
 
-            allowed = set(self.authoritative_sources())
-            if not allowed:
-                return candidates
+            valid_candidates: set[tuple[str, int]] = set()
+            if allowed is not None and rows:
+                table_map = {
+                    "work": works_table,
+                    "works": works_table,
+                    "expression": expressions_table,
+                    "expressions": expressions_table,
+                    "manifestation": manifestations_table,
+                    "manifestations": manifestations_table,
+                    "item": items_table,
+                    "items": items_table,
+                    "agent": agents_table,
+                    "agents": agents_table,
+                }
+                for etype, tbl in table_map.items():
+                    eids = [r["entity_id"] for r in rows if r["entity_type"] == etype]
+                    if eids:
+                        check_stmt = select(tbl.c.id, tbl.c.record_origin).where(tbl.c.id.in_(eids))
+                        for sr in conn.execute(check_stmt).fetchall():
+                            if sr[1] in allowed:
+                                valid_candidates.add((etype, sr[0]))
 
-            table_map = {
-                "work": works_table,
-                "works": works_table,
-                "expression": expressions_table,
-                "expressions": expressions_table,
-                "manifestation": manifestations_table,
-                "manifestations": manifestations_table,
-                "item": items_table,
-                "items": items_table,
-                "agent": agents_table,
-                "agents": agents_table,
-            }
-            filtered: list[tuple[EntityType, int]] = []
-            for etype, eid in candidates:
-                tbl = table_map.get(etype)
-                if tbl is not None:
-                    check_stmt = select(tbl.c.record_origin).where(tbl.c.id == eid)
-                    row = conn.execute(check_stmt).mappings().fetchone()
-                    if row and row["record_origin"] in allowed:
-                        filtered.append((etype, eid))
-            return filtered
+        for r in rows:
+            etype = r["entity_type"]
+            eid = r["entity_id"]
+            if allowed is not None and (etype, eid) not in valid_candidates:
+                continue
+
+            src = r["source"]
+            s_id = r["source_id"]
+            s_norm = r["source_id_normalized"]
+
+            candidates_for_src = source_map.get(src, [])
+            for val_clean, norm_val, alnum_val, orig_pair in candidates_for_src:
+                if s_norm in (norm_val, alnum_val) or s_id == val_clean:
+                    if (etype, eid) not in results[orig_pair]:
+                        results[orig_pair].append((etype, eid))
+
+        for pair in needed_pairs:
+            scheme, val = pair
+            cache_key = (scheme.lower().strip(), val.strip().lower(), authoritative_only)
+            self._identifier_lookup_cache[cache_key] = results[pair]
+            if len(self._identifier_lookup_cache) > self.entity_cache_size:
+                self._identifier_lookup_cache.popitem(last=False)
+
+        return results
 
     def get_mediums_of_performance(self, work_id: int) -> list[EntitySubject]:
         """Fetch medium_of_performance EntitySubject records for a given work."""
@@ -2564,46 +2750,75 @@ class WEMIRepository:
         overfetch: int = 4,
     ) -> list[tuple[WorkEntity, float]]:
         """Retrieve top-k candidate works from the work vector index."""
-        if self.work_indexer is None or self.work_indexer.total_vectors == 0:
-            return []
+        if len(query_vector.shape) == 1:
+            q_mat = query_vector[np.newaxis, :]
+        else:
+            q_mat = query_vector
+        batches = self.search_work_vectors_batch(
+            q_mat, top_k=top_k, authoritative_only=authoritative_only, overfetch=overfetch
+        )
+        return batches[0] if batches else []
 
-        # Over-fetch when a filter will be applied: the index cannot filter, so
-        # asking for exactly top_k and discarding afterwards silently returns
-        # fewer candidates than requested - or none, when a large source fills
-        # the whole budget.
+    def search_work_vectors_batch(
+        self,
+        query_vectors: np.ndarray,
+        top_k: int = 20,
+        authoritative_only: bool = False,
+        overfetch: int = 4,
+    ) -> list[list[tuple[WorkEntity, float]]]:
+        """Retrieve top-k candidate works for a 2D batch of query vectors [N, dimension]."""
+        if self.work_indexer is None or self.work_indexer.total_vectors == 0 or len(query_vectors) == 0:
+            return [[] for _ in range(len(query_vectors))]
+
         fetch_k = top_k * max(1, overfetch) if authoritative_only else top_k
-        scores, indices = self.work_indexer.search(query_vector, top_k=fetch_k)
-        if len(scores) == 0 or len(indices) == 0:
-            return []
+        scores_matrix, indices_matrix = self.work_indexer.search(query_vectors, top_k=fetch_k)
+        if len(scores_matrix) == 0 or len(indices_matrix) == 0:
+            return [[] for _ in range(len(query_vectors))]
 
         allowed = set(self.authoritative_sources()) if authoritative_only else None
         if not allowed:
             allowed = None
 
-        vector_indices = indices[0].tolist()
-        dense_scores = scores[0].tolist()
+        # Collect all unique vector indices across all queries
+        all_vector_indices: set[int] = set()
+        for row in indices_matrix:
+            for v_id in row:
+                if v_id >= 0:
+                    all_vector_indices.add(int(v_id))
 
         vector_to_work_id: dict[int, int] = {}
-        with self.get_connection() as conn:
-            stmt = select(work_vectors_table.c.vector_id, work_vectors_table.c.work_id).where(
-                work_vectors_table.c.vector_id.in_(vector_indices)
-            )
-            for r in conn.execute(stmt):
-                vector_to_work_id[r[0]] = r[1]
+        if all_vector_indices:
+            with self.get_read_connection() as conn:
+                stmt = select(work_vectors_table.c.vector_id, work_vectors_table.c.work_id).where(
+                    work_vectors_table.c.vector_id.in_(list(all_vector_indices))
+                )
+                for r in conn.execute(stmt):
+                    vector_to_work_id[r[0]] = r[1]
 
-        results: list[tuple[WorkEntity, float]] = []
-        seen_work_ids: set[int] = set()
-        for v_id, score in zip(vector_indices, dense_scores):
-            work_id = vector_to_work_id.get(v_id, v_id if v_id >= 0 else None)
-            if work_id is not None and work_id not in seen_work_ids:
-                seen_work_ids.add(work_id)
-                work = self.get_work(work_id)
-                if work and (allowed is None or work.record_origin in allowed):
-                    results.append((work, float(score)))
-                    if len(results) >= top_k:
-                        break
+        # Bulk fetch/cache works
+        needed_work_ids = [
+            vector_to_work_id[v_id]
+            for v_id in all_vector_indices
+            if v_id in vector_to_work_id
+        ]
+        works_by_id = self.get_works_by_ids(needed_work_ids)
 
-        return results
+        batch_results: list[list[tuple[WorkEntity, float]]] = []
+        for scores_row, indices_row in zip(scores_matrix, indices_matrix):
+            results: list[tuple[WorkEntity, float]] = []
+            seen_work_ids: set[int] = set()
+            for v_id, score in zip(indices_row.tolist(), scores_row.tolist()):
+                work_id = vector_to_work_id.get(v_id, v_id if v_id >= 0 else None)
+                if work_id is not None and work_id not in seen_work_ids:
+                    seen_work_ids.add(work_id)
+                    work = works_by_id.get(work_id)
+                    if work and (allowed is None or work.record_origin in allowed):
+                        results.append((work, float(score)))
+                        if len(results) >= top_k:
+                            break
+            batch_results.append(results)
+
+        return batch_results
 
     def search_manifestation_vectors(
         self,
