@@ -262,7 +262,8 @@ vocabularies:
     allars: "yso"
     kaunokki: "kauno"
     bella: "kauno"
-    musa: "muso"
+    musa: "yso"
+    muso: "yso"
     cilla: "seko"
 
   # Language associated with each legacy thesaurus for language subcode assignment
@@ -272,15 +273,22 @@ vocabularies:
     kaunokki: "fi"
     bella: "sv"
     musa: "fi"
+    muso: "fi"
     cilla: "sv"
 
   # Vocabularies that require language subcodes (e.g. yso/fin, yso/swe)
   language_subcode_vocabularies:
     yso: "fin"
+    yso-aika: "fin"
     yso-paikat: "fin"
     kauno: "fin"
-    muso: "fin"
     slm: "fin"
+
+  # Mapping from internal ontology keys to external MARC $2 vocabulary codes
+  vocabulary_code_map:
+    yso: "yso"
+    yso-aika: "yso"
+    yso-paikat: "yso"
 
   # Mapping from language code to 3-letter MARC vocabulary subcode suffix
   language_subcode_suffixes:

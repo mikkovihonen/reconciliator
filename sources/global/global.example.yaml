@@ -83,7 +83,8 @@ vocabularies:
     allars: "yso"
     kaunokki: "kauno"
     bella: "kauno"
-    musa: "muso"
+    musa: "yso"
+    muso: "yso"
     cilla: "seko"
 
   thesaurus_languages:
@@ -92,14 +93,20 @@ vocabularies:
     kaunokki: "fi"
     bella: "sv"
     musa: "fi"
+    muso: "fi"
     cilla: "sv"
 
   language_subcode_vocabularies:
     yso: "fin"
+    yso-aika: "fin"
     yso-paikat: "fin"
     kauno: "fin"
-    muso: "fin"
     slm: "fin"
+
+  vocabulary_code_map:
+    yso: "yso"
+    yso-aika: "yso"
+    yso-paikat: "yso"
 
   language_subcode_suffixes:
     fi: "fin"

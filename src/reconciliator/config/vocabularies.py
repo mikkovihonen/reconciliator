@@ -88,15 +88,7 @@ class HierarchyConfig(BaseModel):
         default_factory=lambda: list(
             _HIERARCHY_DEFAULTS.get(
                 "hierarchical_vocabularies",
-                ["yso", "yso-aika", "yso-paikat", "kauno", "muso", "slm", "seko"],
-            )
-        )
-    )
-    hierarchical_vocabularies: list[str] = Field(
-        default_factory=lambda: list(
-            _HIERARCHY_DEFAULTS.get(
-                "hierarchical_vocabularies",
-                ["yso", "yso-aika", "yso-paikat", "kauno", "muso", "slm", "seko"],
+                ["yso", "yso-aika", "yso-paikat", "kauno", "slm", "seko"],
             )
         )
     )
@@ -135,6 +127,9 @@ class VocabulariesConfig(BaseModel):
     )
     language_subcode_suffixes: dict[str, str] = Field(
         default_factory=lambda: dict(_VOCAB_DEFAULTS.get("language_subcode_suffixes", {}))
+    )
+    vocabulary_code_map: dict[str, str] = Field(
+        default_factory=lambda: dict(_VOCAB_DEFAULTS.get("vocabulary_code_map", {}))
     )
 
     # --- Subject heading rewriting policy -------------------------------------

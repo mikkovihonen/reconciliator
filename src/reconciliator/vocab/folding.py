@@ -26,6 +26,10 @@ def format_target_vocab(
     raw_source = (source_vocab or "").strip().lower()
     base_vocab = strip_vocabulary_subcode(target_vocab)
 
+    code_map = getattr(cfg, "vocabulary_code_map", None) or {}
+    if base_vocab in code_map:
+        base_vocab = code_map[base_vocab]
+
     if not cfg.apply_language_subcode:
         return base_vocab
 

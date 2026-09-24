@@ -199,8 +199,6 @@ def to_actionable_uri(
     if not curie_or_uri:
         return ""
     raw = str(curie_or_uri).strip()
-    if raw.startswith("http://") or raw.startswith("https://"):
-        return raw
     src, sid = parse_curie(raw, default_source=default_source)
     if src and src != "unknown" and sid:
         return format_source_uri(src, sid, template=template)

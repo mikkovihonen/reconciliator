@@ -213,7 +213,7 @@ Polymorphic storage of derived blocking keys emitted during ingest.
 
 ## 5. Controlled Vocabularies & Subject Ontologies
 
-Standardizes concepts and subject headings across Finnish national ontologies (YSO, KAUNO, MUSO, SLM, SEKO).
+Standardizes concepts and subject headings across Finnish national ontologies (YSO, KAUNO, SLM, SEKO, with legacy MUSA/MUSO folded into YSO, and YSO places/time unified under the canonical `yso` vocabulary code and `http://www.yso.fi/onto/yso/` namespace).
 
 ```mermaid
 erDiagram

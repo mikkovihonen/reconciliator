@@ -263,3 +263,45 @@ def test_format_wikidata_uri() -> None:
     assert vm.format_wikidata_uri("Q42") == "http://www.wikidata.org/entity/Q42"
     assert vm.format_wikidata_uri("q42") == "http://www.wikidata.org/entity/Q42"
     assert vm.format_wikidata_uri(None) is None
+
+
+def test_vocabulary_code_map_unification() -> None:
+    """Test that yso, yso-aika, and yso-paikat output unified yso/fin and yso/swe vocabulary codes."""
+    from reconciliator.config import VocabulariesConfig
+    from reconciliator.vocab import format_target_vocab
+
+    cfg = VocabulariesConfig()
+    # Default language (fi -> fin)
+    assert format_target_vocab("yso", config=cfg) == "yso/fin"
+    assert format_target_vocab("yso-paikat", config=cfg) == "yso/fin"
+    assert format_target_vocab("yso-aika", config=cfg) == "yso/fin"
+
+    # Swedish language (sv -> swe)
+    assert format_target_vocab("yso", lang="sv", config=cfg) == "yso/swe"
+    assert format_target_vocab("yso-paikat", lang="sv", config=cfg) == "yso/swe"
+    assert format_target_vocab("yso-aika", lang="sv", config=cfg) == "yso/swe"
+
+    # Preserved source suffix
+    assert format_target_vocab("yso-paikat", source_vocab="yso/swe", config=cfg) == "yso/swe"
+    assert format_target_vocab("yso-aika", source_vocab="yso/swe", config=cfg) == "yso/swe"
+
+    # Subcodes disabled
+    cfg_no_sub = VocabulariesConfig(apply_language_subcode=False)
+    assert format_target_vocab("yso", config=cfg_no_sub) == "yso"
+    assert format_target_vocab("yso-paikat", config=cfg_no_sub) == "yso"
+    assert format_target_vocab("yso-aika", config=cfg_no_sub) == "yso"
+
+
+def test_yso_paikat_and_aika_actionable_uris() -> None:
+    """Test that yso-paikat and yso-aika identifiers resolve to canonical http://www.yso.fi/onto/yso/ URIs."""
+    from reconciliator.utils.curie import to_actionable_uri
+
+    # CURIEs
+    assert to_actionable_uri("yso-paikat:p104990") == "http://www.yso.fi/onto/yso/p104990"
+    assert to_actionable_uri("yso-aika:p6197061979") == "http://www.yso.fi/onto/yso/p6197061979"
+    assert to_actionable_uri("yso:p2591") == "http://www.yso.fi/onto/yso/p2591"
+
+    # Legacy/divergent URLs canonicalized
+    assert to_actionable_uri("http://www.yso.fi/onto/yso-paikat/p104990") == "http://www.yso.fi/onto/yso/p104990"
+    assert to_actionable_uri("http://www.yso.fi/onto/yso-aika/p6197061979") == "http://www.yso.fi/onto/yso/p6197061979"
+

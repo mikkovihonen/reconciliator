@@ -496,9 +496,9 @@ def test_enrich_subject_headings_full_actionable_urns() -> None:
         elif source_field == "650":
             return ("650", "yso/fin", "yso:p22090", "kosto", "exact", None)
         elif source_field == "651":
-            return ("651", "yso-paikat/fin", "yso-paikat:p104990", "Iso-Britannia", "exact", None)
+            return ("651", "yso/fin", "yso-paikat:p104990", "Iso-Britannia", "exact", None)
         elif source_field == "648":
-            return ("648", "yso-aika", "yso-aika:p6198061989", "1980-luku", "exact", None)
+            return ("648", "yso/fin", "yso-aika:p6198061989", "1980-luku", "exact", None)
         return (source_field, source_vocab, source_uri or "", heading, "none", None)
 
     mock_vf.fold_subject_heading.side_effect = mock_fold
@@ -513,5 +513,5 @@ def test_enrich_subject_headings_full_actionable_urns() -> None:
 
     assert _get_subfields(f655, "0") == ["https://urn.fi/URN:NBN:fi:au:slm:s356"]
     assert _get_subfields(f650, "0") == ["http://www.yso.fi/onto/yso/p22090"]
-    assert _get_subfields(f651, "0") == ["http://www.yso.fi/onto/yso-paikat/p104990"]
-    assert _get_subfields(f648, "0") == ["http://www.yso.fi/onto/yso-aika/p6198061989"]
+    assert _get_subfields(f651, "0") == ["http://www.yso.fi/onto/yso/p104990"]
+    assert _get_subfields(f648, "0") == ["http://www.yso.fi/onto/yso/p6198061989"]

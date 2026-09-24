@@ -51,8 +51,7 @@ Declarative, precedence-ordered `FunnelSpec` entries tailoring matching and disc
 
 ### 6. Authority Grounding & URI Aggregation
 - **Split KANTO Sources**: Differentiates personal authorities (`kanto_pn` with `https://urn.fi/URN:NBN:fi:au:pn:*`) from corporate/conference authorities (`kanto_cn` with `https://urn.fi/URN:NBN:fi:au:cn:*`).
-- **Multi-Source Aggregation**: Traverses all accepted candidate records across Melinda, Asteri, and Wikidata to aggregate canonical `$0` (KANTO, ISNI, VIAF) and `$1` (Wikidata QIDs) links.
-- **Vocabulary & Thesauri Folding**: Standardizes subject headings against YSO, KAUNO, MUSO, SLM, and SEKO, automatically folding legacy Finnish thesauri (YSA $\rightarrow$ YSO, Allärs $\rightarrow$ YSO, Kaunokki $\rightarrow$ KAUNO/SLM, MUSA $\rightarrow$ MUSO/SEKO).
+- **Vocabulary & Thesauri Folding**: Standardizes subject headings against YSO, KAUNO, SLM, and SEKO, automatically folding legacy Finnish thesauri and ontologies (YSA $\rightarrow$ YSO, Allärs $\rightarrow$ YSO, Kaunokki $\rightarrow$ KAUNO/SLM, MUSA/MUSO $\rightarrow$ YSO, and performance medium $\rightarrow$ SEKO).
 
 ### 7. Cascading Hybrid Rerankers & Vector Engines
 - **ANN Vector Search**: High-throughput semantic candidate retrieval via FAISS or PyTorch (supporting Apple Silicon MPS and NVIDIA CUDA).

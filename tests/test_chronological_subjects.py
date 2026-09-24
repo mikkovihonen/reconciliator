@@ -181,7 +181,7 @@ def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
     store.insert_concepts(
         [
             VocabConcept(
-                uri="http://www.yso.fi/onto/yso-aika/p1800",
+                uri="http://www.yso.fi/onto/yso/p1800",
                 vocabulary="yso-aika",
                 pref_labels={"fi": "1800-luku"},
                 target_field="648",
@@ -194,7 +194,7 @@ def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
                 legacy_uri="http://www.yso.fi/onto/ysa/Y1800",
                 legacy_vocab="ysa",
                 legacy_labels={"fi": "1800-luku"},
-                target_uri="http://www.yso.fi/onto/yso-aika/p1800",
+                target_uri="http://www.yso.fi/onto/yso/p1800",
                 target_vocab="yso-aika",
                 mapping_type="exact_match",
                 target_field="648",
@@ -229,14 +229,14 @@ def test_xml_enricher_modernizes_648(tmp_path: Path) -> None:
     sub2 = (f.findall("marc:subfield[@code='2']", MARC_NS) or f.findall("subfield[@code='2']"))[
         0
     ].text
-    assert sub2 == "yso-aika"
+    assert sub2 == "yso/fin"
     sub0 = [
         e.text
         for e in (
             f.findall("marc:subfield[@code='0']", MARC_NS) or f.findall("subfield[@code='0']")
         )
     ]
-    assert "http://www.yso.fi/onto/yso-aika/p1800" in sub0
+    assert "http://www.yso.fi/onto/yso/p1800" in sub0
 
 
 def test_parse_turtle_simple_detects_yso_aika() -> None:
@@ -481,7 +481,7 @@ def test_enricher_modernizes_unlinked_648(tmp_path: Path) -> None:
     store.insert_concepts(
         [
             VocabConcept(
-                uri="http://www.yso.fi/onto/yso-aika/p6160061699",
+                uri="http://www.yso.fi/onto/yso/p6160061699",
                 vocabulary="yso-aika",
                 concept_id="p6160061699",
                 pref_labels={"fi": "1600-luku", "sv": "1600-talet"},
@@ -519,12 +519,12 @@ def test_enricher_modernizes_unlinked_648(tmp_path: Path) -> None:
     sub2 = (f.findall("marc:subfield[@code='2']", MARC_NS) or f.findall("subfield[@code='2']"))[
         0
     ].text
-    assert sub2 == "yso-aika"
+    assert sub2 == "yso/fin"
     sub0 = [
         e.text
         for e in (
             f.findall("marc:subfield[@code='0']", MARC_NS) or f.findall("subfield[@code='0']")
         )
     ]
-    assert "http://www.yso.fi/onto/yso-aika/p6160061699" in sub0
+    assert "http://www.yso.fi/onto/yso/p6160061699" in sub0
 

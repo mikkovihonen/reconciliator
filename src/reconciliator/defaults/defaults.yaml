@@ -202,7 +202,8 @@ vocabularies:
     allars: "yso"
     kaunokki: "kauno"
     bella: "kauno"
-    musa: "muso"
+    musa: "yso"
+    muso: "yso"
     cilla: "seko"
 
   thesaurus_languages:
@@ -211,14 +212,20 @@ vocabularies:
     kaunokki: "fi"
     bella: "sv"
     musa: "fi"
+    muso: "fi"
     cilla: "sv"
 
   language_subcode_vocabularies:
     yso: "fin"
+    yso-aika: "fin"
     yso-paikat: "fin"
     kauno: "fin"
-    muso: "fin"
     slm: "fin"
+
+  vocabulary_code_map:
+    yso: "yso"
+    yso-aika: "yso"
+    yso-paikat: "yso"
 
   language_subcode_suffixes:
     fi: "fin"
@@ -367,7 +374,7 @@ vocabularies:
       canonical_id_case: "lower"
     YSO-AIKA:
       prefix: "yso-aika"
-      uri_template: "http://www.yso.fi/onto/yso-aika/{id}"
+      uri_template: "http://www.yso.fi/onto/yso/{id}"
       id_patterns:
         - '(?i)onto/yso-aika/(p\d+)'
         - '(?i)\(fi-yso-aika\)(p\d+)'
@@ -376,7 +383,7 @@ vocabularies:
       canonical_id_case: "lower"
     YSO-PAIKAT:
       prefix: "yso-paikat"
-      uri_template: "http://www.yso.fi/onto/yso-paikat/{id}"
+      uri_template: "http://www.yso.fi/onto/yso/{id}"
       id_patterns:
         - '(?i)onto/yso-paikat/(p\d+)'
         - '(?i)\(fi-yso-paikat\)(p\d+)'
@@ -1518,13 +1525,15 @@ sources:
     uri_patterns:
       - "^https?://finto\\.fi/yso-aika/[a-z]{2}/page/"
       - "^http://www\\.yso\\.fi/onto/yso-aika/"
-    canonical_uri_template: "http://www.yso.fi/onto/yso-aika/{identifier}"
+      - "^http://www\\.yso\\.fi/onto/yso/"
+    canonical_uri_template: "http://www.yso.fi/onto/yso/{identifier}"
     tag_prefixes: ["yso-aika", "(fi-yso-aika)"]
   yso-paikat:
     uri_patterns:
       - "^https?://finto\\.fi/yso-paikat/[a-z]{2}/page/"
       - "^http://www\\.yso\\.fi/onto/yso-paikat/"
-    canonical_uri_template: "http://www.yso.fi/onto/yso-paikat/{identifier}"
+      - "^http://www\\.yso\\.fi/onto/yso/"
+    canonical_uri_template: "http://www.yso.fi/onto/yso/{identifier}"
     tag_prefixes: ["yso-paikat", "(fi-yso-paikat)", "ysop"]
   kauno:
     uri_patterns:

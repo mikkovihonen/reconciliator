@@ -326,7 +326,7 @@ def test_marcxml_agent_subject_concept_id_extraction() -> None:
     assert subj_counts.get("yso:p2591") == 1
     assert subj_counts.get("slm:s123") == 1
     assert subj_counts.get("kauno:k456") == 1
-    assert subj_counts.get("muso:m789") == 1
+    assert subj_counts.get("yso:m789") == 1
     assert subj_counts.get("wikidata:q11660") == 1
     # Resolved via vocab_store
     assert subj_counts.get("yso:p1054") == 1

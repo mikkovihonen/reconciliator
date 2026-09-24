@@ -208,7 +208,7 @@ def test_agent_aligner_safeguard_blocks_human_authority_transfer() -> None:
 def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
     store = VocabStore(tmp_path / "vocab.db")
     concept = VocabConcept(
-        uri="http://www.yso.fi/onto/yso-paikat/p105994",
+        uri="http://www.yso.fi/onto/yso/p105994",
         vocabulary="yso-paikat",
         pref_labels={"fi": "Maalahti", "sv": "Malax"},
         target_field="651",
@@ -219,7 +219,7 @@ def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
     # Swedish name Malax must resolve to Maalahti concept without any hardcoded dictionary
     found, qid = store.find_concept_by_alias("malax", target_field="651")
     assert found is not None
-    assert found.uri == "http://www.yso.fi/onto/yso-paikat/p105994"
+    assert found.uri == "http://www.yso.fi/onto/yso/p105994"
     assert found.pref_labels.get("fi") == "Maalahti"
     assert found.pref_labels.get("sv") == "Malax"
 
@@ -230,8 +230,8 @@ def test_dynamic_bilingual_alias_resolution(tmp_path: Path) -> None:
         lang="fi",
     )
     assert t_field == "651"
-    assert t_vocab == "yso-paikat/fin"
-    assert t_uri == "http://www.yso.fi/onto/yso-paikat/p105994"
+    assert t_vocab == "yso/fin"
+    assert t_uri == "http://www.yso.fi/onto/yso/p105994"
     assert t_label == "Maalahti"
     assert m_type == "alias_match"
 
