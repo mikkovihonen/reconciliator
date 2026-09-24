@@ -121,6 +121,9 @@ vocabularies:
     - "sv"
     - "en"
 
+  default_label_language: "record"
+  vocabulary_label_languages: {}
+
   language_code_map:
     fi: "fi"
     fin: "fi"

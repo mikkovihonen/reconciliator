@@ -329,6 +329,13 @@ vocabularies:
     - "sv"
     - "en"
 
+  # Language resolution policy for preferred labels and $2 language subcodes.
+  # Options for default_label_language: "record" (follows 008/041/377 language) or fixed code ("fi", "sv", "en").
+  default_label_language: "record"
+
+  # Per-vocabulary language overrides. Maps vocabulary base name to language policy (e.g. kauno: "fi", yso: "record")
+  vocabulary_label_languages: {}
+
   # Language code normalization map
   language_code_map:
     fi: "fi"

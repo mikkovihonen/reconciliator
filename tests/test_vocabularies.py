@@ -305,3 +305,119 @@ def test_yso_paikat_and_aika_actionable_uris() -> None:
     assert to_actionable_uri("http://www.yso.fi/onto/yso-paikat/p104990") == "http://www.yso.fi/onto/yso/p104990"
     assert to_actionable_uri("http://www.yso.fi/onto/yso-aika/p6197061979") == "http://www.yso.fi/onto/yso/p6197061979"
 
+
+def test_resolve_target_language() -> None:
+    """Test resolving target label language via record policy, global default, and per-vocab overrides."""
+    from reconciliator.config import VocabulariesConfig
+    from reconciliator.vocab import VocabFolder
+
+    # 1. Default config: default_label_language = "record"
+    cfg = VocabulariesConfig()
+    folder = VocabFolder(config=cfg)
+
+    # 3-letter MARC code maps to 2-letter
+    assert folder.resolve_target_language("yso", record_lang="swe") == "sv"
+    assert folder.resolve_target_language("yso", record_lang="fin") == "fi"
+    assert folder.resolve_target_language("yso", record_lang="eng") == "en"
+    # Unified code mapping
+    assert folder.resolve_target_language("yso-paikat", record_lang="swe") == "sv"
+    assert folder.resolve_target_language("yso-aika", record_lang="swe") == "sv"
+    # When record_lang is None -> falls back to default_language ("fi")
+    assert folder.resolve_target_language("yso", record_lang=None) == "fi"
+
+    # 2. Per-vocabulary overrides
+    cfg_overrides = VocabulariesConfig(
+        default_label_language="record",
+        vocabulary_label_languages={"kauno": "fi", "slm": "record"},
+    )
+    folder_overrides = VocabFolder(config=cfg_overrides)
+    # kauno pinned to "fi" even on Swedish record
+    assert folder_overrides.resolve_target_language("kauno", record_lang="swe") == "fi"
+    # slm follows record
+    assert folder_overrides.resolve_target_language("slm", record_lang="swe") == "sv"
+    # unmentioned vocabulary (yso) uses default_label_language ("record")
+    assert folder_overrides.resolve_target_language("yso", record_lang="swe") == "sv"
+
+    # 3. Global fixed default_label_language
+    cfg_fixed = VocabulariesConfig(
+        default_label_language="fi",
+        vocabulary_label_languages={"slm": "sv"},
+    )
+    folder_fixed = VocabFolder(config=cfg_fixed)
+    assert folder_fixed.resolve_target_language("yso", record_lang="swe") == "fi"
+    assert folder_fixed.resolve_target_language("kauno", record_lang="swe") == "fi"
+    # override takes precedence
+    assert folder_fixed.resolve_target_language("slm", record_lang="fin") == "sv"
+
+
+def test_fold_subject_heading_multilingual_and_subcode() -> None:
+    """Test fold_subject_heading multilingual label selection and accurate $2 subcode formatting."""
+    from unittest.mock import MagicMock
+    from reconciliator.config import VocabulariesConfig
+    from reconciliator.models import VocabConcept
+    from reconciliator.vocab import VocabFolder
+
+    store = MagicMock()
+    # Concept with fi and sv labels
+    concept_yso = VocabConcept(
+        uri="http://www.yso.fi/onto/yso/p2591",
+        vocabulary="yso",
+        concept_id="p2591",
+        pref_labels={"fi": "lääkärit", "sv": "läkare", "en": "physicians"},
+        target_field="650",
+    )
+    # Concept with fi only
+    concept_fi_only = VocabConcept(
+        uri="http://www.yso.fi/onto/yso/p999",
+        vocabulary="yso",
+        concept_id="p999",
+        pref_labels={"fi": "erikoislääkärit"},
+        target_field="650",
+    )
+
+    def find_by_uri(uri):
+        if uri == "http://www.yso.fi/onto/yso/p2591":
+            return concept_yso
+        if uri == "http://www.yso.fi/onto/yso/p999":
+            return concept_fi_only
+        return None
+
+    store.find_concept_by_uri.side_effect = find_by_uri
+
+    cfg = VocabulariesConfig(default_label_language="record")
+    folder = VocabFolder(vocab_store=store, config=cfg)
+
+    # 1. Swedish record gets Swedish label and yso/swe
+    t_field, t_vocab, t_uri, t_label, _, _ = folder.fold_subject_heading(
+        heading="lääkärit",
+        source_vocab="yso/fin",
+        source_field="650",
+        source_uri="http://www.yso.fi/onto/yso/p2591",
+        lang="swe",
+    )
+    assert t_label == "läkare"
+    assert t_vocab == "yso/swe"
+
+    # 2. Finnish record gets Finnish label and yso/fin
+    t_field, t_vocab, t_uri, t_label, _, _ = folder.fold_subject_heading(
+        heading="läkare",
+        source_vocab="yso/swe",
+        source_field="650",
+        source_uri="http://www.yso.fi/onto/yso/p2591",
+        lang="fin",
+    )
+    assert t_label == "lääkärit"
+    assert t_vocab == "yso/fin"
+
+    # 3. Swedish record where concept only has Finnish label:
+    # Falls back to Finnish label, and formats $2 as yso/fin (reflecting the actual label language)
+    t_field, t_vocab, t_uri, t_label, _, _ = folder.fold_subject_heading(
+        heading="erikoislääkärit",
+        source_vocab="yso",
+        source_field="650",
+        source_uri="http://www.yso.fi/onto/yso/p999",
+        lang="swe",
+    )
+    assert t_label == "erikoislääkärit"
+    assert t_vocab == "yso/fin"
+

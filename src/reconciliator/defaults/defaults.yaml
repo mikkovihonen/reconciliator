@@ -252,6 +252,8 @@ vocabularies:
   default_target_field: "650"
   default_subject_field: "650"
   default_language: "fi"
+  default_label_language: "record"
+  vocabulary_label_languages: {}
 
   ingest_pref_label_languages: null
   ingest_alt_label_languages: null

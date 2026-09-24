@@ -145,6 +145,12 @@ class VocabulariesConfig(BaseModel):
             _VOCAB_DEFAULTS.get("default_language") or _LING_DEFAULTS.get("default_language") or ""
         )
     )
+    default_label_language: str = Field(
+        default_factory=lambda: str(_VOCAB_DEFAULTS.get("default_label_language", "record"))
+    )
+    vocabulary_label_languages: dict[str, str] = Field(
+        default_factory=lambda: dict(_VOCAB_DEFAULTS.get("vocabulary_label_languages", {}))
+    )
     default_classification_scheme: str = Field(
         default_factory=lambda: str(_CLASSIFICATION_DEFAULTS.get("default_scheme") or "")
     )

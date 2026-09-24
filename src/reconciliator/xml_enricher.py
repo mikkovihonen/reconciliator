@@ -141,6 +141,7 @@ class MARCXMLEnricher:
                             source_vocab=vocab,
                             source_field=tag,
                             source_uri=source_uri,
+                            lang=record_lang,
                         )
                     )
 

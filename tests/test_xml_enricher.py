@@ -515,3 +515,108 @@ def test_enrich_subject_headings_full_actionable_urns() -> None:
     assert _get_subfields(f650, "0") == ["http://www.yso.fi/onto/yso/p22090"]
     assert _get_subfields(f651, "0") == ["http://www.yso.fi/onto/yso/p104990"]
     assert _get_subfields(f648, "0") == ["http://www.yso.fi/onto/yso/p6198061989"]
+
+
+def test_enrich_subject_headings_record_language_selection() -> None:
+    """Test that MARCXML enrichment adapts subject heading labels and $2 subcodes to record language and per-vocab config."""
+    from unittest.mock import MagicMock
+    from reconciliator.config import VocabulariesConfig
+    from reconciliator.models import VocabConcept
+    from reconciliator.vocab import VocabFolder
+
+    store = MagicMock()
+    concept_yso = VocabConcept(
+        uri="http://www.yso.fi/onto/yso/p2591",
+        vocabulary="yso",
+        concept_id="p2591",
+        pref_labels={"fi": "lääkärit", "sv": "läkare", "en": "physicians"},
+        target_field="650",
+    )
+    concept_kauno = VocabConcept(
+        uri="http://www.yso.fi/onto/kauno/k123",
+        vocabulary="kauno",
+        concept_id="k123",
+        pref_labels={"fi": "rikosromaanit", "sv": "kriminalromaner"},
+        target_field="650",
+    )
+
+    def find_by_uri(uri):
+        if uri == "http://www.yso.fi/onto/yso/p2591":
+            return concept_yso
+        if uri == "http://www.yso.fi/onto/kauno/k123":
+            return concept_kauno
+        return None
+
+    store.find_concept_by_uri.side_effect = find_by_uri
+
+    # Case A: Swedish record with default_label_language="record" -> both become Swedish
+    cfg_record = VocabulariesConfig(default_label_language="record")
+    vf_record = VocabFolder(vocab_store=store, config=cfg_record)
+    enricher_swe = MARCXMLEnricher(vocab_folder=vf_record)
+
+    xml_swe = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <controlfield tag="001">swe001</controlfield>
+      <controlfield tag="008">850101s1985    fi ||||||||||||||| |swe|d</controlfield>
+      <datafield tag="650" ind1=" " ind2="7">
+        <subfield code="a">lääkärit</subfield>
+        <subfield code="0">http://www.yso.fi/onto/yso/p2591</subfield>
+        <subfield code="2">yso/fin</subfield>
+      </datafield>
+      <datafield tag="650" ind1=" " ind2="7">
+        <subfield code="a">rikosromaanit</subfield>
+        <subfield code="0">http://www.yso.fi/onto/kauno/k123</subfield>
+        <subfield code="2">kauno/fin</subfield>
+      </datafield>
+    </record>
+    """
+    elem_swe = etree.fromstring(xml_swe.strip())
+    enriched_swe = enricher_swe.enrich_record_tree(elem_swe, enrich=False, fold_legacy=True)
+
+    fields_650 = enriched_swe.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']")
+    assert len(fields_650) == 2
+
+    # YSO: translated to Swedish
+    assert _get_subfields(fields_650[0], "a") == ["läkare"]
+    assert _get_subfields(fields_650[0], "2") == ["yso/swe"]
+
+    # Kauno: translated to Swedish
+    assert _get_subfields(fields_650[1], "a") == ["kriminalromaner"]
+    assert _get_subfields(fields_650[1], "2") == ["kauno/swe"]
+
+    # Case B: Swedish record with per-vocabulary override vocabulary_label_languages={"kauno": "fi"}
+    cfg_override = VocabulariesConfig(
+        default_label_language="record",
+        vocabulary_label_languages={"kauno": "fi"},
+    )
+    vf_override = VocabFolder(vocab_store=store, config=cfg_override)
+    enricher_override = MARCXMLEnricher(vocab_folder=vf_override)
+
+    elem_swe2 = etree.fromstring(xml_swe.strip())
+    enriched_override = enricher_override.enrich_record_tree(elem_swe2, enrich=False, fold_legacy=True)
+
+    fields_650_ov = enriched_override.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']")
+    # YSO still Swedish
+    assert _get_subfields(fields_650_ov[0], "a") == ["läkare"]
+    assert _get_subfields(fields_650_ov[0], "2") == ["yso/swe"]
+    # Kauno pinned to Finnish
+    assert _get_subfields(fields_650_ov[1], "a") == ["rikosromaanit"]
+    assert _get_subfields(fields_650_ov[1], "2") == ["kauno/fin"]
+
+    # Case C: Finnish record
+    xml_fin = """
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <controlfield tag="001">fin001</controlfield>
+      <controlfield tag="008">850101s1985    fi ||||||||||||||| |fin|d</controlfield>
+      <datafield tag="650" ind1=" " ind2="7">
+        <subfield code="a">läkare</subfield>
+        <subfield code="0">http://www.yso.fi/onto/yso/p2591</subfield>
+        <subfield code="2">yso/swe</subfield>
+      </datafield>
+    </record>
+    """
+    elem_fin = etree.fromstring(xml_fin.strip())
+    enriched_fin = enricher_swe.enrich_record_tree(elem_fin, enrich=False, fold_legacy=True)
+    field_fin = enriched_fin.find(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']")
+    assert _get_subfields(field_fin, "a") == ["lääkärit"]
+    assert _get_subfields(field_fin, "2") == ["yso/fin"]
