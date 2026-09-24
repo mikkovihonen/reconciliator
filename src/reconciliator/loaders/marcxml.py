@@ -227,6 +227,8 @@ def parse_marc_record_elem(
     vocab_store: Optional[Any] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
+    default_classification_scheme: Optional[str] = None,
+    digital_repository_patterns: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Extract raw bibliographic fields from an lxml MARCXML <record> element."""
     # Control numbers
@@ -422,12 +424,12 @@ def parse_marc_record_elem(
                 series_numbering = _get_subfield(sf, "v")
 
     # Classifications
-    from reconciliator.config import get_bundled_defaults
-
     classifications: list[tuple[str, str]] = []
-    default_scheme = str(
-        get_bundled_defaults().get("classification", {}).get("default_scheme") or ""
-    )
+    if default_classification_scheme is None:
+        from reconciliator.config import get_bundled_record_defaults
+        default_scheme = str(get_bundled_record_defaults().get("default_classification_scheme") or "ykl")
+    else:
+        default_scheme = str(default_classification_scheme)
     for f in _get_datafields(record_elem, "084"):
         code = _get_subfield(f, "a")
         scheme = _get_subfield(f, "2") or default_scheme
@@ -509,9 +511,14 @@ def parse_marc_record_elem(
         else:
             other_ids.append(val_024)
 
+    if digital_repository_patterns is None:
+        from reconciliator.config import get_bundled_vocabularies_defaults
+        raw_patterns = get_bundled_vocabularies_defaults().get("digital_repository_patterns") or []
+    else:
+        raw_patterns = digital_repository_patterns
     repo_patterns = [
         re.compile(p, re.I)
-        for p in get_bundled_defaults().get("digital_repositories", {}).get("uri_patterns") or []
+        for p in raw_patterns
     ]
     for f in _get_datafields(record_elem, "856"):
         u = _get_subfield(f, "u")

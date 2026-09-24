@@ -12,13 +12,22 @@ from reconciliator.config.defaults import (
     get_bundled_oai_ingest_defaults,
 )
 from reconciliator.config.normalization import RecordNormalizationConfig
-from reconciliator.config.vocabularies import VocabulariesConfig
+from reconciliator.config.semantics import VocabulariesConfig
 
 _INGESTION_DEFAULTS = get_bundled_ingestion_defaults()
 _INGEST_FILTER_DEFAULTS = dict(_INGESTION_DEFAULTS.get("filter") or {})
 _OAI_INGEST_DEFAULTS = get_bundled_oai_ingest_defaults()
 _WIKIDATA_INGEST_DEFAULTS = dict(_INGESTION_DEFAULTS.get("wikidata") or {})
 _VOCAB_INGEST_DEFAULTS = dict(_INGESTION_DEFAULTS.get("vocab") or {})
+
+
+class FieldTruncationConfig(BaseModel):
+    """Configuration for truncating overlong text field values."""
+
+    truncate_overlong_values: bool = True
+    truncation_marker: str = ""
+    default_max_field_length: Optional[int] = None
+    field_length_overrides: dict[str, int] = Field(default_factory=dict)
 
 
 class IngestFilterConfig(BaseModel):
@@ -60,7 +69,7 @@ class IngestFilterConfig(BaseModel):
         return True
 
 
-class OAIDefaultsConfig(BaseModel):
+class OAIDefaultsConfig(FieldTruncationConfig):
     """Shared defaults for OAI-PMH and ResourceSync harvesting."""
 
     workers: int = Field(default_factory=lambda: int(_OAI_INGEST_DEFAULTS.get("workers", 4)))
@@ -101,21 +110,12 @@ class OAIDefaultsConfig(BaseModel):
     drop_indexes_during_replace: bool = Field(
         default_factory=lambda: bool(_OAI_INGEST_DEFAULTS.get("drop_indexes_during_replace", False))
     )
-    truncate_overlong_values: bool = Field(
-        default_factory=lambda: bool(_OAI_INGEST_DEFAULTS.get("truncate_overlong_values", True))
-    )
-    truncation_marker: str = Field(
-        default_factory=lambda: str(_OAI_INGEST_DEFAULTS.get("truncation_marker") or "")
-    )
-    default_max_field_length: Optional[int] = Field(
-        default_factory=lambda: _OAI_INGEST_DEFAULTS.get("default_max_field_length")
-    )
     adopt_previous_task_id: bool = Field(
         default_factory=lambda: bool(_OAI_INGEST_DEFAULTS.get("adopt_previous_task_id", True))
     )
 
 
-class OAIIngestConfig(IngestFilterConfig):
+class OAIIngestConfig(IngestFilterConfig, FieldTruncationConfig):
     """Configuration for an individual OAI-PMH, ResourceSync, or file authority source."""
 
     enabled: bool = True
@@ -177,16 +177,6 @@ class OAIIngestConfig(IngestFilterConfig):
     normalization: Optional[RecordNormalizationConfig] = None
     constituents: Optional[str] = None
     constituents_mode: Optional[Literal["off", "keys_only", "entities"]] = None
-    truncate_overlong_values: bool = Field(
-        default_factory=lambda: bool(_OAI_INGEST_DEFAULTS.get("truncate_overlong_values", True))
-    )
-    truncation_marker: str = Field(
-        default_factory=lambda: str(_OAI_INGEST_DEFAULTS.get("truncation_marker") or "")
-    )
-    default_max_field_length: Optional[int] = Field(
-        default_factory=lambda: _OAI_INGEST_DEFAULTS.get("default_max_field_length")
-    )
-    field_length_overrides: dict[str, int] = Field(default_factory=dict)
     adopt_previous_task_id: bool = Field(
         default_factory=lambda: bool(_OAI_INGEST_DEFAULTS.get("adopt_previous_task_id", True))
     )
@@ -224,7 +214,7 @@ class OAIIngestConfig(IngestFilterConfig):
         return self
 
 
-class WikidataIngestConfig(IngestFilterConfig):
+class WikidataIngestConfig(IngestFilterConfig, FieldTruncationConfig):
     """Configuration for streaming Wikidata JSON ingestion."""
 
     enabled: bool = Field(
@@ -290,23 +280,9 @@ class WikidataIngestConfig(IngestFilterConfig):
     subject_mappings: dict[str, str] = Field(
         default_factory=lambda: dict(_WIKIDATA_INGEST_DEFAULTS.get("subject_mappings") or {})
     )
-    truncate_overlong_values: bool = Field(
-        default_factory=lambda: bool(
-            _WIKIDATA_INGEST_DEFAULTS.get("truncate_overlong_values", True)
-        )
-    )
-    truncation_marker: str = Field(
-        default_factory=lambda: str(_WIKIDATA_INGEST_DEFAULTS.get("truncation_marker") or "")
-    )
-    default_max_field_length: Optional[int] = Field(
-        default_factory=lambda: _WIKIDATA_INGEST_DEFAULTS.get("default_max_field_length")
-    )
-    field_length_overrides: dict[str, int] = Field(
-        default_factory=lambda: dict(_WIKIDATA_INGEST_DEFAULTS.get("field_length_overrides") or {})
-    )
 
 
-class VocabIngestConfig(BaseModel):
+class VocabIngestConfig(FieldTruncationConfig):
     """Configuration for value vocabulary and migration thesauri ingestion."""
 
     enabled: bool = Field(default_factory=lambda: bool(_VOCAB_INGEST_DEFAULTS.get("enabled", True)))
@@ -322,18 +298,6 @@ class VocabIngestConfig(BaseModel):
     pref_label_languages: Optional[list[str] | str] = None
     alt_label_languages: Optional[list[str] | str] = None
     normalization: Optional[VocabulariesConfig] = None
-    truncate_overlong_values: bool = Field(
-        default_factory=lambda: bool(_VOCAB_INGEST_DEFAULTS.get("truncate_overlong_values", True))
-    )
-    truncation_marker: str = Field(
-        default_factory=lambda: str(_VOCAB_INGEST_DEFAULTS.get("truncation_marker") or "")
-    )
-    default_max_field_length: Optional[int] = Field(
-        default_factory=lambda: _VOCAB_INGEST_DEFAULTS.get("default_max_field_length")
-    )
-    field_length_overrides: dict[str, int] = Field(
-        default_factory=lambda: dict(_VOCAB_INGEST_DEFAULTS.get("field_length_overrides") or {})
-    )
     relators_bridge_file: Optional[Path] = Field(
         default_factory=lambda: (
             Path(_VOCAB_INGEST_DEFAULTS["relators_bridge_file"])

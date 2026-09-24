@@ -3,6 +3,8 @@
 from pathlib import Path
 
 from reconciliator.config import (
+    BiographicalDatesConfig,
+    LinguisticConfig,
     RecordNormalizationConfig,
     VocabulariesConfig,
     load_config,
@@ -262,8 +264,12 @@ def test_biographical_date_qualifiers_customization() -> None:
 
     # RecordNormalizer configured with custom biographical qualifier parts
     cfg = RecordNormalizationConfig(
-        biographical_date_prefixes=["geb.", "gest."],
-        biographical_era_bc=["v.chr."],
+        linguistic=LinguisticConfig(
+            biographical_dates=BiographicalDatesConfig(
+                prefixes=["geb.", "gest."],
+                era_bc=["v.chr."],
+            )
+        )
     )
     normalizer = RecordNormalizer(config=cfg)
     raw_data = {
@@ -283,7 +289,7 @@ def test_load_config_with_external_and_omitted_normalization(tmp_path: Path) -> 
     root_example = Path(__file__).parent.parent / "config.example.yaml"
     cfg = load_config(root_example)
     assert cfg.record_normalization is not None
-    assert cfg.record_normalization.default_language == "fi"
+    assert cfg.record_normalization.linguistic.default_language == "fi"
     assert cfg.record_normalization.classification_priority == ["ykl", "udk", "dewey", "lc"]
     assert cfg.vocabularies.default_field_vocabularies["650"] == "yso"
 

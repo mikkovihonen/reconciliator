@@ -59,121 +59,13 @@ def get_bundled_sources_defaults() -> dict[str, Any]:
 
 
 def get_bundled_vocabularies_defaults() -> dict[str, Any]:
-    """Get bundled default vocabulary definitions dictionary with derived mappings."""
-    raw = dict(get_bundled_defaults().get("vocabularies") or {})
-    sf = raw.get("subject_fields") or {}
-    if "field_to_vocabularies" not in raw:
-        raw["field_to_vocabularies"] = {k: list(v.get("allowed_vocabs", [])) for k, v in sf.items()}
-    if "default_field_vocabularies" not in raw:
-        raw["default_field_vocabularies"] = {
-            k: str(v.get("default_vocab", "")) for k, v in sf.items()
-        }
-    if "vocab_target_fields" not in raw:
-        raw["vocab_target_fields"] = {
-            str(v.get("default_vocab", "")): k
-            for k, v in sf.items()
-            if v.get("category") != "topical"
-        }
-    if "subject_field_category_map" not in raw:
-        raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
-    if "default_vocab_target_field" not in raw:
-        raw["default_vocab_target_field"] = str(raw.get("default_vocab_target_field") or "")
-    if "default_target_field" not in raw:
-        raw["default_target_field"] = str(
-            raw.get("default_target_field") or raw.get("default_vocab_target_field") or ""
-        )
-    if "default_subject_field" not in raw:
-        raw["default_subject_field"] = str(
-            raw.get("default_subject_field") or raw.get("default_vocab_target_field") or ""
-        )
-    if "supported_subject_vocabularies" not in raw:
-        raw["supported_subject_vocabularies"] = list(raw.get("supported_subjects", []))
-    if "vocabularies" not in raw:
-        seen = set()
-        vocabs = []
-        for key in ("agent_priority", "subject_priority", "entity_vocabularies"):
-            for val in raw.get(key, []):
-                v_up = str(val).upper()
-                if v_up not in seen:
-                    seen.add(v_up)
-                    vocabs.append(v_up)
-        raw["vocabularies"] = vocabs
-    ling = get_bundled_linguistic_defaults()
-    if "preserved_diacritics" not in raw:
-        raw["preserved_diacritics"] = str(ling.get("preserved_diacritics") or "")
-    b_dates = ling.get("biographical_dates", {})
-    if "biographical_date_prefixes" not in raw:
-        raw["biographical_date_prefixes"] = list(b_dates.get("prefixes", []))
-    if "biographical_era_bc" not in raw:
-        raw["biographical_era_bc"] = list(b_dates.get("era_bc", []))
-    if "biographical_era_ad" not in raw:
-        raw["biographical_era_ad"] = list(b_dates.get("era_ad", []))
-    if "biographical_century_suffixes" not in raw:
-        raw["biographical_century_suffixes"] = list(b_dates.get("century_suffixes", []))
-    if "biographical_date_pattern" not in raw:
-        raw["biographical_date_pattern"] = b_dates.get("pattern")
-    if "default_language" not in raw:
-        raw["default_language"] = str(
-            raw.get("default_language") or ling.get("default_language") or ""
-        )
-    return raw
+    """Get bundled default vocabulary definitions dictionary directly from defaults.yaml."""
+    return get_bundled_section_defaults("vocabularies")
 
 
 def get_bundled_record_defaults() -> dict[str, Any]:
-    """Get bundled default record normalization dictionary with enrichments and linguistic defaults."""
-    data = get_bundled_defaults()
-    raw = dict(data.get("record_normalization") or data.get("record") or {})
-    enrich = dict(data.get("enrichment") or {})
-    if "marc_predicate_profiles" not in raw and "predicate_profiles" in enrich:
-        raw["marc_predicate_profiles"] = enrich["predicate_profiles"]
-    if "marc_schemes" not in raw and "schemes" in enrich:
-        raw["marc_schemes"] = enrich["schemes"]
-    if "marc_domain_concepts" not in raw and "domain_concepts" in enrich:
-        raw["marc_domain_concepts"] = enrich["domain_concepts"]
-    if "marc_linking_labels" not in raw and "linking_labels" in enrich:
-        raw["marc_linking_labels"] = enrich["linking_labels"]
-    if "marc_accessibility" not in raw and "accessibility" in enrich:
-        raw["marc_accessibility"] = enrich["accessibility"]
-    if "thesis_institution_uri" not in raw and "thesis_institution_uri" in enrich:
-        raw["thesis_institution_uri"] = enrich["thesis_institution_uri"]
-    if "thesis_relator_code" not in raw and "thesis_relator_code" in enrich:
-        raw["thesis_relator_code"] = enrich["thesis_relator_code"]
-    if "surrogate_title_keywords" not in raw and "surrogate_title_keywords" in enrich:
-        raw["surrogate_title_keywords"] = enrich["surrogate_title_keywords"]
-    if "ephemera_terms" not in raw and "ephemera_terms" in enrich:
-        raw["ephemera_terms"] = enrich["ephemera_terms"]
-
-    ling = get_bundled_linguistic_defaults()
-    if "preserved_diacritics" not in raw:
-        raw["preserved_diacritics"] = str(ling.get("preserved_diacritics") or "")
-    b_dates = ling.get("biographical_dates", {})
-    if "biographical_date_prefixes" not in raw:
-        raw["biographical_date_prefixes"] = list(b_dates.get("prefixes", []))
-    if "biographical_era_bc" not in raw:
-        raw["biographical_era_bc"] = list(b_dates.get("era_bc", []))
-    if "biographical_era_ad" not in raw:
-        raw["biographical_era_ad"] = list(b_dates.get("era_ad", []))
-    if "biographical_century_suffixes" not in raw:
-        raw["biographical_century_suffixes"] = list(b_dates.get("century_suffixes", []))
-    if "biographical_date_pattern" not in raw:
-        raw["biographical_date_pattern"] = b_dates.get("pattern")
-    if "default_language" not in raw:
-        raw["default_language"] = str(ling.get("default_language") or "")
-
-    vocab = dict(data.get("vocabularies") or {})
-    sf = vocab.get("subject_fields") or {}
-    if "subject_field_category_map" not in raw:
-        raw["subject_field_category_map"] = {k: str(v.get("category", "")) for k, v in sf.items()}
-    if "default_subject_field" not in raw:
-        raw["default_subject_field"] = str(
-            vocab.get("default_subject_field") or vocab.get("default_vocab_target_field") or ""
-        )
-    return raw
-
-
-def get_bundled_normalization_defaults() -> dict[str, Any]:
-    """Get bundled default record normalization dictionary."""
-    return get_bundled_record_defaults()
+    """Get bundled default record normalization dictionary directly from defaults.yaml."""
+    return get_bundled_section_defaults("record_normalization")
 
 
 def get_bundled_enrichment_defaults() -> dict[str, Any]:

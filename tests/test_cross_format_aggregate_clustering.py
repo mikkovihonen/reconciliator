@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import MagicMock
 from reconciliator.models import MatchRecord, WorkCluster
 from reconciliator.clustering.corpus import CorpusClusterer, _lcs_length
-from reconciliator.config.clustering import ClusterConfig, AggregateClusteringConfig
+from reconciliator.config import AggregateClusteringConfig, WEMIClusterConfig
 
 
 def test_lcs_length():
@@ -24,7 +24,7 @@ def test_lcs_length():
 
 def test_pairwise_aggregate_jaccard_merge_bonus():
     """Verify that records sharing >= 80% constituent works receive merge bonus."""
-    config = ClusterConfig(
+    config = WEMIClusterConfig(
         aggregates=AggregateClusteringConfig(
             enabled=True,
             jaccard_merge_threshold=0.80,
@@ -57,7 +57,7 @@ def test_pairwise_aggregate_jaccard_merge_bonus():
 
 def test_pairwise_aggregate_jaccard_mismatch_veto():
     """Verify that records sharing <= 30% constituent works are hard-vetoed."""
-    config = ClusterConfig(
+    config = WEMIClusterConfig(
         aggregates=AggregateClusteringConfig(
             enabled=True,
             jaccard_veto_threshold=0.30,
@@ -89,7 +89,7 @@ def test_pairwise_aggregate_jaccard_mismatch_veto():
 
 def test_pairwise_container_part_collision_veto():
     """Verify that container records and individual constituent components never merge."""
-    config = ClusterConfig(
+    config = WEMIClusterConfig(
         aggregates=AggregateClusteringConfig(
             enabled=True,
             min_constituents_for_overlap=2,
@@ -121,7 +121,7 @@ def test_pairwise_container_part_collision_veto():
 
 def test_pairwise_sequence_alignment_distinction():
     """Verify that sequence alignment distinguishes ordered albums from scrambled ones."""
-    config = ClusterConfig(
+    config = WEMIClusterConfig(
         aggregates=AggregateClusteringConfig(
             enabled=True,
             jaccard_merge_threshold=0.80,
@@ -172,7 +172,7 @@ def test_pairwise_sequence_alignment_distinction():
 
 def test_blocking_keys_constituent_work():
     """Verify that container records generate constituent_work blocking keys."""
-    config = ClusterConfig(
+    config = WEMIClusterConfig(
         aggregates=AggregateClusteringConfig(
             enabled=True,
             blocking_family="constituent_work",

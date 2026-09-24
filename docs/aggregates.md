@@ -56,14 +56,14 @@ Constituent extraction is entirely profile-driven, mapping native syntax into un
                       └─────────────────────────────────────────┘
 ```
 
-### 2.1 MARCXML Profile ([`marc_enhanced.yaml`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/defaults/constituent_profiles/marc_enhanced.yaml))
+### 2.1 MARCXML Profile ([`marc_enhanced.yaml`](../src/reconciliator/defaults/constituent_profiles/marc_enhanced.yaml))
 Extracts analytical entries from:
 - **`730` (Uniform Title Added Entry)**: Common in Finnish songbooks (e.g. `$aOi muistatko vielä sen virren$gMerikanto, Oskar`).
 - **`700` (Name-Title Added Entry)**: Analytical composer/author entries (`$aMerikanto, Oskar,$d1868-1924.$tLaula, tyttö!`).
 - **`740` (Uncontrolled Analytical Title)**: Secondary title added entries with indicator `ind2: "2"`.
 - **`505` (Enhanced Contents Note)**: Tracklists with `$t` (title) and `$r` (statement of responsibility).
 
-### 2.2 Finnish BFFI Profile ([`bffi_haspart.yaml`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/defaults/constituent_profiles/bffi_haspart.yaml))
+### 2.2 Finnish BFFI Profile ([`bffi_haspart.yaml`](../src/reconciliator/defaults/constituent_profiles/bffi_haspart.yaml))
 Strictly adheres to the National Library of Finland LKD schema (`https://schema.finto.fi/bffi/1-0-0/lkd.rdf`):
 - Uses `bffi:hasPart` and `bf:hasPart`.
 - Extracts titles from `bffi:title` and `bffi:mainTitle`.
@@ -71,7 +71,7 @@ Strictly adheres to the National Library of Finland LKD schema (`https://schema.
 - Extracts provenance components and author hints from `bffi:marcKey`.
 - **Strict Constraint**: Zero references to or generation of `bflc:` triples.
 
-### 2.3 LC BIBFRAME Profile ([`bibframe_haspart.yaml`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/defaults/constituent_profiles/bibframe_haspart.yaml))
+### 2.3 LC BIBFRAME Profile ([`bibframe_haspart.yaml`](../src/reconciliator/defaults/constituent_profiles/bibframe_haspart.yaml))
 Standard Library of Congress profile:
 - Reads `bf:hasPart`.
 - Reads `bf:title` / `bf:mainTitle` and `bf:contribution`.
@@ -81,7 +81,7 @@ Standard Library of Congress profile:
 
 ## 3. Ingestion & Staging
 
-In [`src/reconciliator/cli.py`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/cli.py) (`_ingest_corpus_as_wemi`):
+In [`src/reconciliator/cli.py`](../src/reconciliator/cli.py) (`_ingest_corpus_as_wemi`):
 1. **Profile Resolution**: Automatically resolves the profile from configuration:
    - MARCXML $\rightarrow$ `config.constituents.profile` (default: `marc_enhanced`)
    - BFFI 1.0 $\rightarrow$ `config.constituents.bffi_profile` (default: `bffi_haspart`)
@@ -97,7 +97,7 @@ In [`src/reconciliator/cli.py`](file:///Users/mikkovihonen/Workspace/reconciliat
 
 ## 4. Bottom-Up Multiplex Clustering
 
-Clustering operates bottom-up in [`src/reconciliator/clustering/corpus.py`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/clustering/corpus.py):
+Clustering operates bottom-up in [`src/reconciliator/clustering/corpus.py`](../src/reconciliator/clustering/corpus.py):
 
 ### Step A: Constituent Micro-Clustering First
 Before clustering container publications, all constituent works in the corpus are clustered:
@@ -144,12 +144,12 @@ After macro-clustering completes:
 
 Enrichment translates resolved constituent authority URIs back into native source formats:
 
-### 5.1 MARCXML Enrichment ([`MARCXMLEnricher`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/xml_enricher.py))
+### 5.1 MARCXML Enrichment ([`MARCXMLEnricher`](../src/reconciliator/xml_enricher.py))
 - Reads `corpus_constituent_linkages` by `record_id`.
 - Locates matching `730`, `700`, or `740` analytical fields by title matching.
 - Injects `$0 <final_work_uri>` directly into the matched field.
 
-### 5.2 BFFI RDF Enrichment ([`enrich_bibframe_graph`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/loaders/bibframe/enricher.py))
+### 5.2 BFFI RDF Enrichment ([`enrich_bibframe_graph`](../src/reconciliator/loaders/bibframe/enricher.py))
 - Resolves dialect title predicates (`p.expanded_title_predicates` and `p.expanded_main_title_predicates`).
 - Matches constituent nodes under `bffi:hasPart` / `bf:hasPart`.
 - Injects `(part_node, owl:sameAs, final_work_uri)`.
@@ -160,7 +160,7 @@ Enrichment translates resolved constituent authority URIs back into native sourc
 
 ## 6. Configuration Reference
 
-In `config.yaml` or [`defaults.yaml`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/defaults/defaults.yaml):
+In `config.yaml` or [`defaults.yaml`](../src/reconciliator/defaults/defaults.yaml):
 
 ```yaml
 constituents:
@@ -170,15 +170,16 @@ constituents:
   mode: "entities"                 # off | keys_only | entities
   index_works: false               # Keep constituent works out of primary work ANN index
 
-cluster:
-  aggregates:
-    enabled: true                  # Enable aggregate multiplex scoring
-    jaccard_merge_threshold: 0.80  # Constituent overlap required for merge bonus
-    jaccard_veto_threshold: 0.30   # Constituent overlap below which records are vetoed
-    min_constituents_for_overlap: 2 # Minimum constituents to trigger overlap rules
-    merge_bonus_score: 0.95        # Similarity score granted on constituent match
-    sequence_alignment: true       # Require LCS track sequence alignment
-    lcs_threshold: 0.70            # LCS ratio threshold
-    blocking_family: "constituent_work" # Blocking key family for container indexing
+reconcile:
+  cluster:
+    aggregates:
+      enabled: true                  # Enable aggregate multiplex scoring
+      jaccard_merge_threshold: 0.80  # Constituent overlap required for merge bonus
+      jaccard_veto_threshold: 0.30   # Constituent overlap below which records are vetoed
+      min_constituents_for_overlap: 3 # Minimum constituents to trigger overlap rules
+      merge_bonus_score: 0.95        # Similarity score granted on constituent match
+      sequence_alignment: true       # Require LCS track sequence alignment
+      lcs_threshold: 0.70            # LCS ratio threshold
+      blocking_family: "constituent_work" # Blocking key family for container indexing
 ```
 

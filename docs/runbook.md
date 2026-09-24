@@ -29,7 +29,21 @@ This runbook provides complete operational guidance for system administrators, D
 
 ## 2. Configuration Surface (`config.yaml` / `defaults.yaml`)
 
-Configuration is driven by YAML files matching [`src/reconciliator/defaults/defaults.yaml`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/defaults/defaults.yaml).
+Reconciliator's configuration system is driven by a single-source-of-truth YAML file matching [`src/reconciliator/defaults/defaults.yaml`](../src/reconciliator/defaults/defaults.yaml) (see full reference in [`config.example.yaml`](../config.example.yaml)).
+
+All configuration models are strongly typed Pydantic models organized into domain modules under [`src/reconciliator/config/`](../src/reconciliator/config/) and exported canonically from [`reconciliator.config`](../src/reconciliator/config/__init__.py):
+
+- **`infrastructure.py`**: Hardware compute (`ComputeConfig`), filesystem paths and PostgreSQL storage (`StorageConfig`, `PostgresConfig`), vector search engines (`VectorEngineConfig`, `TorchEngineConfig`, `FAISSEngineConfig`, `USearchEngineConfig`, `VectorDaemonConfig`), logging (`LoggingConfig`), telemetry (`TelemetryConfig`), and source registry entries (`SourceConfig`).
+- **`semantics.py`**: Linguistic normalization and biographical qualifiers (`LinguisticConfig`, `BiographicalDatesConfig`), controlled vocabularies and hierarchy (`VocabulariesConfig`, `HierarchyConfig`), and format mutation/predicate policies (`EnrichmentConfig`).
+- **`matching.py`**: WEMI multiplex graph clustering (`WEMIClusterConfig`, `WEMIScoringConfig`, `AggregateClusteringConfig`), agent clustering (`AgentClusterConfig`), cross-source work consolidation (`WorkConsolidationConfig`), candidate reranking and LLM judging (`RerankConfig`, `CascadeRouterConfig`, `LLMJudgeConfig`, `ShortCircuitConfig`), and domain-specific funnels (`FunnelsConfig`).
+- **`normalization.py`**: Bibliographic record parsing, ISBD punctuation stripping, non-filing articles, volume parsing, roman numerals, and standard identifiers (`RecordNormalizationConfig`, with embedded `linguistic: LinguisticConfig`).
+- **`ingestion.py`**: Universal ingest filters (`IngestFilterConfig`), field length truncation (`FieldTruncationConfig`), OAI-PMH harvesting (`OAIIngestConfig`, `OAIDefaultsConfig`), Skosmos downloads (`SkosmosDownloadConfig`), value vocabulary ingestion (`VocabIngestConfig`), and Wikidata streaming (`WikidataIngestConfig`).
+- **`authority.py`**: Virtual authority generation, PID allocation, provenance tracking, and serialization (`VirtualAuthorityConfig`, `AgentAuthorityConfig`).
+- **`app.py`**: Root [`AppConfig`](../src/reconciliator/config/app.py), offline reconcile configuration ([`ReconcileConfig`](../src/reconciliator/config/app.py)), template/report paths (`TemplateSetPathsConfig`, `ReportSetPathsConfig`), and cross-subsystem validation and propagation.
+- **`loader.py`**: Safe YAML loading (`load_config`) and logging setup (`configure_logging`).
+
+> [!NOTE]
+> Reconciliator enforces strict configuration schemas without backward-compatibility shims, aliases, or hardcoded fallbacks. All default values derive directly from [`defaults.yaml`](../src/reconciliator/defaults/defaults.yaml).
 
 ### 2.1 Storage Configuration
 ```yaml
@@ -44,11 +58,16 @@ storage:
 
 ### 2.2 Embedding & Vector Engine
 ```yaml
+storage:
+  vector_engine:
+    backend: "auto"     # auto | faiss | torch | usearch
+    mode: "embedded"    # embedded | daemon
+
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
   device: "auto"        # auto | cuda | mps | cpu
-  batch_size: 128
-  vector_engine: "auto" # auto | faiss | torch
+  batch_size: 64
+  template_path: "reconciliator/embedding/templates/default_serialization.j2"
 ```
 
 ### 2.3 Aggregate & Constituent Work Configuration
@@ -60,16 +79,17 @@ constituents:
   mode: "entities"                 # off | keys_only | entities
   index_works: false               # Keep constituents out of primary work ANN index
 
-cluster:
-  aggregates:
-    enabled: true                  # Enable aggregate multiplex scoring
-    jaccard_merge_threshold: 0.80  # Constituent overlap required for merge bonus
-    jaccard_veto_threshold: 0.30   # Constituent overlap below which records are vetoed
-    min_constituents_for_overlap: 2 # Minimum constituents to trigger overlap rules
-    merge_bonus_score: 0.95        # Similarity score granted on constituent match
-    sequence_alignment: true       # Require LCS track sequence alignment
-    lcs_threshold: 0.70            # LCS ratio threshold
-    blocking_family: "constituent_work"
+reconcile:
+  cluster:
+    aggregates:
+      enabled: true                  # Enable aggregate multiplex scoring
+      jaccard_merge_threshold: 0.80  # Constituent overlap required for merge bonus
+      jaccard_veto_threshold: 0.30   # Constituent overlap below which records are vetoed
+      min_constituents_for_overlap: 3 # Minimum constituents to trigger overlap rules
+      merge_bonus_score: 0.95        # Similarity score granted on constituent match
+      sequence_alignment: true       # Require LCS track sequence alignment
+      lcs_threshold: 0.70            # LCS ratio threshold
+      blocking_family: "constituent_work"
 ```
 
 ### 2.4 Candidate Reranking & Cascading
@@ -77,11 +97,14 @@ cluster:
 reconcile:
   rerank:
     enabled: true
-    engine: "bm25"                 # bm25 | fuzzy | cross_encoder | cascade | noop
+    engine: "cascade"              # cascade | llm_judge | bm25 | fuzzy | cross_encoder | noop
     top_k: 20                      # Number of candidates retrieved from vector ANN
-    dense_weight: 0.40             # Weight for dense embedding cosine similarity
-    sparse_weight: 0.60            # Weight for BM25/Fuzzy lexical score
-    max_year_difference: 3         # Hard discriminator maximum publication year tolerance
+    dense_weight: 0.50             # Weight for dense embedding cosine similarity
+    rerank_weight: 0.50            # Weight for reranker score (dense_weight + rerank_weight = 1.0)
+    max_year_difference: 5         # Hard discriminator maximum publication year tolerance
+    short_circuit:
+      enabled: true
+      threshold: 0.98
 ```
 
 ---

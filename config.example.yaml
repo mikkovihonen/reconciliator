@@ -133,7 +133,7 @@ embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
 
   # Jinja2 template used for serializing bibliographic metadata into embeddable strings
-  template_path: "reconciliator/templates/default_serialization.j2"
+  template_path: "reconciliator/embedding/templates/default_serialization.j2"
 
   # Inference device: 'auto', 'cpu', 'cuda', 'mps'
   device: "auto"
@@ -1398,10 +1398,10 @@ reconcile:
 
   # Serialization templates for WEMI entities
   templates:
-    work: "reconciliator/templates/work_serialization.j2"
-    expression: "reconciliator/templates/expression_serialization.j2"
-    manifestation: "reconciliator/templates/manifestation_serialization.j2"
-    agent: "reconciliator/templates/agent_serialization.j2"
+    work: "reconciliator/embedding/templates/work_serialization.j2"
+    expression: "reconciliator/embedding/templates/expression_serialization.j2"
+    manifestation: "reconciliator/embedding/templates/manifestation_serialization.j2"
+    agent: "reconciliator/embedding/templates/agent_serialization.j2"
 
 # ==============================================================================
 # 18. Tooling: Bruno API Collection Export

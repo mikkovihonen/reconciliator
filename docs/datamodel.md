@@ -1,6 +1,6 @@
 # Reconciliator Data Model Architecture
 
-This document specifies the complete, authoritative database schema and entity model implemented in Reconciliator. It describes each table, relationship, index, and use case across all **43 relational tables** defined in [`src/reconciliator/database/schema.py`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/database/schema.py).
+This document specifies the complete, authoritative database schema and entity model implemented in Reconciliator. It describes each table, relationship, index, and use case across all **43 relational tables** defined in [`src/reconciliator/database/schema.py`](../src/reconciliator/database/schema.py).
 
 ---
 

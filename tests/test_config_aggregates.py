@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from reconciliator.config.clustering import AggregateClusteringConfig, ClusterConfig
-from reconciliator.config.authority import ConstituentsConfig
+from reconciliator.config import AggregateClusteringConfig, WEMIClusterConfig
+from reconciliator.config import ConstituentsConfig
 from reconciliator.config import ReconcileConfig
 
 
@@ -21,7 +21,7 @@ def test_aggregate_clustering_config_defaults():
 
 
 def test_cluster_config_has_aggregates():
-    cluster_cfg = ClusterConfig()
+    cluster_cfg = WEMIClusterConfig()
     assert isinstance(cluster_cfg.aggregates, AggregateClusteringConfig)
     assert cluster_cfg.aggregates.enabled is True
 

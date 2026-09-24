@@ -69,8 +69,8 @@ def test_bibframe_normalize_role_uri_or_label_with_mts() -> None:
 def test_mts_concept_id_rules() -> None:
     assert normalize_concept_id("http://urn.fi/URN:NBN:fi:au:mts:m552") == "mts:m552"
     assert normalize_concept_id("urn:nbn:fi:au:mts:m4115") == "mts:m4115"
-    assert concept_id_to_uri("mts:m552") == "http://urn.fi/URN:NBN:fi:au:mts:m552"
-    assert concept_id_to_uri("mts:m4115") == "http://urn.fi/URN:NBN:fi:au:mts:m4115"
+    assert concept_id_to_uri("mts:m552") == "https://urn.fi/URN:NBN:fi:au:mts:m552"
+    assert concept_id_to_uri("mts:m4115") == "https://urn.fi/URN:NBN:fi:au:mts:m4115"
 
 
 def test_ingest_bridge_files_populates_relator_terms(tmp_path: Path) -> None:

@@ -92,7 +92,7 @@ vector_model: "embedding"
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
-  template_path: "reconciliator/templates/default_serialization.j2"
+  template_path: "reconciliator/embedding/templates/default_serialization.j2"
   device: "auto"
   batch_size: 64
   vector_dim: null
@@ -162,6 +162,19 @@ linguistic:
     pattern: null
 
 vocabularies:
+  vocabularies:
+    - "KANTO_PN"
+    - "KANTO_CN"
+    - "ISNI"
+    - "VIAF"
+    - "WIKIDATA"
+    - "YSO"
+    - "YSO-AIKA"
+    - "KAUNO"
+    - "MUSO"
+    - "SLM"
+    - "SEKO"
+
   agent_priority:
     - "KANTO_PN"
     - "KANTO_CN"
@@ -1313,7 +1326,7 @@ reconcile:
     rerank_weight: 0.5
     top_k: 20
     short_circuit:
-      enabled: false
+      enabled: true
       threshold: 0.98
     require_volume_match: true
     require_surname_match: true

@@ -868,7 +868,10 @@ def parse_wikidata_entity(
     temporal_field = cat_defaults.get("temporal") or cat_defaults["chronological"]
     mop_field = cat_defaults["medium_of_performance"]
 
-    subj_mappings = dict(get_bundled_defaults().get("wikidata", {}).get("subject_mappings") or {})
+    subj_mappings = dict(
+        get_bundled_defaults().get("ingestion", {}).get("wikidata", {}).get("subject_mappings")
+        or {"topical": "yso", "geographic": "yso-paikat", "temporal": "yso-aika"}
+    )
 
     for s_qid in get_claim_qids(claims, "P921"):
         s_heading = _lookup_entity_name(s_qid, store, cache=cache) or s_qid

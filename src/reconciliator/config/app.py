@@ -12,8 +12,6 @@ from reconciliator.config.authority import (
     ConstituentsConfig,
     VirtualAuthorityConfig,
 )
-from reconciliator.config.clustering import AgentClusterConfig
-from reconciliator.config.compute import ComputeConfig
 from reconciliator.config.defaults import (
     get_bundled_agent_authority_defaults,
     get_bundled_agent_clustering_defaults,
@@ -27,29 +25,45 @@ from reconciliator.config.defaults import (
     get_bundled_ingestion_defaults,
     get_bundled_llm_defaults,
     get_bundled_logging_defaults,
+    get_bundled_reconcile_defaults,
     get_bundled_sources_defaults,
     get_bundled_storage_defaults,
     get_bundled_telemetry_defaults,
     get_bundled_vector_model_default,
     get_bundled_virtual_authority_defaults,
+    get_bundled_vocabularies_defaults,
 )
-from reconciliator.config.embedding import EmbeddingConfig
-from reconciliator.config.enrichment import EnrichmentConfig
-from reconciliator.config.funnels import FunnelsConfig
-from reconciliator.config.ingestion import IngestionConfig
-from reconciliator.config.linguistic import LinguisticConfig
-from reconciliator.config.normalization import RecordNormalizationConfig
-from reconciliator.config.reconciliation import ReconcileConfig, WorkConsolidationConfig
-from reconciliator.config.rerank import LLMJudgeConfig
-from reconciliator.config.storage import StorageConfig
-from reconciliator.config.system import (
+from reconciliator.config.infrastructure import (
     BrunoConfig,
+    ComputeConfig,
+    EmbeddingConfig,
     EntraAuthConfig,
     LoggingConfig,
     SourceConfig,
+    StorageConfig,
     TelemetryConfig,
 )
-from reconciliator.config.vocabularies import VocabulariesConfig
+from reconciliator.config.ingestion import (
+    FieldTruncationConfig,
+    IngestFilterConfig,
+    IngestionConfig,
+)
+from reconciliator.config.matching import (
+    AgentClusterConfig,
+    FunnelsConfig,
+    FunnelSpec,
+    LLMJudgeConfig,
+    ReconcileFTSFallbackConfig,
+    RerankConfig,
+    WEMIClusterConfig,
+    WorkConsolidationConfig,
+)
+from reconciliator.config.normalization import RecordNormalizationConfig
+from reconciliator.config.semantics import (
+    EnrichmentConfig,
+    LinguisticConfig,
+    VocabulariesConfig,
+)
 
 _COMPUTE_DEFAULTS = get_bundled_compute_defaults()
 _STORAGE_DEFAULTS = get_bundled_storage_defaults()
@@ -67,6 +81,163 @@ _AGENT_AUTHORITY_DEFAULTS = get_bundled_agent_authority_defaults()
 _BRUNO_DEFAULTS = get_bundled_bruno_defaults()
 _FUNNELS_DEFAULTS = get_bundled_funnels_defaults()
 _ENRICH_DEFAULTS = get_bundled_enrichment_defaults()
+_RECONCILE_DEFAULTS = get_bundled_reconcile_defaults()
+_VOCAB_DEFAULTS = get_bundled_vocabularies_defaults()
+
+
+class TemplateSetPathsConfig(BaseModel):
+    """File paths for WEMI and agent serialization templates."""
+
+    work: Path = Path("reconciliator/embedding/templates/work_serialization.j2")
+    expression: Path = Path("reconciliator/embedding/templates/expression_serialization.j2")
+    manifestation: Path = Path("reconciliator/embedding/templates/manifestation_serialization.j2")
+    agent: Path = Path("reconciliator/embedding/templates/agent_serialization.j2")
+
+
+class ReportSetPathsConfig(BaseModel):
+    """Paths for detailed and summary TSV reports."""
+
+    detailed_file: Path
+    summary_file: Path
+
+
+class ReconcileConfig(IngestFilterConfig, FieldTruncationConfig):
+    """Offline reconciliation and enrichment configuration."""
+
+    target_file: Path
+    corpus_source_name: Optional[str] = None
+    funnels: list[FunnelSpec] = Field(default_factory=list)
+    funnel_settings: FunnelsConfig = Field(
+        default_factory=lambda: FunnelsConfig(**_FUNNELS_DEFAULTS)
+    )
+    config_dir: Optional[Path] = None
+    format: Literal["auto", "marcxml", "bibra", "bibframe"] = "auto"
+    schema_profile: Optional[str] = None
+    output_file: Optional[Path] = None
+    reports_dir: Optional[Path] = Path("data/reports")
+    agent_reports: Optional[ReportSetPathsConfig] = None
+    subject_reports: Optional[ReportSetPathsConfig] = None
+    work_reports: Optional[ReportSetPathsConfig] = None
+    expression_reports: Optional[ReportSetPathsConfig] = None
+    templates: TemplateSetPathsConfig = Field(default_factory=TemplateSetPathsConfig)
+    cluster: WEMIClusterConfig = Field(default_factory=WEMIClusterConfig)
+    enrichment: EnrichmentConfig = Field(default_factory=EnrichmentConfig)
+    constituents: ConstituentsConfig = Field(
+        default_factory=lambda: ConstituentsConfig(**_CONSTITUENTS_DEFAULTS)
+    )
+    enrich: bool = True
+    fold_legacy: bool = True
+    threshold: float = 0.85
+    rerank: RerankConfig = Field(default_factory=RerankConfig)
+    fts_fallback: ReconcileFTSFallbackConfig = Field(default_factory=ReconcileFTSFallbackConfig)
+    link_policy: Literal["priority_fallback", "all"] = "priority_fallback"
+    quality_brackets: Optional[list[float]] = None
+    normalization: Optional[RecordNormalizationConfig] = None
+    fallback_agent_reconciliation: bool = True
+    agent_fallback_threshold: float = 0.90
+    verify_chronology: bool = True
+    chronology_min_author_age: int = 12
+    chronology_max_posthumous_years: int = 70
+    strict_homonym_guard: bool = True
+    max_editions_compared: int = Field(
+        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("max_editions_compared", 50))
+    )
+    translator_alignment_threshold: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("translator_alignment_threshold", 0.80)
+        )
+    )
+    agent_aligner_threshold: float = Field(
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("agent_aligner_threshold", 0.85))
+    )
+    life_date_tolerance_years: int = Field(
+        default_factory=lambda: int(_RECONCILE_DEFAULTS.get("life_date_tolerance_years", 2))
+    )
+    homonym_score_margin: float = Field(
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("homonym_score_margin", 0.05))
+    )
+    qualifier_similarity_threshold: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("qualifier_similarity_threshold", 0.80)
+        )
+    )
+    distribution_match_threshold: float = Field(
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("distribution_match_threshold", 0.85))
+    )
+    surname_similarity_threshold: float = Field(
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("surname_similarity_threshold", 0.85))
+    )
+    allow_pseudonym_author_match: bool = Field(
+        default_factory=lambda: bool(_RECONCILE_DEFAULTS.get("allow_pseudonym_author_match", True))
+    )
+    pseudonym_author_match_weight: float = Field(
+        default_factory=lambda: float(
+            _RECONCILE_DEFAULTS.get("pseudonym_author_match_weight", 0.95)
+        )
+    )
+
+    vocabularies: list[str] = Field(default_factory=list)
+    agent_priority: list[str] = Field(default_factory=list)
+    subject_priority: list[str] = Field(default_factory=list)
+    supported_subject_vocabularies: list[str] = Field(default_factory=list)
+    entity_vocabularies: list[str] = Field(default_factory=list)
+    vocabulary_patterns: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_params_and_derive_reports(self) -> ReconcileConfig:
+        if not (0.0 <= self.threshold <= 1.0):
+            raise ValueError(f"reconcile threshold must be in [0.0, 1.0], got {self.threshold}")
+        if not (0.0 <= self.agent_fallback_threshold <= 1.0):
+            raise ValueError(
+                f"agent_fallback_threshold must be in [0.0, 1.0], got {self.agent_fallback_threshold}"
+            )
+        if self.chronology_min_author_age < 0:
+            raise ValueError(
+                f"chronology_min_author_age must be non-negative, got {self.chronology_min_author_age}"
+            )
+        if self.chronology_max_posthumous_years < 0:
+            raise ValueError(
+                f"chronology_max_posthumous_years must be non-negative, got {self.chronology_max_posthumous_years}"
+            )
+        if self.quality_brackets is not None:
+            if not self.quality_brackets:
+                raise ValueError("quality_brackets cannot be empty if specified")
+            for b in self.quality_brackets:
+                if not (0.0 <= b <= 1.0):
+                    raise ValueError(f"quality_brackets values must be in [0.0, 1.0], got {b}")
+            if self.quality_brackets != sorted(set(self.quality_brackets)):
+                raise ValueError(
+                    f"quality_brackets must be strictly ascending and unique, got {self.quality_brackets}"
+                )
+
+        r_dir = self.reports_dir or Path("data/reports")
+        if self.agent_reports is None:
+            self.agent_reports = ReportSetPathsConfig(
+                detailed_file=r_dir / "agent_reconciliation_uris.tsv",
+                summary_file=r_dir / "agent_reconciliation_summary.tsv",
+            )
+        if self.subject_reports is None:
+            self.subject_reports = ReportSetPathsConfig(
+                detailed_file=r_dir / "subject_reconciliation_uris.tsv",
+                summary_file=r_dir / "subject_reconciliation_summary.tsv",
+            )
+
+        if not self.agent_priority:
+            self.agent_priority = list(_VOCAB_DEFAULTS.get("agent_priority", []))
+        if not self.subject_priority:
+            self.subject_priority = list(_VOCAB_DEFAULTS.get("subject_priority", []))
+        if not self.supported_subject_vocabularies:
+            self.supported_subject_vocabularies = list(
+                _VOCAB_DEFAULTS.get("supported_subjects", [])
+            )
+        if not self.entity_vocabularies:
+            self.entity_vocabularies = list(_VOCAB_DEFAULTS.get("entity_vocabularies", []))
+        if not self.vocabulary_patterns:
+            self.vocabulary_patterns = dict(_VOCAB_DEFAULTS.get("vocabulary_patterns", {}))
+        if not self.vocabularies:
+            self.vocabularies = list(self.agent_priority) + list(self.subject_priority)
+
+        return self
 
 
 class AppConfig(BaseModel):
@@ -144,7 +315,6 @@ class AppConfig(BaseModel):
         shared_dev = self.compute.device
         shared_threads = self.compute.threads
 
-        # Propagate compute hardware device if subsystem is set to "auto"
         if self.storage.vector_engine.device == "auto" and shared_dev != "auto":
             self.storage.vector_engine.device = shared_dev
         if self.storage.vector_engine.threads is None and shared_threads is not None:
@@ -152,12 +322,19 @@ class AppConfig(BaseModel):
 
         if self.embedding and self.embedding.device == "auto" and shared_dev != "auto":
             self.embedding.device = shared_dev
+        if self.embedding and self.embedding.num_cpu_threads is None and shared_threads is not None:
+            self.embedding.num_cpu_threads = shared_threads
+
         if self.llm and self.llm.device == "auto" and shared_dev != "auto":
             self.llm.device = shared_dev
 
         if self.reconcile:
             if self.reconcile.rerank.device == "auto" and shared_dev != "auto":
                 self.reconcile.rerank.device = shared_dev
+
+        # Propagate linguistic configuration to record_normalization
+        if self.linguistic and self.record_normalization:
+            self.record_normalization.linguistic = self.linguistic
 
         # Propagate vocabularies defaults to ingestion.skosmos
         for skos_cfg in self.ingestion.skosmos.values():

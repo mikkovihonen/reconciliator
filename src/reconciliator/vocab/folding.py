@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from reconciliator.config import VocabulariesConfig
+from reconciliator.config import LinguisticConfig, VocabulariesConfig
 from reconciliator.models import VocabConcept
 from reconciliator.normalizers.linguistic import build_biographical_date_pattern, fold_label
 from reconciliator.vocab.detection import strip_vocabulary_subcode
@@ -75,15 +75,17 @@ class VocabFolder:
         self,
         vocab_store: Optional[VocabStore] = None,
         config: Optional[VocabulariesConfig] = None,
+        linguistic: Optional[LinguisticConfig] = None,
     ) -> None:
         self.vocab_store = vocab_store
         self.config = config or VocabulariesConfig()
+        self.linguistic = linguistic or LinguisticConfig()
         self.date_pattern = build_biographical_date_pattern(
-            prefixes=self.config.biographical_date_prefixes,
-            era_bc=self.config.biographical_era_bc,
-            era_ad=self.config.biographical_era_ad,
-            century_suffixes=self.config.biographical_century_suffixes,
-            custom_pattern=self.config.biographical_date_pattern,
+            prefixes=self.linguistic.biographical_dates.prefixes,
+            era_bc=self.linguistic.biographical_dates.era_bc,
+            era_ad=self.linguistic.biographical_dates.era_ad,
+            century_suffixes=self.linguistic.biographical_dates.century_suffixes,
+            custom_pattern=self.linguistic.biographical_dates.pattern,
         )
 
     def resolve_target_language(
@@ -293,7 +295,7 @@ class VocabFolder:
         # 3. Dynamic alias lookup in concept_aliases (including multilingual, Wikidata P2347, and bridges)
         folded = fold_label(
             clean_heading,
-            preserved_diacritics=self.config.preserved_diacritics,
+            preserved_diacritics=self.linguistic.preserved_diacritics,
             date_pattern=self.date_pattern,
         )
         concept, qid = self.vocab_store.find_concept_by_alias(folded, target_field=source_field)

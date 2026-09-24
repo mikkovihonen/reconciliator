@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from reconciliator.config import VocabulariesConfig
+from reconciliator.config import LinguisticConfig, VocabulariesConfig
 from reconciliator.database import (
     concept_aliases_table,
     concept_hierarchy_table,
@@ -78,8 +78,10 @@ class VocabStore:
         db_path: Path | str | None = None,
         config: Optional[VocabulariesConfig] = None,
         engine: Optional[Engine] = None,
+        linguistic: Optional[LinguisticConfig] = None,
     ) -> None:
         self.config = config or VocabulariesConfig()
+        self.linguistic = linguistic or LinguisticConfig()
         if engine is not None:
             self.engine = engine
             self.db_path = engine.url.render_as_string(hide_password=False)
@@ -918,7 +920,7 @@ class VocabStore:
         clean_folded = (
             fold_label(
                 clean,
-                preserved_diacritics=self.config.preserved_diacritics,
+                preserved_diacritics=self.linguistic.preserved_diacritics,
             )
             or clean.lower()
         )

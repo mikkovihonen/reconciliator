@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from reconciliator.config import (
-    ClusterConfig,
     EnrichmentConfig,
     MultiplexClusterThresholds,
     OAIIngestConfig,
@@ -11,6 +10,7 @@ from reconciliator.config import (
     ReportSetPathsConfig,
     StorageConfig,
     TemplateSetPathsConfig,
+    WEMIClusterConfig,
     WikidataIngestConfig,
 )
 
@@ -43,8 +43,8 @@ def test_multiplex_cluster_thresholds():
 
 
 def test_cluster_config():
-    cfg = ClusterConfig()
-    assert cfg.similarity_threshold == 0.88
+    cfg = WEMIClusterConfig()
+    assert cfg.similarity_threshold == 0.85
     assert cfg.thresholds.work == 0.85
     assert cfg.max_cluster_size == 500
     assert cfg.message_passing is True
@@ -103,7 +103,7 @@ def test_reconcile_config_with_wemi():
             summary_file=Path("reports/subj_summary.tsv"),
         ),
         templates=TemplateSetPathsConfig(),
-        cluster=ClusterConfig(),
+        cluster=WEMIClusterConfig(),
         enrichment=EnrichmentConfig(),
     )
     assert cfg.templates is not None

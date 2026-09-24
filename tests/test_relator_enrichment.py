@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from lxml import etree
 
-from reconciliator.config.enrichment import EnrichmentConfig
+from reconciliator.config import EnrichmentConfig
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.xml_enricher import MARCXMLEnricher
 

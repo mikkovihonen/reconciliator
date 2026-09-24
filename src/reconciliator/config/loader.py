@@ -10,7 +10,7 @@ from typing import Any, Optional
 import yaml
 
 from reconciliator.config.app import AppConfig
-from reconciliator.config.system import LoggingConfig
+from reconciliator.config.infrastructure import LoggingConfig
 
 
 def _get_source_stem(p: Path) -> str:

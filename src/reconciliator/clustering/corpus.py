@@ -17,7 +17,7 @@ from typing import Any, Optional
 from rapidfuzz import fuzz
 
 from reconciliator.authority.lifecycle import ClusterIdentityManager
-from reconciliator.config import ClusterConfig
+from reconciliator.config import WEMIClusterConfig
 from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     ClusterEdge,
@@ -66,14 +66,14 @@ class CorpusClusterer:
         corpus_repo: WEMIRepository,
         wemi_repo: Optional[WEMIRepository] = None,
         matcher: Optional[WorkMatcher] = None,
-        config: Optional[ClusterConfig] = None,
+        config: Optional[WEMIClusterConfig] = None,
         corpus_origins: Optional[list[str]] = None,
         identity_manager: Optional[ClusterIdentityManager] = None,
     ) -> None:
         self.corpus_repo = corpus_repo
         self.wemi_repo = wemi_repo if wemi_repo is not None else corpus_repo
         self.matcher = matcher
-        self.config = config or ClusterConfig()
+        self.config = config or WEMIClusterConfig()
         self.corpus_origins = corpus_origins
         self.identity_manager = identity_manager or ClusterIdentityManager(self.corpus_repo)
 

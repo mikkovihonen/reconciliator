@@ -9,20 +9,10 @@ from pydantic import BaseModel, Field
 from reconciliator.config.defaults import (
     get_bundled_record_defaults,
     get_bundled_sources_defaults,
-    get_bundled_vocabularies_defaults,
 )
-from reconciliator.config.linguistic import (
-    DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES,
-    DEFAULT_BIOGRAPHICAL_DATE_PREFIXES,
-    DEFAULT_BIOGRAPHICAL_ERA_AD,
-    DEFAULT_BIOGRAPHICAL_ERA_BC,
-    DEFAULT_LANGUAGE,
-    DEFAULT_PRESERVED_DIACRITICS,
-)
-from reconciliator.config.vocabularies import DEFAULT_SUBJECT_FIELD_CATEGORY_MAP
+from reconciliator.config.semantics import LinguisticConfig
 
 _REC_DEFAULTS = get_bundled_record_defaults()
-_VOCAB_DEFAULTS = get_bundled_vocabularies_defaults()
 
 DEFAULT_NON_FILING_ARTICLES: dict[str, list[str]] = dict(
     _REC_DEFAULTS.get("non_filing_articles") or {}
@@ -74,7 +64,7 @@ class RecordNormalizationConfig(BaseModel):
         default_factory=lambda: list(DEFAULT_CLASSIFICATION_PRIORITY)
     )
     default_classification_scheme: str = Field(
-        default_factory=lambda: str(_REC_DEFAULTS.get("default_classification_scheme") or "")
+        default_factory=lambda: str(_REC_DEFAULTS.get("default_classification_scheme") or "ykl")
     )
     default_carrier_source: str = Field(
         default_factory=lambda: str(_REC_DEFAULTS.get("default_carrier_source") or "melinda")
@@ -115,33 +105,7 @@ class RecordNormalizationConfig(BaseModel):
         }
     )
     custom_relator_terms: dict[str, str] = Field(default_factory=dict)
-
-    # Linguistic and subject field delegations for direct RecordNormalizer compatibility
-    preserved_diacritics: str = DEFAULT_PRESERVED_DIACRITICS
-    biographical_date_prefixes: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_BIOGRAPHICAL_DATE_PREFIXES)
-    )
-    biographical_era_bc: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_BIOGRAPHICAL_ERA_BC)
-    )
-    biographical_era_ad: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_BIOGRAPHICAL_ERA_AD)
-    )
-    biographical_century_suffixes: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES)
-    )
-    biographical_date_pattern: Optional[str] = None
-    default_language: str = DEFAULT_LANGUAGE
-    subject_field_category_map: dict[str, str] = Field(
-        default_factory=lambda: dict(DEFAULT_SUBJECT_FIELD_CATEGORY_MAP)
-    )
-    default_subject_field: str = Field(
-        default_factory=lambda: str(
-            _VOCAB_DEFAULTS.get("default_subject_field")
-            or _VOCAB_DEFAULTS.get("default_vocab_target_field")
-            or ""
-        )
-    )
+    linguistic: LinguisticConfig = Field(default_factory=LinguisticConfig)
 
 
 def get_default_carrier_source(config: Optional[Any] = None) -> str:

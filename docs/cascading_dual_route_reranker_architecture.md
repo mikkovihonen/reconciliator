@@ -265,7 +265,7 @@ reconcile:
 
 ### 4.2 Python Pydantic Configuration Model
 
-The configuration schema is strictly typed via `CascadeRouterConfig` in `src/reconciliator/config.py`:
+The configuration schema is strictly typed via `CascadeRouterConfig` in [`src/reconciliator/config/matching.py`](../src/reconciliator/config/matching.py) (exported canonically from [`reconciliator.config`](../src/reconciliator/config/__init__.py)):
 
 ```python
 class CascadeRouterConfig(BaseModel):

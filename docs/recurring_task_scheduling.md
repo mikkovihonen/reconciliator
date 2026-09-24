@@ -8,7 +8,7 @@ This guide describes how to configure, automate, and monitor recurring batch tas
 
 Reconciliator follows a **stateless, idempotent, CLI-first pipeline architecture**:
 
-* **Database-Backed State**: Harvest progress and resumption tokens are persisted in PostgreSQL ([`harvest_state_table`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/database/schema.py#L354)). The pipeline does not require a long-running scheduler daemon process.
+* **Database-Backed State**: Harvest progress and resumption tokens are persisted in PostgreSQL ([`harvest_state_table`](../src/reconciliator/database/schema.py#L354)). The pipeline does not require a long-running scheduler daemon process.
 * **Clean Process Lifecycle**: Invoking tasks as discrete jobs allows heavy machine-learning runtimes (PyTorch, Hugging Face transformer models, USearch / FAISS vector engines) to release GPU memory and RAM cleanly upon completion.
 * **Deterministic Non-Zero Exit Codes**: CLI commands raise non-zero exit codes on failure (`code=1`), ensuring external schedulers detect errors, report status, and trigger retries or alerts accurately.
 * **Headless & Structured Logging**: Standard log formatting (`[timestamp] [level] [task_id=...] name: message`) is emitted directly to `stdout`/`stderr`. Rich terminal animations and ANSI escapes are automatically suppressed when standard output is not attached to a TTY.
@@ -429,7 +429,7 @@ reconciliator status
 reconciliator status watch --task-id oai-ingest-melinda-1726822800
 ```
 
-Or query [`task_progress_table`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/database/schema.py#L323) directly in PostgreSQL:
+Or query [`task_progress_table`](../src/reconciliator/database/schema.py#L323) directly in PostgreSQL:
 ```sql
 SELECT
     task_id,

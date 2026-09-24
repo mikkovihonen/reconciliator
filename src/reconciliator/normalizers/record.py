@@ -13,6 +13,7 @@ from reconciliator.config import (
     DEFAULT_VOLUME_PREFIXES,
     DEFAULT_VOLUME_SUFFIXES,
     RecordNormalizationConfig,
+    get_subject_field_category_map,
 )
 from reconciliator.embedding.template import RecordTemplateEngine
 from reconciliator.models import (
@@ -202,10 +203,10 @@ def normalize_classifications(
     or ClassificationItem objects.
     """
     if default_scheme is None:
-        from reconciliator.config import get_bundled_defaults
+        from reconciliator.config import get_bundled_record_defaults
 
         default_scheme = str(
-            get_bundled_defaults().get("classification", {}).get("default_scheme") or ""
+            get_bundled_record_defaults().get("default_classification_scheme") or "ykl"
         )
     items: list[tuple[str, str, bool]] = []
     has_explicit_primary = False
@@ -278,17 +279,17 @@ class RecordNormalizer:
         config: Optional[RecordNormalizationConfig] = None,
     ) -> None:
         self.config = config or RecordNormalizationConfig()
-        self.vocab_folder = vocab_folder or VocabFolder()
+        self.vocab_folder = vocab_folder or VocabFolder(linguistic=self.config.linguistic)
         self.template_engine = template_engine
         self.relator_registry = relator_registry or RelatorRegistry(
             vocab_store=getattr(self.vocab_folder, "vocab_store", None),
         )
         self.date_pattern = build_biographical_date_pattern(
-            prefixes=self.config.biographical_date_prefixes,
-            era_bc=self.config.biographical_era_bc,
-            era_ad=self.config.biographical_era_ad,
-            century_suffixes=self.config.biographical_century_suffixes,
-            custom_pattern=self.config.biographical_date_pattern,
+            prefixes=self.config.linguistic.biographical_dates.prefixes,
+            era_bc=self.config.linguistic.biographical_dates.era_bc,
+            era_ad=self.config.linguistic.biographical_dates.era_ad,
+            century_suffixes=self.config.linguistic.biographical_dates.century_suffixes,
+            custom_pattern=self.config.linguistic.biographical_dates.pattern,
         )
         if self.config.custom_relator_terms:
             for code, term in self.config.custom_relator_terms.items():
@@ -326,7 +327,7 @@ class RecordNormalizer:
         rec_lang = raw_data.get("language")
         if rec_lang:
             rec_lang = str(rec_lang).strip().lower()[:3]
-        target_lang = rec_lang or cfg.default_language
+        target_lang = rec_lang or cfg.linguistic.default_language
 
         title_proper = clean_title(
             str(raw_data.get("title") or ""),
@@ -493,7 +494,7 @@ class RecordNormalizer:
                 name_raw,
                 is_personal=is_personal,
                 relator_registry=self.relator_registry,
-                preserved_diacritics=cfg.preserved_diacritics,
+                preserved_diacritics=cfg.linguistic.preserved_diacritics,
                 date_pattern=self.date_pattern,
             )
             if norm_name:
@@ -553,7 +554,7 @@ class RecordNormalizer:
                 prefixes=cfg.responsibility_prefixes,
                 conjunctions=cfg.responsibility_conjunctions,
                 relator_registry=self.relator_registry,
-                preserved_diacritics=cfg.preserved_diacritics,
+                preserved_diacritics=cfg.linguistic.preserved_diacritics,
                 date_pattern=self.date_pattern,
             )
             for n in names_245c:
@@ -570,14 +571,20 @@ class RecordNormalizer:
 
         # Subjects folding via VocabFolder
         raw_subjects = raw_data.get("subjects", {})
-        rec_lang_folding = language or cfg.default_language
+        rec_lang_folding = language or cfg.linguistic.default_language
 
-        field_to_cat = cfg.subject_field_category_map
+        field_to_cat = (
+            self.vocab_folder.config.subject_field_category_map or get_subject_field_category_map()
+        )
         cat_default_field = {cat: tag for tag, cat in field_to_cat.items()}
         folded_categories: dict[str, list[SubjectItem]] = {cat: [] for cat in field_to_cat.values()}
 
         for cat_name, items in raw_subjects.items():
-            fallback_field = cat_default_field.get(cat_name) or self.config.default_subject_field
+            fallback_field = (
+                cat_default_field.get(cat_name)
+                or self.vocab_folder.config.default_vocab_target_field
+                or "650"
+            )
             for item in items:
                 heading = item.get("heading") or item.get("pref_label", "")
                 field = item.get("field", fallback_field)
