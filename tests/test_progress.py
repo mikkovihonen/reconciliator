@@ -158,7 +158,7 @@ def test_run_telemetry_tui(progress_db: Path) -> None:
 def test_cli_status_watch_tui(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 
-    from reconciliator.cli import app
+    from reconciliator.commands import app
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
@@ -193,7 +193,7 @@ telemetry:
 def test_cli_status_watch_alias(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 
-    from reconciliator.cli import app
+    from reconciliator.commands import app
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
@@ -225,7 +225,7 @@ telemetry:
 def test_cli_status_watch_json(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 
-    from reconciliator.cli import app
+    from reconciliator.commands import app
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
@@ -382,7 +382,7 @@ def test_prune_tasks_older_than_and_keep_last(progress_db: Path) -> None:
 def test_cli_prune_commands(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 
-    from reconciliator.cli import app
+    from reconciliator.commands import app
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(

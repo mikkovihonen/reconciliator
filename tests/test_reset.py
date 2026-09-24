@@ -4,7 +4,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from reconciliator.cli import app
+from reconciliator.commands import app
 from reconciliator.config import StorageConfig
 from reconciliator.database import get_db_connection, init_authority_db, reset_all_storage
 

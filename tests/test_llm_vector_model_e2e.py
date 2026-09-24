@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from lxml import etree
 
-from reconciliator.cli import (
+from reconciliator.commands import (
     build_index_cmd,
     ingest_oai_cmd,
     ingest_vocab_cmd,

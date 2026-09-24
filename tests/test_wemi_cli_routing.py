@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from reconciliator.cli import app
+from reconciliator.commands import app
 from reconciliator.database import WEMIRepository
 
 
@@ -28,7 +28,7 @@ ingestion:
 """
     )
 
-    with patch("reconciliator.cli.ingest_wikidata_pipeline") as mock_pipeline:
+    with patch("reconciliator.commands.ingest.ingest_wikidata_pipeline") as mock_pipeline:
         mock_pipeline.return_value = 42
         result = runner.invoke(app, ["ingest-wikidata", "--config", str(cfg_file)])
         assert result.exit_code == 0
@@ -79,7 +79,7 @@ ingestion:
     )
 
     for source, expected_authoritative in (("an_authority", True), ("a_corpus", False)):
-        with patch("reconciliator.cli.ingest_oai_pipeline") as mock_pipeline:
+        with patch("reconciliator.commands.ingest.ingest_oai_pipeline") as mock_pipeline:
             mock_pipeline.return_value = 1
             result = runner.invoke(
                 app, ["ingest-oai", "--config", str(cfg_file), "--source", source]

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from lxml import etree
 
-from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
+from reconciliator.commands import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC = "{http://www.loc.gov/MARC21/slim}"
@@ -228,7 +228,7 @@ def test_export_preserves_every_input_field(tmp_path: Path) -> None:
 
     # And enrichment actually happened.
     assert ("0", "http://www.yso.fi/onto/yso/p2591") in out_subfield_values
-    assert ("0", "http://urn.fi/URN:NBN:fi:au:slm:s123") in out_subfield_values
+    assert ("0", "https://urn.fi/URN:NBN:fi:au:slm:s123") in out_subfield_values
     assert ("0", "https://urn.fi/URN:NBN:fi:au:pn:000123456") in out_subfield_values
     assert "655" in out_tags, "kaunokki heading should fold from 650 to 655"
 

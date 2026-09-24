@@ -81,7 +81,7 @@ Standard Library of Congress profile:
 
 ## 3. Ingestion & Staging
 
-In [`src/reconciliator/cli.py`](../src/reconciliator/cli.py) (`_ingest_corpus_as_wemi`):
+In [`src/reconciliator/commands/reconcile.py`](../src/reconciliator/commands/reconcile.py) (`_ingest_corpus_as_wemi`):
 1. **Profile Resolution**: Automatically resolves the profile from configuration:
    - MARCXML $\rightarrow$ `config.constituents.profile` (default: `marc_enhanced`)
    - BFFI 1.0 $\rightarrow$ `config.constituents.bffi_profile` (default: `bffi_haspart`)

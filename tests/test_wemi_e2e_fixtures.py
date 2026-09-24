@@ -17,7 +17,7 @@ import numpy as np
 from lxml import etree
 from rdflib import Graph, URIRef
 
-from reconciliator.cli import reconcile_cmd, reset_cmd
+from reconciliator.commands import reconcile_cmd, reset_cmd
 from reconciliator.clustering import CorpusClusterer
 from reconciliator.config import AppConfig
 from reconciliator.database import WEMIRepository

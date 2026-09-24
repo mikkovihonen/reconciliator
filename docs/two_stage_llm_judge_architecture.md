@@ -282,6 +282,21 @@ When candidates must be retrieved via dense embeddings:
 - Read-only lookups utilize `get_read_connection()`, which checks out direct connections (`self.engine.connect()`) without wrapping queries in unnecessary `BEGIN`/`COMMIT` transaction blocks.
 - Memory footprint is strictly bounded: all $B$ records are processed and output streams flushed before the next micro-batch is loaded, maintaining $\mathcal{O}(1)$ memory consumption throughout multimillion-record runs.
 
+#### 5. Asynchronous Pipeline Double-Buffering (3-Stage Overlapping Execution)
+To eliminate pipeline bubbles where database connections, GPU/MPS vector cores, and disk I/O sit idle waiting on each other, `reconciliator` implements **Pipeline Double-Buffering** (enabled by default via `reconcile.pipeline_double_buffering: true`, capacity `reconcile.pipeline_queue_capacity: 2`):
+
+```mermaid
+flowchart LR
+    Stage1["Stage 1: Reader Worker<br/>(Disk Read & Normalization)"] -->|"in_queue (cap=2)"| Stage2["Stage 2: Main Matcher<br/>(SQL Pre-warm + Funnels + FAISS)"]
+    Stage2 -->|"out_queue (cap=2)"| Stage3["Stage 3: Writer Worker<br/>(Serialization & TSV Reports)"]
+```
+
+- **Stage 1 (Reader/Producer)**: Reads batch $i+1$ from disk, executes record normalization and WEMI conversion, and pushes into `in_queue`.
+- **Stage 2 (Inference / Main Thread)**: Consumes from `in_queue`, calls `match_targets_batch` (bulk SQL + FAISS GEMM) and `resolve_agents`, and pushes into `out_queue`.
+- **Stage 3 (Writer/Consumer)**: Consumes from `out_queue`, serializes enriched records (MARCXML/JSON-LD), generates TSV report rows, and updates progress tracking.
+- **GIL Immunity**: SQL queries (`psycopg`), FAISS C++ matrix multiplication, PyTorch/MPS GPU kernels, and kernel file I/O all release the Python GIL, allowing background I/O workers to run concurrently without thread contention.
+- **Bounded Footprint**: With queue capacity bounded to 2, at most 3 micro-batches ($3 \times 32 = 96$ records) exist in memory simultaneously, ensuring flat $\mathcal{O}(1)$ RAM usage over 50M+ record corpora.
+
 ---
 
 ## 3. Core Protocol & Dual-Backend Abstraction
@@ -518,6 +533,8 @@ To eliminate order asymmetry ($f(A, B) \ne f(B, A)$) on borderline candidates, w
 reconcile:
   batch_size: 32                   # Target-record micro-batch size for Tier 1 SQL and Tier 3 vector search
   entity_cache_size: 50000         # Max LRU cache capacity for works, manifestations, and identifier lookups
+  pipeline_double_buffering: true  # Asynchronous 3-stage overlapping pipeline (Reader -> Matcher -> Writer)
+  pipeline_queue_capacity: 2      # Bounded queue capacity between stages (keeps memory usage at O(B))
   rerank:
     enabled: true
     engine: "llm_judge"            # Options: "llm_judge", "bm25", "cross_encoder", "fuzzy", "noop"

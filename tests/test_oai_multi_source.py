@@ -9,7 +9,7 @@ import numpy as np
 from sqlalchemy import select
 from typer.testing import CliRunner
 
-from reconciliator.cli import app
+from reconciliator.commands import app
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
 from reconciliator.database import WEMIRepository, agents_table, manifestations_table, works_table
 from reconciliator.embedding.embedder import SentenceEmbedder

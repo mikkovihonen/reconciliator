@@ -15,7 +15,7 @@ import pytest
 from lxml import etree
 from sqlalchemy import func, select
 
-from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
+from reconciliator.commands import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.config import load_config
 from reconciliator.database import WEMIRepository, work_relationships_table, works_table
 

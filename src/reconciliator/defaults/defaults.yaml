@@ -247,6 +247,12 @@ vocabularies:
     yso-aika: "yso"
     yso-paikat: "yso"
 
+  vocab_target_fields:
+    yso-aika: "648"
+    yso-paikat: "651"
+    slm: "655"
+    seko: "382"
+
   language_subcode_suffixes:
     fi: "fin"
     fin: "fin"
@@ -1309,6 +1315,8 @@ consolidation:
 reconcile:
   batch_size: 32
   entity_cache_size: 50000
+  pipeline_double_buffering: true
+  pipeline_queue_capacity: 2
   target_work_types: []
   exclude_work_types: []
   target_languages: []

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
+from reconciliator.commands import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.loaders.bibra import (
     BibraPublicationMetadata,
     bibra_to_marcxml_elem,

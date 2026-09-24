@@ -26,10 +26,7 @@ storage:
     password: "postgres"
 
   vector_engine:
-    backend: "torch"                 # 'torch' or 'usearch'
-    normalize_vectors: true
-    distance_metric: "cosine"
-    threads: 0
+    backend: "usearch"                 # 'torch' or 'usearch'
 
 # ------------------------------------------------------------------------------
 # 2. Base LLM Judge & Dense Retriever Configuration
@@ -75,6 +72,10 @@ ingestion:
 reconcile:
   target_file: "tests/fixtures/corpus_1000.marcxml"
   output_file: "data/llm_test/enriched.xml"
+  batch_size: 32                     # Micro-batch size for Tier 1 bulk SQL and Tier 3 matrix search
+  entity_cache_size: 50000           # Bounded LRU cache capacity for canonical entities & identifiers
+  pipeline_double_buffering: true    # Asynchronous 3-stage overlapping pipeline (Reader -> Matcher -> Writer)
+  pipeline_queue_capacity: 2         # Bounded queue capacity between pipeline stages (O(B) memory)
   enrich: true
   fold_legacy: true
   threshold: 0.80
@@ -95,6 +96,10 @@ reconcile:
     dense_weight: 0.6
     rerank_weight: 0.4
     top_k: 5
+    apply_pre_veto: true             # Deterministic hard discriminators on CPU before GPU suffix eval
+    require_volume_match: true       # Reject conflicting volume designations
+    require_surname_match: true      # Require author surname overlap
+    max_year_difference: 5           # Reject publication year discrepancies > 5
     short_circuit:
       enabled: true
       threshold: 0.98

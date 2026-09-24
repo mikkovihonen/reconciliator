@@ -98,7 +98,17 @@ reconciliator/
 ├── src/
 │   └── reconciliator/                 # Main Python package
 │       ├── _core.pyi                  # Complete type stub signatures for the Rust extension
-│       ├── cli.py                     # CLI entrypoints (Rich console, commands)
+│       ├── cli.py                     # CLI entrypoint re-exporting Typer app & main
+│       ├── commands/                  # Modular Typer CLI commands package
+│       │   ├── common.py              # Shared CLI helpers, console, and WEMI repo constructor
+│       │   ├── db.py                  # PostgreSQL Podman container management
+│       │   ├── daemon.py              # Vector daemon IPC lifecycle commands
+│       │   ├── maintenance.py         # Storage reset, status inspection, and telemetry pruning
+│       │   ├── ingest.py              # Skosmos, vocabulary, OAI-PMH, and Wikidata ingest
+│       │   ├── reconcile.py           # Offline batch reconciliation & enrichment pipeline
+│       │   ├── wemi.py                # Work consolidation, agent clustering, and vector indexing
+│       │   ├── pipeline.py            # End-to-end multi-step YAML pipeline orchestrator
+│       │   └── serve.py               # REST API and Web UI server launcher
 │       ├── config/                    # Pydantic configuration hierarchy
 │       ├── database/                  # SQLAlchemy / PostgreSQL schemas and migrations
 │       ├── ingestion/                 # Ontology and vocabulary ingestion

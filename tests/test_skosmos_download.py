@@ -10,7 +10,7 @@ import httpx2
 import pytest
 import typer
 
-from reconciliator.cli import download_skosmos_cmd
+from reconciliator.commands import download_skosmos_cmd
 from reconciliator.config import load_config
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_vocab_file, parse_turtle_simple
@@ -224,7 +224,7 @@ def test_parse_turtle_prefixed_and_yso_paikat() -> None:
 
     # yso-paikat concept (geographic name -> 651)
     c1 = concepts[1]
-    assert c1.uri == "http://www.yso.fi/onto/yso-paikat/p999"
+    assert c1.uri == "http://www.yso.fi/onto/yso/p999"
     assert c1.vocabulary == "yso-paikat"
     assert c1.pref_labels.get("fi") == "Helsinki"
     assert c1.target_field == "651"
@@ -265,7 +265,7 @@ def test_ingest_vocab_directory(tmp_path: Path) -> None:
 
     c2 = store.find_concept_by_label("romaanit", vocabulary="slm")
     assert c2 is not None
-    assert c2.uri == "http://urn.fi/URN:NBN:fi:au:slm:s1"
+    assert c2.uri == "https://urn.fi/URN:NBN:fi:au:slm:s1"
     assert c2.target_field == "655"
 
 

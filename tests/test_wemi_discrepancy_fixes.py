@@ -713,7 +713,7 @@ def test_run_cmd_pipeline_execution_and_reporting(tmp_path):
 
     from typer.testing import CliRunner
 
-    from reconciliator.cli import app
+    from reconciliator.commands import app
 
     runner = CliRunner()
     cfg_file = tmp_path / "config.yaml"
@@ -729,8 +729,8 @@ ingestion:
 
     # Successful pipeline run
     with (
-        patch("reconciliator.cli.ingest_vocab_cmd") as mock_vocab,
-        patch("reconciliator.cli.ingest_wikidata_cmd") as mock_wiki,
+        patch("reconciliator.commands.pipeline.ingest_vocab_cmd") as mock_vocab,
+        patch("reconciliator.commands.pipeline.ingest_wikidata_cmd") as mock_wiki,
     ):
         result = runner.invoke(app, ["run", "--config", str(cfg_file)])
         assert result.exit_code == 0
@@ -743,8 +743,8 @@ ingestion:
 
     # Failed pipeline run stops further execution and exits with code 1
     with (
-        patch("reconciliator.cli.ingest_vocab_cmd", side_effect=RuntimeError("Download timeout")),
-        patch("reconciliator.cli.ingest_wikidata_cmd") as mock_wiki,
+        patch("reconciliator.commands.pipeline.ingest_vocab_cmd", side_effect=RuntimeError("Download timeout")),
+        patch("reconciliator.commands.pipeline.ingest_wikidata_cmd") as mock_wiki,
     ):
         result = runner.invoke(app, ["run", "--config", str(cfg_file)])
         assert result.exit_code == 1

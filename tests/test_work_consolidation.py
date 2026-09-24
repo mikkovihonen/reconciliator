@@ -15,7 +15,7 @@ import pytest
 from lxml import etree
 from sqlalchemy import func, select
 
-from reconciliator.cli import (
+from reconciliator.commands import (
     consolidate_works_cmd,
     ingest_oai_cmd,
     ingest_vocab_cmd,

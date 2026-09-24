@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from lxml import etree
 
-from reconciliator.cli import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
+from reconciliator.commands import ingest_oai_cmd, ingest_vocab_cmd, reconcile_cmd, reset_cmd
 from reconciliator.loaders.marcxml import _get_subfields
 
 
