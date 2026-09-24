@@ -5,10 +5,10 @@
 </p>
 
 <p align="center">
-  <strong>High-Performance Finnish Bibliographic Authority Reconciliation & Multi-Format WEMI Multiplex Clustering Platform</strong>
+  <strong>Bibliographic Authority Reconciliation & Multi-Format WEMI Multiplex Clustering Platform</strong>
 </p>
 
-`reconciliator` is an automated, high-throughput bibliographic entity resolution, WEMI multiplex clustering, and authority enrichment platform built specifically for Finnish and international library catalog ecosystems. It decomposes bibliographic records into normalized IFLA LRM / FRBR entities (**Work**, **Expression**, **Manifestation**, **Item**), performs bottom-up multiplex co-reference resolution, unifies cross-source works, enriches agents and subjects with canonical persistent identifiers (KANTO, ISNI, VIAF, Wikidata, YSO), and serializes enriched records back to native formats without lossy cross-translations.
+`reconciliator` is an automated, bibliographic entity resolution, WEMI multiplex clustering, and authority enrichment platform built for Finnish and international library catalog ecosystems. It decomposes bibliographic records into normalized IFLA LRM / FRBR entities (**Work**, **Expression**, **Manifestation**, **Item**), performs bottom-up multiplex co-reference resolution, unifies cross-source works, enriches agents and subjects with configurable canonical persistent identifiers (defaults to KANTO, ISNI, VIAF, Wikidata and YSO), and serializes enriched records back to native formats without lossy cross-translations.
 
 ---
 
@@ -61,61 +61,34 @@ Declarative, precedence-ordered `FunnelSpec` entries tailoring matching and disc
 
 ## Architectural Overview
 
-```
-                      ┌──────────────────────────────────────────────┐
-                      │ External Sources & Harvesters                │
-                      │ • OAI-PMH / ResourceSync (Melinda, Fennica)  │
-                      │ • Wikidata Dumps (JSON-LD / NDJSON)          │
-                      │ • SKOS Vocabularies (Finto / Skosmos REST)   │
-                      │ • Local Files (MARCXML, BIBFRAME, BIBRA)     │
-                      └──────────────────────┬───────────────────────┘
-                                             │
-                                             ▼
-                      ┌──────────────────────────────────────────────┐
-                      │ Ingest & WEMI Decomposition                  │
-                      │ • RecordLoader (ISBD punctuation stripping)  │
-                      │ • Dialect Profiles (BFFI 1.0, BF 2.0/3.0)    │
-                      │ • Constituent Extraction (marc, bffi, bf)    │
-                      │ • Subject & Relator Vocabulary Folding       │
-                      └──────────────────────┬───────────────────────┘
-                                             │
-                                             ▼
-                      ┌──────────────────────────────────────────────┐
-                      │ Unified PostgreSQL Storage (43 Tables)       │
-                      │ • WEMI Entities & Work Relationships         │
-                      │ • Polymorphic Identifiers & Entity Keys      │
-                      │ • Concept Schemes & Subject Mappings         │
-                      │ • Corpus Staging & Harvest Resumption        │
-                      └──────────────┬───────────────────────────────┘
-                                     │
-         ┌───────────────────────────┼───────────────────────────┐
-         ▼                           ▼                           ▼
-┌──────────────────┐       ┌───────────────────┐       ┌───────────────────┐
-│ Vector Indexing  │       │ Cross-Source Work │       │ Bottom-Up Cluster │
-│ • work_vectors   │       │ Consolidation     │       │ • Constituent     │
-│ • manifestation_ │       │ • Wikidata QID    │       │   Micro-Cluster   │
-│   vectors        │       │ • Strong ID       │       │ • Container       │
-│ • agent_vectors  │       │ • Metadata score  │       │   Macro-Cluster   │
-└────────┬─────────┘       └─────────┬─────────┘       └─────────┬─────────┘
-         │                           │                           │
-         └───────────────────────────┼───────────────────────────┘
-                                     │
-                                     ▼
-                      ┌──────────────────────────────────────────────┐
-                      │ Reconcile Engine & 42 Funnels                │
-                      │ • Tier 1: Exact Standard Identifiers         │
-                      │ • Tier 2: Author Key + Title Stem (Filtered) │
-                      │ • Tier 3: Dense ANN + Cascading Reranker     │
-                      │ • Tier 4: Agent Alignment & URI Aggregation  │
-                      └──────────────────────┬───────────────────────┘
-                                             │
-                                             ▼
-                      ┌──────────────────────────────────────────────┐
-                      │ Output Enrichment & Reports                  │
-                      │ • MARCXML (758, 730/700 $0/$1, folded 6XX)   │
-                      │ • BFFI / BIBFRAME (bffi:hasPart, owl:sameAs) │
-                      │ • Multi-Tier TSV Diagnostic Reports          │
-                      └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Sources["<div style='text-align:center;'><b>External Sources & Harvesters</b></div><div style='text-align:left;'>• OAI-PMH / ResourceSync (Melinda, Fennica)<br/>• Wikidata Dumps (JSON-LD / NDJSON)<br/>• SKOS Vocabularies (Finto / Skosmos REST)<br/>• Local Files (MARCXML, BIBFRAME, BIBRA)</div>"]
+
+    Ingest["<div style='text-align:center;'><b>Ingest & WEMI Decomposition</b></div><div style='text-align:left;'>• RecordLoader (ISBD punctuation stripping)<br/>• Dialect Profiles (BFFI 1.0, BF 2.0/3.0)<br/>• Constituent Extraction (marc, bffi, bf)<br/>• Subject & Relator Vocabulary Folding</div>"]
+
+    DB[("<div style='text-align:center;'><b>Unified PostgreSQL Storage (43 Tables)</b></div><div style='text-align:left;'>• WEMI Entities & Work Relationships<br/>• Polymorphic Identifiers & Entity Keys<br/>• Concept Schemes & Subject Mappings<br/>• Corpus Staging & Harvest Resumption</div>")]
+
+    subgraph ParallelProcessing["Parallel Preparation & Processing"]
+        direction LR
+        VIndex["<div style='text-align:center;'><b>Vector Indexing</b></div><div style='text-align:left;'>• work_vectors<br/>• manifestation_vectors<br/>• agent_vectors</div>"]
+        Consolidate["<div style='text-align:center;'><b>Cross-Source Work Consolidation</b></div><div style='text-align:left;'>• Wikidata QID<br/>• Strong ID<br/>• Metadata score</div>"]
+        Cluster["<div style='text-align:center;'><b>Bottom-Up Multiplex Clustering</b></div><div style='text-align:left;'>• Constituent Micro-Cluster<br/>• Container Macro-Cluster</div>"]
+    end
+
+    Reconcile["<div style='text-align:center;'><b>Reconcile Engine & 42 Funnels</b></div><div style='text-align:left;'>• Tier 1: Exact Standard Identifiers<br/>• Tier 2: Author Key + Title Stem (Filtered)<br/>• Tier 3: Dense ANN + Cascading Reranker<br/>• Tier 4: Agent Alignment & URI Aggregation</div>"]
+
+    Output["<div style='text-align:center;'><b>Output Enrichment & Reports</b></div><div style='text-align:left;'>• MARCXML (758, 730/700 $0/$1, folded 6XX)<br/>• BFFI / BIBFRAME (bffi:hasPart, owl:sameAs)<br/>• Multi-Tier TSV Diagnostic Reports</div>"]
+
+    Sources --> Ingest
+    Ingest --> DB
+    DB --> VIndex
+    DB --> Consolidate
+    DB --> Cluster
+    VIndex --> Reconcile
+    Consolidate --> Reconcile
+    Cluster --> Reconcile
+    Reconcile --> Output
 ```
 
 ---
@@ -132,49 +105,50 @@ Declarative, precedence-ordered `FunnelSpec` entries tailoring matching and disc
 git clone https://github.com/NatLibFi/reconciliator.git
 cd reconciliator
 uv sync
+source .venv/bin/activate
 ```
 
 ### Running Tests
-Execute the comprehensive test suite (1,081 tests):
+Execute the comprehensive test suite:
 ```bash
-uv run pytest
+pytest
 ```
 
 ### CLI Commands
-All capabilities are exposed via the unified Typer CLI:
+All capabilities are exposed via the unified Typer CLI. Ensure your virtual environment is active (`source .venv/bin/activate`):
 
 ```bash
 # 1. Reset / initialize database tables
-uv run reconciliator reset -c config.yaml
+reconciliator reset -c config.yaml
 
 # 2. Download and ingest controlled vocabularies from Finto (YSO, SLM, KANTO)
-uv run reconciliator download-skosmos -c config.yaml
-uv run reconciliator ingest-vocab -c config.yaml
+reconciliator download-skosmos -c config.yaml
+reconciliator ingest-vocab -c config.yaml
 
 # 3. Harvest source data (OAI-PMH, ResourceSync, or local files)
-uv run reconciliator ingest-oai --all -c config.yaml
+reconciliator ingest-oai --all -c config.yaml
 
 # 4. Ingest Wikidata authority dumps (optional)
-uv run reconciliator ingest-wikidata -c config.yaml
+reconciliator ingest-wikidata -c config.yaml
 
 # 5. Build dense vector ANN indices
-uv run reconciliator build-index -c config.yaml
-uv run reconciliator build-agent-index -c config.yaml
+reconciliator build-index -c config.yaml
+reconciliator build-agent-index -c config.yaml
 
 # 6. Unify cross-source work identities
-uv run reconciliator consolidate-works -c config.yaml
+reconciliator consolidate-works -c config.yaml
 
 # 7. Cluster agent authority records
-uv run reconciliator cluster-agents -c config.yaml
+reconciliator cluster-agents -c config.yaml
 
 # 8. Run full intra-corpus clustering, reconciliation, and output enrichment
-uv run reconciliator reconcile -c config.yaml
+reconciliator reconcile -c config.yaml
 
 # 9. Or execute the entire end-to-end pipeline in one automated pass
-uv run reconciliator run -c config.yaml
+reconciliator run -c config.yaml
 
 # 10. Start the REST API service
-uv run reconciliator serve --host 127.0.0.1 --port 8000
+reconciliator serve --host 127.0.0.1 --port 8000
 ```
 
 ---

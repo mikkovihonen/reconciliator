@@ -272,16 +272,43 @@ This normalized dense representation is used directly by FAISS, USearch, and Tor
 
 ---
 
-## 5. Pre-Veto Optimization
+## 5. Pre-Veto Optimization & Entity Type Attribution
 
 While KV-branching suffix evaluation takes only ~15–20 ms per candidate on Apple Silicon M2 Max, running 20 candidates per record across 100,000 records still totals ~300,000 GPU inferences.
 
-To maximize throughput, the pipeline includes **Deterministic Pre-Veto Filters**:
-* **Volume Conflict Check**: Candidates with conflicting volume numbers (e.g. *Osa 1* vs. *Osa 2*) are rejected instantly.
-* **Publication Year Distance**: Candidates exceeding `max_year_difference` are rejected instantly.
-* **Author Surname Token Match**: Candidates with completely mismatched author surnames are rejected instantly.
+To maximize throughput, the pipeline incorporates **Deterministic Pre-Veto Filters** evaluated by `CandidateEvaluator`. Crucially, these filters are not generic string heuristics—each filter directly maps to a specific tier of the **IFLA LRM / WEMI** model or the related **Agent** entity model.
 
-When `apply_pre_veto: true`, ~70–80% of spurious vector neighbors are dropped in sub-microsecond CPU time before triggering GPU suffix inference.
+```mermaid
+flowchart TD
+    subgraph WEMI_Layers["Pre-Veto Filter Entity Type Attribution"]
+        subgraph AgentLayer["Agent Level (Creator Responsibility)"]
+            AgentFilter["<div style='text-align:center;'><b>Author Surname Token Match</b> (<code>check_surname_match</code>)</div><div style='text-align:left;'>• Entity Target: <b>Agent</b> (contributions / creator)<br/>• Attribute: <code>agents[].surname</code> (MARC 100/700)<br/>• Logic: Vetoes candidate if author surnames have zero overlap</div>"]
+        end
+
+        subgraph ManifestationLayer["Manifestation Level (Embodiment & Publication)"]
+            VolFilter["<div style='text-align:center;'><b>Volume Conflict Check</b> (<code>check_volume_match</code>)</div><div style='text-align:left;'>• Entity Target: <b>Manifestation</b> (physical/digital part)<br/>• Attribute: <code>volume_designation</code> (MARC 245$n/$p, 490/830$v)<br/>• Logic: Vetoes conflicting volume numbers (e.g. <i>Osa 1</i> vs. <i>Osa 2</i>)</div>"]
+            YearFilter["<div style='text-align:center;'><b>Publication Year Distance</b> (<code>evaluate_year</code>)</div><div style='text-align:left;'>• Entity Target: <b>Manifestation</b> (publication date)<br/>• Attribute: <code>publication_year</code> (MARC 008/07-10, 260/264$c)<br/>• Logic: Rejects discrepancies exceeding <code>max_year_difference</code></div>"]
+        end
+
+        subgraph WorkLayer["Work Level (Intellectual Entity)"]
+            WorkMatching["<div style='text-align:center;'><b>Work-Level Equivalence Scope</b></div><div style='text-align:left;'>• Abstract intellectual creation transcends publication years and carriers<br/>• Manifestation year vetoes can be relaxed for Work clustering, while Agent vetoes remain strict</div>"]
+        end
+    end
+
+    AgentFilter --> WorkMatching
+    VolFilter --> ManifestationLayer
+    YearFilter --> ManifestationLayer
+```
+
+### 5.1 Pre-Veto Filters by Entity Type
+
+| Pre-Veto Filter | Target Entity Type | Metadata Attributes (MARC Fields) | Rejection Logic & Semantic Rationale | Work vs. Manifestation Scope |
+| :--- | :--- | :--- | :--- | :--- |
+| **Author Surname Match** (`check_surname_match`) | **Agent** (Creator Attribution) | `agents[].surname`, `agents[].name` (MARC `100$a`, `700$a`) | **Rejects on zero author overlap**: If two records have distinct, non-overlapping author surnames (e.g. *Waltari* vs. *Topelius*), they cannot represent the same Work or Manifestation regardless of semantic title similarity. | **Strict for both Work and Manifestation**: Valid across all WEMI layers unless the work is an anonymous/folkloric creation. |
+| **Volume Conflict Check** (`check_volume_match`) | **Manifestation** (and sub-Expression parts) | `volume_designation`, `series_numbering` (MARC `245$n`, `245$p`, `490$v`, `830$v`) | **Rejects conflicting volume designations**: Normalized via `normalize_volume()` (handling prefixes like *osa*, *del*, *vol.*, and Roman numerals). If Record A is *Osa 1* and Record B is *Osa 2*, they represent distinct physical parts/manifestations. | **Strict for Manifestation and Multi-Part Work sets**: Prevents distinct volumes of multi-part sets from collapsing into a single manifestation. |
+| **Publication Year Distance** (`evaluate_year`) | **Manifestation** (Publication Event) | `publication_year` (MARC `008/07-10`, `260$c`, `264$c`) | **Rejects excessive publication date divergence**: Calculates absolute difference $|y_T - y_C| > \text{max\_year\_difference}$. Filters out distant reprints, adaptations, or unrelated homonymous works. | **Configurable by Resolution Target**: Strict for **Manifestation** matching (default: 3–5 years tolerance); relaxed or bypassed for **Work** consolidation where 19th-century originals and 21st-century reprints share Work identity. |
+
+When `apply_pre_veto: true`, ~70–80% of spurious vector neighbors are dropped in sub-microsecond CPU time before invoking GPU suffix inference, preserving GPU throughput for genuinely ambiguous candidates.
 
 ---
 
