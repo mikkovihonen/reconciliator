@@ -46,6 +46,22 @@ fields:
     contributes_to_container: false
     creator_controlled: true
 
+  # 730 uniform title added entry (common in music anthologies and songbooks)
+  - tag: "730"
+    title: "a"
+    creator: "g"
+    ordinal: position
+    contributes_to_container: false
+    creator_controlled: true
+
+  # 740 uncontrolled analytical title
+  - tag: "740"
+    indicators:
+      ind2: "2"
+    title: "a"
+    ordinal: position
+    contributes_to_container: false
+
   # 773 host item: this record is itself a part, so its own manifestation is a
   # component of the host's.
   #

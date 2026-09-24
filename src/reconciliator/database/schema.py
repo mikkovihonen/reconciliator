@@ -196,6 +196,7 @@ manifestation_expressions_table = Table(
     Column("duration", String, nullable=True),
     Column("is_primary", Boolean, nullable=False, default=True, server_default="1"),
     Index("idx_manif_exp_track", "manifestation_id", "track_number"),
+    Index("idx_manif_exp_expression", "expression_id"),
 )
 
 items_table = Table(
@@ -304,6 +305,7 @@ work_relationships_table = Table(
     Column("source_work_id", Integer, ForeignKey("works.id", ondelete="CASCADE"), nullable=False),
     Column("target_work_id", Integer, ForeignKey("works.id", ondelete="CASCADE"), nullable=False),
     Column("relationship_type", String, nullable=False),
+    Column("sequence_number", Integer, nullable=True),
     Column("created_at", DateTime, server_default=func.current_timestamp()),
     UniqueConstraint(
         "source_work_id",
@@ -313,6 +315,12 @@ work_relationships_table = Table(
     ),
     Index("idx_work_rel_source", "source_work_id", "relationship_type"),
     Index("idx_work_rel_target", "target_work_id", "relationship_type"),
+    Index(
+        "idx_work_rel_source_type_seq",
+        "source_work_id",
+        "relationship_type",
+        "sequence_number",
+    ),
 )
 
 work_consolidations_table = Table(
@@ -620,6 +628,82 @@ corpus_linkages_table = Table(
     Column("final_expression_source_id", String, nullable=False, default="", server_default=""),
     Index("idx_linkage_manifestation", "manifestation_cluster_id"),
     Index("idx_linkage_work", "work_cluster_id"),
+)
+
+corpus_constituent_linkages_table = Table(
+    "corpus_constituent_linkages",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "record_id",
+        String,
+        ForeignKey("corpus_linkages.record_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("constituent_ordinal", Integer, nullable=False, default=1),
+    Column("constituent_work_id", String, nullable=False),
+    Column(
+        "constituent_work_cluster_id",
+        String,
+        ForeignKey("corpus_work_clusters.cluster_id"),
+        nullable=True,
+    ),
+    Column(
+        "constituent_expression_cluster_id",
+        String,
+        ForeignKey("corpus_expression_clusters.cluster_id"),
+        nullable=True,
+    ),
+    Column("title", String, nullable=False),
+    Column("creator", String, nullable=True),
+    Column("field_tag", String(64), nullable=True),
+    Column("final_work_source", String, nullable=False, default="", server_default=""),
+    Column("final_work_source_id", String, nullable=False, default="", server_default=""),
+    Column("final_work_uri", Text, nullable=True),
+    Column("confidence", Float, nullable=False, default=1.0, server_default="1.0"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    UniqueConstraint(
+        "record_id", "constituent_ordinal", name="uq_constituent_linkage_record_ordinal"
+    ),
+    Index("idx_const_linkage_record", "record_id"),
+    Index("idx_const_linkage_work_cluster", "constituent_work_cluster_id"),
+    Index("idx_const_linkage_work_id", "constituent_work_id"),
+)
+
+corpus_work_relationships_table = Table(
+    "corpus_work_relationships",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "source_cluster_id",
+        String,
+        ForeignKey("corpus_work_clusters.cluster_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "target_cluster_id",
+        String,
+        ForeignKey("corpus_work_clusters.cluster_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "relationship_type",
+        String(32),
+        nullable=False,
+        default="has_part",
+        server_default="has_part",
+    ),
+    Column("sequence_number", Integer, nullable=True),
+    Column("confidence", Float, nullable=False, default=1.0, server_default="1.0"),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    UniqueConstraint(
+        "source_cluster_id",
+        "target_cluster_id",
+        "relationship_type",
+        name="uq_corpus_work_rel",
+    ),
+    Index("idx_corpus_work_rel_source", "source_cluster_id", "relationship_type"),
+    Index("idx_corpus_work_rel_target", "target_cluster_id", "relationship_type"),
 )
 
 sammelband_bindings_table = Table(

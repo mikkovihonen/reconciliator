@@ -36,6 +36,7 @@ def enrich_bibframe_graph(
     expression_cluster: Optional[ExpressionCluster] = None,
     manifestation_cluster: Optional[ManifestationCluster] = None,
     enrichment_config: Optional[EnrichmentConfig] = None,
+    constituent_linkages: Optional[list[Any]] = None,
 ) -> Graph:
     """Enrich an RDF graph in-place with resolved authority, vocabulary, and WEMI graph URIs.
 
@@ -202,6 +203,68 @@ def enrich_bibframe_graph(
         for cm in wemi_res.constituent_matches:
             c_ref = URIRef(cm.work_uri)
             g.add((work_node, bf_has_part, c_ref))
+
+    if toggles.inject_component_links and constituent_linkages and work_node:
+        from rdflib import Literal
+
+        has_part_curie = "bffi:hasPart" if p.name == "bffi_1" else "bf:hasPart"
+        part_pred = URIRef(p.expand_curie(has_part_curie))
+        for c_link in constituent_linkages:
+            uri = getattr(c_link, "final_work_uri", None) or (
+                f"reconciliator:{c_link.constituent_work_cluster_id}"
+                if getattr(c_link, "constituent_work_cluster_id", None)
+                else None
+            )
+            if not uri:
+                continue
+            uri_ref = URIRef(uri)
+            matched_part = None
+            title_preds = p.expanded_title_predicates | {str(URIRef(p.expand_curie("bf:title")))}
+            main_t_preds = p.expanded_main_title_predicates | {str(URIRef(p.expand_curie("bf:mainTitle")))}
+            for part_obj in g.objects(work_node, part_pred):
+                if isinstance(part_obj, IdentifiedNode):
+                    for t_pred in title_preds:
+                        for title_obj in g.objects(part_obj, URIRef(t_pred)):
+                            for mt_pred in main_t_preds:
+                                for main_t in g.objects(title_obj, URIRef(mt_pred)):
+                                    if str(main_t).strip().lower() in c_link.title.lower() or c_link.title.lower() in str(main_t).strip().lower():
+                                        matched_part = part_obj
+                                        break
+                                if matched_part is not None:
+                                    break
+                            if matched_part is not None:
+                                break
+                        if matched_part is not None:
+                            break
+                    if matched_part is not None:
+                        break
+
+            if matched_part is not None:
+                if (matched_part, owl_same_as, uri_ref) not in g:
+                    g.add((matched_part, owl_same_as, uri_ref))
+                if p.expanded_provenance_predicate:
+                    for mk_lit in list(
+                        g.objects(matched_part, URIRef(p.expanded_provenance_predicate))
+                    ):
+                        mk_str = str(mk_lit)
+                        if "$0" not in mk_str and uri not in mk_str:
+                            g.remove(
+                                (
+                                    matched_part,
+                                    URIRef(p.expanded_provenance_predicate),
+                                    mk_lit,
+                                )
+                            )
+                            g.add(
+                                (
+                                    matched_part,
+                                    URIRef(p.expanded_provenance_predicate),
+                                    Literal(f"{mk_str}$0{uri}"),
+                                )
+                            )
+            else:
+                if (work_node, part_pred, uri_ref) not in g:
+                    g.add((work_node, part_pred, uri_ref))
 
     return g
 

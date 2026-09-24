@@ -998,6 +998,8 @@ ingestion:
 
 constituents:
   profile: null
+  bibframe_profile: "bibframe_haspart"
+  bffi_profile: "bffi_haspart"
   mode: "keys_only"
   index_works: false
 
@@ -1331,6 +1333,15 @@ reconcile:
       - "standard_key"
     message_passing: true
     reconcile_items: false
+    aggregates:
+      enabled: true
+      min_constituents_for_overlap: 3
+      jaccard_merge_threshold: 0.80
+      jaccard_veto_threshold: 0.30
+      merge_bonus_score: 0.95
+      sequence_alignment: true
+      lcs_threshold: 0.70
+      blocking_family: "constituent_work"
     scoring:
       with_author:
         title: 0.45

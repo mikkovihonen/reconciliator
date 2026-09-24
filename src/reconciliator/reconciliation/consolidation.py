@@ -249,6 +249,11 @@ class WorkConsolidator:
         if a.work_type != b.work_type:
             return 0.0
 
+        n1 = set(re.findall(r"\b\d+\b", a.title_normalized))
+        n2 = set(re.findall(r"\b\d+\b", b.title_normalized))
+        if (n1 - n2) and (n2 - n1):
+            return 0.0
+
         title_sim = fuzz.token_set_ratio(a.title_normalized, b.title_normalized) / 100.0
 
         if a.author_keys and b.author_keys:

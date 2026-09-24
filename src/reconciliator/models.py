@@ -501,6 +501,8 @@ WorkRelationshipType = Literal[
     # stories, a journal issue and its articles. Distinct from
     # series_member_of/has_series_member, which is serial hierarchy, and from
     # bound_with, which is item-level. See plans/aggregates.md.
+    "has_part",
+    "part_of",
     "has_constituent",
     "constituent_of",
 ]
@@ -1029,6 +1031,7 @@ class WorkRelationship(BaseModel):
     source_work_curie: Optional[str] = None
     target_work_curie: Optional[str] = None
     relationship_type: WorkRelationshipType
+    sequence_number: Optional[int] = None
     created_at: Optional[str] = None
 
     @model_validator(mode="before")
@@ -1126,6 +1129,7 @@ class MatchRecord(BaseModel):
     serialized_expression: Optional[str] = None
     serialized_manifestation: Optional[str] = None
     raw_payload: bytes = b""
+    constituent_cluster_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -1368,6 +1372,39 @@ class CorpusLinkage(BaseModel):
     @property
     def final_expression_uri(self) -> str:
         return self.final_expression_curie
+
+
+class CorpusConstituentLinkage(BaseModel):
+    """Constituent work/expression resolution mapping within an aggregate in reconcile_corpus.db."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: Optional[int] = None
+    record_id: str
+    constituent_ordinal: int = 1
+    constituent_work_id: str
+    constituent_work_cluster_id: Optional[str] = None
+    constituent_expression_cluster_id: Optional[str] = None
+    title: str
+    creator: Optional[str] = None
+    field_tag: Optional[str] = None
+    final_work_source: str = ""
+    final_work_source_id: str = ""
+    final_work_uri: Optional[str] = None
+    confidence: float = 1.0
+
+
+class CorpusWorkRelationship(BaseModel):
+    """Whole-part graph relationship between discovered work clusters in reconcile_corpus.db."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: Optional[int] = None
+    source_cluster_id: str
+    target_cluster_id: str
+    relationship_type: str = "has_part"
+    sequence_number: Optional[int] = None
+    confidence: float = 1.0
 
 
 class SammelbandBinding(BaseModel):

@@ -13,4 +13,7 @@ fields:
   - predicate: "bf:hasPart"
     title: "bf:title"
     creator: "bf:contribution"
+    sequence_predicates:
+      - "bflc:sequenceNumber"
+      - "bflc:sequence"
     ordinal: none

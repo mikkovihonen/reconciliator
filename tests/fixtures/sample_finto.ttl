@@ -1,6 +1,7 @@
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 @prefix dct: <http://purl.org/dc/terms/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <http://www.yso.fi/onto/yso/p2591> a skos:Concept ;
     skos:prefLabel "lääkärit"@fi ;

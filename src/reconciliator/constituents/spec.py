@@ -64,6 +64,8 @@ class ConstituentField(BaseModel):
     pagination: Optional[str] = None
     disc: Optional[str] = None
     role: Optional[str] = None
+    sequence_predicates: list[str] = Field(default_factory=list)
+    provenance_predicate: Optional[str] = None
 
     #: `position` numbers constituents by the order they appear, which is what a
     #: tracklist means; `subfield:<code>` / `predicate:<name>` reads a stated

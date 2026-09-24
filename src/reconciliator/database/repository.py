@@ -44,10 +44,12 @@ from reconciliator.database.schema import (
     corpus_agent_cluster_members_table,
     corpus_agent_clusters_table,
     corpus_agent_relationships_table,
+    corpus_constituent_linkages_table,
     corpus_expression_clusters_table,
     corpus_linkages_table,
     corpus_manifestation_clusters_table,
     corpus_work_clusters_table,
+    corpus_work_relationships_table,
     entity_keys_table,
     entity_pins_table,
     entity_subjects_table,
@@ -77,7 +79,9 @@ from reconciliator.models import (
     ClusterLifecycleEvent,
     ClusterRedirection,
     ContributionEntity,
+    CorpusConstituentLinkage,
     CorpusLinkage,
+    CorpusWorkRelationship,
     DataReadinessSummary,
     EntityKey,
     EntitySubject,
@@ -1204,6 +1208,7 @@ class WEMIRepository:
                 "source_work_id": rel.source_work_id,
                 "target_work_id": rel.target_work_id,
                 "relationship_type": rel.relationship_type,
+                "sequence_number": rel.sequence_number,
             }
             for rel in rels
         }
@@ -1219,7 +1224,10 @@ class WEMIRepository:
                 stmt = pg_insert(work_relationships_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["source_work_id", "target_work_id", "relationship_type"],
-                    set_={"relationship_type": stmt.excluded.relationship_type},
+                    set_={
+                        "relationship_type": stmt.excluded.relationship_type,
+                        "sequence_number": stmt.excluded.sequence_number,
+                    },
                 ).returning(
                     work_relationships_table.c.id,
                     work_relationships_table.c.source_work_id,
@@ -1961,10 +1969,11 @@ class WEMIRepository:
             return [_row_to_expression(r) for r in rows]
 
     def get_constituent_works(self, work_id: int) -> list[WorkEntity]:
-        """The works this one contains, by stored `has_constituent` edges."""
+        """The works this one contains, by stored whole-part edges."""
         stmt = (
             select(
                 works_table,
+                func.min(work_relationships_table.c.sequence_number).label("seq"),
                 func.min(manifestation_expressions_table.c.disc_number).label("d"),
                 func.min(manifestation_expressions_table.c.track_number).label("t"),
             )
@@ -1980,10 +1989,11 @@ class WEMIRepository:
             )
             .where(
                 work_relationships_table.c.source_work_id == work_id,
-                work_relationships_table.c.relationship_type == "has_constituent",
+                work_relationships_table.c.relationship_type.in_(("has_part", "has_constituent")),
             )
             .group_by(*works_table.c)
             .order_by(
+                nulls_last(func.min(work_relationships_table.c.sequence_number)),
                 nulls_last(func.min(manifestation_expressions_table.c.disc_number)),
                 nulls_last(func.min(manifestation_expressions_table.c.track_number)),
                 works_table.c.id,
@@ -3504,6 +3514,63 @@ class WEMIRepository:
             conflict_index_elements=["record_id"],
         )
 
+    def insert_corpus_constituent_linkages_batch(
+        self, linkages: list[CorpusConstituentLinkage]
+    ) -> None:
+        """Batch insert or replace constituent record-to-cluster linkages."""
+        if not linkages:
+            return
+        deduped = {
+            (lnk.record_id, lnk.constituent_ordinal): {
+                "record_id": lnk.record_id,
+                "constituent_ordinal": lnk.constituent_ordinal,
+                "constituent_work_id": lnk.constituent_work_id,
+                "constituent_work_cluster_id": lnk.constituent_work_cluster_id,
+                "constituent_expression_cluster_id": lnk.constituent_expression_cluster_id,
+                "title": lnk.title,
+                "creator": lnk.creator,
+                "field_tag": lnk.field_tag,
+                "final_work_source": lnk.final_work_source,
+                "final_work_source_id": lnk.final_work_source_id,
+                "final_work_uri": lnk.final_work_uri,
+                "confidence": lnk.confidence,
+            }
+            for lnk in linkages
+        }
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_constituent_linkages_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=["record_id", "constituent_ordinal"],
+        )
+
+    def insert_corpus_work_relationships_batch(
+        self, relationships: list[CorpusWorkRelationship]
+    ) -> None:
+        """Batch insert or replace whole-part relationships between discovered work clusters."""
+        if not relationships:
+            return
+        deduped = {
+            (rel.source_cluster_id, rel.target_cluster_id, rel.relationship_type): {
+                "source_cluster_id": rel.source_cluster_id,
+                "target_cluster_id": rel.target_cluster_id,
+                "relationship_type": rel.relationship_type,
+                "sequence_number": rel.sequence_number,
+                "confidence": rel.confidence,
+            }
+            for rel in relationships
+        }
+        upsert_batch(
+            bind=self.get_corpus_connection(),
+            table=corpus_work_relationships_table,
+            rows=list(deduped.values()),
+            conflict_index_elements=[
+                "source_cluster_id",
+                "target_cluster_id",
+                "relationship_type",
+            ],
+        )
+
     def insert_sammelband_bindings_batch(self, bindings: list[SammelbandBinding]) -> None:
         """Batch insert or replace sammelband item-level composite bindings."""
         if not bindings:
@@ -3805,6 +3872,74 @@ class WEMIRepository:
         with self.get_corpus_connection() as conn:
             rows = conn.execute(stmt).mappings().fetchall()
             return [CorpusLinkage.model_validate(dict(r)) for r in rows]
+
+    def get_constituent_linkages_for_record(
+        self, record_id: str
+    ) -> list[CorpusConstituentLinkage]:
+        """Fetch all constituent linkages for a container record, ordered by constituent ordinal."""
+        stmt = (
+            select(corpus_constituent_linkages_table)
+            .where(corpus_constituent_linkages_table.c.record_id == record_id)
+            .order_by(corpus_constituent_linkages_table.c.constituent_ordinal)
+        )
+        with self.get_corpus_connection() as conn:
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [CorpusConstituentLinkage.model_validate(dict(r)) for r in rows]
+
+    def get_all_constituent_linkages(self) -> list[CorpusConstituentLinkage]:
+        """Fetch all constituent linkages ordered by record_id and ordinal."""
+        stmt = select(corpus_constituent_linkages_table).order_by(
+            corpus_constituent_linkages_table.c.record_id,
+            corpus_constituent_linkages_table.c.constituent_ordinal,
+        )
+        with self.get_corpus_connection() as conn:
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [CorpusConstituentLinkage.model_validate(dict(r)) for r in rows]
+
+    def get_constituent_clusters_for_container(
+        self, container_cluster_id: str
+    ) -> list[WorkCluster]:
+        """Fetch all constituent work clusters for an aggregate container work cluster, ordered by sequence."""
+        stmt = (
+            select(corpus_work_clusters_table)
+            .select_from(
+                corpus_work_relationships_table.join(
+                    corpus_work_clusters_table,
+                    corpus_work_clusters_table.c.cluster_id
+                    == corpus_work_relationships_table.c.target_cluster_id,
+                )
+            )
+            .where(
+                corpus_work_relationships_table.c.source_cluster_id == container_cluster_id,
+                corpus_work_relationships_table.c.relationship_type == "has_part",
+            )
+            .order_by(
+                nulls_last(corpus_work_relationships_table.c.sequence_number),
+                corpus_work_clusters_table.c.cluster_id,
+            )
+        )
+        with self.get_corpus_connection() as conn:
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [WorkCluster.model_validate(dict(r)) for r in rows]
+
+    def get_constituent_work_relationships_for_container(
+        self, container_cluster_id: str
+    ) -> list[CorpusWorkRelationship]:
+        """Fetch all outgoing work relationships (e.g. has_part) for a container cluster."""
+        stmt = (
+            select(corpus_work_relationships_table)
+            .where(
+                corpus_work_relationships_table.c.source_cluster_id == container_cluster_id,
+                corpus_work_relationships_table.c.relationship_type == "has_part",
+            )
+            .order_by(
+                nulls_last(corpus_work_relationships_table.c.sequence_number),
+                corpus_work_relationships_table.c.target_cluster_id,
+            )
+        )
+        with self.get_corpus_connection() as conn:
+            rows = conn.execute(stmt).mappings().fetchall()
+            return [CorpusWorkRelationship.model_validate(dict(r)) for r in rows]
 
     def get_sammelband_bindings(self, binding_id: str) -> list[SammelbandBinding]:
         """Fetch all constituent items in a composite binding."""

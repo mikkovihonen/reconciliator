@@ -30,11 +30,17 @@ class CandidateEvaluator:
         )
 
     def check_volume_match(
-        self, target_volume: Optional[str], candidate_volume: Optional[str]
+        self,
+        target_volume: Optional[str],
+        candidate_volume: Optional[str],
+        target_title: Optional[str] = None,
+        candidate_title: Optional[str] = None,
+        target_year: Optional[int] = None,
+        candidate_year: Optional[int] = None,
     ) -> bool:
         """
-        Check volume/part designation compatibility.
-        Rejects conflicting designations (e.g. 'osa 1' vs 'osa 2').
+        Check volume/part designation and numeric title token compatibility.
+        Rejects conflicting designations (e.g. 'osa 1' vs 'osa 2') or conflicting numeric title tokens.
 
         Compares *normalised* designations. Raw string equality made this check
         reject every candidate whose volume was merely spelled differently -
@@ -45,14 +51,25 @@ class CandidateEvaluator:
         """
         if not self.config.require_volume_match:
             return True
-        if not target_volume or not candidate_volume:
-            return True
 
-        from reconciliator.normalizers.record import normalize_volume
+        if target_volume and candidate_volume:
+            from reconciliator.normalizers.record import normalize_volume
 
-        target_norm = normalize_volume(target_volume) or target_volume.strip().lower()
-        candidate_norm = normalize_volume(candidate_volume) or candidate_volume.strip().lower()
-        return target_norm == candidate_norm
+            target_norm = normalize_volume(target_volume) or target_volume.strip().lower()
+            candidate_norm = normalize_volume(candidate_volume) or candidate_volume.strip().lower()
+            if target_norm != candidate_norm:
+                return False
+
+        if target_title and candidate_title:
+            import re
+
+            pub_years = {str(y) for y in (target_year, candidate_year) if y and 1000 <= y <= 9999}
+            n1 = set(re.findall(r"\b\d+\b", target_title)) - pub_years
+            n2 = set(re.findall(r"\b\d+\b", candidate_title)) - pub_years
+            if (n1 - n2) and (n2 - n1):
+                return False
+
+        return True
 
     def check_surname_match(
         self,
@@ -135,7 +152,12 @@ class CandidateEvaluator:
     ) -> ReconciliationMatch:
         """Evaluate a candidate record through short-circuit or hybrid dense+rerank scoring."""
         vol_match = self.check_volume_match(
-            target_record.volume_designation, candidate_record.volume_designation
+            target_record.volume_designation,
+            candidate_record.volume_designation,
+            target_title=target_record.title,
+            candidate_title=candidate_record.title,
+            target_year=target_record.publication_year,
+            candidate_year=candidate_record.publication_year,
         )
         surname_match = self.check_surname_match(
             target_record, candidate_record, author_relationships=author_relationships
@@ -273,7 +295,12 @@ class CandidateEvaluator:
 
         for i, (cand_rec, dense_score) in enumerate(candidates):
             vol_match = self.check_volume_match(
-                target_record.volume_designation, cand_rec.volume_designation
+                target_record.volume_designation,
+                cand_rec.volume_designation,
+                target_title=target_record.title,
+                candidate_title=cand_rec.title,
+                target_year=target_record.publication_year,
+                candidate_year=cand_rec.publication_year,
             )
             surname_match = self.check_surname_match(
                 target_record, cand_rec, author_relationships=author_relationships

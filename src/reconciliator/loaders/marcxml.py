@@ -2541,13 +2541,16 @@ def extract_marc_constituents(
                         return None
                     return group.get(code) or field_level.get(code)
 
-                title = value(field.title)
+                raw_title = value(field.title)
+                title = strip_isbd(raw_title).strip() if raw_title else None
                 if not title:
                     continue
+                raw_creator = value(field.creator)
+                creator = strip_isbd(raw_creator).strip() if raw_creator else None
                 found.append(
                     Constituent(
                         title=title,
-                        creator=value(field.creator),
+                        creator=creator,
                         ordinal=_stated_ordinal(field.ordinal, group, field_level),
                         disc=_as_int(value(field.disc)),
                         duration=_clean_duration(value(field.duration)),

@@ -21,6 +21,12 @@ class ConstituentsConfig(BaseModel):
     """Global default for constituent extraction, overridable per source."""
 
     profile: Optional[str] = Field(default_factory=lambda: _CONSTITUENTS_DEFAULTS.get("profile"))
+    bibframe_profile: Optional[str] = Field(
+        default_factory=lambda: _CONSTITUENTS_DEFAULTS.get("bibframe_profile", "bibframe_haspart")
+    )
+    bffi_profile: Optional[str] = Field(
+        default_factory=lambda: _CONSTITUENTS_DEFAULTS.get("bffi_profile", "bffi_haspart")
+    )
     mode: Literal["off", "keys_only", "entities"] = Field(
         default_factory=lambda: _CONSTITUENTS_DEFAULTS.get("mode", "keys_only")
     )

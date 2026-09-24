@@ -1036,11 +1036,34 @@ def _ingest_corpus_as_wemi(
     entity_keys; `authoritative: false` on the source is what keeps a corpus from
     being matched against as if it were authority data.
     """
+    from reconciliator.constituents import get_constituent_profile
+    from reconciliator.loaders.aggregates import build_embodied_constituents
     from reconciliator.loaders.bibframe import bibframe_entity_keys, decompose_bibframe_work
-    from reconciliator.loaders.marcxml import decompose_marc_wemi
+    from reconciliator.loaders.marcxml import decompose_marc_wemi, extract_marc_constituents
 
     total = 0
     batch: dict[str, list[Any]] = {}
+
+    const_cfg = config.constituents if config else None
+    const_mode = const_cfg.mode if const_cfg else "entities"
+    marc_const_prof = None
+    if const_cfg and const_mode != "off":
+        try:
+            marc_const_prof = get_constituent_profile(const_cfg.profile or "marc_enhanced")
+        except Exception as e:
+            logger.warning("Could not load MARC constituent profile: %s", e)
+
+    bf_const_prof = None
+    if const_cfg and const_mode != "off":
+        try:
+            if profile and profile.name == "bffi_1":
+                bf_const_prof = get_constituent_profile(const_cfg.bffi_profile or "bffi_haspart")
+            else:
+                bf_const_prof = get_constituent_profile(
+                    const_cfg.bibframe_profile or "bibframe_haspart"
+                )
+        except Exception as e:
+            logger.warning("Could not load BIBFRAME constituent profile: %s", e)
 
     def _flush() -> None:
         if not batch.get("works"):
@@ -1107,6 +1130,26 @@ def _ingest_corpus_as_wemi(
                     key_sink=keys,
                     subject_sink=subjs,
                 )
+                if const_mode == "entities" and marc_const_prof:
+                    consts = extract_marc_constituents(orig_payload, marc_const_prof)
+                    if consts:
+                        c_batch = build_embodied_constituents(
+                            container_work=w,
+                            container_expression=e,
+                            container_manifestation=m,
+                            constituents=consts,
+                            source=source_name,
+                            record_origin=source_name,
+                            language=e.language,
+                            content_type=e.content_type,
+                            work_type=w.work_type,
+                            container_creator=w.title_normalized or None,
+                            relationship_type="has_part",
+                        )
+                        _stage("works", c_batch.works)
+                        _stage("expressions", c_batch.expressions)
+                        _stage("associations", c_batch.associations)
+                        _stage("relationships", c_batch.relationships)
             elif rec_fmt in ("bibframe_rdf", "bibframe_jsonld"):
                 if rec_fmt == "bibframe_rdf":
                     g, nodes = orig_payload
@@ -1115,10 +1158,37 @@ def _ingest_corpus_as_wemi(
                     g = Graph()
                     g.parse(data=json.dumps(orig_payload), format="json-ld")
                     node = None
+                constituent_sink: list[Any] = []
                 w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_bibframe_work(
-                    g=g, instance_node=node, profile=profile, source=source_name, subject_sink=subjs
+                    g=g,
+                    instance_node=node,
+                    profile=profile,
+                    source=source_name,
+                    subject_sink=subjs,
+                    constituent_profile=bf_const_prof if const_mode != "off" else None,
+                    constituent_sink=constituent_sink if const_mode != "off" else None,
                 )
-                keys = bibframe_entity_keys(m, w, agts, idents)
+                keys = bibframe_entity_keys(
+                    m, w, agts, idents, constituents=constituent_sink
+                )
+                if const_mode == "entities" and constituent_sink:
+                    c_batch = build_embodied_constituents(
+                        container_work=w,
+                        container_expression=e,
+                        container_manifestation=m,
+                        constituents=constituent_sink,
+                        source=source_name,
+                        record_origin=source_name,
+                        language=e.language,
+                        content_type=e.content_type,
+                        work_type=w.work_type,
+                        container_creator=w.title_normalized or None,
+                        relationship_type="has_part",
+                    )
+                    _stage("works", c_batch.works)
+                    _stage("expressions", c_batch.expressions)
+                    _stage("associations", c_batch.associations)
+                    _stage("relationships", c_batch.relationships)
             else:
                 continue
         except Exception:
@@ -1148,6 +1218,7 @@ def _to_target_record(
     orig_payload: Any,
     raw_rec: dict[str, Any],
     profile: Optional[BIBFRAMESchemaProfile] = None,
+    constituent_profile: Optional[Any] = None,
 ) -> MatchRecord:
     """Decompose or map raw bibliographic items into normalized MatchRecord instances."""
     try:
@@ -1157,12 +1228,18 @@ def _to_target_record(
             g, nodes = orig_payload
             instance_node = nodes[0] if nodes else None
             return build_target_record_from_bibframe(
-                g, instance_node=instance_node, profile=profile, source="target"
+                g,
+                instance_node=instance_node,
+                profile=profile,
+                source="target",
+                constituent_profile=constituent_profile,
             )
         elif rec_fmt == "bibframe_jsonld":
             g = Graph()
             g.parse(data=json.dumps(orig_payload), format="json-ld")
-            return build_target_record_from_bibframe(g, profile=profile, source="target")
+            return build_target_record_from_bibframe(
+                g, profile=profile, source="target", constituent_profile=constituent_profile
+            )
     except Exception:
         pass
 
@@ -1520,12 +1597,25 @@ def reconcile_cmd(
             total_records += 1
             target_record = normalizer.normalize(raw_rec)
 
-            # One construction, one match. Both halves of the output - the agent
-            # authority URIs and the WEMI report columns - derive from the same
-            # resolution. They used to come from two separately built records, of
-            # which the one driving agent reconciliation knew neither the work
-            # type nor any identifier.
-            target_wemi = _to_target_record(rec_fmt, orig_payload, raw_rec, bf_profile)
+            target_const_prof = None
+            if r_cfg.constituents and r_cfg.constituents.mode != "off":
+                from reconciliator.constituents import get_constituent_profile
+
+                try:
+                    if bf_profile and bf_profile.name == "bffi_1":
+                        target_const_prof = get_constituent_profile(
+                            r_cfg.constituents.bffi_profile or "bffi_haspart"
+                        )
+                    else:
+                        target_const_prof = get_constituent_profile(
+                            r_cfg.constituents.bibframe_profile or "bibframe_haspart"
+                        )
+                except Exception:
+                    pass
+
+            target_wemi = _to_target_record(
+                rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
+            )
             wemi_res = work_matcher.match_target(target_wemi)
 
             res = work_matcher.resolve_agents(wemi_res, target_record)

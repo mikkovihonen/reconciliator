@@ -8,10 +8,11 @@ connected-component graph clustering, and external authority URI hoisting.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from collections import defaultdict
-from typing import Optional
+from typing import Any, Optional
 
 from rapidfuzz import fuzz
 
@@ -22,7 +23,9 @@ from reconciliator.models import (
     ClusterEdge,
     ClusterLifecycleEvent,
     ClusterRedirection,
+    CorpusConstituentLinkage,
     CorpusLinkage,
+    CorpusWorkRelationship,
     ExpressionCluster,
     ManifestationCluster,
     MatchRecord,
@@ -30,12 +33,29 @@ from reconciliator.models import (
     SammelbandBinding,
     WorkCluster,
 )
+from reconciliator.normalizers.blocking import compute_author_key, compute_title_stem
 from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import (
     UnionFind,
     clean_alphanumeric,
     extract_identifiers_from_target,
 )
+
+
+def _lcs_length(seq1: list[str], seq2: list[str]) -> int:
+    """Compute length of longest common subsequence between two sequences."""
+    m, n = len(seq1), len(seq2)
+    dp = [0] * (n + 1)
+    for i in range(1, m + 1):
+        prev = 0
+        for j in range(1, n + 1):
+            temp = dp[j]
+            if seq1[i - 1] == seq2[j - 1]:
+                dp[j] = prev + 1
+            else:
+                dp[j] = max(dp[j], dp[j - 1])
+            prev = temp
+    return dp[n]
 
 
 class CorpusClusterer:
@@ -70,6 +90,13 @@ class CorpusClusterer:
         for k_type, vals in target.keys.items():
             for val in vals:
                 _add(k_type, val)
+
+        # Aggregate constituent clusters blocking
+        agg_cfg = getattr(self.config, "aggregates", None)
+        if agg_cfg and agg_cfg.enabled and target.constituent_cluster_ids:
+            bfamily = agg_cfg.blocking_family or "constituent_work"
+            for cid in target.constituent_cluster_ids:
+                _add(bfamily, cid)
 
         # 2. Material-specific blocking routing
         wt = target.work_type
@@ -147,13 +174,79 @@ class CorpusClusterer:
                 if s1 & s2:
                     return 1.0, f"domain_key:{k_type}"
 
+        # Check explicit volume designation compatibility (hard veto)
+        if r1.volume_designation and r2.volume_designation:
+            from reconciliator.normalizers.record import normalize_volume
+
+            v1 = normalize_volume(r1.volume_designation) or r1.volume_designation.strip().lower()
+            v2 = normalize_volume(r2.volume_designation) or r2.volume_designation.strip().lower()
+            if v1 != v2:
+                return 0.0, "volume_conflict"
+
+        # Check numeric title conflict (hard veto)
+        # Extract numeric tokens from titles, excluding publication years
+        pub_years = {str(y) for y in (r1.year, r2.year) if y and 1000 <= y <= 9999}
+        r1_title_nums = (
+            set(re.findall(r"\b\d+\b", r1.title or ""))
+            | set(re.findall(r"\b\d+\b", r1.title_stem or ""))
+            | set(re.findall(r"\b\d+\b", r1.uniform_title or ""))
+        ) - pub_years
+        r2_title_nums = (
+            set(re.findall(r"\b\d+\b", r2.title or ""))
+            | set(re.findall(r"\b\d+\b", r2.title_stem or ""))
+            | set(re.findall(r"\b\d+\b", r2.uniform_title or ""))
+        ) - pub_years
+
+        diff1 = r1_title_nums - r2_title_nums
+        diff2 = r2_title_nums - r1_title_nums
+        if diff1 and diff2:
+            return 0.0, "numeric_title_conflict"
+
+        # Check aggregate constituent overlap and container-part collision
+        agg_cfg = getattr(self.config, "aggregates", None)
+        if agg_cfg and agg_cfg.enabled:
+            c1 = r1.constituent_cluster_ids or r1.keys.get("analytic", [])
+            c2 = r2.constituent_cluster_ids or r2.keys.get("analytic", [])
+            min_c = agg_cfg.min_constituents_for_overlap
+
+            # Anti-collision: container vs constituent part
+            if (len(c1) >= min_c and r2.is_component) or (len(c2) >= min_c and r1.is_component):
+                return 0.0, "container_part_collision"
+
+            if len(c1) >= min_c and len(c2) >= min_c:
+                s1 = set(c1)
+                s2 = set(c2)
+                inter = len(s1 & s2)
+                union = len(s1 | s2)
+                jaccard = inter / union if union > 0 else 0.0
+
+                if jaccard <= agg_cfg.jaccard_veto_threshold:
+                    return 0.0, "aggregate_content_mismatch"
+
+                if jaccard >= agg_cfg.jaccard_merge_threshold:
+                    if agg_cfg.sequence_alignment:
+                        lcs_len = _lcs_length(c1, c2)
+                        lcs_ratio = (
+                            (2.0 * lcs_len) / (len(c1) + len(c2))
+                            if (len(c1) + len(c2)) > 0
+                            else 0.0
+                        )
+                        if lcs_ratio >= agg_cfg.lcs_threshold:
+                            return agg_cfg.merge_bonus_score, "aggregate_jaccard_lcs_merge"
+                    else:
+                        return agg_cfg.merge_bonus_score, "aggregate_jaccard_merge"
+
         # 3. Composite metadata similarity
         # Title similarity (cross-checking uniform_title, title, title_stem)
         titles_r1 = [t for t in (r1.uniform_title, r1.title, r1.title_stem) if t]
         titles_r2 = [t for t in (r2.uniform_title, r2.title, r2.title_stem) if t]
         title_sim = 0.0
         for x1 in titles_r1:
+            n1 = set(re.findall(r"\b\d+\b", x1)) - pub_years
             for x2 in titles_r2:
+                n2 = set(re.findall(r"\b\d+\b", x2)) - pub_years
+                if (n1 - n2) and (n2 - n1):
+                    continue
                 sim = fuzz.token_set_ratio(x1, x2) / 100.0
                 if sim > title_sim:
                     title_sim = sim
@@ -253,9 +346,15 @@ class CorpusClusterer:
                 .lower()
             )
         elif content_type == "audio_music":
-            sub_key = f"{(target.author_key or '').strip().lower()}_{target.year or ''}"
+            nums = re.findall(r"\b\d+\b", target.title_stem or target.title or "")
+            num_suffix = f"_{'_'.join(nums)}" if nums else ""
+            sub_key = f"{(target.author_key or '').strip().lower()}_{target.year or ''}{num_suffix}"
         elif content_type == "notated_music":
-            sub_key = (target.volume_designation or "score").strip().lower()
+            if target.volume_designation:
+                sub_key = target.volume_designation.strip().lower()
+            else:
+                nums = re.findall(r"\b\d+\b", target.title_stem or target.title or "")
+                sub_key = f"score_{'_'.join(nums)}" if nums else "score"
         elif content_type in ("computer_program", "model_weights", "dataset"):
             sub_key = (target.volume_designation or "v1").strip().lower()
         elif content_type == "three_dimensional_form":
@@ -270,7 +369,10 @@ class CorpusClusterer:
         sk = (target.get_first_key("standard") or "").strip().lower()
         year = str(target.year or 0)
         vol = (target.volume_designation or "").strip().lower()
-        return f"{sk}::{year}::{vol}"
+        if sk:
+            return f"{sk}::{year}::{vol}"
+        t_stem = (target.title_stem or target.title or "").strip().lower()
+        return f"raw::{target.record_id}::{t_stem}::{year}::{vol}"
 
     def _merge_manifestation_groups_by_vector(
         self, groups: dict[str, list[MatchRecord]]
@@ -338,6 +440,125 @@ class CorpusClusterer:
             r.record_id: extract_identifiers_from_target(r) for r in records
         }
 
+        # Step 0: Micro-Clustering (Constituent Works First)
+        constituent_work_clusters: dict[str, WorkCluster] = {}
+        record_constituents: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+        agg_cfg = getattr(self.config, "aggregates", None)
+        if agg_cfg and agg_cfg.enabled:
+            try:
+                from sqlalchemy import and_, select
+                from reconciliator.database.schema import (
+                    agents_table,
+                    contributions_table,
+                    manifestations_table,
+                    work_relationships_table,
+                    works_table,
+                )
+
+                stmt_const = (
+                    select(
+                        manifestations_table.c.source_id.label("container_record_id"),
+                        work_relationships_table.c.sequence_number,
+                        works_table.c.id.label("const_work_id"),
+                        works_table.c.source_id.label("const_work_source_id"),
+                        works_table.c.title.label("const_title"),
+                        works_table.c.work_type.label("const_work_type"),
+                        agents_table.c.name.label("const_agent_name"),
+                        contributions_table.c.field_tag.label("const_field_tag"),
+                    )
+                    .select_from(
+                        manifestations_table.join(
+                            work_relationships_table,
+                            work_relationships_table.c.source_work_id
+                            == manifestations_table.c.work_id,
+                        )
+                        .join(
+                            works_table,
+                            works_table.c.id == work_relationships_table.c.target_work_id,
+                        )
+                        .outerjoin(
+                            agents_table,
+                            agents_table.c.id == works_table.c.primary_agent_id,
+                        )
+                        .outerjoin(
+                            contributions_table,
+                            and_(
+                                contributions_table.c.entity_type == "work",
+                                contributions_table.c.entity_id == works_table.c.id,
+                            ),
+                        )
+                    )
+                    .where(
+                        work_relationships_table.c.relationship_type.in_(
+                            ("has_part", "has_constituent")
+                        )
+                    )
+                )
+                if origins:
+                    stmt_const = stmt_const.where(
+                        manifestations_table.c.record_origin.in_(origins)
+                    )
+                stmt_const = stmt_const.order_by(
+                    manifestations_table.c.source_id,
+                    nulls_last(work_relationships_table.c.sequence_number),
+                    works_table.c.id,
+                )
+
+                with self.corpus_repo.get_connection() as conn:
+                    for row in conn.execute(stmt_const).mappings():
+                        c_rec_id = row["container_record_id"]
+                        record_constituents[c_rec_id].append(dict(row))
+            except Exception:
+                pass
+
+            for r in records:
+                if r.record_id in record_constituents:
+                    for idx, c_info in enumerate(record_constituents[r.record_id]):
+                        title = c_info.get("const_title") or ""
+                        creator = c_info.get("const_agent_name") or ""
+                        auth_key = compute_author_key(creator)
+                        stem = compute_title_stem(title)
+                        h = hashlib.sha256(f"{auth_key}::{stem}".encode("utf-8")).hexdigest()[:16]
+                        cid = f"va_const_work_{h}"
+                        c_info["cluster_id"] = cid
+                        if cid not in constituent_work_clusters:
+                            constituent_work_clusters[cid] = WorkCluster(
+                                cluster_id=cid,
+                                work_type=c_info.get("const_work_type") or "music",
+                                canonical_work_curie=f"reconciliator:{cid}",
+                                canonical_title=title,
+                                canonical_author=auth_key or None,
+                                authority_status="provisional",
+                                canonical_access_point=f"{creator} - {title}".strip(" -") or title,
+                            )
+                        if cid not in r.constituent_cluster_ids:
+                            r.constituent_cluster_ids.append(cid)
+                elif "analytic" in r.keys:
+                    for a_key in r.keys["analytic"]:
+                        try:
+                            a_title, a_creator = json.loads(a_key)
+                        except Exception:
+                            a_title, a_creator = a_key, None
+                        auth_key = compute_author_key(a_creator)
+                        stem = compute_title_stem(a_title)
+                        h = hashlib.sha256(f"{auth_key}::{stem}".encode("utf-8")).hexdigest()[:16]
+                        cid = f"va_const_work_{h}"
+                        if cid not in constituent_work_clusters:
+                            constituent_work_clusters[cid] = WorkCluster(
+                                cluster_id=cid,
+                                work_type="music",
+                                canonical_work_curie=f"reconciliator:{cid}",
+                                canonical_title=a_title,
+                                canonical_author=auth_key or None,
+                                authority_status="provisional",
+                                canonical_access_point=(
+                                    f"{a_creator or ''} - {a_title}".strip(" -") or a_title
+                                ),
+                            )
+                        if cid not in r.constituent_cluster_ids:
+                            r.constituent_cluster_ids.append(cid)
+
         # Step 1: Multi-Key Blocking Pass
         blocks: dict[str, list[str]] = defaultdict(list)
         for r in records:
@@ -391,6 +612,8 @@ class CorpusClusterer:
         expression_clusters: list[ExpressionCluster] = []
         manifestation_clusters: list[ManifestationCluster] = []
         corpus_linkages: list[CorpusLinkage] = []
+        all_constituent_linkages: list[CorpusConstituentLinkage] = []
+        all_corpus_work_relationships: list[CorpusWorkRelationship] = []
         sammelband_bindings: list[SammelbandBinding] = []
         all_work_events: list[ClusterLifecycleEvent] = []
         all_work_redirections: list[ClusterRedirection] = []
@@ -537,6 +760,75 @@ class CorpusClusterer:
                         )
                         corpus_linkages.append(linkage)
 
+                        # Constituent linkages & work relationships
+                        if agg_cfg and agg_cfg.enabled:
+                            if rec.record_id in record_constituents:
+                                for idx, c_info in enumerate(record_constituents[rec.record_id]):
+                                    cid = c_info.get("cluster_id")
+                                    if not cid:
+                                        continue
+                                    seq = c_info.get("sequence_number") or (idx + 1)
+                                    c_link = CorpusConstituentLinkage(
+                                        record_id=rec.record_id,
+                                        constituent_ordinal=seq,
+                                        constituent_work_id=c_info.get("const_work_source_id")
+                                        or f"c:{seq}",
+                                        constituent_work_cluster_id=cid,
+                                        title=c_info.get("const_title") or "",
+                                        creator=c_info.get("const_agent_name"),
+                                        field_tag=c_info.get("const_field_tag"),
+                                        final_work_source="reconciliator",
+                                        final_work_source_id=cid,
+                                        final_work_uri=f"reconciliator:{cid}",
+                                        confidence=1.0,
+                                    )
+                                    all_constituent_linkages.append(c_link)
+
+                                    c_rel = CorpusWorkRelationship(
+                                        source_cluster_id=work_cluster_id,
+                                        target_cluster_id=cid,
+                                        relationship_type="has_part",
+                                        sequence_number=seq,
+                                        confidence=1.0,
+                                    )
+                                    all_corpus_work_relationships.append(c_rel)
+                            elif "analytic" in rec.keys:
+                                for idx, a_key in enumerate(rec.keys["analytic"]):
+                                    try:
+                                        a_title, a_creator = json.loads(a_key)
+                                    except Exception:
+                                        a_title, a_creator = a_key, None
+                                    auth_key = compute_author_key(a_creator)
+                                    stem = compute_title_stem(a_title)
+                                    h = hashlib.sha256(
+                                        f"{auth_key}::{stem}".encode("utf-8")
+                                    ).hexdigest()[:16]
+                                    cid = f"va_const_work_{h}"
+                                    seq = idx + 1
+                                    c_link = CorpusConstituentLinkage(
+                                        record_id=rec.record_id,
+                                        constituent_ordinal=seq,
+                                        constituent_work_id=f"c:{seq}",
+                                        constituent_work_cluster_id=cid,
+                                        title=a_title,
+                                        creator=a_creator,
+                                        field_tag="730",
+                                        final_work_source="reconciliator",
+                                        final_work_source_id=cid,
+                                        final_work_uri=f"reconciliator:{cid}",
+                                        confidence=1.0,
+                                    )
+                                    all_constituent_linkages.append(c_link)
+
+                                    c_rel = CorpusWorkRelationship(
+                                        source_cluster_id=work_cluster_id,
+                                        target_cluster_id=cid,
+                                        relationship_type="has_part",
+                                        sequence_number=seq,
+                                        confidence=1.0,
+                                    )
+                                    all_corpus_work_relationships.append(c_rel)
+
         # Step 6: Sammelband Item Binding Tracking
         sammelband_groups: dict[str, list[MatchRecord]] = defaultdict(list)
         for r in records:
@@ -555,10 +847,16 @@ class CorpusClusterer:
                 )
 
         # Step 7: Batch Persistence to PostgreSQL
+        if constituent_work_clusters:
+            self.corpus_repo.insert_work_clusters_batch(list(constituent_work_clusters.values()))
         self.corpus_repo.insert_work_clusters_batch(work_clusters)
         self.corpus_repo.insert_expression_clusters_batch(expression_clusters)
         self.corpus_repo.insert_manifestation_clusters_batch(manifestation_clusters)
         self.corpus_repo.insert_corpus_linkages_batch(corpus_linkages)
+        if all_constituent_linkages:
+            self.corpus_repo.insert_corpus_constituent_linkages_batch(all_constituent_linkages)
+        if all_corpus_work_relationships:
+            self.corpus_repo.insert_corpus_work_relationships_batch(all_corpus_work_relationships)
         if sammelband_bindings:
             self.corpus_repo.insert_sammelband_bindings_batch(sammelband_bindings)
         self.identity_manager.record_lifecycle_batch(all_work_events, all_work_redirections)

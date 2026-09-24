@@ -338,3 +338,34 @@ def test_finalise_numbers_only_what_the_profile_numbers():
         profile,
     )
     assert [(c.title, c.ordinal) for c in got] == [("A", 1), ("B", None), ("C", 2)]
+
+
+def test_730_uniform_title_and_740_analytical_title_extraction():
+    """Music anthologies and songbooks catalog constituent songs in 730 and 740."""
+    record = _record(
+        '<datafield tag="730" ind1="0" ind2=" ">'
+        '<subfield code="a">Laula, tyttö!, op30, nro 2 /</subfield>'
+        '<subfield code="g">Merikanto, Oskar</subfield>'
+        "</datafield>",
+        '<datafield tag="730" ind1="0" ind2=" ">'
+        '<subfield code="a">Sinfonia nro 9 /</subfield>'
+        '<subfield code="g">Beethoven, Ludwig van</subfield>'
+        "</datafield>",
+        '<datafield tag="740" ind1="0" ind2="2">'
+        '<subfield code="a">Kalliolle kukkulalle /</subfield>'
+        "</datafield>",
+    )
+    got = extract_marc_constituents(record, ENHANCED)
+    assert len(got) == 3
+    assert got[0].title == "Laula, tyttö!, op30, nro 2"
+    assert got[0].creator == "Merikanto, Oskar"
+    assert got[0].ordinal == 1
+    assert got[0].contributes_to_container is False
+
+    assert got[1].title == "Sinfonia nro 9"
+    assert got[1].creator == "Beethoven, Ludwig van"
+    assert got[1].ordinal == 2
+
+    assert got[2].title == "Kalliolle kukkulalle"
+    assert got[2].creator is None
+    assert got[2].ordinal == 3

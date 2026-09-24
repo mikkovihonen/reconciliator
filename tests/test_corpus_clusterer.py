@@ -604,3 +604,89 @@ def test_cluster_corpus_specialized_domains(temp_dbs):
 
     work_types = {w.work_type for w in c_repo.get_all_work_clusters()}
     assert work_types == {"patent", "software", "board_game"}
+
+
+def test_numeric_title_and_volume_conflict_prevents_clustering(temp_dbs):
+    """Verify distinct numbered works (e.g. songbooks 113 vs 109) and volume conflicts are not merged."""
+    c_repo, _ = temp_dbs
+    clusterer = CorpusClusterer(corpus_repo=c_repo)
+
+    # 1. Numbered songbook collections sharing same author and similar titles
+    r1 = MatchRecord(
+        record_id="b10002388",
+        format="marcxml",
+        work_type="music",
+        title="113 kitaralaulua",
+        title_stem="113 kitaralaulua",
+        author_key="vuoristo",
+        work_blocking_key="vuoristo::113kitaralaulua",
+        year=1978,
+        raw_payload=b"",
+    )
+    r2 = MatchRecord(
+        record_id="b10002595",
+        format="marcxml",
+        work_type="music",
+        title="109 kitaralaulua",
+        title_stem="109 kitaralaulua",
+        author_key="vuoristo",
+        work_blocking_key="vuoristo::109kitaralaulua",
+        year=1978,
+        raw_payload=b"",
+    )
+
+    score, evidence = clusterer.compute_pairwise_score(r1, r2, {}, {})
+    assert score == 0.0
+    assert evidence == "numeric_title_conflict"
+
+    # Distinct expression and manifestation keys
+    e1 = clusterer.extract_expression_key(r1)
+    e2 = clusterer.extract_expression_key(r2)
+    assert e1 != e2
+    assert "113" in e1[2]
+    assert "109" in e2[2]
+
+    m1 = clusterer.extract_manifestation_key(r1)
+    m2 = clusterer.extract_manifestation_key(r2)
+    assert m1 != m2
+
+    # 2. Volume designation conflict
+    r_v1 = MatchRecord(
+        record_id="rec_v1",
+        format="marcxml",
+        work_type="text",
+        title="Kootut teokset",
+        title_stem="kootut teokset",
+        volume_designation="osa 1",
+        author_key="kivi",
+        raw_payload=b"",
+    )
+    r_v2 = MatchRecord(
+        record_id="rec_v2",
+        format="marcxml",
+        work_type="text",
+        title="Kootut teokset",
+        title_stem="kootut teokset",
+        volume_designation="osa 2",
+        author_key="kivi",
+        raw_payload=b"",
+    )
+    score_v, ev_v = clusterer.compute_pairwise_score(r_v1, r_v2, {}, {})
+    assert score_v == 0.0
+    assert ev_v == "volume_conflict"
+
+    # 3. Full cluster_corpus pass: ensure 113 and 109 remain separate work clusters
+    persist_match_records(c_repo, [r1, r2])
+    res = clusterer.cluster_corpus()
+    assert res.records_clustered == 2
+    assert res.work_clusters_count == 2
+    assert res.expression_clusters_count == 2
+    assert res.manifestation_clusters_count == 2
+
+    l1 = c_repo.get_corpus_linkage("b10002388")
+    l2 = c_repo.get_corpus_linkage("b10002595")
+    assert l1 is not None and l2 is not None
+    assert l1.work_cluster_id != l2.work_cluster_id
+    assert l1.expression_cluster_id != l2.expression_cluster_id
+    assert l1.manifestation_cluster_id != l2.manifestation_cluster_id
+

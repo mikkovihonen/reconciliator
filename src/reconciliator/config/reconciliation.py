@@ -7,9 +7,11 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from reconciliator.config.authority import ConstituentsConfig
 from reconciliator.config.clustering import ClusterConfig
 from reconciliator.config.defaults import (
     get_bundled_consolidation_defaults,
+    get_bundled_constituents_defaults,
     get_bundled_funnels_defaults,
     get_bundled_reconcile_defaults,
     get_bundled_vocabularies_defaults,
@@ -21,6 +23,7 @@ from reconciliator.config.normalization import RecordNormalizationConfig
 from reconciliator.config.rerank import RerankConfig
 
 _CONSOLIDATION_DEFAULTS = get_bundled_consolidation_defaults()
+_CONSTITUENTS_DEFAULTS = get_bundled_constituents_defaults()
 _RECONCILE_DEFAULTS = get_bundled_reconcile_defaults()
 _FUNNELS_DEFAULTS = get_bundled_funnels_defaults()
 _VOCAB_DEFAULTS = get_bundled_vocabularies_defaults()
@@ -119,6 +122,9 @@ class ReconcileConfig(IngestFilterConfig):
     templates: TemplateSetPathsConfig = Field(default_factory=TemplateSetPathsConfig)
     cluster: ClusterConfig = Field(default_factory=ClusterConfig)
     enrichment: EnrichmentConfig = Field(default_factory=EnrichmentConfig)
+    constituents: ConstituentsConfig = Field(
+        default_factory=lambda: ConstituentsConfig(**_CONSTITUENTS_DEFAULTS)
+    )
     enrich: bool = True
     fold_legacy: bool = True
     threshold: float = 0.85

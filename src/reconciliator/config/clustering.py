@@ -125,6 +125,47 @@ class MusicScoreConfig(BaseModel):
     )
 
 
+class AggregateClusteringConfig(BaseModel):
+    """Configuration for constituent-first multiplex clustering of aggregate works."""
+
+    enabled: bool = Field(default=True)
+    min_constituents_for_overlap: int = Field(
+        default_factory=lambda: int(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("min_constituents_for_overlap", 3)
+        )
+    )
+    jaccard_merge_threshold: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("jaccard_merge_threshold", 0.80)
+        )
+    )
+    jaccard_veto_threshold: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("jaccard_veto_threshold", 0.30)
+        )
+    )
+    merge_bonus_score: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("merge_bonus_score", 0.95)
+        )
+    )
+    sequence_alignment: bool = Field(
+        default_factory=lambda: bool(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("sequence_alignment", True)
+        )
+    )
+    lcs_threshold: float = Field(
+        default_factory=lambda: float(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("lcs_threshold", 0.70)
+        )
+    )
+    blocking_family: str = Field(
+        default_factory=lambda: str(
+            _CLUSTER_DEFAULTS.get("aggregates", {}).get("blocking_family", "constituent_work")
+        )
+    )
+
+
 class ClusterConfig(BaseModel):
     """Configuration for multiplex graph clustering and blocking."""
 
@@ -142,6 +183,7 @@ class ClusterConfig(BaseModel):
     thresholds: MultiplexClusterThresholds = Field(default_factory=MultiplexClusterThresholds)
     message_passing: bool = True
     reconcile_items: bool = False
+    aggregates: AggregateClusteringConfig = Field(default_factory=AggregateClusteringConfig)
     scoring: WEMIScoringConfig = Field(
         default_factory=lambda: WEMIScoringConfig(**_CLUSTER_DEFAULTS.get("scoring", {}))
     )

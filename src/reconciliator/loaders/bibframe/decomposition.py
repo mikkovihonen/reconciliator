@@ -1420,12 +1420,46 @@ def extract_bibframe_constituents(
                 if not isinstance(part, IdentifiedNode):
                     continue
                 title = _part_title(g, part, field, profile)
+                creator = _part_creator(g, part, profile)
+
+                prov_pred = getattr(field, "provenance_predicate", None)
+                if prov_pred and (not title or not creator):
+                    for p_uri in _expand_both(profile, prov_pred):
+                        mk_lits = _get_literals(g, part, [p_uri])
+                        if mk_lits:
+                            parsed = extract_marc_key_components(mk_lits[0], profile=profile)
+                            if parsed:
+                                _tag, _inds, sf_str = parsed
+                                sf_map = dict(re.findall(r"[\$\x1f]([a-z0-9])([^\$\x1f]+)", sf_str))
+                                if not title:
+                                    title = sf_map.get("a") or sf_map.get("t")
+                                if not creator:
+                                    creator = sf_map.get("g") or sf_map.get("c")
+
                 if not title:
                     continue
+
+                title = re.sub(r"[\s/.,;:]+$", "", title).strip()
+                if creator:
+                    creator = re.sub(r"[\s/.,;:]+$", "", creator).strip()
+
+                seq_num: Optional[int] = None
+                for seq_pred in getattr(field, "sequence_predicates", []):
+                    for seq_uri in _expand_both(profile, seq_pred):
+                        for seq_obj in g.objects(part, URIRef(seq_uri)):
+                            try:
+                                seq_num = int(str(seq_obj).strip())
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                        if seq_num is not None:
+                            break
+
                 found.append(
                     Constituent(
                         title=title,
-                        creator=_part_creator(g, part, profile),
+                        creator=creator,
+                        ordinal=seq_num,
                         shape=constituent_profile.shape_of(field),
                         component_type=field.component_type,
                         contributes_to_container=field.contributes_to_container,
@@ -1499,6 +1533,7 @@ def derive_bibframe_keys(
     identifiers: list[IdentifierEntity],
     author_key: Optional[str] = None,
     title_stem: Optional[str] = None,
+    constituents: Optional[list[Any]] = None,
 ) -> dict[str, list[str]]:
     """Derive domain blocking keys for a BIBFRAME record.
 
@@ -1533,6 +1568,15 @@ def derive_bibframe_keys(
     # impossible here because roles were not normalised, so no BibFrame agent
     # ever carried "trl"; now that they do, the key that funnel HH dispatches on
     # and the clusterer scores with is derivable from BIBFRAME too.
+
+    if constituents:
+        for c in constituents:
+            c_title = getattr(c, "title", None)
+            if c_title:
+                c_creator = getattr(c, "creator", None)
+                _add("analytic", json.dumps([c_title, c_creator], ensure_ascii=False))
+                _add("analytic_title", c_title)
+
     return keys
 
 
@@ -1541,11 +1585,12 @@ def bibframe_entity_keys(
     work: WorkEntity,
     agents: list[AgentEntity],
     identifiers: list[IdentifierEntity],
+    constituents: Optional[list[Any]] = None,
 ) -> list[EntityKey]:
     """Shape `derive_bibframe_keys` output as EntityKey rows bound to the manifestation."""
     return to_manifestation_entity_keys(
         manifestation.manifestation_uri,
-        derive_bibframe_keys(work, agents, identifiers),
+        derive_bibframe_keys(work, agents, identifiers, constituents=constituents),
     )
 
 
@@ -1555,8 +1600,10 @@ def build_target_record_from_bibframe(
     profile: Optional[BIBFRAMESchemaProfile] = None,
     source: str = "bibframe",
     serialization_engine: Optional[WEMISerializationEngine] = None,
+    constituent_profile: Optional[Any] = None,
 ) -> MatchRecord:
     """Decompose a BIBFRAME graph instance and construct a MatchRecord for staging."""
+    constituent_sink: list[Any] = []
     (
         work,
         expression,
@@ -1573,6 +1620,8 @@ def build_target_record_from_bibframe(
         profile=profile,
         source=source,
         serialization_engine=serialization_engine,
+        constituent_profile=constituent_profile,
+        constituent_sink=constituent_sink if constituent_profile else None,
     )
 
     # Primary author for keys
@@ -1582,7 +1631,9 @@ def build_target_record_from_bibframe(
 
     # One shared derivation, so the staged record and the persisted entity_keys
     # rows cannot drift apart.
-    keys = derive_bibframe_keys(work, agents, identifiers, author_key, title_stem)
+    keys = derive_bibframe_keys(
+        work, agents, identifiers, author_key, title_stem, constituents=constituent_sink
+    )
 
     # Serialize raw RDF representation for lossless payload staging
     raw_payload = g.serialize(format="turtle").encode("utf-8")

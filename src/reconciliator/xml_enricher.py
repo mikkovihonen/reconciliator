@@ -30,7 +30,12 @@ from reconciliator.models import (
 from reconciliator.normalizers.agent import normalize_agent_name
 from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.reconciliation import ReconciliationResult, WEMIMatchResult
-from reconciliator.utils.curie import extract_wikidata_qid
+from reconciliator.utils.curie import (
+    extract_wikidata_qid,
+    parse_curie,
+    to_actionable_uri,
+    to_curie,
+)
 from reconciliator.vocab import VocabFolder, concept_id_to_uri, format_wikidata_uri
 
 _LANG_CODE_MAP: dict[str, str] = dict(
@@ -85,6 +90,7 @@ class MARCXMLEnricher:
         target_record: Optional[MatchRecord] = None,
         enrichment_config: Optional[EnrichmentConfig] = None,
         sibling_ids: Optional[list[str]] = None,
+        constituent_linkages: Optional[list[Any]] = None,
     ) -> etree._Element:
         """Enrich a MARCXML <record> element in-place with novel authority links and modernized subjects."""
         if not enrich and not fold_legacy:
@@ -177,8 +183,6 @@ class MARCXMLEnricher:
 
                     # Inject or update modern $0 URI if enrich is active
                     if enrich and target_uri:
-                        from reconciliator.utils.curie import to_actionable_uri
-
                         actionable_target_uri = to_actionable_uri(target_uri)
                         if source_uri and source_uri in existing_uris:
                             f0_elems = field.findall(
@@ -241,12 +245,6 @@ class MARCXMLEnricher:
                                 existing_u1.add(uri)
                         else:
                             # Format as full actionable URN/URI using template from configuration
-                            from reconciliator.utils.curie import (
-                                parse_curie,
-                                to_actionable_uri,
-                                to_curie,
-                            )
-
                             actionable_uri = to_actionable_uri(uri)
                             uri_src, uri_sid = parse_curie(actionable_uri)
                             uri_curie = (
@@ -825,6 +823,61 @@ class MARCXMLEnricher:
                     s0 = etree.SubElement(df024, subfield_tag, code="0")
                     s0.text = work_uri
 
+        # 3.20 Enrich Constituent Works from Aggregate Linkages (730, 700, 740)
+        if enrich and constituent_linkages:
+            for c_link in constituent_linkages:
+                uri = getattr(c_link, "final_work_uri", None) or (
+                    f"reconciliator:{c_link.constituent_work_cluster_id}"
+                    if getattr(c_link, "constituent_work_cluster_id", None)
+                    else None
+                )
+                if not uri:
+                    continue
+                actionable_uri = to_actionable_uri(uri)
+                target_tags = (
+                    [c_link.field_tag]
+                    if getattr(c_link, "field_tag", None) and str(c_link.field_tag).isdigit()
+                    else ["730", "700", "740"]
+                )
+                matched_field = None
+                for tag in target_tags:
+                    for field in _get_datafields(record_elem, tag):
+                        a_elems = field.findall(f".//{subfield_tag}[@code='a']") or field.findall(
+                            ".//subfield[@code='a']"
+                        )
+                        t_elems = field.findall(f".//{subfield_tag}[@code='t']") or field.findall(
+                            ".//subfield[@code='t']"
+                        )
+                        field_title = (
+                            (t_elems[0].text or "").strip()
+                            if t_elems and t_elems[0].text
+                            else (
+                                (a_elems[0].text or "").strip()
+                                if a_elems and a_elems[0].text
+                                else ""
+                            )
+                        )
+                        if field_title and (
+                            field_title.lower() in c_link.title.lower()
+                            or c_link.title.lower() in field_title.lower()
+                        ):
+                            matched_field = field
+                            break
+                    if matched_field is not None:
+                        break
+
+                if matched_field is not None:
+                    existing_0 = {
+                        (sub.text or "").strip()
+                        for sub in (
+                            matched_field.findall(f".//{subfield_tag}[@code='0']")
+                            or matched_field.findall(".//subfield[@code='0']")
+                        )
+                    }
+                    if actionable_uri not in existing_0:
+                        sub = etree.SubElement(matched_field, subfield_tag, code="0")
+                        sub.text = actionable_uri
+
         return record_elem
 
     def enrich_wemi_record_tree(
@@ -839,6 +892,7 @@ class MARCXMLEnricher:
         enrich: bool = True,
         fold_legacy: bool = True,
         enrichment_config: Optional[EnrichmentConfig] = None,
+        constituent_linkages: Optional[list[Any]] = None,
     ) -> etree._Element:
         """Convenience method explicitly for WEMI graph and cluster enrichment."""
         return self.enrich_record_tree(
@@ -853,4 +907,5 @@ class MARCXMLEnricher:
             manifestation_cluster=manifestation_cluster,
             target_record=target_record,
             enrichment_config=enrichment_config,
+            constituent_linkages=constituent_linkages,
         )

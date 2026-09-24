@@ -1,0 +1,26 @@
+# Finnish National Library Linked Library Data (BFFI v1.0.0 / LKD).
+# Strictly uses bffi: and W3C standards. No bflc namespace.
+name: bffi_haspart
+shape: embodied
+dedup: normalized_title
+max_per_record: 500
+
+fields:
+  - predicate: "bffi:hasPart"
+    title: "bffi:title"
+    creator: "bffi:contribution"
+    sequence_predicates:
+      - "bffi:sequenceNumber"
+      - "bffi:sequence"
+    provenance_predicate: "bffi:marcKey"
+    ordinal: position
+
+  - predicate: "bf:hasPart"
+    title: "bffi:title"
+    creator: "bffi:contribution"
+    sequence_predicates:
+      - "bffi:sequenceNumber"
+      - "bffi:sequence"
+    provenance_predicate: "bffi:marcKey"
+    ordinal: position
+
