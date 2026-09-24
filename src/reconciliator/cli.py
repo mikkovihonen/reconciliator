@@ -1437,6 +1437,9 @@ def reconcile_cmd(
             logger.warning("Agent index unavailable, skipping agent fallback: %s", exc)
             agent_indexer = None
 
+    if r_cfg.rerank and r_cfg.rerank.enabled and r_cfg.rerank.judge is None and cfg.llm:
+        r_cfg.rerank.judge = cfg.llm
+
     work_matcher = WorkMatcher(
         wemi_repo=wemi_repo,
         embedder=embedder,

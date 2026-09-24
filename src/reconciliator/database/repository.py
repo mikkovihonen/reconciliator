@@ -2024,6 +2024,30 @@ class WEMIRepository:
             rows = conn.execute(stmt).fetchall()
             return [_row_to_manifestation(r) for r in rows]
 
+    def get_manifestations_for_works(
+        self, work_ids: list[int], record_origin: Optional[RecordOrigin | str] = None
+    ) -> dict[int, list[ManifestationEntity]]:
+        """Fetch all Manifestation entities linked to given work_ids, grouped by work_id."""
+        if not work_ids:
+            return {}
+        result: dict[int, list[ManifestationEntity]] = {wid: [] for wid in work_ids}
+        chunk_size = 1000
+        with self.get_connection() as conn:
+            for i in range(0, len(work_ids), chunk_size):
+                chunk = work_ids[i : i + chunk_size]
+                stmt = select(manifestations_table).where(manifestations_table.c.work_id.in_(chunk))
+                if record_origin is not None:
+                    stmt = stmt.where(manifestations_table.c.record_origin == record_origin)
+                stmt = stmt.order_by(
+                    manifestations_table.c.publication_year.asc(), manifestations_table.c.id.asc()
+                )
+                rows = conn.execute(stmt).fetchall()
+                for r in rows:
+                    m = _row_to_manifestation(r)
+                    if m.work_id in result:
+                        result[m.work_id].append(m)
+        return result
+
     def get_expressions_for_manifestation(
         self, manifestation_id: int, record_origin: Optional[RecordOrigin | str] = None
     ) -> list[ExpressionEntity]:
@@ -2223,6 +2247,32 @@ class WEMIRepository:
             rows = conn.execute(stmt).fetchall()
             return [_row_to_identifier(r) for r in rows]
 
+    def get_identifiers_for_entities(
+        self, entity_type: EntityType | str, entity_ids: list[int]
+    ) -> dict[int, list[IdentifierEntity]]:
+        """Fetch all polymorphic identifiers for multiple entities of a given type in batch."""
+        if not entity_ids:
+            return {}
+        result: dict[int, list[IdentifierEntity]] = {eid: [] for eid in entity_ids}
+        chunk_size = 1000
+        with self.get_connection() as conn:
+            for i in range(0, len(entity_ids), chunk_size):
+                chunk = entity_ids[i : i + chunk_size]
+                stmt = (
+                    select(identifiers_table)
+                    .where(
+                        identifiers_table.c.entity_type == entity_type,
+                        identifiers_table.c.entity_id.in_(chunk),
+                    )
+                    .order_by(identifiers_table.c.id)
+                )
+                rows = conn.execute(stmt).fetchall()
+                for r in rows:
+                    ident = _row_to_identifier(r)
+                    if ident.entity_id in result:
+                        result[ident.entity_id].append(ident)
+        return result
+
     def get_contributions_for_entity(
         self, entity_type: str, entity_id: int
     ) -> list[ContributionEntity]:
@@ -2238,6 +2288,41 @@ class WEMIRepository:
         with self.get_connection() as conn:
             rows = conn.execute(stmt).fetchall()
             return [_row_to_contribution(r) for r in rows]
+
+    def get_contributions_for_entities(
+        self, entity_specs: list[tuple[str, int]]
+    ) -> dict[tuple[str, int], list[ContributionEntity]]:
+        """Fetch all contributions for multiple (entity_type, entity_id) pairs in batch."""
+        if not entity_specs:
+            return {}
+        result: dict[tuple[str, int], list[ContributionEntity]] = {spec: [] for spec in entity_specs}
+        by_type: dict[str, list[int]] = {}
+        for etype, eid in entity_specs:
+            by_type.setdefault(etype, []).append(eid)
+
+        with self.get_connection() as conn:
+            for etype, eids in by_type.items():
+                chunk_size = 1000
+                for i in range(0, len(eids), chunk_size):
+                    chunk = eids[i : i + chunk_size]
+                    stmt = (
+                        select(contributions_table)
+                        .where(
+                            contributions_table.c.entity_type == etype,
+                            contributions_table.c.entity_id.in_(chunk),
+                        )
+                        .order_by(
+                            contributions_table.c.is_primary.desc(),
+                            contributions_table.c.id.asc(),
+                        )
+                    )
+                    rows = conn.execute(stmt).fetchall()
+                    for r in rows:
+                        c = _row_to_contribution(r)
+                        key = (c.entity_type, c.entity_id)
+                        if key in result:
+                            result[key].append(c)
+        return result
 
     def lookup_by_identifier(
         self, scheme: str, value: str, authoritative_only: bool = False

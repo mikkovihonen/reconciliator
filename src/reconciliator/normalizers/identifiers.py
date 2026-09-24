@@ -40,33 +40,21 @@ def classify_identifier_scheme(val: str, hint: Optional[str] = None) -> tuple[st
     return ("standard_number", v)
 
 
+from reconciliator._core.normalizers import (
+    py_clean_alphanumeric as _rust_clean_alphanumeric,
+    py_isbn_10_to_13 as _rust_isbn_10_to_13,
+    py_validate_isbn_13 as _rust_validate_isbn_13,
+)
+
+
 def isbn_10_to_13(isbn10: str) -> Optional[str]:
     """Convert a valid 10-digit ISBN into a canonical 13-digit EAN string."""
-    clean = re.sub(r"[^0-9X]", "", isbn10.upper())
-    if len(clean) != 10:
-        return None
-
-    # Validate 10-digit checksum
-    total = 0
-    for i, char in enumerate(clean):
-        val = 10 if char == "X" else int(char)
-        total += val * (10 - i)
-    if total % 11 != 0:
-        return None
-
-    core = "978" + clean[:9]
-    # Calculate EAN-13 checksum
-    total_13 = sum(int(digit) * (1 if idx % 2 == 0 else 3) for idx, digit in enumerate(core))
-    check_digit = (10 - (total_13 % 10)) % 10
-    return core + str(check_digit)
+    return _rust_isbn_10_to_13(isbn10)
 
 
 def validate_isbn_13(isbn13: str) -> bool:
     """Validate 13-digit ISBN checksum."""
-    if len(isbn13) != 13 or not isbn13.isdigit():
-        return False
-    total = sum(int(digit) * (1 if idx % 2 == 0 else 3) for idx, digit in enumerate(isbn13))
-    return total % 10 == 0
+    return _rust_validate_isbn_13(isbn13)
 
 
 def normalize_isbn(raw_isbn: str) -> Optional[str]:

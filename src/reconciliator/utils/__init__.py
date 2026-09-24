@@ -32,7 +32,7 @@ from reconciliator.utils.target_extraction import (
     extract_target_track_titles,
 )
 from reconciliator.utils.tsv import sanitize_tsv_cell, write_summary_tsv, write_tsv_file
-from reconciliator.utils.union_find import UnionFind
+from reconciliator.utils.union_find import UnionFind, cluster_edges
 from reconciliator.utils.version import (
     __version__,
     get_default_user_agent,
@@ -41,6 +41,7 @@ from reconciliator.utils.version import (
 
 __all__ = [
     "UnionFind",
+    "cluster_edges",
     "clean_alphanumeric",
     "compute_jaccard_overlap",
     "extract_identifiers_from_target",

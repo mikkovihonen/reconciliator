@@ -6,6 +6,7 @@ __pycache__/
 
 # C-extensions and native binaries
 build/
+target/
 develop-eggs/
 dist/
 downloads/

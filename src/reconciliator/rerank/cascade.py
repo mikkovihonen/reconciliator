@@ -77,6 +77,7 @@ class CascadeScorer:
         query: str,
         documents: list[str],
         past_key_values: Optional[Any] = None,
+        target_encoding: Optional[Any] = None,
         **kwargs: Any,
     ) -> list[float]:
         """
@@ -173,6 +174,8 @@ class CascadeScorer:
             judge_kwargs: dict[str, Any] = {}
             if past_key_values is not None:
                 judge_kwargs["past_key_values"] = past_key_values
+            if target_encoding is not None:
+                judge_kwargs["target_encoding"] = target_encoding
             try:
                 judge_results = self.judge_scorer.score_batch(
                     query, docs_to_evaluate, **judge_kwargs

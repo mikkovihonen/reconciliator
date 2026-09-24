@@ -108,6 +108,13 @@ def build_biographical_date_pattern(
 _BIOGRAPHICAL_DATE_PATTERN: Final[re.Pattern[str]] = build_biographical_date_pattern()
 
 
+from reconciliator._core.normalizers import (
+    py_fold_diacritics as _rust_fold_diacritics,
+    py_strip_biographical_dates as _rust_strip_biographical_dates,
+    py_fold_label as _rust_fold_label,
+)
+
+
 def fold_diacritics(s: str, preserved_diacritics: Optional[Container[str] | str] = None) -> str:
     """Selectively fold Latin diacritics; preserve specified diacritics (default: Finnish / Swedish åäöÅÄÖ).
 
@@ -115,23 +122,9 @@ def fold_diacritics(s: str, preserved_diacritics: Optional[Container[str] | str]
     characters pass through untouched; every other character
     is NFKD-decomposed and its combining marks dropped.
     """
-    preserved: Container[str]
-    if preserved_diacritics is None:
-        preserved = frozenset(DEFAULT_PRESERVED_DIACRITICS)
-    elif isinstance(preserved_diacritics, str):
-        preserved = frozenset(preserved_diacritics)
-    else:
-        preserved = preserved_diacritics
-
-    nfc = unicodedata.normalize("NFC", s)
-    out: list[str] = []
-    for ch in nfc:
-        if ch in preserved:
-            out.append(ch)
-            continue
-        decomposed = unicodedata.normalize("NFKD", ch)
-        out.append("".join(c for c in decomposed if not unicodedata.combining(c)))
-    return "".join(out)
+    if preserved_diacritics is None or isinstance(preserved_diacritics, str):
+        return _rust_fold_diacritics(s, preserved_diacritics)
+    return _rust_fold_diacritics(s, "".join(preserved_diacritics))
 
 
 def has_biographical_dates(s: str, date_pattern: Optional[re.Pattern[str]] = None) -> bool:
@@ -147,14 +140,16 @@ def strip_biographical_dates(s: str, date_pattern: Optional[re.Pattern[str]] = N
     ``"Fleming, Ian, 1908-1964"``) while leaving non-date qualifiers
     (e.g. ``"Bond, James (fiktiivinen hahmo)"``) intact.
     """
-    pattern = date_pattern or _BIOGRAPHICAL_DATE_PATTERN
-    cleaned = s
-    while True:
-        new_cleaned = pattern.sub("", cleaned).rstrip()
-        if new_cleaned == cleaned:
-            break
-        cleaned = new_cleaned
-    return cleaned.rstrip(",:;/ \t\r\n")
+    if date_pattern is not None:
+        cleaned = s
+        while True:
+            new_cleaned = date_pattern.sub("", cleaned).rstrip()
+            if new_cleaned == cleaned:
+                break
+            cleaned = new_cleaned
+        return cleaned.rstrip(",:;/ \t\r\n")
+
+    return _rust_strip_biographical_dates(s)
 
 
 def strip_label_decoration(
@@ -202,6 +197,14 @@ def fold_label(
     4. ``str.casefold`` — lower-case for case-insensitive match.
     5. Whitespace collapse — ``" ".join(s.split())``.
     """
+    if relator_registry is None and date_pattern is None:
+        pres = (
+            preserved_diacritics
+            if (preserved_diacritics is None or isinstance(preserved_diacritics, str))
+            else "".join(preserved_diacritics)
+        )
+        return _rust_fold_label(s, pres)
+
     stripped = strip_label_decoration(
         s, relator_registry=relator_registry, date_pattern=date_pattern
     )

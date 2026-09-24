@@ -230,7 +230,13 @@ class VocabularyManager:
         vocab = detect_vocabulary(uri, patterns=self.vocabulary_patterns)
         if not vocab:
             return False
-        return vocab.upper() in self.allowed_vocabularies
+        v_upper = vocab.upper()
+        if v_upper in self.allowed_vocabularies:
+            return True
+        for allowed in self.allowed_vocabularies:
+            if v_upper.startswith(f"{allowed}_") or allowed.startswith(f"{v_upper}_"):
+                return True
+        return False
 
     def filter_allowed(self, uris: list[str]) -> list[str]:
         """Filter a list of URIs to only those matching allowed vocabularies."""
@@ -276,8 +282,20 @@ class VocabularyManager:
 
             chosen_vocab_0: Optional[str] = None
             for p_vocab in self.agent_priority:
-                if p_vocab not in self.entity_vocabularies and p_vocab in by_vocab_0:
-                    chosen_vocab_0 = p_vocab
+                if p_vocab in self.entity_vocabularies:
+                    continue
+                matched_v = next(
+                    (
+                        v
+                        for v in by_vocab_0
+                        if v.upper() == p_vocab
+                        or v.upper().startswith(f"{p_vocab}_")
+                        or p_vocab.startswith(f"{v.upper()}_")
+                    ),
+                    None,
+                )
+                if matched_v:
+                    chosen_vocab_0 = matched_v
                     break
 
             if chosen_vocab_0:

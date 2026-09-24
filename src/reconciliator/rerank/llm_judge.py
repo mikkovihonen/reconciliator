@@ -68,7 +68,14 @@ class LLMJudgeScorer:
 
         return fwd_score
 
-    def score_batch(self, query: str, documents: list[str]) -> list[float]:
+    def score_batch(
+        self,
+        query: str,
+        documents: list[str],
+        past_key_values: Optional[Any] = None,
+        target_encoding: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> list[float]:
         """
         Compute similarity scores for a query across candidate documents.
         Encodes query once, evaluates suffixes via KV-branching with prior calibration,
@@ -77,8 +84,11 @@ class LLMJudgeScorer:
         if not query or not documents:
             return [0.0] * len(documents)
 
-        # Single-pass encoding of the query
-        encoding = self.backend.encode_target(query, retain_cache=True)
+        # Single-pass encoding of the query (or reuse pre-existing target_encoding from coarse search)
+        if target_encoding is not None and getattr(target_encoding, "kv_cache", None) is not None:
+            encoding = target_encoding
+        else:
+            encoding = self.backend.encode_target(query, retain_cache=True)
         prior_bias = getattr(encoding, "prior_bias", 0.0)
         suffix_template = getattr(
             getattr(self.backend, "config", None),

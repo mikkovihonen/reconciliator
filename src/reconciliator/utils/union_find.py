@@ -46,3 +46,23 @@ class UnionFind(Generic[T]):
         return dict(components)
 
     groups = get_components
+
+
+from reconciliator._core.clustering import (
+    py_cluster_connected_components as _rust_cluster,
+)
+
+
+def cluster_edges(nodes: list[T], edges: Iterable[tuple[T, T]]) -> dict[T, list[T]]:
+    """Cluster nodes into connected components using native Rust IntUnionFind."""
+    if not nodes:
+        return {}
+    idx_map = {n: i for i, n in enumerate(nodes)}
+    int_edges: list[tuple[int, int]] = []
+    for u, v in edges:
+        iu = idx_map.get(u)
+        iv = idx_map.get(v)
+        if iu is not None and iv is not None:
+            int_edges.append((iu, iv))
+    int_components = _rust_cluster(len(nodes), int_edges)
+    return {nodes[root]: [nodes[i] for i in members] for root, members in int_components.items()}

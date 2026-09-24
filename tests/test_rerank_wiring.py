@@ -306,3 +306,90 @@ def test_ranking_without_an_evaluator_preserves_the_previous_behaviour(store: WE
         c.source_id for c in store.find_works_by_author_and_title("waltari", "sinuhe egyptilainen")
     ]
     assert all(v.accepted for _, v in ranked)
+
+
+def test_rank_candidates_forwards_target_encoding_to_evaluator(store: WEMIRepository):
+    """When target_encoding is provided to _rank_candidates, it must be passed
+    to evaluate_candidates_batch so LLM judge KV caches are reused.
+    """
+    _add_work(store, "W_KV", "Sinuhe egyptilainen", editions=((1945, None),))
+    matcher = _matcher(store)
+
+    passed_target_encoding = None
+
+    class MockEvaluator:
+        def evaluate_candidates_batch(
+            self,
+            target_record,
+            candidates,
+            acceptance_threshold=0.85,
+            author_relationships=None,
+            target_encoding=None,
+        ):
+            nonlocal passed_target_encoding
+            passed_target_encoding = target_encoding
+            from reconciliator.models import ReconciliationMatch
+
+            return [
+                ReconciliationMatch(
+                    candidate_record_id=cand.source_id,
+                    source=cand.source,
+                    match_tier="tier2_llm_judge",
+                    match_score=0.95,
+                    dense_score=dense_score,
+                    accepted=True,
+                )
+                for cand, dense_score in candidates
+            ]
+
+    matcher.evaluator = MockEvaluator()
+    works = store.find_works_by_author_and_title("waltari", "sinuhe egyptilainen")
+    fake_encoding = object()
+
+    ranked = matcher._rank_candidates(
+        _record(),
+        [(w, 0.9) for w in works],
+        target_encoding=fake_encoding,
+    )
+    assert passed_target_encoding is fake_encoding
+    assert len(ranked) == 1
+    assert ranked[0][1].accepted is True
+    assert ranked[0][1].match_score == 0.95
+
+
+def test_llm_judge_score_batch_reuses_target_encoding():
+    from reconciliator.rerank.llm_judge import LLMJudgeScorer
+
+    class MockEvalResult:
+        confidence_score = 0.99
+
+    class MockBackend:
+        def __init__(self):
+            self.eval_call_count = 0
+            self.encoded_target = False
+            self.config = type("Config", (), {"symmetric_scoring": False, "candidate_suffix_template": "{text}"})()
+
+        def encode_target(self, text, retain_cache=True):
+            self.encoded_target = True
+            return type("Encoding", (), {"kv_cache": object(), "base_seq_len": 10, "prior_bias": 0.0})()
+
+        def evaluate_candidate(self, base_cache, base_seq_len, candidate_suffix, prior_bias):
+            self.eval_call_count += 1
+            return MockEvalResult()
+
+    mock_backend = MockBackend()
+    scorer = LLMJudgeScorer(backend=mock_backend)
+
+    # 1. Without target_encoding, it calls encode_target
+    scores = scorer.score_batch("target query", ["cand 1", "cand 2"])
+    assert scores == [0.99, 0.99]
+    assert mock_backend.encoded_target is True
+
+    # 2. With target_encoding supplied, it reuses it directly without calling encode_target
+    mock_backend.encoded_target = False
+    fake_enc = type("Encoding", (), {"kv_cache": object(), "base_seq_len": 10, "prior_bias": 0.0})()
+    scores2 = scorer.score_batch("target query", ["cand 1"], target_encoding=fake_enc)
+    assert scores2 == [0.99]
+    assert mock_backend.encoded_target is False
+
+

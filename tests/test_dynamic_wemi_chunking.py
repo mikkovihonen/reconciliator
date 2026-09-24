@@ -33,7 +33,7 @@ def test_calculate_batch_size_per_table() -> None:
     rel_size = calculate_batch_size(
         len(work_relationships_table.c), max_parameters_per_batch=max_params
     )
-    assert rel_size >= 6000  # work_relationships has 4 columns: ~8,191 rows
+    assert rel_size >= 5000  # work_relationships has 6 columns: ~5,461 rows
 
     # Wide tables
     work_size = calculate_batch_size(len(works_table.c), max_parameters_per_batch=max_params)

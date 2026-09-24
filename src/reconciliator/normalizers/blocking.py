@@ -41,15 +41,22 @@ def compute_author_key(name: Optional[str], surname: Optional[str] = None) -> st
     return cleaned
 
 
+from reconciliator._core.normalizers import (
+    py_compute_host_citation_key as _rust_compute_host_citation_key,
+    py_compute_series_key as _rust_compute_series_key,
+    py_compute_work_blocking_key as _rust_compute_work_blocking_key,
+    py_deterministic_key_hash as _rust_deterministic_key_hash,
+)
+
+
 def deterministic_key_hash(key_content: str) -> str:
     """Generate deterministic 32-character SHA-256 hex digest prefix for blocking keys."""
-    return hashlib.sha256(key_content.encode("utf-8")).hexdigest()[:32]
+    return _rust_deterministic_key_hash(key_content)
 
 
 def compute_work_blocking_key(author_key: str, title_stem: str) -> str:
     """Compute primary work blocking key: hash(author_key + '::' + title_stem)."""
-    content = f"{author_key.strip().lower()}::{title_stem.strip().lower()}"
-    return deterministic_key_hash(content)
+    return _rust_compute_work_blocking_key(author_key, title_stem)
 
 
 def compute_music_work_key(
@@ -72,12 +79,8 @@ def compute_series_key(
     series_issn: Optional[str] = None,
 ) -> Optional[str]:
     """Compute series blocking key: hash(series_title + '::' + series_issn)."""
-    if not series_title and not series_issn:
-        return None
-    s_title = compute_title_stem(series_title or "")
-    s_issn = (series_issn or "").strip().lower().replace("-", "")
-    content = f"{s_title}::{s_issn}"
-    return deterministic_key_hash(content)
+    stem = compute_title_stem(series_title or "") if series_title else None
+    return _rust_compute_series_key(stem, series_issn)
 
 
 def compute_host_citation_key(
@@ -87,10 +90,5 @@ def compute_host_citation_key(
     author_surname: Optional[str],
 ) -> Optional[str]:
     """Compute host citation key for journal articles: ISSN::Year::StartPage::AuthorSurname."""
-    if not (issn and year):
-        return None
-    clean_issn = str(issn).strip().lower().replace("-", "")
-    clean_year = str(year).strip()
-    clean_page = str(start_page or "").strip()
-    clean_author = str(author_surname or "").strip().lower()
-    return f"{clean_issn}::{clean_year}::{clean_page}::{clean_author}"
+    year_str = str(year) if year is not None else None
+    return _rust_compute_host_citation_key(issn, year_str, start_page, author_surname)

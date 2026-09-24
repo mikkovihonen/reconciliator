@@ -127,6 +127,10 @@ class WorkMatcher:
         self.authoritative_only = authoritative_only
         self.agent_indexer = agent_indexer
         self._equivalence_cache: Optional[dict[int, int]] = None
+        self._work_manifestations_cache: dict[int, list[ManifestationEntity]] = {}
+        self._hydration_cache: dict[
+            tuple[Optional[int], Optional[int], Optional[int]], BibliographicRecord
+        ] = {}
         aligner_thresh = (
             getattr(self.config, "agent_aligner_threshold", 85.0) if self.config else 85.0
         )
@@ -352,8 +356,15 @@ class WorkMatcher:
             and self.repo.work_indexer.total_vectors > 0
         ):
             query_text = target.serialized_work or f"{target.title} {target.author_key or ''}"
+            is_llm_judge = (
+                self.config is not None
+                and hasattr(self.config, "rerank")
+                and getattr(self.config.rerank, "enabled", False)
+                and getattr(self.config.rerank, "engine", "bm25") in ("llm_judge", "cascade")
+            )
+            t_enc = None
             if hasattr(self.embedder, "encode_target"):
-                t_enc = self.embedder.encode_target(query_text, retain_cache=False)
+                t_enc = self.embedder.encode_target(query_text, retain_cache=is_llm_judge)
                 query_vec = t_enc.dense_vector
                 if len(query_vec.shape) == 1:
                     query_vec = query_vec[np.newaxis, :]
@@ -387,7 +398,7 @@ class WorkMatcher:
                 if not work_type or cand_work.work_type == work_type
             ]
             for cand_work, verdict in self._rank_candidates(
-                target, typed, acceptance_threshold=thresh
+                target, typed, acceptance_threshold=thresh, target_encoding=t_enc
             ):
                 if not verdict.accepted:
                     continue
@@ -663,6 +674,7 @@ class WorkMatcher:
         candidates: list[tuple[WorkEntity, float]],
         acceptance_threshold: Optional[float] = None,
         require_threshold: bool = True,
+        target_encoding: Optional[Any] = None,
     ) -> list[tuple[WorkEntity, ReconciliationMatch]]:
         """Score candidates against the record and return them best-first.
 
@@ -699,25 +711,114 @@ class WorkMatcher:
             ]
 
         target = self._target_view(record)
-        scored: list[tuple[WorkEntity, ReconciliationMatch]] = []
+
+        max_editions = (
+            getattr(self.config, "max_editions_compared", DEFAULT_MAX_EDITIONS_COMPARED)
+            if self.config
+            else DEFAULT_MAX_EDITIONS_COMPARED
+        )
+        work_ids = [work.id for work, _ in candidates if work.id]
+        uncached_work_ids = [
+            wid for wid in work_ids if wid not in self._work_manifestations_cache
+        ]
+        if uncached_work_ids:
+            if hasattr(self.repo, "get_manifestations_for_works"):
+                fetched_manifestations = self.repo.get_manifestations_for_works(uncached_work_ids)
+                self._work_manifestations_cache.update(fetched_manifestations)
+            else:
+                for wid in uncached_work_ids:
+                    self._work_manifestations_cache[wid] = self.repo.get_manifestations_for_work(wid)
+
+        # Collect (work, manifestation) pairs that need hydration and are not in cache
+        needed_pairs: list[tuple[WorkEntity, Optional[ManifestationEntity]]] = []
+        for work, _ in candidates:
+            manifestations = (
+                self._work_manifestations_cache.get(work.id, []) if work.id else []
+            )
+            for manifestation in (manifestations or [None])[:max_editions]:
+                cache_key = (
+                    work.id if work else None,
+                    None,
+                    manifestation.id if manifestation else None,
+                )
+                if cache_key not in self._hydration_cache:
+                    needed_pairs.append((work, manifestation))
+
+        # Batch-fetch metadata for uncached candidate pairs
+        contributions_map: dict[tuple[str, int], list[ContributionEntity]] = {}
+        agents_map: dict[int, AgentEntity] = {}
+        agent_rels_map: dict[int, list[dict[str, Any]]] = {}
+        manifestation_idents_map: dict[int, list[IdentifierEntity]] = {}
+
+        if needed_pairs:
+            entity_specs: list[tuple[str, int]] = []
+            m_ids: list[int] = []
+            for w, m in needed_pairs:
+                if w.id:
+                    entity_specs.append(("work", w.id))
+                if m and m.id:
+                    entity_specs.append(("manifestation", m.id))
+                    m_ids.append(m.id)
+
+            if hasattr(self.repo, "get_contributions_for_entities"):
+                contributions_map = self.repo.get_contributions_for_entities(entity_specs)
+            else:
+                for etype, eid in entity_specs:
+                    try:
+                        contributions_map[(etype, eid)] = self.repo.get_contributions_for_entity(
+                            etype, eid
+                        )
+                    except Exception:
+                        pass
+
+            if m_ids:
+                if hasattr(self.repo, "get_identifiers_for_entities"):
+                    manifestation_idents_map = self.repo.get_identifiers_for_entities(
+                        "manifestation", m_ids
+                    )
+                else:
+                    for mid in m_ids:
+                        try:
+                            manifestation_idents_map[mid] = (
+                                self.repo.get_identifiers_for_entity("manifestation", mid)
+                            )
+                        except Exception:
+                            pass
+
+            all_agent_ids = list(
+                {c.agent_id for clist in contributions_map.values() for c in clist if c.agent_id}
+            )
+            if all_agent_ids:
+                agent_profiles = self.repo.get_agents_by_ids(all_agent_ids)
+                for aid, data in agent_profiles.items():
+                    agents_map[aid] = AgentEntity.model_validate(data)
+                if hasattr(self.repo, "get_agent_relationships_map"):
+                    try:
+                        agent_rels_map = self.repo.get_agent_relationships_map(all_agent_ids)
+                    except Exception:
+                        agent_rels_map = {}
+
+        eval_items: list[tuple[WorkEntity, BibliographicRecord, float]] = []
         for work, dense_score in candidates:
             # The volume, year and publisher the discriminators compare live on
             # the *manifestation*, not the work, so a work has to be hydrated
             # with one to be judged on them. A work with several manifestations
             # is several editions: the record is compatible with the work if it
             # is compatible with any one of them, so each is evaluated and the
-            # best verdict stands. Hydrating with the work alone left volume and
-            # year as None on the candidate side, which both checks read as
-            # "do not penalise" - so they silently never fired.
-            manifestations = self.repo.get_manifestations_for_work(work.id) if work.id else []
-            best: Optional[ReconciliationMatch] = None
-            max_editions = (
-                getattr(self.config, "max_editions_compared", DEFAULT_MAX_EDITIONS_COMPARED)
-                if self.config
-                else DEFAULT_MAX_EDITIONS_COMPARED
+            # best verdict stands.
+            manifestations = (
+                self._work_manifestations_cache.get(work.id, []) if work.id else []
             )
             for manifestation in (manifestations or [None])[:max_editions]:
-                candidate = self._hydrate_candidate_record(work, None, manifestation)
+                candidate = self._hydrate_candidate_record(
+                    work,
+                    None,
+                    manifestation,
+                    contributions_map=contributions_map,
+                    agents_map=agents_map,
+                    agent_rels_map=agent_rels_map,
+                    manifestation_identifiers_map=manifestation_idents_map,
+                )
                 if candidate is None:
                     continue
                 # Normalise candidate surnames the way author_key is normalised,
@@ -732,23 +833,42 @@ class WorkMatcher:
                         ]
                     }
                 )
-                verdict = self.evaluator.evaluate_candidate(
-                    target, candidate, dense_score, acceptance_threshold=threshold
-                )
-                if not require_threshold and not verdict.accepted:
-                    # Re-admit a candidate the fuzzy threshold rejected but the
-                    # vetoes did not. See _hard_checks_pass.
-                    verdict = verdict.model_copy(
-                        update={"accepted": self._hard_checks_pass(verdict)}
-                    )
-                if best is None or (verdict.accepted, verdict.match_score) > (
-                    best.accepted,
-                    best.match_score,
-                ):
-                    best = verdict
-            if best is not None:
-                scored.append((work, best))
+                eval_items.append((work, candidate, dense_score))
 
+        if not eval_items:
+            return []
+
+        cand_pairs = [(c_rec, d_score) for _, c_rec, d_score in eval_items]
+        if hasattr(self.evaluator, "evaluate_candidates_batch"):
+            verdicts = self.evaluator.evaluate_candidates_batch(
+                target, cand_pairs, acceptance_threshold=threshold, target_encoding=target_encoding
+            )
+        else:
+            verdicts = [
+                self.evaluator.evaluate_candidate(target, c_rec, d_score, acceptance_threshold=threshold)
+                for c_rec, d_score in cand_pairs
+            ]
+
+        best_by_work: dict[Any, tuple[WorkEntity, ReconciliationMatch]] = {}
+        for (work, _, _), verdict in zip(eval_items, verdicts):
+            if not require_threshold and not verdict.accepted:
+                # Re-admit a candidate the fuzzy threshold rejected but the
+                # vetoes did not. See _hard_checks_pass.
+                verdict = verdict.model_copy(
+                    update={"accepted": self._hard_checks_pass(verdict)}
+                )
+            wid = work.id if work.id is not None else id(work)
+            if wid not in best_by_work:
+                best_by_work[wid] = (work, verdict)
+            else:
+                existing_verdict = best_by_work[wid][1]
+                if (verdict.accepted, verdict.match_score) > (
+                    existing_verdict.accepted,
+                    existing_verdict.match_score,
+                ):
+                    best_by_work[wid] = (work, verdict)
+
+        scored = list(best_by_work.values())
         scored.sort(key=lambda pair: (pair[1].accepted, pair[1].match_score), reverse=True)
         return scored
 
@@ -757,6 +877,11 @@ class WorkMatcher:
         work: Optional[WorkEntity],
         expression: Optional[ExpressionEntity] = None,
         manifestation: Optional[ManifestationEntity] = None,
+        *,
+        contributions_map: Optional[dict[tuple[str, int], list[ContributionEntity]]] = None,
+        agents_map: Optional[dict[int, AgentEntity]] = None,
+        agent_rels_map: Optional[dict[int, list[dict[str, Any]]]] = None,
+        manifestation_identifiers_map: Optional[dict[int, list[IdentifierEntity]]] = None,
     ) -> Optional[BibliographicRecord]:
         """Reconstruct a BibliographicRecord from matched WEMI entities for agent alignment.
 
@@ -769,6 +894,14 @@ class WorkMatcher:
         if work is None and manifestation is None:
             return None
 
+        cache_key = (
+            work.id if work else None,
+            expression.id if expression else None,
+            manifestation.id if manifestation else None,
+        )
+        if hasattr(self, "_hydration_cache") and cache_key in self._hydration_cache:
+            return self._hydration_cache[cache_key]
+
         # Gather contributions across every matched tier, de-duplicating by agent.
         agent_ids: list[int] = []
         tiers: list[tuple[str, Optional[int]]] = [
@@ -780,7 +913,10 @@ class WorkMatcher:
             if not entity_id:
                 continue
             try:
-                contribs = self.repo.get_contributions_for_entity(entity_type, entity_id)
+                if contributions_map is not None:
+                    contribs = contributions_map.get((entity_type, entity_id), [])
+                else:
+                    contribs = self.repo.get_contributions_for_entity(entity_type, entity_id)
             except Exception:
                 continue
             for c in contribs:
@@ -788,15 +924,21 @@ class WorkMatcher:
                     agent_ids.append(c.agent_id)
 
         rels_map: dict[int, list[dict[str, Any]]] = {}
-        if agent_ids and hasattr(self.repo, "get_agent_relationships_map"):
-            try:
-                rels_map = self.repo.get_agent_relationships_map(agent_ids)
-            except Exception:
-                rels_map = {}
+        if agent_ids:
+            if agent_rels_map is not None:
+                rels_map = {aid: agent_rels_map.get(aid, []) for aid in agent_ids}
+            elif hasattr(self.repo, "get_agent_relationships_map"):
+                try:
+                    rels_map = self.repo.get_agent_relationships_map(agent_ids)
+                except Exception:
+                    rels_map = {}
 
         agents: list[Agent] = []
         for aid in agent_ids:
-            entity = self.repo.get_agent(aid)
+            if agents_map is not None and aid in agents_map:
+                entity = agents_map[aid]
+            else:
+                entity = self.repo.get_agent(aid)
             if entity is None:
                 continue
             u0, u1 = self._agent_uris_from_identifiers(entity)
@@ -827,16 +969,20 @@ class WorkMatcher:
         identifiers = RecordIdentifiers()
         if manifestation and manifestation.id:
             try:
-                for ident in self.repo.get_identifiers_for_entity(
-                    "manifestation", manifestation.id
-                ):
+                if manifestation_identifiers_map is not None:
+                    m_idents = manifestation_identifiers_map.get(manifestation.id, [])
+                else:
+                    m_idents = self.repo.get_identifiers_for_entity(
+                        "manifestation", manifestation.id
+                    )
+                for ident in m_idents:
                     bucket = getattr(identifiers, (ident.scheme or "").lower(), None)
                     if isinstance(bucket, list) and ident.value not in bucket:
                         bucket.append(ident.value)
             except Exception:
                 pass
 
-        return BibliographicRecord(
+        candidate_record = BibliographicRecord(
             source_id=source_id,
             source=source,
             title=title,
@@ -853,6 +999,9 @@ class WorkMatcher:
             identifiers=identifiers,
             agents=agents,
         )
+        if hasattr(self, "_hydration_cache") and len(self._hydration_cache) < 20000:
+            self._hydration_cache[cache_key] = candidate_record
+        return candidate_record
 
     def _resolve_agent_fallback(
         self,

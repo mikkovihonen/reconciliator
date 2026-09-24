@@ -11,9 +11,12 @@ _XML_CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _ALL_CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
 
 
+from reconciliator._core.normalizers import py_clean_alphanumeric
+
+
 def clean_alphanumeric(value: str) -> str:
     """Strip all characters except ASCII/Unicode digits and lowercase letters."""
-    return re.sub(r"[^0-9a-z]", "", str(value or "").strip().lower())
+    return py_clean_alphanumeric(str(value or ""))
 
 
 def sanitize_control_characters(

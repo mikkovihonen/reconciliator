@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.config import LinguisticConfig, VocabulariesConfig
 from reconciliator.database import (
+    calculate_batch_size,
     concept_aliases_table,
     concept_hierarchy_table,
     concept_labels_table,
@@ -177,11 +178,13 @@ class VocabStore:
             for c in concepts
         ]
 
-        batch_size = 5000
+        concept_batch_size = calculate_batch_size(num_columns=len(concepts_table.c))
+        is_postgres = self.engine.dialect.name == "postgresql"
 
         with self.engine.begin() as conn:
-            for i in range(0, len(concept_rows), batch_size):
-                chunk = concept_rows[i : i + batch_size]
+            row_id_map: dict[tuple[str, str], int] = {}
+            for i in range(0, len(concept_rows), concept_batch_size):
+                chunk = concept_rows[i : i + concept_batch_size]
                 stmt = pg_insert(concepts_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["vocabulary", "concept_id"],
@@ -190,24 +193,35 @@ class VocabStore:
                         "target_field": stmt.excluded.target_field,
                     },
                 )
-                conn.execute(stmt)
+                if is_postgres:
+                    stmt = stmt.returning(
+                        concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
+                    )
+                    res = conn.execute(stmt)
+                    for r_id, voc, cid in res.fetchall():
+                        row_id_map[(voc, cid)] = r_id
+                else:
+                    conn.execute(stmt)
 
-            keys = [(c.vocabulary, c.concept_id) for c in concepts]
-            row_id_map: dict[tuple[str, str], int] = {}
-            for chunk_start in range(0, len(keys), 500):
-                chunk_keys = keys[chunk_start : chunk_start + 500]
-                q = select(
-                    concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
-                ).where(
-                    tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk_keys)
-                )
-                for r_id, voc, cid in conn.execute(q).fetchall():
-                    row_id_map[(voc, cid)] = r_id
+            # If any keys missing (e.g. non-postgres dialect), fallback query
+            missing_keys = [(c.vocabulary, c.concept_id) for c in concepts if (c.vocabulary, c.concept_id) not in row_id_map]
+            if missing_keys:
+                key_batch_size = calculate_batch_size(num_columns=2)
+                for chunk_start in range(0, len(missing_keys), key_batch_size):
+                    chunk_keys = missing_keys[chunk_start : chunk_start + key_batch_size]
+                    q = select(
+                        concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
+                    ).where(
+                        tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk_keys)
+                    )
+                    for r_id, voc, cid in conn.execute(q).fetchall():
+                        row_id_map[(voc, cid)] = r_id
 
             row_ids = list(row_id_map.values())
             if row_ids:
-                for chunk_start in range(0, len(row_ids), 1000):
-                    chunk_rids = row_ids[chunk_start : chunk_start + 1000]
+                delete_batch_size = calculate_batch_size(num_columns=1)
+                for chunk_start in range(0, len(row_ids), delete_batch_size):
+                    chunk_rids = row_ids[chunk_start : chunk_start + delete_batch_size]
                     conn.execute(
                         delete(concept_labels_table).where(
                             concept_labels_table.c.concept_row_id.in_(chunk_rids)
@@ -244,8 +258,9 @@ class VocabStore:
                                 )
 
             if label_rows:
-                for i in range(0, len(label_rows), batch_size):
-                    conn.execute(insert(concept_labels_table), label_rows[i : i + batch_size])
+                label_batch_size = calculate_batch_size(num_columns=len(concept_labels_table.c))
+                for i in range(0, len(label_rows), label_batch_size):
+                    conn.execute(insert(concept_labels_table), label_rows[i : i + label_batch_size])
 
         self.clear_caches()
 
@@ -255,25 +270,44 @@ class VocabStore:
         """Bulk insert legacy mappings into concept_mappings and concept_mapping_labels."""
         if not mappings:
             return
+
+        mapping_batch_size = calculate_batch_size(num_columns=len(concept_mappings_table.c))
+        label_batch_size = calculate_batch_size(num_columns=len(concept_mapping_labels_table.c))
+
         with self.engine.begin() as conn:
-            for m in mappings:
-                res = conn.execute(
-                    insert(concept_mappings_table).values(
-                        legacy_vocab=m.legacy_vocab,
-                        legacy_id=m.legacy_id,
-                        target_vocab=m.target_vocab,
-                        target_id=m.target_id,
-                        mapping_type=m.mapping_type,
-                        target_field=m.target_field,
-                    )
+            for i in range(0, len(mappings), mapping_batch_size):
+                chunk_m = mappings[i : i + mapping_batch_size]
+                chunk_rows = [
+                    {
+                        "legacy_vocab": m.legacy_vocab,
+                        "legacy_id": m.legacy_id,
+                        "target_vocab": m.target_vocab,
+                        "target_id": m.target_id,
+                        "mapping_type": m.mapping_type,
+                        "target_field": m.target_field,
+                    }
+                    for m in chunk_m
+                ]
+                stmt = (
+                    insert(concept_mappings_table)
+                    .values(chunk_rows)
+                    .returning(concept_mappings_table.c.id)
                 )
-                m_id = res.inserted_primary_key[0] if res.inserted_primary_key else None
+                res = conn.execute(stmt)
+                m_ids = [row[0] for row in res.fetchall()]
+
                 label_rows = []
-                for lang, lbl in m.legacy_labels.items():
-                    if lbl and lbl.strip():
-                        label_rows.append({"mapping_id": m_id, "lang": lang, "label": lbl.strip()})
-                if label_rows and m_id is not None:
-                    conn.execute(insert(concept_mapping_labels_table), label_rows)
+                for m_id, m in zip(m_ids, chunk_m):
+                    for lang, lbl in m.legacy_labels.items():
+                        if lbl and lbl.strip():
+                            label_rows.append({"mapping_id": m_id, "lang": lang, "label": lbl.strip()})
+
+                if label_rows:
+                    for l_idx in range(0, len(label_rows), label_batch_size):
+                        conn.execute(
+                            insert(concept_mapping_labels_table),
+                            label_rows[l_idx : l_idx + label_batch_size],
+                        )
 
         self.clear_caches()
 
@@ -313,10 +347,10 @@ class VocabStore:
         if not clean_rows:
             return
 
-        batch_size = 5000
+        hierarchy_batch_size = calculate_batch_size(num_columns=len(concept_hierarchy_table.c))
         with self.engine.begin() as conn:
-            for i in range(0, len(clean_rows), batch_size):
-                chunk = clean_rows[i : i + batch_size]
+            for i in range(0, len(clean_rows), hierarchy_batch_size):
+                chunk = clean_rows[i : i + hierarchy_batch_size]
                 stmt = pg_insert(concept_hierarchy_table).values(chunk)
                 stmt = stmt.on_conflict_do_nothing(
                     index_elements=["vocabulary", "concept_id", "broader_concept_id"]
@@ -722,10 +756,10 @@ class VocabStore:
         if not unique_rows:
             return
 
+        relator_batch_size = calculate_batch_size(num_columns=len(relator_terms_table.c))
         with self.engine.begin() as conn:
-            batch_size = 5000
-            for i in range(0, len(unique_rows), batch_size):
-                chunk = unique_rows[i : i + batch_size]
+            for i in range(0, len(unique_rows), relator_batch_size):
+                chunk = unique_rows[i : i + relator_batch_size]
                 stmt = pg_insert(relator_terms_table).values(chunk)
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_relator_folded_code_lang",
@@ -899,10 +933,10 @@ class VocabStore:
                     "source": a.get("source", "vocab"),
                 }
             )
+        alias_batch_size = calculate_batch_size(num_columns=len(concept_aliases_table.c))
         with self.engine.begin() as conn:
-            batch_size = 5000
-            for i in range(0, len(rows), batch_size):
-                conn.execute(insert(concept_aliases_table), rows[i : i + batch_size])
+            for i in range(0, len(rows), alias_batch_size):
+                conn.execute(insert(concept_aliases_table), rows[i : i + alias_batch_size])
         self.clear_caches()
 
     @functools.lru_cache(maxsize=65536)

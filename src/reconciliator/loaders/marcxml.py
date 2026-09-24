@@ -73,6 +73,14 @@ from reconciliator.vocab import (
     subject_footprint,
 )
 
+from reconciliator._core.parsers import (
+    MarcDatafield,
+    MarcRecordData,
+    MarcSubfield,
+    py_parse_marc_file,
+    py_parse_marc_xml_str,
+)
+
 logger = logging.getLogger(__name__)
 
 #: 1XX main entry: the record's principal creator, whose relator MARC leaves
@@ -852,6 +860,26 @@ def iter_marc_record_elements(
                 while elem.getprevious() is not None:
                     del parent[0]
         del context
+
+
+def parse_marc_file_fast(
+    file_path: Path | str,
+    use_pigz: bool = True,
+    pigz_threads: int = 4,
+    pigz_path: Optional[str] = None,
+) -> list[MarcRecordData]:
+    """Parse MARCXML records from file using native Rust SAX parser (with optional pigz)."""
+    return py_parse_marc_file(
+        str(file_path),
+        use_pigz=use_pigz,
+        pigz_threads=pigz_threads,
+        pigz_path=pigz_path,
+    )
+
+
+def parse_marc_xml_str_fast(xml: str) -> list[MarcRecordData]:
+    """Parse MARCXML records from an XML string using native Rust SAX parser."""
+    return py_parse_marc_xml_str(xml)
 
 
 # ---------------------------------------------------------------------------

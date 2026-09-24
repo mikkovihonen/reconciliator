@@ -25,6 +25,53 @@ By unifying vector indexing and LLM judgment into a single autoregressive base L
 4. **Zero-Copy In-Place Truncation**: After decoding the classification token (`YES` vs `NO`), the KV-cache key and value tensor views are sliced back to $L_{\text{base}}$ in-place with zero memory allocation or buffer copying:
    $$\text{Unified Complexity} = \mathcal{O}\left(L_{\text{target}} + \sum_{i=1}^k L_{\text{cand}, i}\right)$$
 
+### 1.2 Key Architectural Distinction: 1D Dense Vectors vs. KV-Cache Suffix Evaluation
+
+> [!IMPORTANT]
+> **Common Misconception**:
+> *"Since we already used the LLM to generate 1D dense vectors for catalog records during ingestion, can't we simply pass those precomputed 1D vectors into the LLM as the candidate suffix during reranking?"*
+>
+> **Answer**: No. Candidate suffixes must be evaluated as **text tokens**, not as precomputed 1D vectors. Understanding why is central to how the two-stage architecture functions.
+
+#### 1. Information Bottleneck (1D Pooling vs. Multi-Token Cross-Attention)
+- **1D Dense Vector ($\mathbf{v} \in \mathbb{R}^D$)**: Created during ingestion by passing candidate text through the model and compressing it into a single vector via last-token pooling. It captures high-level semantic gist for coarse indexing.
+- **LLM Judge Reasoning**: The power of an LLM judge stems from **fine-grained token-level cross-attention**. The judge must cross-reference exact volume numbers (*"osa 1"* vs. *"osa 2"*), publication years (*1945* vs. *1985*), publisher names, and author relationships. A single 1D vector collapses these individual token dimensions into a flat embedding where subtle distinctions are irrevocably lost.
+
+#### 2. Redundancy with Stage 1 Coarse Retrieval
+The alignment between the target's 1D vector and the candidate's 1D vector is already evaluated in Stage 1 via inner-product search:
+$$\text{dense\_score} = \langle \mathbf{q}_{\text{target}}, \mathbf{v}_{\text{cand}} \rangle$$
+If the Stage 2 reranker only received that same 1D vector, it could not extract any new discriminative signal beyond what vector search already computed. Reranking exists specifically to compute full token-to-token attention that bi-encoder dot products cannot capture.
+
+#### 3. Autoregressive Transformer Architecture (Tokens vs. Soft Embeddings)
+Causal language models are trained on discrete token sequences:
+```text
+[Target Prompt Tokens (L_base)] + [Candidate Text Suffix Tokens (L_suffix)] -> [YES / NO]
+```
+Injecting an arbitrary 1D continuous vector directly as a pseudo-token causes severe distribution shift, as language model embedding layers map discrete vocabulary IDs to latent space, not raw floating-point vectors.
+
+In theory, Vision-Language Models (VLMs like LLaVA, Flamingo, or Qwen-VL) use a projection adapter (e.g., a 2-layer MLP or Perceiver Resampler) to map continuous embeddings (such as image patch vectors) into the LLM's token embedding space:
+$$\text{Soft Tokens} = \mathbf{W}_2 \cdot \sigma(\mathbf{W}_1 \cdot \mathbf{v} + \mathbf{b}_1) + \mathbf{b}_2$$
+One *could* train a custom projection adapter to map a 1D catalog vector into one or more "soft tokens" in the LLM's sequence. However, for bibliographic reconciliation this approach is counterproductive:
+1. **Off-the-shelf mismatch**: Pretrained VLM adapters are aligned with visual features (e.g., CLIP image embeddings), not bibliographic text embeddings. Reusing an off-the-shelf adapter without training a dedicated text-embedding adapter produces out-of-distribution noise.
+2. **Lossy round-trip**: Unlike images (which are high-dimensional pixel matrices that *must* be compressed into continuous patch embeddings), bibliographic records are *already native text*. Converting `Text -> 1D Vector -> Adapter -> Soft Token` imposes lossy compression on information that the LLM is natively pre-trained to read.
+3. **The KV-Branching Alternative is Superior**: Because the candidate record is already concise text (~30–50 tokens), evaluating the raw text tokens directly against the frozen target KV cache is computationally fast (fractions of a millisecond) and preserves 100% token fidelity (exact volume designations, publication years, and author names) with zero extra training.
+
+#### 4. Storage Footprint: Why Full KV Caches Cannot Be Precomputed for Catalog Records
+Could we precompute and store the **entire KV cache** for every catalog record instead of a 1D vector?
+- A 1D embedding for 10M records takes:
+  $$10^7 \times 1024 \times 4 \text{ bytes} \approx 40 \text{ GB}$$
+  This fits easily in RAM or vector search memory.
+- In contrast, storing the multi-layer KV-cache ($N_{\text{layers}} \times 2 \times N_{\text{heads}} \times L \times D_{\text{head}}$) for 10M records would require **hundreds of terabytes** of storage, rendering catalog indexing infeasible.
+
+#### Summary Comparison Table
+
+| Feature | Stage 1: Catalog Dense Vectors | Stage 2: Target Prompt KV-Cache | Stage 2: Candidate Suffix |
+| :--- | :--- | :--- | :--- |
+| **Representation** | 1D float array ($\mathbb{R}^D$) | Multi-layer KV tensors ($\mathbb{R}^{layers \times heads \times L_{target} \times d}$) | Tokenized text string ($L_{cand}$ tokens) |
+| **When Computed** | Once, during catalog ingestion | Once per query, during `encode_target` | On the fly for top-$k$ retrieved candidates |
+| **Where Stored** | Persistent Vector Index (FAISS/USearch) | Transient GPU/VRAM memory during query | Dynamically appended to target KV cache |
+| **Purpose** | Fast coarse nearest-neighbor search | Frozen context anchor for candidate branching | Token-level cross-attention & discrimination |
+
 ---
 
 ## 2. System Architecture

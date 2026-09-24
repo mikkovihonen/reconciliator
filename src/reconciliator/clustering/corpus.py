@@ -38,24 +38,20 @@ from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import (
     UnionFind,
     clean_alphanumeric,
+    cluster_edges,
     extract_identifiers_from_target,
+)
+
+
+from reconciliator._core.clustering import (
+    py_evaluate_aggregate_overlap as _rust_evaluate_aggregate_overlap,
+    py_lcs_length as _rust_lcs_length,
 )
 
 
 def _lcs_length(seq1: list[str], seq2: list[str]) -> int:
     """Compute length of longest common subsequence between two sequences."""
-    m, n = len(seq1), len(seq2)
-    dp = [0] * (n + 1)
-    for i in range(1, m + 1):
-        prev = 0
-        for j in range(1, n + 1):
-            temp = dp[j]
-            if seq1[i - 1] == seq2[j - 1]:
-                dp[j] = prev + 1
-            else:
-                dp[j] = max(dp[j], dp[j - 1])
-            prev = temp
-    return dp[n]
+    return _rust_lcs_length(seq1, seq2)
 
 
 class CorpusClusterer:
@@ -207,34 +203,20 @@ class CorpusClusterer:
         if agg_cfg and agg_cfg.enabled:
             c1 = r1.constituent_cluster_ids or r1.keys.get("analytic", [])
             c2 = r2.constituent_cluster_ids or r2.keys.get("analytic", [])
-            min_c = agg_cfg.min_constituents_for_overlap
-
-            # Anti-collision: container vs constituent part
-            if (len(c1) >= min_c and r2.is_component) or (len(c2) >= min_c and r1.is_component):
-                return 0.0, "container_part_collision"
-
-            if len(c1) >= min_c and len(c2) >= min_c:
-                s1 = set(c1)
-                s2 = set(c2)
-                inter = len(s1 & s2)
-                union = len(s1 | s2)
-                jaccard = inter / union if union > 0 else 0.0
-
-                if jaccard <= agg_cfg.jaccard_veto_threshold:
-                    return 0.0, "aggregate_content_mismatch"
-
-                if jaccard >= agg_cfg.jaccard_merge_threshold:
-                    if agg_cfg.sequence_alignment:
-                        lcs_len = _lcs_length(c1, c2)
-                        lcs_ratio = (
-                            (2.0 * lcs_len) / (len(c1) + len(c2))
-                            if (len(c1) + len(c2)) > 0
-                            else 0.0
-                        )
-                        if lcs_ratio >= agg_cfg.lcs_threshold:
-                            return agg_cfg.merge_bonus_score, "aggregate_jaccard_lcs_merge"
-                    else:
-                        return agg_cfg.merge_bonus_score, "aggregate_jaccard_merge"
+            res = _rust_evaluate_aggregate_overlap(
+                c1=c1,
+                c2=c2,
+                is_component1=bool(r1.is_component),
+                is_component2=bool(r2.is_component),
+                min_constituents=agg_cfg.min_constituents_for_overlap,
+                jaccard_veto_threshold=agg_cfg.jaccard_veto_threshold,
+                jaccard_merge_threshold=agg_cfg.jaccard_merge_threshold,
+                sequence_alignment=bool(agg_cfg.sequence_alignment),
+                lcs_threshold=agg_cfg.lcs_threshold,
+                merge_bonus_score=agg_cfg.merge_bonus_score,
+            )
+            if res is not None:
+                return res
 
         # 3. Composite metadata similarity
         # Title similarity (cross-checking uniform_title, title, title_stem)
@@ -401,7 +383,7 @@ class CorpusClusterer:
         # the groups being clustered rather than some unrelated manifestation.
         rep_by_source = {groups[k][0].record_id: k for k in keys}
 
-        uf: UnionFind[str] = UnionFind(keys)
+        sem_edges: list[tuple[str, str]] = []
         for key in keys:
             rep = groups[key][0]
             text = rep.serialized_manifestation or rep.title
@@ -419,12 +401,13 @@ class CorpusClusterer:
                     continue
                 other = rep_by_source.get(manifestation.source_id)
                 if other is not None and other != key:
-                    uf.union(key, other)
+                    sem_edges.append((key, other))
 
+        sem_components = cluster_edges(keys, sem_edges)
         merged: dict[str, list[MatchRecord]] = {}
-        for key in keys:
-            root = uf.find(key)
-            merged.setdefault(root, []).extend(groups[key])
+        for root, member_keys in sem_components.items():
+            for k in member_keys:
+                merged.setdefault(root, []).extend(groups[k])
         return merged
 
     def cluster_corpus(self) -> MultiplexClusterResult:
@@ -567,7 +550,6 @@ class CorpusClusterer:
                 blocks[bk].append(r.record_id)
 
         # Step 2: Work Graph Clustering & Pairwise Scoring
-        uf: UnionFind[str] = UnionFind([r.record_id for r in records])
         edges: list[ClusterEdge] = []
         candidate_pairs: set[tuple[str, str]] = set()
 
@@ -595,7 +577,6 @@ class CorpusClusterer:
             r2 = records_map[id2]
             score, evidence = self.compute_pairwise_score(r1, r2, ids_cache[id1], ids_cache[id2])
             if score >= threshold:
-                uf.union(id1, id2)
                 edges.append(
                     ClusterEdge(
                         source_node=id1,
@@ -605,7 +586,8 @@ class CorpusClusterer:
                     )
                 )
 
-        work_components = uf.get_components()
+        edge_tuples = [(e.source_node, e.target_node) for e in edges]
+        work_components = cluster_edges([r.record_id for r in records], edge_tuples)
 
         # Step 3: Work Cluster Synthesis & External URI Hoisting
         work_clusters: list[WorkCluster] = []

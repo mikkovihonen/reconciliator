@@ -57,9 +57,88 @@ def parse_turtle_simple(
     default_vocab: Optional[str] = None,
 ) -> tuple[list[VocabConcept], list[ConceptMapping], list[dict[str, Any]]]:
     """
-    W3C-compliant SKOS Turtle (.ttl) parser using rdflib.
+    W3C-compliant SKOS Turtle (.ttl) parser.
+    Uses native streaming Rust parser when available with automatic fallback to rdflib.
     Extracts skos:Concept, prefLabels, altLabels, exactMatch, isReplacedBy, skos:broader, and skos:narrower.
     """
+    try:
+        from reconciliator._core.parsers import py_parse_turtle_content
+
+        active_legacy = (
+            list(legacy_thesauri)
+            if legacy_thesauri is not None
+            else list(_DEFAULT_LEGACY_SOURCES)
+        )
+        active_target_fields = (
+            vocab_target_fields
+            if vocab_target_fields is not None
+            else get_bundled_vocabularies_defaults().get("vocab_target_fields", {})
+        )
+        default_target_field = get_bundled_vocabularies_defaults().get(
+            "default_vocab_target_field", "650"
+        )
+        pref_langs = (
+            [pref_label_languages]
+            if isinstance(pref_label_languages, str)
+            else list(pref_label_languages)
+            if pref_label_languages is not None
+            else None
+        )
+        alt_langs = (
+            [alt_label_languages]
+            if isinstance(alt_label_languages, str)
+            else list(alt_label_languages)
+            if alt_label_languages is not None
+            else None
+        )
+        custom_pats = get_bundled_vocabularies_defaults().get("vocabulary_patterns", {})
+
+        rcs, rms, res = py_parse_turtle_content(
+            content,
+            default_vocab=default_vocab,
+            legacy_thesauri=active_legacy,
+            vocab_target_fields=active_target_fields,
+            default_target_field=default_target_field,
+            pref_langs=pref_langs,
+            alt_langs=alt_langs,
+            custom_patterns=custom_pats,
+        )
+        concepts = [
+            VocabConcept.model_construct(
+                vocabulary=rc.vocabulary,
+                concept_id=rc.concept_id,
+                pref_labels=rc.pref_labels,
+                alt_labels=rc.alt_labels,
+                is_deprecated=rc.is_deprecated,
+                target_field=rc.target_field,
+            )
+            for rc in rcs
+        ]
+        mappings = [
+            ConceptMapping.model_construct(
+                legacy_vocab=rm.legacy_vocab,
+                legacy_id=rm.legacy_id,
+                target_vocab=rm.target_vocab,
+                target_id=rm.target_id,
+                mapping_type=rm.mapping_type,
+                target_field=rm.target_field,
+                legacy_labels=rm.legacy_labels,
+            )
+            for rm in rms
+        ]
+        hierarchy_edges = [
+            {
+                "vocabulary": re.vocabulary,
+                "concept_id": re.concept_id,
+                "broader_concept_id": re.broader_concept_id,
+                "relation_type": re.relation_type,
+            }
+            for re in res
+        ]
+        return concepts, mappings, hierarchy_edges
+    except (ImportError, AttributeError):
+        pass
+
     concepts: list[VocabConcept] = []
     mappings: list[ConceptMapping] = []
     hierarchy_edges: list[dict[str, Any]] = []
@@ -226,6 +305,102 @@ def parse_turtle_simple(
                 )
 
     return concepts, mappings, hierarchy_edges
+
+
+def parse_turtle_file(
+    file_path: Path | str,
+    pref_label_languages: Optional[Sequence[str] | str] = None,
+    alt_label_languages: Optional[Sequence[str] | str] = None,
+    vocab_target_fields: Optional[dict[str, str]] = None,
+    legacy_thesauri: Optional[set[str]] = None,
+    default_vocab: Optional[str] = None,
+) -> tuple[list[VocabConcept], list[ConceptMapping], list[dict[str, Any]]]:
+    """Parse Turtle file using streaming native Rust parser when available."""
+    try:
+        from reconciliator._core.parsers import py_parse_turtle_file
+
+        active_legacy = (
+            list(legacy_thesauri)
+            if legacy_thesauri is not None
+            else list(_DEFAULT_LEGACY_SOURCES)
+        )
+        active_target_fields = (
+            vocab_target_fields
+            if vocab_target_fields is not None
+            else get_bundled_vocabularies_defaults().get("vocab_target_fields", {})
+        )
+        default_target_field = get_bundled_vocabularies_defaults().get(
+            "default_vocab_target_field", "650"
+        )
+        pref_langs = (
+            [pref_label_languages]
+            if isinstance(pref_label_languages, str)
+            else list(pref_label_languages)
+            if pref_label_languages is not None
+            else None
+        )
+        alt_langs = (
+            [alt_label_languages]
+            if isinstance(alt_label_languages, str)
+            else list(alt_label_languages)
+            if alt_label_languages is not None
+            else None
+        )
+        custom_pats = get_bundled_vocabularies_defaults().get("vocabulary_patterns", {})
+
+        rcs, rms, res = py_parse_turtle_file(
+            str(file_path),
+            default_vocab=default_vocab,
+            legacy_thesauri=active_legacy,
+            vocab_target_fields=active_target_fields,
+            default_target_field=default_target_field,
+            pref_langs=pref_langs,
+            alt_langs=alt_langs,
+            custom_patterns=custom_pats,
+        )
+        concepts = [
+            VocabConcept.model_construct(
+                vocabulary=rc.vocabulary,
+                concept_id=rc.concept_id,
+                pref_labels=rc.pref_labels,
+                alt_labels=rc.alt_labels,
+                is_deprecated=rc.is_deprecated,
+                target_field=rc.target_field,
+            )
+            for rc in rcs
+        ]
+        mappings = [
+            ConceptMapping.model_construct(
+                legacy_vocab=rm.legacy_vocab,
+                legacy_id=rm.legacy_id,
+                target_vocab=rm.target_vocab,
+                target_id=rm.target_id,
+                mapping_type=rm.mapping_type,
+                target_field=rm.target_field,
+                legacy_labels=rm.legacy_labels,
+            )
+            for rm in rms
+        ]
+        hierarchy_edges = [
+            {
+                "vocabulary": re.vocabulary,
+                "concept_id": re.concept_id,
+                "broader_concept_id": re.broader_concept_id,
+                "relation_type": re.relation_type,
+            }
+            for re in res
+        ]
+        return concepts, mappings, hierarchy_edges
+    except (ImportError, AttributeError):
+        content = Path(file_path).read_text(encoding="utf-8")
+        return parse_turtle_simple(
+            content,
+            pref_label_languages=pref_label_languages,
+            alt_label_languages=alt_label_languages,
+            vocab_target_fields=vocab_target_fields,
+            legacy_thesauri=legacy_thesauri,
+            default_vocab=default_vocab,
+        )
 
 
 def ingest_bridge_files(
@@ -536,10 +711,9 @@ def ingest_vocab_file(
     total_hierarchy_edges: list[dict[str, Any]] = []
 
     for file_path in files:
-        content = file_path.read_text(encoding="utf-8")
         file_vocab = file_path.stem.lower()
-        concepts, mappings, edges = parse_turtle_simple(
-            content,
+        concepts, mappings, edges = parse_turtle_file(
+            file_path,
             pref_label_languages=pref_langs,
             alt_label_languages=alt_langs,
             vocab_target_fields=vocab_target_fields,

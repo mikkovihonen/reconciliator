@@ -1,0 +1,18 @@
+[package]
+name = "reconciliator-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+path = "crates/reconciliator_core/src/lib.rs"
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["extension-module"] }
+unicode-normalization = "0.1"
+regex = "1.10"
+sha2 = "0.10"
+rayon = "1.10"
+hashbrown = "0.15"
+quick-xml = "0.37"

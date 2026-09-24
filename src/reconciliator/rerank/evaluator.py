@@ -272,6 +272,7 @@ class CandidateEvaluator:
         candidates: list[tuple[BibliographicRecord, float]],
         acceptance_threshold: float = 0.85,
         author_relationships: Optional[dict[str, set[str]]] = None,
+        target_encoding: Optional[Any] = None,
     ) -> list[ReconciliationMatch]:
         """
         Evaluate a candidate list against a target record with batch score fusion
@@ -379,7 +380,13 @@ class CandidateEvaluator:
             candidate_texts = [
                 c.serialization or f"{c.title} {c.publisher or ''}" for c in pending_candidates
             ]
-            raw_scores = self.scorer.score_batch(target_text, candidate_texts)
+            scorer_kwargs: dict[str, Any] = {}
+            if target_encoding is not None:
+                scorer_kwargs["target_encoding"] = target_encoding
+            try:
+                raw_scores = self.scorer.score_batch(target_text, candidate_texts, **scorer_kwargs)
+            except TypeError:
+                raw_scores = self.scorer.score_batch(target_text, candidate_texts)
             routes = getattr(self.scorer, "last_routes", ["heuristic"] * len(raw_scores))
 
             for idx, orig_i in enumerate(pending_indices):
