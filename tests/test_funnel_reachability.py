@@ -34,14 +34,14 @@ LOADER = pathlib.Path(__file__).resolve().parents[1] / "src/reconciliator/loader
 # classify the record type they key on. Fixing one means teaching
 # `determine_work_type` or `derive_domain_keys` to recognise its signal, which
 # needs a citable rule from the Finnish RDA application guidelines rather than a
-# guess - see docs/plans/wemi_data_structure.md 14.17 for the ones researched so
-# far and the open questions to put to the National Library.
+# guess - see docs/datamodel.md and the Finnish RDA guidelines for the ones
+# researched so far and open questions for the National Library.
 KNOWN_UNREACHABLE_FROM_MARC = {
     # SLM's "katkelmat" (s1210) is the only candidate term, and it carries no
     # definition and no broader concept in the vocabulary, so it may well mean a
     # published excerpt rather than a manuscript fragment. Using it would be the
     # kind of guess this table exists to prevent; it is a question for the
-    # National Library instead. See 14.18 in docs/plans/wemi_data_structure.md.
+    # National Library instead.
     "funnel_jj_medieval_fragment",
 }
 

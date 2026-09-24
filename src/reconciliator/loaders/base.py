@@ -3,7 +3,7 @@
 Three formats reach the datastore through this interface. They do not extract
 alike - MARC bibliographic, MARC authority and BIBFRAME read largely disjoint
 field sets, and merging their extraction was measured and declined (see
-plans/wemi_data_structure.md 14.9.1). What they must share is the *contract*: one
+docs/datamodel.md). What they must share is the *contract*: one
 return shape, one options object, one set of post-decomposition guarantees, and
 an explicit statement of what each format cannot yield.
 

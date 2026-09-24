@@ -392,8 +392,8 @@ def test_an_ascii_folded_relator_term_resolves():
     contribution was filed against the *expression*, so
     `WorkConsolidator.load_signatures` - which reads contributions on works -
     found no creators, so the metadata score fell from clearing 0.93 to 0.90 and
-    nothing consolidated at all. Found while measuring stage 9 of
-    plans/aggregates.md."""
+    nothing consolidated at all. Found while measuring aggregate linking. See
+    docs/aggregates.md."""
     from reconciliator.normalizers.relators import normalize_role
 
     for folded, proper in (

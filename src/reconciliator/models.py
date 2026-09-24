@@ -500,7 +500,7 @@ WorkRelationshipType = Literal[
     # Part/whole within one source: an album and its tracks, an anthology and its
     # stories, a journal issue and its articles. Distinct from
     # series_member_of/has_series_member, which is serial hierarchy, and from
-    # bound_with, which is item-level. See plans/aggregates.md.
+    # bound_with, which is item-level. See docs/aggregates.md.
     "has_part",
     "part_of",
     "has_constituent",

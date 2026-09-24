@@ -7,9 +7,8 @@ Reconciliator ingests bibliographic corpora, decomposes them into a WEMI
 and to authority data, and writes enriched records back out. This describes how
 it actually works today, not how it is intended to work.
 
-For the refactoring history see
-[plans/wemi_data_structure.md](plans/wemi_data_structure.md); for the
-moving-image research see [plans/kavi.md](plans/kavi.md).
+For the relational schema specification, see [datamodel.md](datamodel.md); for the
+aggregate and constituent work architecture, see [aggregates.md](aggregates.md).
 
 ---
 
@@ -26,6 +25,7 @@ moving-image research see [plans/kavi.md](plans/kavi.md).
                                          ┌───────────────────────┐
                                          │  PostgreSQL           │
                                          │  relational database  │
+                                         │  (43 tables)          │
                                          └───────────────────────┘
                                            │        │          │
                            ┌───────────────┘        │          └──────────────┐
@@ -44,25 +44,30 @@ moving-image research see [plans/kavi.md](plans/kavi.md).
                                                                      + TSV reports
 ```
 
-Everything lives in **PostgreSQL** (relational database, 36 tables). There
-used to be a separate corpus-staging database; it was merged so a cluster can be
-joined to the works it resolves to.
+Everything lives in **PostgreSQL 15+** (relational database, 43 tables). All
+ingestion, authority, clustering, and constituent linkage state resides in
+the database.
 
 ## 2. Commands
 
+All workflows are driven by the unified Typer CLI:
+
 | command | what it does |
 |---|---|
-| `ingest-vocab` | Load controlled vocabularies (YSO, SLM, KANTO…) into `vocab.db` |
-| `download-skosmos` | Fetch those vocabularies from Finto |
+| `download-skosmos` | Fetch controlled vocabularies from Finto REST APIs |
+| `ingest-vocab` | Load controlled vocabularies (YSO, SLM, KANTO, SEKO…) into database tables |
 | `ingest-oai` | Harvest a source (OAI-PMH, file or ResourceSync) into WEMI rows |
-| `ingest-wikidata` | Stream a Wikidata dump into the same structure |
-| `build-index` | Embed stored works and manifestations into their vector indexes |
+| `ingest-wikidata` | Stream a Wikidata dump into the same WEMI structure |
+| `build-index` | Embed stored works and manifestations into vector ANN indices |
 | `build-agent-index` | Embed agents into the agent vector index |
 | `consolidate-works` | Elect one canonical work per cross-source equivalence group |
-| `reconcile` | Cluster, match, resolve agents, enrich, report |
-| `run` | ingest-vocab → ingest-oai → ingest-wikidata → **build-index** → reconcile |
-| `status` | Task progress and telemetry from `progress.db` |
-| `reset` / `prune` | Clear storage; drop completed tasks |
+| `cluster-agents` | Cluster agent authority records into canonical identity clusters |
+| `reconcile` | Cluster, match, resolve agents, enrich, and emit TSV reports |
+| `run` | Execute the full pipeline sequentially (`ingest-vocab` → `ingest-oai` → `ingest-wikidata` → `build-index` → `reconcile`) |
+| `serve` | Launch the FastAPI REST API service for online reconciliation |
+| `status` | Display task progress and throughput telemetry from `task_progress` |
+| `prune` | Clean up completed or stale tasks |
+| `reset` | Clear and recreate database tables |
 
 ## 3. Ingest
 
@@ -137,64 +142,39 @@ Key types the MARC loader emits: `work` (author + title stem), `author`,
 `title_stem`, `uniform_title`, `music_work`, `series`, `standard`, `citation`,
 `patent`, `fingerprint`, `geodata_spatial`, `heritage_model`,
 `translators_signature`, `sammelband`, `analytic` and `analytic_title` (MARC
-505/700/710 `$t` constituent works).
+505/700/710/730 `$t` constituent works).
 
 Neither table has a foreign key — `entity_type` can name any tier, which cannot
 be expressed as a single foreign key constraint — so deleting an owning row does **not** cascade
 and cleanup has to be explicit. `delete_source()` does that, which is what backs
 `ingest_mode: replace`.
 
-## 4a. Aggregates: what a publication contains
+## 4a. Aggregates: pure graph containment
 
-An album's tracks, an anthology's stories, an article inside a journal issue.
-Two shapes, because the schema has two mechanisms and conflating them is how
-aggregate modelling goes wrong:
+An album's tracks, an anthology's stories, a songbook's songs, an article inside a journal issue.
 
-- **Embodied constituent** — a track or a story. A Work realised as an
-  Expression *inside the container's manifestation*: no carrier of its own, so no
-  manifestation row. It appears as an ordered row in `manifestation_expressions`
-  with its `track_number`, `disc_number` and `duration`, plus a
-  `has_constituent` edge from the container's work.
-- **Component manifestation** — an article, a chapter with its own pagination.
-  Its own Work, Expression *and* Manifestation, the last carrying `container_id`,
-  `is_component` and `component_type`. A record that is itself a part gets this
-  from its host-item entry (MARC 773 `$w`, the host's control number), resolved
-  against the batch and then the store, since a journal issue is ingested long
-  before its articles.
+Aggregates are modeled via **pure graph containment**:
+- Outgoing `has_part` edges in `work_relationships` with a 1-based `sequence_number` (no boolean flags).
+- Profile-driven multi-format extraction via `marc_enhanced.yaml`, `bffi_haspart.yaml` (strictly no `bflc:`), and `bibframe_haspart.yaml`.
+- Embodied constituents produce constituent `WorkEntity` and `ExpressionEntity` rows linked to the container manifestation via `manifestation_expressions`.
+- Component manifestations (journal articles, separate paginations) retain `container_id`, `is_component=True`, and `component_type`.
 
-**Which fields carry constituents is per-source configuration**, because two
-sources in the same format do not agree about it: Melinda writes enhanced 505s, a
-sound-recording catalogue keeps tracks in its own conventions, and plenty of
-sources have no aggregates at all. A source names a bundled profile, a YAML
-profile of its own, or `off`; see
-[plans/aggregates.md](plans/aggregates.md) and `constituents/`.
+For the full specification of constituent extraction, bottom-up multiplex clustering, and output enrichment, see [aggregates.md](aggregates.md).
 
 ```yaml
 constituents:
-  profile: null          # the default: look for nothing
-  mode: keys_only        # off | keys_only | entities
-  index_works: false
-ingest_oai:
-  melinda: {constituents: marc_enhanced, constituents_mode: entities}
+  profile: "marc_enhanced"
+  bibframe_profile: "bibframe_haspart"
+  bffi_profile: "bffi_haspart"
+  mode: "entities"           # off | keys_only | entities
+  index_works: false         # Keep constituent works out of the primary work vector index
 ```
 
-`keys_only` is what ingest did before constituents existed: the `analytic` and
-`analytic_title` blocking keys and no rows. `entities` also writes the works,
-expressions, ordered junction rows and edges.
+**Constituent works stay out of the primary work vector index** by default. On
+album and songbook collections, constituents constitute over 80% of works; indexing
+them causes title queries for an album to match individual songs instead. They remain
+discoverable via `analytic_title` keys and graph traversal via `get_constituent_works`.
 
-**Identity is content-derived**, so two releases that share a track converge on
-one work row — which is the point, since a tracklist that matched only within one
-release would be no use. A constituent naming no creator inherits the container's
-main entry, which is the cataloguing rule and what makes the convergence work
-when one release's note names a composer and the next does not. An RDF part keeps
-its own node URI instead: the graph stating it is better evidence than a digest.
-
-**Constituent works stay out of the work vector index** by default. Measured on
-200 albums of 12 tracks they are 82% of it, and a title-only query returns tracks
-and no albums, so tier 3's top-k window fills with things that are not what the
-target is. They remain reachable exactly — by `analytic_title` key and through
-`get_constituent_works` from a matched container — and `index_works: true` is
-there for a source whose targets are tracks.
 
 ## 5. Classification
 
@@ -311,23 +291,29 @@ injected.
 
 ## 8. Clustering
 
-`CorpusClusterer` finds records that describe the same work, expression or
-manifestation *within* the corpus. It reads `get_all_match_records()` scoped to
-the non-authoritative sources — authority data lives in the same database and
-must not be clustered as if it were the corpus.
+`CorpusClusterer` performs intra-corpus co-reference resolution and 3-tier WEMI multiplex
+graph clustering across non-authoritative sources:
 
-- **blocking** over the key families, then pairwise similarity within blocks,
-  unioned with `UnionFind`
-- **expression** sub-clustering by content type, language and translator
-- **manifestation** grouping by `standard::year::volume`, then merged further by
-  manifestation-embedding similarity above `cluster.thresholds.manifestation` —
-  records of one edition that share no standard number never meet in a key group
-- **authority hoisting**: each cluster member is matched, and a cluster adopts the
-  authority work URI of any member that resolved, so every member exports the
-  same identity
-
-Results go to `corpus_work_clusters`, `corpus_expression_clusters`,
-`corpus_manifestation_clusters` and `corpus_linkages`.
+1. **Bottom-Up Constituent Micro-Clustering (Step 0)**:
+   - Queries all constituent works (identified via incoming `has_part` edges or `c:` content hashes).
+   - Generates blocking keys from author key and title stem.
+   - Micro-clusters them into deterministic `va_const_work_{sha256}` clusters.
+   - Decorates each container `MatchRecord` with its ordered list of `constituent_cluster_ids`.
+2. **Container Blocking**:
+   - Blocks over 35 key families, including `constituent_work::<cluster_id>`.
+3. **Cross-Format Pairwise Scoring & Vetoes**:
+   - **Container-Part Anti-Collision**: Hard-vetoes container vs constituent matches (`container_part_collision`).
+   - **Content Mismatch Hard-Veto**: Hard-vetoes container pairs with Jaccard constituent overlap $\le 0.30$ (`aggregate_content_mismatch`).
+   - **Jaccard Merge Bonus**: Container pairs sharing $\ge 80\%$ constituent works merge into a unified Work cluster (`aggregate_jaccard_lcs_merge` when Longest Common Subsequence ratio $\ge 0.70$, or `aggregate_jaccard_merge`).
+   - **Numeric Title & Volume Vetoes**: Hard-vetoes conflicting numbers in titles (`numeric_title_conflict`) and volume designations (`volume_conflict`).
+4. **Expression Sub-Clustering**: Groups expressions by content type, language, and translator.
+5. **Manifestation Near-Duplicate Merge**: Groups manifestations by `standard::year::volume`, then merges further via dense manifestation-embedding cosine similarity above `cluster.thresholds.manifestation`.
+6. **Authority Hoisting**: Each cluster member is matched against authoritative works, and the cluster adopts the canonical authority work URI of any member that resolved.
+7. **Graph Linkage Persistence**:
+   - Container clusters $\rightarrow$ `corpus_work_clusters`, `corpus_expression_clusters`, `corpus_manifestation_clusters`.
+   - Record linkages $\rightarrow$ `corpus_linkages`.
+   - Constituent record linkages $\rightarrow$ `corpus_constituent_linkages`.
+   - Whole-part inter-cluster edges $\rightarrow$ `corpus_work_relationships`.
 
 ## 9. Consolidation
 
@@ -343,14 +329,19 @@ hoisting and the reconcile loop cannot disagree about a work's identity.
 
 ## 10. Enrichment and output
 
-`MARCXMLEnricher` and the BibFrame enricher write resolved URIs back into the
-records: agent `$0`/`$1`, subject URIs folded to their modern vocabulary,
-work/expression links. Subject heading rewriting is configurable — whether to
-replace a legacy heading with the ontology's preferred label or retain it, and
-whether to append the `$2 yso/fin`-style language subcode.
+Enrichment translates resolved authority links back into source syntax:
+- **MARCXML** (`MARCXMLEnricher`):
+  - Injects `$0 <final_work_uri>` into container `758`.
+  - Injects `$0 <final_work_uri>` into constituent `730`, `700`, and `740` analytical fields.
+  - Injects canonical `$0` (KANTO URNs, ISNI, VIAF) and `$1` (Wikidata QIDs) into agent fields (`100`, `700`, `110`, `710`).
+  - Rewrites or folds subject headings (`650`, `655`) to modern YSO/SLM ontologies with `$2` language codes.
+- **BFFI / BIBFRAME** (`enrich_bibframe_graph`, `enrich_bibframe_jsonld`):
+  - Injects `owl:sameAs` linking container and constituent `bffi:hasPart` / `bf:hasPart` nodes to canonical authority work URIs.
+  - Updates `bffi:marcKey` literals with `$0 <final_work_uri>`.
+  - Strictly preserves pure BFFI graphs without introducing any `bflc:` triples.
+- **Reports** (`ReportGenerator`):
+  - Emits TSV report sets for agents, subjects, works, and expressions with match tiers, funnels used, and confidence scores.
 
-`ReportGenerator` emits TSV report sets for agents, subjects, works and
-expressions, each row naming the match tier, the funnel used and the confidence.
 
 ## 11. Vector indexes
 
@@ -405,12 +396,11 @@ manifestation to key and carries no relator codes; BIBFRAME has no host-item
 concept (MARC 773), models constituent works as related Works rather than 505/700
 `$t` subfields, and has no bound-with, which is holdings-level.
 
-See [plans/loader_interface.md](plans/loader_interface.md) for the measured
-divergences this closed, and for what each one turned out to be hiding.
+The loader interface guarantees mathematical parity across MARCXML, BIBFRAME, and BFFI.
 
 ## 12. Testing conventions
 
-619 tests. Three patterns carry most of the weight:
+1,081 tests across unit, integration, and end-to-end suites. Three patterns carry most of the weight:
 
 - **Dispatch on loader output.** Tests that build a probe record from a funnel's
   own predicate prove only that the spec claims its own probe. The tests that

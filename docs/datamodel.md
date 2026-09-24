@@ -1,92 +1,53 @@
 # Reconciliator Data Model Architecture
 
-This document provides a comprehensive specification of the multi-layer data model in Reconciliator. It describes each layer's role, entities, and use cases, accompanied by Mermaid relationship diagrams.
+This document specifies the complete, authoritative database schema and entity model implemented in Reconciliator. It describes each table, relationship, index, and use case across all **43 relational tables** defined in [`src/reconciliator/database/schema.py`](file:///Users/mikkovihonen/Workspace/reconciliator/src/reconciliator/database/schema.py).
 
 ---
 
-## 1. Overview & Multi-Layer Architecture
+## 1. Storage Architecture Overview
 
-Reconciliator organizes bibliographic and authority metadata into **five decoupled functional layers**:
+Reconciliator operates on a single unified relational engine in **PostgreSQL 15+** (leveraging `pg_trgm` trigram similarity and full-text search extensions).
 
-1. **Ingestion & Raw Staging Layer**: Stores immutable, provenance-tracked, source-specific bibliographic and authority records. Ingestion is **100% idempotent** without heuristic merges or count aggregations.
-2. **Controlled Vocabularies & Subject Ontologies Layer**: Standardizes concepts, subject headings, classification codes, and contributor relators across Finnish and international vocabularies (YSO, YKL, UDC, MeSH, RDA).
-3. **Vector & Trigram Retrieval Index Layer**: Provides dual-index retrieval capabilities: dense semantic vector representations for multilingual similarity and fast sparse/trigram PostgreSQL indexes for lexical blocking.
-4. **Cluster & Reconciliation Layer (Corpus Subsystem)**: Reconciles cross-source records into first-class **WEMI Intellectual Clusters** (Works, Expressions, Manifestations) and **Agent Identity Clusters** with empirical attribute frequency distributions and canonical representative hoisting.
-5. **Pipeline State, Telemetry & Metadata Layer**: Manages resumable OAI-PMH harvesting checkpoints, worker thread telemetry, progress monitoring, and database version metadata.
+The 43 tables are organized into **ten decoupled functional domains**:
 
-### High-Level Architectural Graph
-
-```mermaid
-flowchart TD
-    classDef leftAlign text-align:left;
-
-    Sources["<b>External Metadata Sources</b><br/>• Asteri Authority (MARCXML)<br/>• Melinda Union Catalog (MARCXML)<br/>• Wikidata Graph (JSON / SPARQL)<br/>• Bibframe / RDF Sources"]:::leftAlign
-
-    Layer1["<b>Layer 1: Ingestion & Raw Staging (Authority DB)</b><br/>• agents, agent_attributes (count-free)<br/>• works, expressions, manifestations, items<br/>• manifestation_expressions (M:N)<br/>• identifiers, entity_keys, contributions<br/>• agent_relationships, work_relationships, work_consolidations"]:::leftAlign
-
-    Layer2["<b>Layer 2: Controlled Vocabularies & Ontologies</b><br/>• concepts, concept_labels (YSO, YKL, UDC, MeSH)<br/>• concept_mappings, concept_mapping_labels<br/>• relator_terms (RDA role codes)<br/>• entity_subjects (topic, genre, occupation, field_of_work)"]:::leftAlign
-
-    Layer3["<b>Layer 3: Retrieval & Indexing</b><br/>• USearch ANN Vector Indices (work_vectors, manifestation_vectors)<br/>• PostgreSQL pg_trgm GIN Trigram Indexes (title, name)<br/>• PostgreSQL Full-Text Search tsvector Indexes"]:::leftAlign
-
-    Layer4["<b>Layer 4: Cluster & Reconciliation (Corpus DB)</b><br/>• WEMI Clusters: corpus_work_clusters, corpus_expression_clusters,<br/>  corpus_manifestation_clusters, corpus_linkages, sammelband_bindings<br/>• Agent Clusters: corpus_agent_clusters, corpus_agent_cluster_members,<br/>  corpus_agent_cluster_attributes (empirical frequencies)"]:::leftAlign
-
-    Layer5["<b>Layer 5: Pipeline State & Telemetry</b><br/>• harvest_state (OAI-PMH resumption checkpoints)<br/>• task_progress (worker rates & telemetry)<br/>• db_metadata (schema versions & configuration)"]:::leftAlign
-
-    %% Flow connections
-    Sources --> Layer1
-    Layer1 --> Layer2
-    Layer1 --> Layer3
-    Layer1 & Layer2 --> Layer4
-    Layer4 <-->|Candidate Retrieval & ANN Search| Layer3
-    Layer5 -.-> Layer1
-    Layer5 -.-> Layer4
-```
-
-### Core Design Principles
-- **Zero Hardcoding**: All weights, tolerances, blocking keys, authority precedence, and vocabularies are configured dynamically via [`defaults.yaml`].
-- **Decoupled Relational Entities**: No JSON blob packing for queryable entities; relationships, subjects, and attributes are modeled as first-class relational tables.
-- **Idempotency**: Ingesting a batch twice produces identical database state without duplicate rows or unbounded counter increments.
-- **Strict Separation of Raw and Cluster Domains**: Raw staging preserves exact source evidence; consensus values, canonical entities, and frequencies are computed exclusively in the cluster layer. Work consolidation decisions are isolated in `work_consolidations` rather than mutating immutable raw work rows.
+1. **System & Source Registry** (`db_metadata`, `sources`)
+2. **Core IFLA LRM / FRBR WEMI Entities** (`works`, `expressions`, `manifestations`, `manifestation_expressions`, `items`)
+3. **Agents & Contributions** (`agents`, `agent_attributes`, `agent_relationships`, `contributions`)
+4. **Polymorphic Identifiers & Blocking Keys** (`identifiers`, `entity_keys`)
+5. **Work Relationships & Cross-Source Consolidation** (`work_relationships`, `work_consolidations`)
+6. **Dense Vector Embeddings** (`work_vectors`, `manifestation_vectors`)
+7. **Harvester State & Operational Telemetry** (`harvest_state`, `task_progress`)
+8. **Controlled Vocabularies & Subject Ontologies** (`concepts`, `concept_labels`, `concept_mappings`, `concept_mapping_labels`, `concept_aliases`, `concept_hierarchy`, `relator_terms`, `entity_subjects`)
+9. **WEMI Multiplex Corpus Clustering** (`corpus_work_clusters`, `corpus_expression_clusters`, `corpus_manifestation_clusters`, `corpus_linkages`, `corpus_constituent_linkages`, `corpus_work_relationships`, `sammelband_bindings`)
+10. **Agent Identity Clusters, Lifecycle & Review Auditing** (`corpus_agent_clusters`, `corpus_agent_cluster_members`, `corpus_agent_cluster_attributes`, `corpus_agent_relationships`, `cluster_lifecycle_events`, `cluster_redirections`, `review_changesets`, `changeset_operations`, `entity_pins`)
 
 ---
 
-## 2. Layer 1: Ingestion & Raw Staging Layer
-
-### Purpose & Use Cases
-The Raw Staging Layer stores the ingested bibliographic and authority records as close to their source representation as possible while normalizing them into the IFLA LRM / FRBR conceptual model:
-- **Authority Grounding**: Stores person and corporate bodies (`agents`) without artificial counts or premature merges.
-- **Multi-Expression Support**: Supports complex manifestations (e.g. musical anthologies, multi-work vinyl records, translated omnibus editions) via the `manifestation_expressions` junction table.
-- **Structural Linkages & Consolidation**: Captures sequential and parent-child work hierarchies (`work_relationships`), physical item copies (`items`), agent affiliations or pseudonyms (`agent_relationships`), and records audited canonical work equivalence decisions and rationale in `work_consolidations` without altering raw work entities.
-- **Deterministic Keying**: Extracts polymorphic identifiers (ISBN, ISSN, DOI, URN, ISNI, VIAF, ORCID) into `identifiers` and blocking signatures into `entity_keys`.
+## 2. Core WEMI & Relationship Schema
 
 ### Entity-Relationship Diagram
 
 ```mermaid
 erDiagram
-    agents ||--o{ agent_attributes : "has attributes (1:N)"
-    agents ||--o{ agent_relationships : "source agent (1:N)"
-    agents ||--o{ agent_relationships : "target agent (1:N)"
-    agents ||--o{ contributions : "participates in (1:N)"
-    agents ||--o{ works : "primary agent of (0:1)"
+    sources ||--o{ works : "records origin"
+    sources ||--o{ manifestations : "records origin"
 
+    works ||--o{ works : "canonical_work_id"
     works ||--|{ expressions : "realized through (1:N)"
     works ||--o{ manifestations : "primary work of (0:1)"
-    works ||--o{ contributions : "credited on (1:N)"
-    works ||--o{ work_relationships : "source work (1:N)"
-    works ||--o{ work_relationships : "target work (1:N)"
+    works ||--o{ work_relationships : "source_work (has_part / etc.)"
+    works ||--o{ work_relationships : "target_work"
     works ||--o{ work_consolidations : "consolidates (0:1)"
-
-    work_consolidations {
-        int work_id PK, FK
-        int canonical_work_id FK
-        text evidence
-        datetime created_at
-    }
 
     expressions ||--|{ manifestation_expressions : "embodied in (1:N)"
     manifestations ||--|{ manifestation_expressions : "embodies (1:N)"
     manifestations ||--o{ items : "has exemplar copies (1:N)"
-    manifestations ||--o{ manifestations : "contains component (1:N)"
+    manifestations ||--o{ manifestations : "container_id (component)"
+
+    agents ||--o{ agent_attributes : "has attributes (1:N)"
+    agents ||--o{ agent_relationships : "source agent"
+    agents ||--o{ agent_relationships : "target agent"
+    agents ||--o{ contributions : "participates in (1:N)"
 
     identifiers }o--|| agents : "identifies (polymorphic)"
     identifiers }o--|| works : "identifies (polymorphic)"
@@ -96,529 +57,253 @@ erDiagram
     entity_keys }o--|| agents : "indexes (polymorphic)"
     entity_keys }o--|| works : "indexes (polymorphic)"
     entity_keys }o--|| manifestations : "indexes (polymorphic)"
+```
 
-    agents {
-        int id PK
-        string source
-        string source_id
-        string record_origin "authority | bibliographic"
-        string name
-        string name_normalized
-        string surname
-        string dates
-        int birth_year
-        int death_year
-        bool is_personal
-        bool is_fictional
-    }
+### 2.1 WEMI Tables
 
-    agent_attributes {
-        int id PK
-        int agent_id FK
-        string attribute_type "qualifier | variant_name"
-        string value
-    }
+#### `works`
+The conceptual intellectual creation.
+- `id` (INTEGER, PK, autoincrement)
+- `source` (VARCHAR(64), NOT NULL): Origin source identifier (e.g. `melinda`, `kanto`, `koha`).
+- `source_id` (VARCHAR(255), NOT NULL): Native record control number or content-derived hash.
+- `record_origin` (VARCHAR(64), NOT NULL): Provenance catalog tag.
+- `title` (VARCHAR(1024), NOT NULL): Primary or uniform title string.
+- `title_normalized` (VARCHAR(1024), NOT NULL, indexed): Lowercase, punctuation-stripped search key.
+- `original_language` (VARCHAR(16), nullable): ISO 639-2/3 code.
+- `primary_agent_id` (INTEGER, FK `agents.id`, nullable).
+- `work_type` (VARCHAR(64), NOT NULL, default `'text'`): Classification from SLM/Leader (e.g. `text`, `notated_music`, `audio`, `cartography`, `moving_image`).
+- `canonical_work_id` (INTEGER, FK `works.id`, nullable): Self-referential pointer recording canonical work election by `consolidate-works`.
+- *Constraints & Indexes*: Unique `(source, source_id)`, index on `canonical_work_id`, trigram index on `title_normalized`.
 
-    agent_relationships {
-        int id PK
-        int source_agent_id FK
-        int target_agent_id FK
-        string target_name
-        string target_uri
-        string relationship_type "affiliation | pseudonym"
-    }
+#### `expressions`
+The specific intellectual or artistic realization of a work.
+- `id` (INTEGER, PK, autoincrement)
+- `work_id` (INTEGER, FK `works.id`, NOT NULL)
+- `source` (VARCHAR(64), NOT NULL), `source_id` (VARCHAR(255), NOT NULL)
+- `record_origin` (VARCHAR(64), NOT NULL)
+- `language` (VARCHAR(16), nullable): Realization language.
+- `content_type` (VARCHAR(64), nullable): RDA content type (e.g. `spoken_word`, `performed_music`, `text`).
+- `version_designation` (VARCHAR(255), nullable): Edition/revision/arrangement statement.
+- `original_script_title` (VARCHAR(1024), nullable)
+- `title_normalized` (VARCHAR(1024), nullable)
+- *Constraints*: Unique `(source, source_id)`.
 
-    works {
-        int id PK
-        string source
-        string source_id
-        string record_origin
-        string title
-        string title_normalized
-        string original_language
-        int primary_agent_id FK
-        string work_type "text | notated_music | audio | etc."
-    }
+#### `manifestations`
+The physical or digital embodiment of an expression.
+- `id` (INTEGER, PK, autoincrement)
+- `work_id` (INTEGER, FK `works.id`, nullable): Primary work shortcut.
+- `expression_id` (INTEGER, FK `expressions.id`, nullable): Primary expression shortcut.
+- `source` (VARCHAR(64), NOT NULL), `source_id` (VARCHAR(255), NOT NULL)
+- `record_origin` (VARCHAR(64), NOT NULL)
+- `title` (VARCHAR(1024), NOT NULL), `title_normalized` (VARCHAR(1024), NOT NULL)
+- `year` (INTEGER, nullable, indexed): Validated 4-digit publication year.
+- `publisher` (VARCHAR(512), nullable)
+- `place_of_publication` (VARCHAR(255), nullable)
+- `edition_statement` (VARCHAR(255), nullable)
+- `extent` (VARCHAR(255), nullable)
+- `carrier` (VARCHAR(64), default `'volume'`): RDA carrier code.
+- `format` (VARCHAR(32), default `'marcxml'`): Source serialization syntax.
+- `container_id` (INTEGER, FK `manifestations.id`, nullable): Self-reference for host-item component parts (MARC 773).
+- `is_component` (BOOLEAN, default `FALSE`): True when the manifestation is an article, chapter, or track.
+- `component_type` (VARCHAR(32), nullable): `track`, `article`, `chapter`, `episode`.
+- `pagination` (VARCHAR(128), nullable)
+- *Constraints*: Unique `(source, source_id)`.
 
-    expressions {
-        int id PK
-        int work_id FK
-        string source
-        string source_id
-        string language
-        string content_type "text | spoken_word | etc."
-        string version_designation
-    }
+#### `manifestation_expressions`
+M:N junction table mapping multiple expressions into complex manifestations (anthologies, sound recordings, polyglot editions).
+- `id` (INTEGER, PK, autoincrement)
+- `manifestation_id` (INTEGER, FK `manifestations.id`, NOT NULL)
+- `expression_id` (INTEGER, FK `expressions.id`, NOT NULL)
+- `track_number` (INTEGER, nullable): Position on disc/album.
+- `disc_number` (INTEGER, default `1`)
+- `duration` (VARCHAR(32), nullable)
+- `is_primary` (BOOLEAN, default `TRUE`)
+- *Constraints*: Unique `(manifestation_id, expression_id)`.
 
-    manifestations {
-        int id PK
-        int work_id FK
-        int container_id FK
-        bool is_component
-        string source
-        string source_id
-        string title
-        string title_normalized
-        int publication_year
-        string publisher
-        string carrier_type
-    }
+#### `items`
+Exemplar copies, physical holdings, or digital instances.
+- `id` (INTEGER, PK, autoincrement)
+- `manifestation_id` (INTEGER, FK `manifestations.id`, NOT NULL)
+- `source` (VARCHAR(64), NOT NULL), `source_id` (VARCHAR(255), NOT NULL)
+- `holding_organization` (VARCHAR(128), nullable)
+- `call_number` (VARCHAR(128), nullable)
+- `barcode` (VARCHAR(64), nullable)
+- `shelf_mark` (VARCHAR(128), nullable)
+- `electronic_locator` (VARCHAR(1024), nullable): Actionable URL/URN.
+- *Constraints*: Unique `(source, source_id)`.
 
-    manifestation_expressions {
-        int manifestation_id PK, FK
-        int expression_id PK, FK
-        int track_number
-        int disc_number
-        bool is_primary
-    }
+---
 
-    items {
-        int id PK
-        int manifestation_id FK
-        string source
-        string source_id
-        string holding_organization
-        string shelf_mark
-        string barcode
-    }
+## 3. Work Relationships & Pure-Graph Aggregates
 
-    identifiers {
-        int id PK
-        string entity_type "work | expression | manifestation | item | agent"
-        int entity_id
-        string source "isbn | issn | doi | isni | viaf | orcid | etc."
-        string source_id
-        string source_id_normalized
-    }
+Containment and hierarchical work relationships are modeled as pure graph edges in `work_relationships` and `corpus_work_relationships` (zero boolean flags or shims).
 
-    entity_keys {
-        int id PK
-        string entity_type
-        int entity_id
-        string key_type "title_author | author_title | lcc | udc"
-        string key_value
-    }
+### `work_relationships`
+Inter-work relationship edges between stored Works.
+- `id` (INTEGER, PK, autoincrement)
+- `source_work_id` (INTEGER, FK `works.id`, NOT NULL)
+- `target_work_id` (INTEGER, FK `works.id`, nullable)
+- `target_title` (VARCHAR(1024), nullable)
+- `relationship_type` (VARCHAR(32), NOT NULL):
+  - `'has_part'`: Container work contains constituent work (1-based `sequence_number`).
+  - `'part_of'`: Constituent work is part of container work.
+  - `'translation_of'`: Target is the original language work.
+  - `'arranged_from'`: Target is the original composition.
+  - `'adaptation_of'`, `'continuation_of'`, `'preceded_by'`, `'succeeded_by'`, etc.
+- `target_uri` (VARCHAR(1024), nullable)
+- `sequence_number` (INTEGER, nullable): 1-based track or sequence order.
+- `confidence` (FLOAT, default `1.0`)
+- *Indexes*: `idx_work_rel_source_type_seq` on `(source_work_id, relationship_type, sequence_number)`.
 
-    contributions {
-        int id PK
-        string entity_type "work | expression | manifestation"
-        int entity_id
-        int agent_id FK
-        string role "aut | edt | trl | cmp | prf | etc."
-        bool is_primary
-    }
+### Dynamic Aggregate Check
+Determining whether a Work is an aggregate is queried dynamically from graph topology:
+```sql
+SELECT 1 FROM work_relationships 
+WHERE source_work_id = :work_id AND relationship_type = 'has_part'
+LIMIT 1;
 ```
 
 ---
 
-## 3. Layer 2: Controlled Vocabularies & Subject Ontologies Layer
+## 4. Agents & Polymorphic Keys
 
-### Purpose & Use Cases
-The Vocabulary Layer standardizes semantic metadata across multiple vocabularies and languages:
-- **Concept Harmonization**: Ingests concepts from YSO (General Finnish Ontology), YKL, UDC, and MeSH.
-- **Multilingual Subject Resolution**: Resolves Finnish, Swedish, and English preferred and alternative labels (`concept_labels`) into unified concept IDs.
-- **Vocabulary Mapping**: Maps legacy or specialized vocabularies into target authority ontologies (`concept_mappings`).
-- **Entity Subject Grounding**: Links Works, Expressions, Manifestations, and Agents to controlled concepts (`entity_subjects`) with specific relationship types (`topic`, `genre`, `occupation`, `field_of_work`).
-- **Relator Standardization**: Maps raw textual role strings (e.g. `"kirjoittaja"`, `"författare"`, `"author"`) to standardized MARC/RDA relator codes (`relator_terms`).
+### `agents`
+Person, corporate, and conference authorities.
+- `id` (INTEGER, PK, autoincrement)
+- `source` (VARCHAR(64), NOT NULL), `source_id` (VARCHAR(255), NOT NULL)
+- `record_origin` (VARCHAR(64), NOT NULL)
+- `name` (VARCHAR(512), NOT NULL), `name_normalized` (VARCHAR(512), NOT NULL)
+- `surname` (VARCHAR(255), nullable)
+- `dates` (VARCHAR(128), nullable)
+- `birth_year` (INTEGER, nullable), `death_year` (INTEGER, nullable)
+- `is_personal` (BOOLEAN, default `TRUE`)
+- `is_fictional` (BOOLEAN, default `FALSE`): Safeguards against transferring fictional identities to real persons.
+- *Constraints*: Unique `(source, source_id)`.
 
-### Entity-Relationship Diagram
+### `contributions`
+Polymorphic attribution linking agents to Works, Expressions, or Manifestations.
+- `id` (INTEGER, PK, autoincrement)
+- `entity_type` (VARCHAR(32), NOT NULL): `'work'`, `'expression'`, `'manifestation'`.
+- `entity_id` (INTEGER, NOT NULL)
+- `agent_id` (INTEGER, FK `agents.id`, NOT NULL)
+- `role` (VARCHAR(32), default `'ctb'`): Normalized MARC/RDA relator code (e.g. `'aut'`, `'cmp'`, `'edt'`, `'trl'`, `'ill'`).
+- `is_primary` (BOOLEAN, default `FALSE`)
+- *Constraints*: Unique `(entity_type, entity_id, agent_id, role)`.
+
+### `identifiers`
+Polymorphic storage of standard, externally-meaningful identifiers.
+- `id` (INTEGER, PK, autoincrement)
+- `entity_type` (VARCHAR(32), NOT NULL): `'work'`, `'expression'`, `'manifestation'`, `'agent'`.
+- `entity_id` (INTEGER, NOT NULL)
+- `scheme` (VARCHAR(32), NOT NULL): `'isbn'`, `'issn'`, `'ismn'`, `'doi'`, `'urn'`, `'kanto_pn'`, `'kanto_cn'`, `'isni'`, `'viaf'`, `'wikidata'`.
+- `value` (VARCHAR(512), NOT NULL)
+- `value_normalized` (VARCHAR(512), NOT NULL, indexed): Stripped punctuation and hyphens for exact lookup.
+- *Constraints*: Unique `(entity_type, entity_id, scheme, value_normalized)`.
+
+### `entity_keys`
+Polymorphic storage of derived blocking keys emitted during ingest.
+- `id` (INTEGER, PK, autoincrement)
+- `entity_type` (VARCHAR(32), NOT NULL): `'work'`, `'manifestation'`, `'agent'`.
+- `entity_id` (INTEGER, NOT NULL)
+- `key_type` (VARCHAR(32), NOT NULL): `'work'` (author+title), `'title_stem'`, `'uniform_title'`, `'music_work'`, `'citation'`, `'patent'`, `'analytic'`, `'analytic_title'`.
+- `key_value` (VARCHAR(1024), NOT NULL)
+- `key_normalized` (VARCHAR(1024), NOT NULL, indexed)
+
+---
+
+## 5. Controlled Vocabularies & Subject Ontologies
+
+Standardizes concepts and subject headings across Finnish national ontologies (YSO, KAUNO, MUSO, SLM, SEKO).
 
 ```mermaid
 erDiagram
-    concepts ||--|{ concept_labels : "labeled by (1:N)"
-    concepts ||--o{ concept_mappings : "legacy concept (1:N)"
-    concept_mappings ||--o{ concept_mapping_labels : "has mapping labels (1:N)"
-    concepts ||--o{ entity_subjects : "referenced as concept (1:N)"
-
-    entity_subjects }o--|| works : "describes topic/genre"
-    entity_subjects }o--|| agents : "describes occupation/field"
-
-    concepts {
-        int id PK
-        string vocabulary "yso | ykl | udc | mesh | etc."
-        string concept_id "p4811"
-        bool is_deprecated
-        string target_field
-    }
-
-    concept_labels {
-        int id PK
-        int concept_row_id FK
-        string lang "fi | sv | en"
-        string label_type "prefLabel | altLabel"
-        string label
-    }
-
-    concept_mappings {
-        int id PK
-        string legacy_vocab
-        string legacy_id
-        string target_vocab
-        string target_id
-        string mapping_type "exactMatch | closeMatch | broadMatch"
-    }
-
-    concept_mapping_labels {
-        int id PK
-        int mapping_id FK
-        string lang
-        string label
-    }
-
-    relator_terms {
-        string folded_term PK
-        string raw_term
-        string lang
-        string code "aut | trl | edt | ill"
-        string uri
-    }
-
-    entity_subjects {
-        int id PK
-        string entity_type "work | expression | manifestation | agent"
-        int entity_id
-        string relation_type "topic | genre | occupation | field_of_work"
-        string vocabulary
-        string concept_id
-        string raw_label
-        bool is_resolved
-        bool is_primary
-    }
+    concepts ||--o{ concept_labels : "has labels (pref / alt)"
+    concepts ||--o{ concept_mappings : "maps to external URI"
+    concepts ||--o{ concept_aliases : "bilingual / legacy alias"
+    concepts ||--o{ concept_hierarchy : "broader / narrower"
+    concepts ||--o{ entity_subjects : "indexes entities"
 ```
+
+- **`concepts`**: Concept identifiers (`uri`, `vocabulary`, `code`, `scheme`).
+- **`concept_labels`**: Multilingual preferred and alternative labels (`concept_id`, `language`, `label`, `is_preferred`).
+- **`concept_mappings`**: Cross-vocabulary concordances (`source_concept_id`, `target_uri`, `mapping_type` e.g. `exactMatch`, `closeMatch`).
+- **`concept_aliases`**: Legacy thesaurus folding aliases (YSA $\rightarrow$ YSO, Kaunokki $\rightarrow$ KAUNO).
+- **`relator_terms`**: RDA role terms mapped to 3-letter MARC relator codes.
+- **`entity_subjects`**: Direct subject attribution (`entity_type`, `entity_id`, `concept_id`, `field_tag`, `category`).
 
 ---
 
-## 4. Layer 3: Vector & Trigram Retrieval Index Layer
+## 6. WEMI Multiplex Corpus Clustering Subsystem
 
-### Purpose & Use Cases
-The Retrieval Index Layer acts as the **computational retrieval engine for Layer 4 (Cluster & Reconciliation)**. Pairwise comparison across millions of works and agents is $O(N^2)$, making brute-force reconciliation computationally impossible. Layer 3 reduces this search space into a high-precision candidate set:
-- **Fast Lexical Blocking**: Uses PostgreSQL `pg_trgm` (trigram) GIN indexes on `title_normalized` and `name_normalized` to generate candidate match pairs in milliseconds.
-- **Full-Text Lexical Search (FTS)**: Evaluates `to_tsvector('simple', serialized_text)` for unstructured bibliographic text matching.
-- **Dense Semantic Retrieval**: Employs USearch vector index engines (`work_vectors`, `manifestation_vectors`, `agent_index`) managed by an IPC daemon to retrieve semantic nearest neighbors when lexical variations, differing subtitles, or language translations prevent exact token matching.
-
-### Vector Index Architecture & Relational Mapping
-Reconciliator uses a hybrid vector architecture that couples relational PostgreSQL mapping tables with high-performance USearch HNSW (Hierarchical Navigable Small World) binary indexes on disk:
+Tracks intra-corpus co-reference resolution and bottom-up constituent containment.
 
 ```mermaid
 erDiagram
-    works ||--o| work_vectors : "relational vector map (1:1)"
-    manifestations ||--o| manifestation_vectors : "relational vector map (1:1)"
-    work_vectors ||--|| USearch_Work_Index : "vector_id key bridge"
-    manifestation_vectors ||--|| USearch_Manifestation_Index : "vector_id key bridge"
+    corpus_work_clusters ||--o{ corpus_linkages : "resolves container work"
+    corpus_expression_clusters ||--o{ corpus_linkages : "resolves expression"
+    corpus_manifestation_clusters ||--o{ corpus_linkages : "resolves manifestation"
 
-    works {
-        int id PK
-        string title
-        string title_normalized
-        string work_type
-    }
+    corpus_linkages ||--o{ corpus_constituent_linkages : "has constituents"
+    corpus_work_clusters ||--o{ corpus_constituent_linkages : "resolves constituent work"
 
-    work_vectors {
-        int vector_id PK "Key in USearch index"
-        int work_id FK "Reference to works.id"
-    }
-
-    manifestations {
-        int id PK
-        string title
-        string title_normalized
-        string publisher
-        int publication_year
-    }
-
-    manifestation_vectors {
-        int vector_id PK "Key in USearch index"
-        int manifestation_id FK "Reference to manifestations.id"
-    }
-
-    USearch_Work_Index {
-        uint64 key "vector_id"
-        float32_array embedding "768d / 384d vector"
-        string binary_file "work_index.usearch"
-        string meta_file "work_index.usearch.meta.json"
-    }
-
-    USearch_Manifestation_Index {
-        uint64 key "vector_id"
-        float32_array embedding "768d / 384d vector"
-        string binary_file "manifestation_index.usearch"
-        string meta_file "manifestation_index.usearch.meta.json"
-    }
+    corpus_work_clusters ||--o{ corpus_work_relationships : "source cluster (container)"
+    corpus_work_clusters ||--o{ corpus_work_relationships : "target cluster (constituent)"
 ```
 
-### Inverted Trigram & Full-Text Search (FTS) Indexes
-In addition to dense vector embeddings, Layer 3 provisions PostgreSQL GIN trigram and lexical text search indexes directly on Layer 1 entity tables:
+### `corpus_work_clusters`
+- `cluster_id` (VARCHAR(64), PK): Deterministic hash `va_work_{sha256}`.
+- `canonical_work_uri` (VARCHAR(1024), nullable): Authority work URI adopted by hoisting.
+- `title` (VARCHAR(1024), NOT NULL), `author_key` (VARCHAR(255), nullable), `work_type` (VARCHAR(64), NOT NULL).
+- `member_count` (INTEGER, NOT NULL, default `1`).
 
-| Index Name | Table & Target Column | Index Type / Opclass | Use Case |
-| :--- | :--- | :--- | :--- |
-| `idx_works_title_trgm` | `works.title_normalized` | `GIN (gin_trgm_ops)` | Fast fuzzy title matching, handling typos and punctuation differences |
-| `idx_agents_name_trgm` | `agents.name_normalized` | `GIN (gin_trgm_ops)` | Fast fuzzy agent name candidate blocking |
-| `idx_manifestations_title_trgm` | `manifestations.title_normalized` | `GIN (gin_trgm_ops)` | Fast fuzzy manifestation title blocking |
-| `idx_works_fts` | `works.serialized_text` | `GIN (to_tsvector('simple', ...))` | Lexical search on serialized MARC fields (titles, notes, classifications) |
-| `idx_expressions_fts` | `expressions.serialized_text` | `GIN (to_tsvector('simple', ...))` | Full-text search on language, notes, and music instrumentation |
-| `idx_manifestations_fts` | `manifestations.serialized_text` | `GIN (to_tsvector('simple', ...))` | Full-text search across complete manifestation metadata |
+### `corpus_linkages`
+Maps each container record to its resolved clusters.
+- `record_id` (VARCHAR(255), PK)
+- `work_cluster_id` (VARCHAR(64), FK `corpus_work_clusters.cluster_id`)
+- `expression_cluster_id` (VARCHAR(64), FK `corpus_expression_clusters.cluster_id`)
+- `manifestation_cluster_id` (VARCHAR(64), FK `corpus_manifestation_clusters.cluster_id`)
+- `final_work_uri` (TEXT, nullable), `confidence` (FLOAT, default `1.0`).
 
-### How Layer 4 Uses Layer 3
-The engines in Layer 4 (`WorkMatcher`, `Clusterer`, and `AgentClusterer`) actively query Layer 3 in a progressive multi-tier funnel:
-1. **Tier 1 (Exact Identifier Lookup)**: Queries `identifiers` for ISBN, ISSN, DOI, URN, ISNI, or VIAF matches.
-2. **Tier 2 (Blocking Key Matching)**: Queries `entity_keys` for standardized bibliographic signatures (`title_author`, `author_title`, `surname_decade`).
-3. **Tier 3 (Trigram Title & Author Fuzzy Search)**: Queries `pg_trgm` indexes with threshold cutoffs to capture typographic errors and punctuation shifts.
-4. **Tier 4 (Dense Vector Semantic Search)**: Queries the USearch ANN vector daemon using dual-encoder embeddings to discover translations, cross-format adaptations (audiobooks, radio plays), and radically altered title formulations.
+### `corpus_constituent_linkages`
+Stores $N$ constituent track/song/article links per container record.
+- `id` (SERIAL, PK)
+- `record_id` (VARCHAR, FK `corpus_linkages.record_id` ON DELETE CASCADE)
+- `constituent_ordinal` (INTEGER, NOT NULL, default `1`): 1-based track or item position.
+- `constituent_work_id` (VARCHAR, NOT NULL)
+- `constituent_work_cluster_id` (VARCHAR, FK `corpus_work_clusters.cluster_id`)
+- `title` (VARCHAR, NOT NULL), `creator` (VARCHAR, nullable)
+- `field_tag` (VARCHAR(64), nullable): MARC `730`/`700` or RDF `bffi:hasPart`.
+- `final_work_uri` (TEXT, nullable): Canonical authority URI injected during enrichment.
+- `confidence` (FLOAT, default `1.0`)
+- *Constraints*: Unique `(record_id, constituent_ordinal)`.
 
-### Index & Retrieval Flow Diagram
-
-```mermaid
-flowchart LR
-    L4Engines["Layer 4 Engines<br/>(WorkMatcher / Clusterer / AgentClusterer)"] --> Pipeline{Multi-Tier Retrieval Pipeline}
-
-    subgraph SparseTier ["Sparse & Lexical Retrieval (PostgreSQL)"]
-        Pipeline -->|1. Standard Identifiers| IdentLookup["identifiers Index Lookup<br/>(ISBN, ISSN, DOI, URN)"]
-        Pipeline -->|2. Blocking Keys| KeyLookup["entity_keys Index Lookup<br/>(title_author, surname_decade)"]
-        Pipeline -->|3. Trigram Fuzzy Search| TrigramLookup["pg_trgm GIN Indexes<br/>(idx_works_title_trgm,<br/>idx_agents_name_trgm)"]
-    end
-
-    subgraph DenseTier ["Dense Semantic Retrieval (USearch Daemon)"]
-        Pipeline -->|4. Dense Embedding Query| DenseLookup["ANN Vector Search<br/>(work_vectors, manifestation_vectors)"]
-    end
-
-    IdentLookup --> Candidates[Consolidated Candidate Pool]
-    KeyLookup --> Candidates
-    TrigramLookup --> Candidates
-    DenseLookup --> Candidates
-
-    Candidates --> L4Scoring["Layer 4 Feature Scoring & Disambiguation Guards<br/>(Cluster Partitioning)"]
-```
+### `corpus_work_relationships`
+Inter-cluster whole-part relationships between container clusters and constituent clusters.
+- `id` (SERIAL, PK)
+- `source_cluster_id` (VARCHAR, FK `corpus_work_clusters.cluster_id` ON DELETE CASCADE)
+- `target_cluster_id` (VARCHAR, FK `corpus_work_clusters.cluster_id` ON DELETE CASCADE)
+- `relationship_type` (VARCHAR(32), NOT NULL, default `'has_part'`)
+- `sequence_number` (INTEGER, nullable)
+- `confidence` (FLOAT, default `1.0`)
+- *Constraints*: Unique `(source_cluster_id, target_cluster_id, relationship_type)`.
 
 ---
 
-## 5. Layer 4: Cluster & Reconciliation Layer (Corpus Subsystem)
+## 7. Review, Changesets & Pinning
 
-### Purpose & Use Cases
-The Cluster Layer stores the consolidated real-world entities produced by reconciliation:
-- **WEMI Intellectual Clusters**:
-  - `corpus_work_clusters`: Conceptual Work identity (e.g. *Sinuhe egyptiläinen*).
-  - `corpus_expression_clusters`: Language, content type, and version designation of a work (e.g. Swedish translation by Ole Torvalds).
-  - `corpus_manifestation_clusters`: Physical and digital publications, collapsing publisher and print run duplicates.
-  - `corpus_linkages`: Record-level routing map from any source record ID to its exact Work, Expression, and Manifestation clusters.
-  - `sammelband_bindings`: Models "bound-with" composite codices where multiple distinct bibliographic works are bound into a single physical binding.
-- **Agent Identity Clusters**:
-  - `corpus_agent_clusters`: Unified person or corporate entity head, electing a canonical record by configured source precedence (Asteri $\to$ Wikidata $\to$ Melinda).
-  - `corpus_agent_cluster_members`: Complete provenance linking every member agent with its specific `link_method` (`identifier_isni`, `weighted_scoring`, etc.) and confidence score.
-  - `corpus_agent_cluster_attributes`: Aggregated frequency counts for all variant names, qualifiers, affiliations, and occupations.
-
-### Active Dependency on Layer 3 (Retrieval & Indexing)
-Layer 4 does not perform passive storage; its clustering engines depend directly on Layer 3:
-- **Work & Expression Clustering**: `Clusterer` and `WorkMatcher` query Layer 3 vector indices and trigram indexes to discover candidates across sources. Without Layer 3, cross-lingual work clustering (e.g. matching a Finnish original to its French edition with a completely translated title) would be impossible.
-- **Agent Identity Clustering**: `AgentClusterer` queries Layer 3 multi-key blocking strategies (`name_normalized`, `surname_decade`, `folded_surname`, `variant_names`) to group candidate pairs before running tolerant scoring and Union-Find graph partitioning.
-- **Target Record Routing**: Incoming records matched by `WorkMatcher` use Layer 3 to resolve against existing clusters, persisting the resulting coordinates into `corpus_linkages`.
-
-### Entity-Relationship Diagram
-
-```mermaid
-erDiagram
-    %% WEMI Intellectual Clusters
-    corpus_work_clusters ||--|{ corpus_expression_clusters : "has expressions (1:N)"
-    corpus_work_clusters ||--o{ corpus_linkages : "realized in (1:N)"
-    corpus_expression_clusters ||--o{ corpus_linkages : "expressed in (1:N)"
-    corpus_manifestation_clusters ||--o{ corpus_linkages : "embodies (1:N)"
-    sammelband_bindings }o--|| corpus_linkages : "physically binds (N:M)"
-
-    %% Agent Identity Clusters
-    corpus_agent_clusters ||--|{ corpus_agent_cluster_members : "merges members (1:N)"
-    corpus_agent_clusters ||--|{ corpus_agent_cluster_attributes : "compiles consensus (1:N)"
-
-    %% Cross-Domain Intersections
-    corpus_agent_clusters ||--o{ corpus_work_clusters : "canonical author of (1:N)"
-    corpus_agent_clusters ||--o{ corpus_expression_clusters : "translator/performer in (1:N)"
-
-    corpus_work_clusters {
-        string cluster_id PK
-        string work_type
-        string canonical_title
-        string canonical_author
-        string canonical_work_source
-        string canonical_work_source_id
-    }
-
-    corpus_expression_clusters {
-        string cluster_id PK
-        string work_cluster_id FK
-        string language
-        string content_type
-        string version_designation
-    }
-
-    corpus_manifestation_clusters {
-        string cluster_id PK
-        string canonical_record_id
-        string publisher
-        int publication_year
-        string carrier_type
-        int member_record_count
-    }
-
-    corpus_linkages {
-        string record_id PK
-        string work_cluster_id FK
-        string expression_cluster_id FK
-        string manifestation_cluster_id FK
-        string final_work_source
-        string final_expression_source
-    }
-
-    sammelband_bindings {
-        string binding_id PK
-        string record_id PK, FK
-        int sequence_in_binding
-        string binding_notes
-    }
-
-    corpus_agent_clusters {
-        string cluster_id PK
-        int canonical_agent_id FK
-        string canonical_name
-        string canonical_uri
-        int birth_year
-        int death_year
-        int member_count
-        int work_count
-        float confidence_score
-    }
-
-    corpus_agent_cluster_members {
-        int agent_id PK, FK
-        string cluster_id FK
-        string source
-        string source_id
-        string link_method "identifier_isni | weighted_scoring"
-        float confidence
-    }
-
-    corpus_agent_cluster_attributes {
-        int id PK
-        string cluster_id FK
-        string attribute_type "variant_name | qualifier | affiliation | occupation"
-        string value
-        string concept_id
-        int frequency
-        bool is_canonical
-    }
-```
+Auditing and human-in-the-loop review operations:
+- **`review_changesets`**: Batches of manual overrides or cluster merges (`status`, `author`, `reason`).
+- **`changeset_operations`**: Atomic operations (`action`, `target_entity_type`, `parameters`).
+- **`entity_pins`**: Explicit pinning locking an entity to a specific cluster or preventing unwanted automatic merges.
+- **`cluster_lifecycle_events`** & **`cluster_redirections`**: Audit log recording cluster creations, splits, and tombstone redirections.
 
 ---
 
-## 6. Layer 5: Pipeline State, Telemetry & Metadata Layer
+## 8. Indexing Architecture & Search Strategy
 
-### Purpose & Use Cases
-The Pipeline State Layer provides operational reliability and monitoring:
-- **Resumable OAI-PMH Harvesting**: Tracks source synchronization partitions, timestamps, and resumption tokens (`harvest_state`), enabling fault-tolerant incremental sync.
-- **Asynchronous Task Telemetry**: Stores worker progress, transfer rates (records/sec, bytes/sec), percentages, and error states (`task_progress`) for live terminal UI monitoring.
-- **System Metadata**: Maintains schema versions, indexing timestamps, and configuration hashes (`db_metadata`).
-
-### Entity Diagram
-
-```mermaid
-erDiagram
-    harvest_state {
-        string source_id PK
-        string source_type "oai_pmh | sparql | dump"
-        string metadata_prefix
-        string set_spec
-        string last_harvest_from
-        string last_harvest_until
-        string resumption_token
-        int records_harvested
-        string status "in_progress | completed | failed"
-    }
-
-    task_progress {
-        string task_id PK
-        string task_type "harvest | index | cluster | match"
-        string status "running | completed | failed"
-        int total_records
-        int processed_records
-        float rate_per_sec
-        float percentage
-        string error_message
-    }
-
-    db_metadata {
-        string key PK
-        string value
-        datetime updated_at
-    }
-```
-
----
-
-## 7. End-to-End Lifecycle & Data Flow
-
-The following sequence diagram illustrates how an incoming bibliographic record is processed through all five layers of the data model:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor CLI as CLI / Worker
-    participant L5 as Layer 5: Harvest State
-    participant L1 as Layer 1: Ingestion & Raw Staging
-    participant L2 as Layer 2: Vocabularies & Relators
-    participant L3 as Layer 3: Retrieval & Indexing
-    participant L4 as Layer 4: Cluster & Reconciliation
-    actor Export as Enriched Output
-
-    CLI->>L5: Checkpoint sync partition (harvest_state)
-    CLI->>L1: Idempotent batch insert (works, manifestations, agents)
-    L1->>L1: Extract identifiers & entity keys (ISBN, ISSN, author_title)
-    
-    CLI->>L2: Resolve subjects & occupations (entity_subjects, concepts)
-    CLI->>L2: Normalize contributor roles (relator_terms)
-    
-    CLI->>L3: Generate & store embeddings (work_vectors, USearch daemon)
-    
-    CLI->>L4: Run AgentClusterer (ISNI override, blocking, tolerant scoring)
-    L4->>L4: Populate corpus_agent_clusters & attribute frequencies
-    
-    CLI->>L4: Run WorkMatcher & WEMI Clusterer
-    L4->>L4: Map to Work/Expression/Manifestation clusters & corpus_linkages
-    
-    CLI->>Export: Export enriched MARCXML (758 / 100 $0) & Bibframe RDF
-```
-
----
-
-## 8. Summary Table of Database Tables
-
-| Table Name | Layer | Purpose | Primary Key |
-| :--- | :---: | :--- | :--- |
-| `agents` | 1 | Raw person and organization entities | `id` (autoincrement) |
-| `agent_attributes` | 1 | Unweighted intrinsic qualifiers and variant names | `id` (autoincrement) |
-| `agent_relationships` | 1 | Person-to-org affiliations and pseudonyms | `id` (autoincrement) |
-| `works` | 1 | Distinct intellectual/artistic creations | `id` (autoincrement) |
-| `expressions` | 1 | Linguistic/musical realizations of works | `id` (autoincrement) |
-| `manifestations` | 1 | Physical/digital publication editions | `id` (autoincrement) |
-| `manifestation_expressions` | 1 | M:N embodiment junction with track numbers | `(manifestation_id, expression_id)` |
-| `items` | 1 | Physical copy holdings and shelf marks | `id` (autoincrement) |
-| `identifiers` | 1 | Polymorphic external identifiers (ISBN, ISNI, etc.) | `id` (autoincrement) |
-| `entity_keys` | 1 | Polymorphic blocking and lookup signatures | `id` (autoincrement) |
-| `contributions` | 1 | Roles linking agents to works/expressions | `id` (autoincrement) |
-| `work_relationships` | 1 | Work-to-work relationships (series, adaptations) | `id` (autoincrement) |
-| `work_consolidations` | 1 | Reconciled work equivalences and evidence | `work_id` (FK to works.id) |
-| `concepts` | 2 | Controlled vocabulary concept identifiers | `id` (autoincrement) |
-| `concept_labels` | 2 | Multilingual preferred and alternative labels | `id` (autoincrement) |
-| `concept_mappings` | 2 | Mappings across vocabulary systems | `id` (autoincrement) |
-| `relator_terms` | 2 | Normalized contributor role term mappings | `folded_term` |
-| `entity_subjects` | 2 | Subject/topic/genre/medium of performance/occupation linkages | `id` (autoincrement) |
-| `work_vectors` | 3 | Work dense semantic embedding vectors | `vector_id` |
-| `manifestation_vectors` | 3 | Manifestation dense embedding vectors | `vector_id` |
-| `corpus_work_clusters` | 4 | Reconciled conceptual work clusters | `cluster_id` |
-| `corpus_expression_clusters`| 4 | Reconciled expression clusters | `cluster_id` |
-| `corpus_manifestation_clusters`| 4 | Reconciled manifestation clusters | `cluster_id` |
-| `corpus_linkages` | 4 | Record-level routing map to WEMI clusters | `record_id` |
-| `sammelband_bindings` | 4 | Composite bound-with volume constituent map | `(binding_id, record_id)` |
-| `corpus_agent_clusters` | 4 | Reconciled agent identity clusters | `cluster_id` |
-| `corpus_agent_cluster_members`| 4 | Member provenance and confidence scores | `agent_id` |
-| `corpus_agent_cluster_attributes`| 4 | Empirical frequencies of consensus attributes | `id` (autoincrement) |
-| `harvest_state` | 5 | OAI-PMH synchronization checkpoints | `source_id` |
-| `task_progress` | 5 | Asynchronous worker telemetry and rates | `task_id` |
-| `db_metadata` | 5 | Schema version and system configuration metadata | `key` |
-
+| Index Type | Targeted Columns | Purpose |
+|---|---|---|
+| B-Tree | `works.source_id`, `works.canonical_work_id`, `work_relationships(source_work_id, relationship_type, sequence_number)` | Fast primary key lookups, hierarchy traversal, and foreign key cascade seeks. |
+| B-Tree Normalised | `identifiers.value_normalized`, `entity_keys.key_normalized` | Exact, O(1) Tier-1 identifier matching and blocking dispatch. |
+| Trigram (`pg_trgm` GIN) | `works.title_normalized`, `agents.name_normalized` | Substring and typo-tolerant fuzzy matching without full table scans. |
+| Vector ANN | `work_vectors`, `manifestation_vectors` | Dense cosine similarity nearest-neighbor semantic search (FAISS / PyTorch). |

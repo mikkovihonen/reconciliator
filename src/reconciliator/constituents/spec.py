@@ -8,7 +8,7 @@ than doing nothing.
 
 So the fields to read, the shape they produce and the order they carry belong to
 the *source*, and the code is one profile-driven extractor rather than a chain of
-per-source special cases. See plans/aggregates.md.
+per-source special cases. See docs/aggregates.md.
 """
 
 from __future__ import annotations

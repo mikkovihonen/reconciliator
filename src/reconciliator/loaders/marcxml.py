@@ -2524,7 +2524,7 @@ def extract_marc_constituents(
     The profile decides which tags to look at, which indicator values qualify,
     which subfield carries what, and how the results are deduplicated and
     numbered - because two sources in the same format do not agree about any of
-    that. See plans/aggregates.md.
+    that. See docs/aggregates.md.
     """
     found: list[Constituent] = []
 

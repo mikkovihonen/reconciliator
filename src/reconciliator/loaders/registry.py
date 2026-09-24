@@ -78,7 +78,7 @@ class MarcAuthorityLoader(RecordLoader):
 
     A separate implementation rather than a branch inside the bibliographic one:
     the two read 4 shared tags out of 36 and 12, so merging them concatenates two
-    disjoint bodies. See plans/wemi_data_structure.md 14.9.1.
+    disjoint bodies. See docs/datamodel.md.
     """
 
     capabilities: ClassVar[LoaderCapabilities]

@@ -24,7 +24,7 @@ Reconciliator follows a **stateless, idempotent, CLI-first pipeline architecture
 | **Vocabulary Download** | `reconciliator download-skosmos -c config.yaml` | Weekly / Bi-weekly | Fetches updated SKOS/RDF controlled vocabularies (YSO, YKL, KANTO, SLM) from Skosmos APIs. |
 | **Vocabulary Ingestion** | `reconciliator ingest-vocab -c config.yaml` | Weekly (after download) | Ingests downloaded SKOS vocabularies, concept hierarchies, mappings, and relator terms into the database. |
 | **Wikidata Ingestion** | `reconciliator ingest-wikidata -c config.yaml` | Weekly / Monthly | Streams updated Wikidata entity dumps, extracting authority persons, works, and identifiers. |
-| **Vector Index Rebuild** | `reconciliator build-index -c config.yaml` | Daily (after ingest) | Generates dense embeddings and updates USearch/FAISS ANN indices for newly harvested works and manifestations. |
+| **Vector Index Rebuild** | `reconciliator build-index -c config.yaml` | Daily (after ingest) | Generates dense embeddings and updates FAISS / PyTorch ANN indices for newly harvested works and manifestations. |
 | **Agent Vector Index Rebuild** | `reconciliator build-agent-index -c config.yaml` | Daily (after ingest) | Generates embeddings and updates the agent authority vector index. |
 | **Work Consolidation** | `reconciliator consolidate-works -c config.yaml` | Daily (after harvest) | Unifies cross-source works using deterministic identifiers and graph equivalence rules into `work_consolidations`. |
 | **Agent Clustering** | `reconciliator cluster-agents -c config.yaml` | Daily (after harvest) | Clusters raw agent authority records into canonical agent identity clusters with consensus frequencies. |
@@ -44,7 +44,7 @@ Reconciliator relies on the external scheduler to prevent concurrent runs of the
 * **Crontab**: Wrap commands with `/usr/bin/flock`.
 
 ### B. Persistent Volume for Vector Indices and Caches
-Vector indices (`work_vectors.usearch`, `manifestation_vectors.pt`) and vocabulary files reside on disk (configured under `storage:` in `config.yaml`).
+Vector indices (`work_vectors.faiss`, `work_vectors.pt`) and vocabulary files reside on disk (configured under `storage:` in `config.yaml`).
 * In containerized environments (Kubernetes), the directory containing index files (`/data`) **must** be mounted from a **PersistentVolumeClaim (PVC)** or a shared storage volume.
 * Transformer model weights download to `~/.cache/huggingface`. Set `HF_HOME=/data/hf_cache` on the persistent mount, or bake pretrained models directly into the container image to prevent re-downloading weights on every run.
 

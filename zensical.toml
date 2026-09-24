@@ -7,8 +7,13 @@ site_dir = "site"
 
 nav = [
     { "Home" = "index.md" },
-    { "Runbook" = "runbook.md" },
-    { "Architecture Specification (Archived)" = "archived/initial_architecture.md" },
+    { "Pipeline Overview" = "pipeline_overview.md" },
+    { "Data Model Specification" = "datamodel.md" },
+    { "Aggregate Architecture" = "aggregates.md" },
+    { "Operational Runbook" = "runbook.md" },
+    { "Recurring Task Scheduling" = "recurring_task_scheduling.md" },
+    { "Cascading Dual-Route Reranker" = "cascading_dual_route_reranker_architecture.md" },
+    { "Two-Stage LLM Judge" = "two_stage_llm_judge_architecture.md" },
 ]
 
 [project.theme]

@@ -89,7 +89,7 @@ def build_embodied_constituents(
     `track_number`, `disc_number` and `duration` columns are for.
 
     A constituent with its own extent is a different shape and is not handled
-    here; see plans/aggregates.md, stage 6.
+    here; see docs/aggregates.md.
     """
     rows = ConstituentRows()
     if not container_manifestation.manifestation_uri:
