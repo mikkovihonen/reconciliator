@@ -60,6 +60,7 @@ class TwoStageEntityResolver:
         base_seq_len: int,
         dense_score: float,
         acceptance_threshold: float = 0.5,
+        prior_bias: float = 0.0,
     ) -> ReconciliationMatch:
         """
         Evaluate candidate against target. Applies pre-veto filtering if enabled,
@@ -102,7 +103,7 @@ class TwoStageEntityResolver:
         suffix_template = getattr(
             getattr(self.backend, "config", None),
             "candidate_suffix_template",
-            "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: ",
+            "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: ",
         )
         candidate_suffix = suffix_template.format(text=cand_text)
 
@@ -111,6 +112,7 @@ class TwoStageEntityResolver:
             base_cache=base_cache,
             base_seq_len=base_seq_len,
             candidate_suffix=candidate_suffix,
+            prior_bias=prior_bias,
         )
 
         dense_weight = getattr(self.config, "dense_weight", 0.5) if self.config else 0.5
@@ -130,4 +132,5 @@ class TwoStageEntityResolver:
             surname_match=surname_match,
             year_diff=year_diff,
             accepted=accepted,
+            rationale=eval_res.rationale,
         )

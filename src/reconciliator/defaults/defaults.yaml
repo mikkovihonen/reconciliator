@@ -113,9 +113,16 @@ llm:
   batch_size: 16
   positive_token: "YES"
   negative_token: "NO"
-  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
-  candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+  target_template: "Task: Determine if two bibliographic records represent the same intellectual work.\nCriteria: Editions, translations, and reprints match. Different volumes, parts, or authors do not match.\n\nTarget Record: {text}\n"
+  candidate_suffix_template: "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: "
   max_seq_length: 2048
+  calibrate_prior: true
+  marginalize_tokens: true
+  prefix_lm_mask: true
+  symmetric_scoring: true
+  symmetric_margin_threshold: 0.05
+  adaptive_cot: false
+  adaptive_cot_max_tokens: 64
 
 linguistic:
   default_language: "fi"

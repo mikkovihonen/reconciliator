@@ -18,7 +18,15 @@ def test_judge_config_defaults() -> None:
     assert cfg.positive_token == "YES"
     assert cfg.negative_token == "NO"
     assert cfg.pooling_strategy == "last_token"
-    assert cfg.max_seq_length == 2048
+    assert "Task: Determine if two bibliographic records" in cfg.target_template
+    assert "Question: Do Target Record and Candidate Record" in cfg.candidate_suffix_template
+    assert cfg.calibrate_prior is True
+    assert cfg.marginalize_tokens is True
+    assert cfg.prefix_lm_mask is True
+    assert cfg.symmetric_scoring is True
+    assert cfg.symmetric_margin_threshold == 0.05
+    assert cfg.adaptive_cot is False
+    assert cfg.adaptive_cot_max_tokens == 64
 
 
 def test_rerank_config_with_judge() -> None:
@@ -51,3 +59,10 @@ def test_defaults_yaml_contains_vector_model_and_llm() -> None:
     assert llm_sec.get("positive_token") == "YES"
     assert llm_sec.get("negative_token") == "NO"
     assert llm_sec.get("model_name") == "Qwen/Qwen2.5-7B-Instruct"
+    assert llm_sec.get("calibrate_prior") is True
+    assert llm_sec.get("marginalize_tokens") is True
+    assert llm_sec.get("prefix_lm_mask") is True
+    assert llm_sec.get("symmetric_scoring") is True
+    assert llm_sec.get("symmetric_margin_threshold") == 0.05
+    assert llm_sec.get("adaptive_cot") is False
+    assert llm_sec.get("adaptive_cot_max_tokens") == 64

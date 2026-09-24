@@ -36,6 +36,8 @@ class MLXJudgeBackend:
 
         self._pos_token_id: Optional[int] = None
         self._neg_token_id: Optional[int] = None
+        self._pos_token_ids: list[int] = []
+        self._neg_token_ids: list[int] = []
 
         self._verify_platform()
 
@@ -90,19 +92,76 @@ class MLXJudgeBackend:
         self._resolve_decision_token_ids()
 
     def _resolve_decision_token_ids(self) -> None:
-        """Resolve token IDs for positive and negative decisions."""
+        """Resolve token IDs for positive and negative decisions with synonym clusters."""
         tokenizer = self.tokenizer
 
         def get_id(token_str: str) -> int:
             for cand in (f" {token_str}", token_str):
-                ids = tokenizer.encode(cand)
-                if ids:
-                    return int(ids[-1])
-            ids = tokenizer.encode(token_str)
-            return int(ids[-1]) if ids else 0
+                try:
+                    ids = tokenizer.encode(cand)
+                    if ids:
+                        return int(ids[-1])
+                except Exception:
+                    pass
+            try:
+                ids = tokenizer.encode(token_str)
+                return int(ids[-1]) if ids else 0
+            except Exception:
+                return 0
 
         self._pos_token_id = get_id(self.config.positive_token)
         self._neg_token_id = get_id(self.config.negative_token)
+
+        pos_words = [self.config.positive_token, "YES", "Yes", "yes", "True", "true", "Match", "match"]
+        neg_words = [self.config.negative_token, "NO", "No", "no", "False", "false", "Different", "different"]
+
+        pos_ids: set[int] = set()
+        for w in pos_words:
+            for cand in (f" {w}", w):
+                try:
+                    tok_ids = tokenizer.encode(cand)
+                    if tok_ids:
+                        pos_ids.add(int(tok_ids[-1]))
+                except Exception:
+                    pass
+
+        neg_ids: set[int] = set()
+        for w in neg_words:
+            for cand in (f" {w}", w):
+                try:
+                    tok_ids = tokenizer.encode(cand)
+                    if tok_ids:
+                        neg_ids.add(int(tok_ids[-1]))
+                except Exception:
+                    pass
+
+        overlap = pos_ids & neg_ids
+        for o in overlap:
+            pos_ids.discard(o)
+            neg_ids.discard(o)
+
+        self._pos_token_ids = sorted(pos_ids) if pos_ids else [self._pos_token_id or 0]
+        self._neg_token_ids = sorted(neg_ids) if neg_ids else [self._neg_token_id or 0]
+
+    def _compute_decision_logits(self, last_logits: Any) -> tuple[float, float, float]:
+        """Compute positive score, negative score, and raw margin via single token or cluster log-sum-exp in MLX."""
+        import mlx.core as mx
+
+        if getattr(self.config, "marginalize_tokens", True) and len(self._pos_token_ids) > 1 and len(self._neg_token_ids) > 1:
+            try:
+                pos_idx = mx.array(self._pos_token_ids)
+                neg_idx = mx.array(self._neg_token_ids)
+                pos_lse = float(mx.logsumexp(last_logits[pos_idx]).item())
+                neg_lse = float(mx.logsumexp(last_logits[neg_idx]).item())
+                return pos_lse, neg_lse, pos_lse - neg_lse
+            except Exception:
+                pass
+
+        pos_id = self._pos_token_id or 0
+        neg_id = self._neg_token_id or 0
+        pos_val = float(last_logits[pos_id].item())
+        neg_val = float(last_logits[neg_id].item())
+        return pos_val, neg_val, pos_val - neg_val
 
     def encode_target(self, text: str, retain_cache: bool = True) -> TargetEncoding:
         """Process target entity text with MLX and capture base prompt cache."""
@@ -143,10 +202,22 @@ class MLXJudgeBackend:
                 if hasattr(c, "values") and c.values is not None:
                     mx.eval(c.values)
 
+        prior_bias = 0.0
+        if retain_cache and getattr(self.config, "calibrate_prior", True) and prompt_cache is not None:
+            neutral_suffix = self.config.candidate_suffix_template.format(text="N/A")
+            neutral_eval = self.evaluate_candidate(
+                base_cache=prompt_cache,
+                base_seq_len=base_seq_len,
+                candidate_suffix=neutral_suffix,
+                prior_bias=0.0,
+            )
+            prior_bias = neutral_eval.calibrated_margin
+
         return TargetEncoding(
             dense_vector=dense_vector,
             kv_cache=prompt_cache,
             base_seq_len=base_seq_len,
+            prior_bias=prior_bias,
         )
 
     def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
@@ -162,16 +233,17 @@ class MLXJudgeBackend:
         return np.vstack(vectors)
 
     def evaluate_candidate(
-        self, base_cache: Any, base_seq_len: int, candidate_suffix: str
+        self,
+        base_cache: Any,
+        base_seq_len: int,
+        candidate_suffix: str,
+        prior_bias: float = 0.0,
     ) -> CandidateEvaluation:
-        """Evaluate candidate suffix using prompt cache and slice back in-place."""
+        """Evaluate candidate suffix using prompt cache, apply prior calibration, and slice back in-place."""
         import mlx.core as mx
 
         if self._pos_token_id is None or self._neg_token_id is None:
             self._resolve_decision_token_ids()
-
-        pos_id = self._pos_token_id or 0
-        neg_id = self._neg_token_id or 0
 
         suffix_tokens = self.tokenizer.encode(candidate_suffix)
         suffix_arr = mx.array([suffix_tokens])
@@ -181,22 +253,22 @@ class MLXJudgeBackend:
             mx.eval(logits)
 
             last_logits = logits[0, -1, :]
-            pos_logit = float(last_logits[pos_id].item())
-            neg_logit = float(last_logits[neg_id].item())
+            pos_val, neg_val, raw_margin = self._compute_decision_logits(last_logits)
 
-            is_match = pos_logit > neg_logit
-            margin = pos_logit - neg_logit
+            calibrated_margin = raw_margin - prior_bias
+            is_match = calibrated_margin > 0.0
 
             try:
-                conf = 1.0 / (1.0 + math.exp(-margin))
+                conf = 1.0 / (1.0 + math.exp(-calibrated_margin))
             except OverflowError:
-                conf = 1.0 if margin > 0 else 0.0
+                conf = 1.0 if calibrated_margin > 0 else 0.0
 
             raw_token = self.config.positive_token if is_match else self.config.negative_token
             return CandidateEvaluation(
                 is_match=is_match,
                 confidence_score=float(conf),
                 raw_token=raw_token,
+                calibrated_margin=float(calibrated_margin),
             )
         finally:
             self.truncate_kv_cache(base_cache, base_seq_len)

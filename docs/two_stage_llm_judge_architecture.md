@@ -285,14 +285,126 @@ When `apply_pre_veto: true`, ~70–80% of spurious vector neighbors are dropped 
 
 ---
 
-## 6. Model Selection Guide for Apple Silicon (M2 Max 64 GB)
+## 6. Model Evaluation & Suitability Analysis
 
-| Model Name | HuggingFace Identifier | Weights | RAM Footprint | Decode Speed | Recommended Use |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Qwen 2.5 14B Instruct** | `mlx-community/Qwen2.5-14B-Instruct-4bit` | 4-bit MLX | **~8.9 GB** | **~55–60 tok/s** | **Default Production**: Best balance of Finnish/Swedish vocabulary (152k tokens), calibrated binary logits, and speed. |
-| **Qwen 2.5 7B Instruct** | `mlx-community/Qwen2.5-7B-Instruct-4bit` | 4-bit MLX | **~4.8 GB** | **~100–110 tok/s** | **High Throughput**: For large batch ingestion and reconciliation. |
-| **Qwen 2.5 32B Instruct** | `mlx-community/Qwen2.5-32B-Instruct-4bit` | 4-bit MLX | **~19.8 GB** | **~22–26 tok/s** | **Maximum Nuance**: Deep bibliographic discrimination for complex editions. |
-| **GTE Qwen2 1.5B** | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | FP16/BF16 | **~3.2 GB** | **~150+ tok/s** | **Testing & CI**: Ultra-fast causal embedding & judge. |
+The two-stage entity resolution pipeline unifies dense retrieval with autoregressive LLM judgment. Because the judge evaluates candidates via **KV-branching suffix passes with zero-copy cache truncation**, not all modern LLMs are architecturally compatible. This section defines the four mandatory suitability criteria and evaluates major contemporary open-weights models.
+
+### 6.1 Architectural Suitability Criteria
+
+```mermaid
+flowchart TD
+    Candidate["Candidate LLM Architecture"] --> CheckAttn{"Attention Type?"}
+    CheckAttn -->|"Alternating Sliding Window (e.g. Gemma 2/3)"| RejectSWA["INCOMPATIBLE:<br/>Sliding-window circular buffers break arbitrary in-place prefix truncation"]
+    CheckAttn -->|"Standard Full-Attention GQA / MHA"| CheckVocab{"Tokenizer & Vocab Size?"}
+    
+    CheckVocab -->|"< 100k or poor Finnish compression"| WarnVocab["SUB-OPTIMAL:<br/>Excessive subword splitting on Finnish/Swedish compounds (Melinda/YSO)"]
+    CheckVocab -->|"128k - 152k with strong multilingual coverage"| CheckWeights{"Parameter Size & Quantization?"}
+
+    CheckWeights -->|"> 35B dense / Unquantized MoE"| HighVRAM["RESOURCE INTENSIVE:<br/>Exceeds single GPU / local M2 Max 64GB budget"]
+    CheckWeights -->|"7B - 32B (4-bit / 8-bit quantized)"| Approved["FULLY COMPATIBLE & RECOMMENDED:<br/>Single-pass encoding, Prefix-LM mask, zero-copy truncation & fast decoding"]
+```
+
+1. **Standard Full-Attention KV Cache (No Sliding Window)**:
+   - Models with sliding-window attention (SWA) or alternating local/global layers (such as **Google Gemma 2 and Gemma 3**) are **incompatible** with arbitrary zero-copy in-place truncation. SWA maintains a circular rolling KV buffer where position offsets wrap around; slicing `t[..., :base_seq_len, :]` corrupts the rolling index and causes catastrophic degradation on subsequent candidates.
+   - Models with standard Grouped Query Attention (GQA) and full causal attention (e.g., Qwen 2.5, Mistral NeMo, Llama 3.1) maintain contiguous, linearly indexed KV states that can be sliced back to $L_{\text{base}}$ in $\mathcal{O}(1)$ time without buffer copying.
+
+2. **Multilingual Tokenizer Compression (Finnish & Swedish)**:
+   - Bibliographic records in Melinda, Fennica, and YSO feature agglutinative Finnish compound words (e.g., *kirjallisuudentutkimus*, *ylioppilastutkintotodistus*) and Nordic diacritics (*å*, *ä*, *ö*).
+   - Tokenizers with smaller or English-biased vocabularies split Nordic words into 3–5 subword fragments, inflating sequence length and diluting attention.
+   - Models with large multilingual vocabularies (e.g., **Qwen's 152k vocabulary** or **Mistral's 128k Tekken tokenizer**) achieve high token compression (~1.35 tokens/word in Finnish vs. >2.10 tokens/word in Llama 3).
+
+3. **Prefix-LM 4D Attention Masking Support**:
+   - The model must accept an explicit 4D attention mask (`[batch, 1, seq_len, seq_len]`) or custom SDPA mask during the target encoding pass to allow bidirectional attention among query tokens without causal masking artifacts.
+
+4. **Hardware Footprint & Decoding Latency**:
+   - In production on Apple Silicon (M2 Max 64 GB) or single workstation GPUs (e.g., RTX 4090 / A10G 24 GB), the model must run in 4-bit or 8-bit quantization with a working RAM footprint under 20 GB, ensuring sufficient memory remains for PostgreSQL, vector indexes, and OS cache while delivering $\ge 30\text{ tokens/sec}$ decode speed.
+
+---
+
+### 6.2 Model Suitability Matrix
+
+| Model Family | Model Identifier | Architecture | Vocab Size | Finnish/Swedish Compression | KV Slicing Compatibility | RAM (4-bit) | Decode Speed (M2 Max) | Overall Verdict |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Qwen 2.5 14B Instruct** | `mlx-community/Qwen2.5-14B-Instruct-4bit`<br/>`Qwen/Qwen2.5-14B-Instruct` | Standard GQA | **152k** | **Exceptional** (~1.35 tok/word) | **Full** (Linear contiguous) | **~8.9 GB** | **~55–60 tok/s** | **Recommended Default**: Outstanding bibliographic nuance, calibrated binary logits, high Nordic density. |
+| **Mistral NeMo 12B Instruct** | `mlx-community/Mistral-Nemo-Instruct-2407-4bit`<br/>`mistralai/Mistral-Nemo-Instruct-2407` | Standard GQA | **128k (Tekken)** | **High** (~1.48 tok/word) | **Full** (Linear contiguous) | **~7.5 GB** | **~65–70 tok/s** | **Excellent Alternative**: Co-developed with NVIDIA; strong European language reasoning and clean instruction compliance. |
+| **Qwen 2.5 7B Instruct** | `mlx-community/Qwen2.5-7B-Instruct-4bit`<br/>`Qwen/Qwen2.5-7B-Instruct` | Standard GQA | **152k** | **Exceptional** (~1.35 tok/word) | **Full** (Linear contiguous) | **~4.8 GB** | **~100–110 tok/s** | **High-Throughput Default**: Ultra-low latency, optimal for large-scale ingestion batches. |
+| **Qwen 2.5 32B Instruct** | `mlx-community/Qwen2.5-32B-Instruct-4bit`<br/>`Qwen/Qwen2.5-32B-Instruct` | Standard GQA | **152k** | **Exceptional** (~1.35 tok/word) | **Full** (Linear contiguous) | **~19.8 GB** | **~22–26 tok/s** | **Maximum Nuance**: Resolves difficult multi-part editions and translations; requires 64 GB unified RAM. |
+| **Meta Llama 3.1 8B Instruct** | `mlx-community/Meta-Llama-3.1-8B-Instruct-4bit`<br/>`meta-llama/Meta-Llama-3.1-8B-Instruct` | Standard GQA | **128k (tiktoken)** | **Moderate** (~2.10 tok/word) | **Full** (Linear contiguous) | **~5.2 GB** | **~90–100 tok/s** | **Acceptable**: Fast and reliable, but splits Finnish compounds into significantly more subwords. |
+| **Google Gemma 2 (9B / 27B)** | `google/gemma-2-9b-it`<br/>`mlx-community/gemma-2-9b-it-4bit` | Alternating SWA | **256k** | **High** (~1.42 tok/word) | **Incompatible** (Circular SWA buffer) | **~6.0 GB** | N/A | **Unsuitable**: Alternating local sliding-window attention breaks arbitrary prefix-cache reuse and truncation. |
+| **DeepSeek-V3 / R1 (671B MoE)** | `deepseek-ai/DeepSeek-V3` | MoE (37B active) | **128k** | **High** | **Incompatible** (Local hardware limit) | **>350 GB** | N/A | **Unsuitable**: Exceeds single-node/local memory; excessive latency for sub-millisecond candidate judging. |
+| **GTE Qwen2 1.5B** | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | Standard GQA | **152k** | **Exceptional** | **Full** (Linear contiguous) | **~3.2 GB (FP16)**| **~150+ tok/s** | **Testing & CI**: Ultra-compact footprint for automated integration suites. |
+
+---
+
+### 6.3 Model Selection Guide by Deployment Profile
+
+```mermaid
+flowchart TD
+    Start(["Select Target Environment"]) --> Hardware{"Hardware Target?"}
+
+    Hardware -->|"Apple Silicon M2/M3/M4 Max (64 GB)"| AppleProfile{"Optimization Goal?"}
+    Hardware -->|"Single Workstation GPU (RTX 4090 / A10G 24 GB)"| CudaProfile{"Optimization Goal?"}
+    Hardware -->|"CI / Automated Testing / Edge"| CIProfile["GTE Qwen2 1.5B (FP16 / BF16)<br/>~3.2 GB RAM, 150+ tok/s"]
+
+    AppleProfile -->|"Accuracy & Nuance (Recommended)"| M2_Acc["Qwen 2.5 14B Instruct (4-bit MLX)<br/>~8.9 GB RAM, 55-60 tok/s"]
+    AppleProfile -->|"Maximum Throughput"| M2_Speed["Qwen 2.5 7B Instruct (4-bit MLX)<br/>~4.8 GB RAM, 100-110 tok/s"]
+    AppleProfile -->|"Complex Edition Disambiguation"| M2_Deep["Qwen 2.5 32B Instruct (4-bit MLX)<br/>~19.8 GB RAM, 22-26 tok/s"]
+
+    CudaProfile -->|"Standard Production"| Cuda_Prod["Qwen 2.5 14B Instruct (AWQ / GPTQ 4-bit)<br/>~9.5 GB VRAM"]
+    CudaProfile -->|"European Multilingual Focus"| Cuda_Nemo["Mistral NeMo 12B Instruct (AWQ / BF16)<br/>~8.5 GB VRAM"]
+    CudaProfile -->|"High Throughput Ingestion"| Cuda_7B["Qwen 2.5 7B Instruct (AWQ / 4-bit)<br/>~5.2 GB VRAM"]
+```
+
+## 6.5 Cross-Encoder Parity & Calibration Architecture
+
+To match and exceed the discrimination accuracy of bidirectional cross-encoders (such as DeBERTa-v3 or `bge-reranker-large`) while preserving the $\mathcal{O}(1)$ KV-branching latency advantage, the LLM Judge incorporates four parity pillars:
+
+```mermaid
+flowchart TD
+    subgraph Target Processing
+        Target["Target Bibliographic Record"] --> Enc["Single-Pass Encoding with Prefix-LM Mask"]
+        Enc --> Cache["Lock Base KV-Cache"]
+        Enc --> Calib["Compute Context-Free Prior Bias (Candidate: N/A)"]
+    end
+
+    subgraph Candidate Evaluation
+        Cache --> Suffix["Append Candidate Suffix"]
+        Suffix --> Fwd["Forward Pass on Suffix Tokens Only"]
+        Fwd --> Marg["Multi-Token Cluster Marginalization (torch/mx.logsumexp)"]
+        Calib --> SubBias["Subtract Context-Free Prior Bias"]
+        Marg --> SubBias
+        SubBias --> Trunc["Zero-Copy In-Place KV Truncation"]
+        Trunc --> Ready["KV-Cache Restored to Base Length"]
+    end
+
+    subgraph Dual-Direction Ambiguity Resolution
+        SubBias --> CheckMargin{"Top Contenders Margin <= threshold?"}
+        CheckMargin -->|"No (Decisive)"| FinalScore["Emit Calibrated Score"]
+        CheckMargin -->|"Yes (Borderline)"| SymForward["Evaluate Inverse Direction B -> A"]
+        SymForward --> AvgScore["Emit Harmonic/Arithmetic Mean"]
+    end
+```
+
+### 1. Multi-Token Logit Marginalization
+Instruction-tuned models emit diverse surface forms for decision tokens. Rather than evaluating a single token ID (`YES` vs `NO`), the judge resolves candidate token clusters:
+* $\mathcal{T}^+ = \{\text{"YES"}, \text{" YES"}, \text{"Yes"}, \text{" Yes"}, \text{"True"}, \text{"Match"}\}$
+* $\mathcal{T}^- = \{\text{"NO"}, \text{" NO"}, \text{"No"}, \text{" No"}, \text{"False"}, \text{"Different"}\}$
+
+Raw confidence margins are computed using log-sum-exp pooling:
+$$\text{margin}_{\text{raw}} = \text{logsumexp}_{t \in \mathcal{T}^+}(\text{logit}_t) - \text{logsumexp}_{t \in \mathcal{T}^-}(\text{logit}_t)$$
+
+### 2. Context-Free Prior Calibration
+Autoregressive LLMs often have intrinsic positive or negative bias. During `encode_target()`, the base model evaluates a neutral candidate (`Candidate: N/A...`) to calculate baseline bias:
+$$\text{bias} = \text{margin}_{\text{neutral}}$$
+During candidate scoring, this background prior is subtracted:
+$$\text{margin}_{\text{calibrated}} = \text{margin}_{\text{raw}} - \text{bias}$$
+$$\text{confidence} = \sigma(\text{margin}_{\text{calibrated}})$$
+
+### 3. Prefix-LM Attention Masking
+Standard causal masks prevent query tokens from attending forward. With Prefix-LM masking enabled, target prompt tokens attend bidirectionally ($q_i \leftrightarrow q_j$), providing the exact same all-to-all query representation as cross-encoders while keeping the multi-layer KV-cache completely static and reusable.
+
+### 4. Symmetric Dual-Direction Scoring
+To eliminate order asymmetry ($f(A, B) \ne f(B, A)$) on borderline candidates, when top contenders differ by less than `symmetric_margin_threshold` (default $0.05$), the judge evaluates the inverse presentation ($B \rightarrow A$) and averages the resulting probabilities.
 
 ---
 
@@ -319,8 +431,15 @@ reconcile:
       batch_size: 16
       positive_token: "YES"
       negative_token: "NO"
-      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n"
-      candidate_suffix_template: "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: "
+      target_template: "Task: Determine if two bibliographic records represent the same intellectual work.\nCriteria: Editions, translations, and reprints match. Different volumes, parts, or authors do not match.\n\nTarget Record: {text}\n"
+      candidate_suffix_template: "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: "
       max_seq_length: 2048
+      calibrate_prior: true       # Context-free prior bias subtraction
+      marginalize_tokens: true    # Multi-token logsumexp cluster marginalization
+      prefix_lm_mask: true        # Bidirectional attention within query prefix
+      symmetric_scoring: true     # Symmetric inverse scoring on borderline contenders
+      symmetric_margin_threshold: 0.05
+      adaptive_cot: false         # Reasoning verification fallback for deadlocks
+      adaptive_cot_max_tokens: 64
 ```
 

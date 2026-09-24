@@ -63,7 +63,7 @@ class LLMJudgeConfig(BaseModel):
         default_factory=lambda: str(
             _LLM_DEFAULTS.get(
                 "target_template",
-                "Instruct: Given a bibliographic record, retrieve matching catalog works.\nQuery: {text}\n",
+                "Task: Determine if two bibliographic records represent the same intellectual work.\nCriteria: Editions, translations, and reprints match. Different volumes, parts, or authors do not match.\n\nTarget Record: {text}\n",
             )
         )
     )
@@ -71,16 +71,34 @@ class LLMJudgeConfig(BaseModel):
         default_factory=lambda: str(
             _LLM_DEFAULTS.get(
                 "candidate_suffix_template",
-                "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: ",
+                "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: ",
             )
         )
     )
     max_seq_length: int = Field(
         default_factory=lambda: int(_LLM_DEFAULTS.get("max_seq_length", 2048))
     )
-
-
-JudgeConfig = LLMJudgeConfig
+    calibrate_prior: bool = Field(
+        default_factory=lambda: bool(_LLM_DEFAULTS.get("calibrate_prior", True))
+    )
+    marginalize_tokens: bool = Field(
+        default_factory=lambda: bool(_LLM_DEFAULTS.get("marginalize_tokens", True))
+    )
+    prefix_lm_mask: bool = Field(
+        default_factory=lambda: bool(_LLM_DEFAULTS.get("prefix_lm_mask", True))
+    )
+    symmetric_scoring: bool = Field(
+        default_factory=lambda: bool(_LLM_DEFAULTS.get("symmetric_scoring", True))
+    )
+    symmetric_margin_threshold: float = Field(
+        default_factory=lambda: float(_LLM_DEFAULTS.get("symmetric_margin_threshold", 0.05))
+    )
+    adaptive_cot: bool = Field(
+        default_factory=lambda: bool(_LLM_DEFAULTS.get("adaptive_cot", False))
+    )
+    adaptive_cot_max_tokens: int = Field(
+        default_factory=lambda: int(_LLM_DEFAULTS.get("adaptive_cot_max_tokens", 64))
+    )
 
 
 class CascadeRouterConfig(BaseModel):

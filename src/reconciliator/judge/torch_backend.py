@@ -40,6 +40,8 @@ class PytorchJudgeBackend:
         # Resolve positive and negative token IDs lazily or on init
         self._pos_token_id: Optional[int] = None
         self._neg_token_id: Optional[int] = None
+        self._pos_token_ids: list[int] = []
+        self._neg_token_ids: list[int] = []
 
     @property
     def model(self) -> Any:
@@ -120,32 +122,91 @@ class PytorchJudgeBackend:
         self._resolve_decision_token_ids()
 
     def _resolve_decision_token_ids(self) -> None:
-        """Identify token IDs for the positive and negative classification targets."""
+        """Identify token IDs for the positive and negative classification targets with synonym clusters."""
         tokenizer = self.tokenizer
 
         def get_id(token_str: str) -> int:
-            # Try with and without leading space
             for candidate in (f" {token_str}", token_str):
-                ids = tokenizer.encode(candidate, add_special_tokens=False)
-                if ids:
-                    return int(ids[-1])
-            ids = tokenizer.encode(token_str, add_special_tokens=True)
-            return int(ids[-1]) if ids else 0
+                try:
+                    ids = tokenizer.encode(candidate, add_special_tokens=False)
+                    if ids:
+                        return int(ids[-1])
+                except Exception:
+                    pass
+            try:
+                ids = tokenizer.encode(token_str, add_special_tokens=True)
+                return int(ids[-1]) if ids else 0
+            except Exception:
+                return 0
 
         self._pos_token_id = get_id(self.config.positive_token)
         self._neg_token_id = get_id(self.config.negative_token)
+
+        # Multi-token marginalization clusters
+        pos_words = [self.config.positive_token, "YES", "Yes", "yes", "True", "true", "Match", "match"]
+        neg_words = [self.config.negative_token, "NO", "No", "no", "False", "false", "Different", "different"]
+
+        pos_ids: set[int] = set()
+        for w in pos_words:
+            for cand in (f" {w}", w):
+                try:
+                    tok_ids = tokenizer.encode(cand, add_special_tokens=False)
+                    if tok_ids:
+                        pos_ids.add(int(tok_ids[-1]))
+                except Exception:
+                    pass
+
+        neg_ids: set[int] = set()
+        for w in neg_words:
+            for cand in (f" {w}", w):
+                try:
+                    tok_ids = tokenizer.encode(cand, add_special_tokens=False)
+                    if tok_ids:
+                        neg_ids.add(int(tok_ids[-1]))
+                except Exception:
+                    pass
+
+        overlap = pos_ids & neg_ids
+        for o in overlap:
+            pos_ids.discard(o)
+            neg_ids.discard(o)
+
+        self._pos_token_ids = sorted(pos_ids) if pos_ids else [self._pos_token_id or 0]
+        self._neg_token_ids = sorted(neg_ids) if neg_ids else [self._neg_token_id or 0]
+
         logger.debug(
-            "Resolved decision tokens: %s -> %s, %s -> %s",
+            "Resolved decision tokens: %s -> %s, %s -> %s (marginalized pos_ids=%s, neg_ids=%s)",
             self.config.positive_token,
             self._pos_token_id,
             self.config.negative_token,
             self._neg_token_id,
+            self._pos_token_ids,
+            self._neg_token_ids,
         )
+
+    def _compute_decision_logits(self, last_logits: torch.Tensor) -> tuple[float, float, float]:
+        """Compute positive score, negative score, and raw margin via single token or cluster log-sum-exp."""
+        if getattr(self.config, "marginalize_tokens", True) and len(self._pos_token_ids) > 1 and len(self._neg_token_ids) > 1:
+            try:
+                pos_idx = torch.tensor(self._pos_token_ids, device=last_logits.device, dtype=torch.long)
+                neg_idx = torch.tensor(self._neg_token_ids, device=last_logits.device, dtype=torch.long)
+                pos_val = float(torch.logsumexp(last_logits[pos_idx], dim=0).item())
+                neg_val = float(torch.logsumexp(last_logits[neg_idx], dim=0).item())
+                return pos_val, neg_val, pos_val - neg_val
+            except Exception:
+                pass
+
+        pos_id = self._pos_token_id or 0
+        neg_id = self._neg_token_id or 0
+        pos_val = float(last_logits[pos_id].item())
+        neg_val = float(last_logits[neg_id].item())
+        return pos_val, neg_val, pos_val - neg_val
 
     def encode_target(self, text: str, retain_cache: bool = True) -> TargetEncoding:
         """
         Process target record through base model once.
-        Simultaneously extracts L2-normalized dense embedding and locks multi-layer KV-cache.
+        Simultaneously extracts L2-normalized dense embedding, locks multi-layer KV-cache,
+        and optionally computes context-free prior calibration bias.
         """
         prompt = self.config.target_template.format(text=text)
         inputs = self.tokenizer(
@@ -156,14 +217,31 @@ class PytorchJudgeBackend:
         ).to(self.device)
 
         base_seq_len = int(inputs.input_ids.shape[1])
+        model_kwargs: dict[str, Any] = {
+            "input_ids": inputs.input_ids,
+            "use_cache": retain_cache,
+            "output_hidden_states": True,
+            "return_dict": True,
+        }
+
+        # Prefix-LM attention mask (bidirectional attention within target prompt)
+        if getattr(self.config, "prefix_lm_mask", True):
+            prefix_mask = torch.ones(
+                (1, 1, base_seq_len, base_seq_len),
+                dtype=torch.bool,
+                device=self.device,
+            )
+            model_kwargs["attention_mask"] = prefix_mask
+        else:
+            model_kwargs["attention_mask"] = inputs.attention_mask
 
         with torch.inference_mode():
-            outputs = self.model(
-                **inputs,
-                use_cache=retain_cache,
-                output_hidden_states=True,
-                return_dict=True,
-            )
+            try:
+                outputs = self.model(**model_kwargs)
+            except (TypeError, ValueError):
+                # Fallback to standard 2D attention mask if model doesn't support 4D
+                model_kwargs["attention_mask"] = inputs.attention_mask
+                outputs = self.model(**model_kwargs)
 
             # Extract dense representation from final hidden states
             last_hidden = outputs.hidden_states[-1]  # [1, seq_len, hidden_dim]
@@ -176,10 +254,24 @@ class PytorchJudgeBackend:
             dense_vector = dense_norm.squeeze(0).to(torch.float32).cpu().numpy()
 
         kv_cache = outputs.past_key_values if retain_cache else None
+
+        # Context-Free Prior Calibration: evaluate neutral candidate "N/A"
+        prior_bias = 0.0
+        if retain_cache and getattr(self.config, "calibrate_prior", True) and kv_cache is not None:
+            neutral_suffix = self.config.candidate_suffix_template.format(text="N/A")
+            neutral_eval = self.evaluate_candidate(
+                base_cache=kv_cache,
+                base_seq_len=base_seq_len,
+                candidate_suffix=neutral_suffix,
+                prior_bias=0.0,
+            )
+            prior_bias = neutral_eval.calibrated_margin
+
         return TargetEncoding(
             dense_vector=dense_vector,
             kv_cache=kv_cache,
             base_seq_len=base_seq_len,
+            prior_bias=prior_bias,
         )
 
     def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
@@ -232,17 +324,18 @@ class PytorchJudgeBackend:
         return np.vstack(all_embeddings)
 
     def evaluate_candidate(
-        self, base_cache: Any, base_seq_len: int, candidate_suffix: str
+        self,
+        base_cache: Any,
+        base_seq_len: int,
+        candidate_suffix: str,
+        prior_bias: float = 0.0,
     ) -> CandidateEvaluation:
         """
         Evaluate candidate suffix with the locked base KV-cache, decode classification token,
-        and perform zero-copy in-place truncation back to base_seq_len.
+        apply context-free prior calibration, and perform zero-copy in-place truncation back to base_seq_len.
         """
         if self._pos_token_id is None or self._neg_token_id is None:
             self._resolve_decision_token_ids()
-
-        pos_id = self._pos_token_id or 0
-        neg_id = self._neg_token_id or 0
 
         suffix_inputs = self.tokenizer(
             candidate_suffix,
@@ -259,23 +352,25 @@ class PytorchJudgeBackend:
                     return_dict=True,
                 )
                 logits = outputs.logits[:, -1, :]  # [1, vocab_size]
-                pos_logit = float(logits[0, pos_id].item())
-                neg_logit = float(logits[0, neg_id].item())
+                pos_val, neg_val, raw_margin = self._compute_decision_logits(logits[0])
 
-                is_match = pos_logit > neg_logit
-                margin = pos_logit - neg_logit
+                # Subtract context-free background prior bias
+                calibrated_margin = raw_margin - prior_bias
+
+                is_match = calibrated_margin > 0.0
 
                 # Calibrated confidence via sigmoid
                 try:
-                    conf = 1.0 / (1.0 + math.exp(-margin))
+                    conf = 1.0 / (1.0 + math.exp(-calibrated_margin))
                 except OverflowError:
-                    conf = 1.0 if margin > 0 else 0.0
+                    conf = 1.0 if calibrated_margin > 0 else 0.0
 
                 raw_token = self.config.positive_token if is_match else self.config.negative_token
                 return CandidateEvaluation(
                     is_match=is_match,
                     confidence_score=float(conf),
                     raw_token=raw_token,
+                    calibrated_margin=float(calibrated_margin),
                 )
         finally:
             # Guarantee zero-copy in-place truncation even if forward pass errors

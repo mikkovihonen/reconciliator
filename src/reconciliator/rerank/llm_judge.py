@@ -32,15 +32,16 @@ class LLMJudgeScorer:
             self.backend = create_judge_backend(LLMJudgeConfig())
 
     def score(self, query: str, document: str) -> float:
-        """Compute matching score in [0.0, 1.0] for a query-document pair."""
+        """Compute matching score in [0.0, 1.0] for a query-document pair with optional symmetric scoring."""
         if not query or not document:
             return 0.0
 
         encoding = self.backend.encode_target(query, retain_cache=True)
+        prior_bias = getattr(encoding, "prior_bias", 0.0)
         suffix_template = getattr(
             getattr(self.backend, "config", None),
             "candidate_suffix_template",
-            "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: ",
+            "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: ",
         )
         suffix = suffix_template.format(text=document)
 
@@ -48,23 +49,41 @@ class LLMJudgeScorer:
             base_cache=encoding.kv_cache,
             base_seq_len=encoding.base_seq_len,
             candidate_suffix=suffix,
+            prior_bias=prior_bias,
         )
-        return float(eval_res.confidence_score)
+        fwd_score = float(eval_res.confidence_score)
+
+        if getattr(getattr(self.backend, "config", None), "symmetric_scoring", True):
+            enc_rev = self.backend.encode_target(document, retain_cache=True)
+            bias_rev = getattr(enc_rev, "prior_bias", 0.0)
+            suffix_rev = suffix_template.format(text=query)
+            eval_rev = self.backend.evaluate_candidate(
+                base_cache=enc_rev.kv_cache,
+                base_seq_len=enc_rev.base_seq_len,
+                candidate_suffix=suffix_rev,
+                prior_bias=bias_rev,
+            )
+            rev_score = float(eval_rev.confidence_score)
+            return (fwd_score + rev_score) / 2.0
+
+        return fwd_score
 
     def score_batch(self, query: str, documents: list[str]) -> list[float]:
         """
         Compute similarity scores for a query across candidate documents.
-        Encodes query once, then evaluates all candidate suffixes via KV-branching.
+        Encodes query once, evaluates suffixes via KV-branching with prior calibration,
+        and applies symmetric dual-direction evaluation on close contenders.
         """
         if not query or not documents:
             return [0.0] * len(documents)
 
         # Single-pass encoding of the query
         encoding = self.backend.encode_target(query, retain_cache=True)
+        prior_bias = getattr(encoding, "prior_bias", 0.0)
         suffix_template = getattr(
             getattr(self.backend, "config", None),
             "candidate_suffix_template",
-            "Candidate: {text}\nDoes this refer to the same work? Answer YES or NO: ",
+            "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: ",
         )
 
         scores: list[float] = []
@@ -77,7 +96,39 @@ class LLMJudgeScorer:
                 base_cache=encoding.kv_cache,
                 base_seq_len=encoding.base_seq_len,
                 candidate_suffix=suffix,
+                prior_bias=prior_bias,
             )
             scores.append(float(eval_res.confidence_score))
+
+        # Symmetric dual-direction scoring on close contenders
+        cfg = getattr(self.backend, "config", None)
+        if getattr(cfg, "symmetric_scoring", True) and len(documents) > 1:
+            threshold = getattr(cfg, "symmetric_margin_threshold", 0.05)
+            indexed = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+            top_idx, top_score = indexed[0]
+            second_idx, second_score = indexed[1]
+
+            if (top_score - second_score) <= threshold and top_score > 0.0:
+                # Contenders to symmetrically re-score
+                contenders = [top_idx]
+                for idx, score in indexed[1:]:
+                    if (top_score - score) <= threshold:
+                        contenders.append(idx)
+                    else:
+                        break
+
+                for idx in contenders:
+                    cand_doc = documents[idx]
+                    enc_rev = self.backend.encode_target(cand_doc, retain_cache=True)
+                    bias_rev = getattr(enc_rev, "prior_bias", 0.0)
+                    suffix_rev = suffix_template.format(text=query)
+                    eval_rev = self.backend.evaluate_candidate(
+                        base_cache=enc_rev.kv_cache,
+                        base_seq_len=enc_rev.base_seq_len,
+                        candidate_suffix=suffix_rev,
+                        prior_bias=bias_rev,
+                    )
+                    rev_score = float(eval_rev.confidence_score)
+                    scores[idx] = (scores[idx] + rev_score) / 2.0
 
         return scores

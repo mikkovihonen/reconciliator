@@ -15,6 +15,7 @@ class TargetEncoding:
     dense_vector: np.ndarray
     kv_cache: Optional[Any]
     base_seq_len: int
+    prior_bias: float = 0.0
 
 
 @dataclass
@@ -24,6 +25,8 @@ class CandidateEvaluation:
     is_match: bool
     confidence_score: float
     raw_token: str
+    calibrated_margin: float = 0.0
+    rationale: Optional[str] = None
 
 
 @runtime_checkable
@@ -48,7 +51,11 @@ class LLMJudgeBackend(Protocol):
         ...
 
     def evaluate_candidate(
-        self, base_cache: Any, base_seq_len: int, candidate_suffix: str
+        self,
+        base_cache: Any,
+        base_seq_len: int,
+        candidate_suffix: str,
+        prior_bias: float = 0.0,
     ) -> CandidateEvaluation:
         """Evaluate candidate suffix, decode decision, and truncate cache back to base_seq_len."""
         ...

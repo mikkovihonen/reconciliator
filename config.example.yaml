@@ -157,9 +157,18 @@ llm:
   batch_size: 16                         # Batch size for dense vector extraction
   positive_token: "YES"
   negative_token: "NO"
-  target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\\nQuery: {text}\\n"
-  candidate_suffix_template: "Candidate: {text}\\nDoes this refer to the same work? Answer YES or NO: "
+  target_template: "Task: Determine if two bibliographic records represent the same intellectual work.\\nCriteria: Editions, translations, and reprints match. Different volumes, parts, or authors do not match.\\n\\nTarget Record: {text}\\n"
+  candidate_suffix_template: "Candidate Record: {text}\\n\\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: "
   max_seq_length: 2048                   # Maximum sequence length for context window
+
+  # Cross-Encoder Parity & Calibration
+  calibrate_prior: true                  # Subtract background prior bias computed on neutral candidate
+  marginalize_tokens: true               # Marginalize over positive/negative synonym token clusters
+  prefix_lm_mask: true                   # Enable bidirectional attention within query prompt prefix
+  symmetric_scoring: true                # Evaluate reverse direction (B -> A) for contenders within margin
+  symmetric_margin_threshold: 0.05       # Score delta triggering symmetric dual-direction evaluation
+  adaptive_cot: false                    # Enable Chain-of-Thought verification on deadlocked ties
+  adaptive_cot_max_tokens: 64            # Maximum reasoning tokens for CoT tie-breaking
 
 # ==============================================================================
 # 6. Knowledge Base: Linguistic Rules & Text Normalization Conventions
@@ -1370,9 +1379,16 @@ reconcile:
       batch_size: 16             # Batch size for offline index dense encoding
       positive_token: "YES"      # Target classification token for matches
       negative_token: "NO"       # Target classification token for non-matches
-      target_template: "Instruct: Given a bibliographic record, retrieve matching catalog works.\\nQuery: {text}\\n"
-      candidate_suffix_template: "Candidate: {text}\\nDoes this refer to the same work? Answer YES or NO: "
+      target_template: "Task: Determine if two bibliographic records represent the same intellectual work.\\nCriteria: Editions, translations, and reprints match. Different volumes, parts, or authors do not match.\\n\\nTarget Record: {text}\\n"
+      candidate_suffix_template: "Candidate Record: {text}\\n\\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: "
       max_seq_length: 2048
+      calibrate_prior: true      # Subtract background prior bias computed on neutral candidate
+      marginalize_tokens: true   # Marginalize over positive/negative synonym token clusters
+      prefix_lm_mask: true       # Enable bidirectional attention within query prompt prefix
+      symmetric_scoring: true    # Evaluate reverse direction (B -> A) for contenders within margin
+      symmetric_margin_threshold: 0.05
+      adaptive_cot: false
+      adaptive_cot_max_tokens: 64
 
   # Tier 3 PostgreSQL full-text search fallback when exact and dense matches fail
   fts_fallback:

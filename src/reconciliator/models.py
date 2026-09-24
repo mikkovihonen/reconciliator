@@ -310,6 +310,7 @@ class ReconciliationMatch(BaseModel):
     surname_match: bool = True
     year_diff: Optional[int] = None
     accepted: bool = True
+    rationale: Optional[str] = None
 
 
 TaskType = Literal["oai_pmh_harvest", "wikidata_ingest", "vocab_ingest", "reconciliation", "system"]

@@ -153,7 +153,6 @@ from reconciliator.config.reconciliation import (
 )
 from reconciliator.config.rerank import (
     CascadeRouterConfig,
-    JudgeConfig,
     LLMJudgeConfig,
     RerankConfig,
     RerankEngineType,
@@ -249,7 +248,6 @@ __all__ = [
     "HierarchyConfig",
     "IngestFilterConfig",
     "IngestionConfig",
-    "JudgeConfig",
     "LLMJudgeConfig",
     "LinguisticConfig",
     "LoggingConfig",
