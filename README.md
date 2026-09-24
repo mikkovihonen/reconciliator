@@ -25,7 +25,7 @@ Decomposes complex bibliographic metadata into normalized entities stored across
 ### 2. Multi-Format Native Interoperability
 Ingests and enriches bibliographic sources in their native syntax without translation loss:
 - **MARCXML (MARC 21)**: Full bibliographic and authority MARC parsing, subfield punctuation normalisation, and field injection (`$0`, `$1`).
-- **Finnish BFFI 1.0 (LKD)**: Strict alignment with the National Library of Finland Linked Library Data profile (`https://schema.finto.fi/bffi/1-0-0/lkd.rdf`), using pure `bffi:` and W3C namespaces (strictly **no `bflc:`** triples).
+- **Finnish BFFI 1.0 (LKD)**: Strict alignment with the National Library of Finland Linked Library Data profile (`https://schema.finto.fi/bffi/1-0-0/lkd.rdf`), using pure `bffi:` and W3C namespaces.
 - **LC BIBFRAME 2.0 / 3.0**: Native RDF graph parsing (Turtle, RDF/XML, N-Triples) and streaming JSON-LD parser, including Performed Music Ontology (PMO) structures (`bf:mediumOfPerformance`).
 - **BIBRA JSON**: Native ingest and in-place enrichment of Finnish municipal library JSON records.
 
