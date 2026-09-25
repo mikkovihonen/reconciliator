@@ -84,4 +84,3 @@ def run_cmd(
     )
     for s_name, s_dur in completed_steps:
         console.print(f"  - [cyan]{s_name}[/cyan]: {s_dur:.2f}s")
-

@@ -119,7 +119,11 @@ telemetry:
     mock_backend.encode_target.side_effect = mock_encode_target
 
     def mock_evaluate_candidate(
-        base_cache: Any, base_seq_len: int, candidate_suffix: str
+        base_cache: Any,
+        base_seq_len: int,
+        candidate_suffix: str,
+        prior_bias: float = 0.0,
+        **kwargs: Any,
     ) -> CandidateEvaluation:
         return CandidateEvaluation(is_match=True, confidence_score=0.95, raw_token="YES")
 

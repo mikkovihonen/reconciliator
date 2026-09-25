@@ -658,6 +658,13 @@ class WEMIRepository:
         if wikidata_idents:
             self.insert_identifiers_batch(wikidata_idents, conn=conn)
 
+        if hasattr(self, "_work_cache") and self._work_cache:
+            for wid in work_ids:
+                self._work_cache.pop(wid, None)
+        if hasattr(self, "_expressions_for_work_cache") and self._expressions_for_work_cache:
+            for wid in work_ids:
+                self._expressions_for_work_cache.pop(wid, None)
+
         return work_ids
 
     def insert_expressions_batch(
@@ -732,6 +739,8 @@ class WEMIRepository:
             with self.get_connection() as c:
                 _exec(c)
 
+        if hasattr(self, "_expressions_for_work_cache") and self._expressions_for_work_cache:
+            self._expressions_for_work_cache.clear()
         return [id_map.get((e.source, e.source_id), 0) for e in expressions]
 
     def insert_manifestations_batch(
@@ -869,6 +878,10 @@ class WEMIRepository:
                 with self.get_connection() as c:
                     _exec_mvec(c)
 
+        if hasattr(self, "_manifestation_cache") and self._manifestation_cache:
+            for mid in manif_ids:
+                self._manifestation_cache.pop(mid, None)
+
         return manif_ids
 
     def insert_manifestation_expressions_batch(
@@ -999,6 +1012,8 @@ class WEMIRepository:
         chunk_size: Optional[int] = None,
     ) -> list[int]:
         """Insert polymorphic IdentifierEntity records in batch with conflict resolution."""
+        if hasattr(self, "_identifier_lookup_cache") and self._identifier_lookup_cache:
+            self._identifier_lookup_cache.clear()
         return self._insert_simple_batch(
             identifiers_table,
             identifiers,
@@ -2013,7 +2028,9 @@ class WEMIRepository:
             self._manifestation_cache.move_to_end(manifestation_id)
             return self._manifestation_cache[manifestation_id]
 
-        manif = self._get_entity_by_id(manifestations_table, _row_to_manifestation, manifestation_id)
+        manif = self._get_entity_by_id(
+            manifestations_table, _row_to_manifestation, manifestation_id
+        )
         if manif is not None:
             self._manifestation_cache[manifestation_id] = manif
             if len(self._manifestation_cache) > self.entity_cache_size:
@@ -2404,7 +2421,9 @@ class WEMIRepository:
         """Fetch all contributions for multiple (entity_type, entity_id) pairs in batch."""
         if not entity_specs:
             return {}
-        result: dict[tuple[str, int], list[ContributionEntity]] = {spec: [] for spec in entity_specs}
+        result: dict[tuple[str, int], list[ContributionEntity]] = {
+            spec: [] for spec in entity_specs
+        }
         by_type: dict[str, list[int]] = {}
         for etype, eid in entity_specs:
             by_type.setdefault(etype, []).append(eid)
@@ -2442,7 +2461,9 @@ class WEMIRepository:
             self._identifier_lookup_cache.move_to_end(cache_key)
             return self._identifier_lookup_cache[cache_key]
 
-        res = self.lookup_by_identifiers_batch([(scheme, value)], authoritative_only=authoritative_only)
+        res = self.lookup_by_identifiers_batch(
+            [(scheme, value)], authoritative_only=authoritative_only
+        )
         ans = res.get((scheme, value), [])
         return ans
 
@@ -2767,7 +2788,11 @@ class WEMIRepository:
         overfetch: int = 4,
     ) -> list[list[tuple[WorkEntity, float]]]:
         """Retrieve top-k candidate works for a 2D batch of query vectors [N, dimension]."""
-        if self.work_indexer is None or self.work_indexer.total_vectors == 0 or len(query_vectors) == 0:
+        if (
+            self.work_indexer is None
+            or self.work_indexer.total_vectors == 0
+            or len(query_vectors) == 0
+        ):
             return [[] for _ in range(len(query_vectors))]
 
         fetch_k = top_k * max(1, overfetch) if authoritative_only else top_k
@@ -2797,9 +2822,7 @@ class WEMIRepository:
 
         # Bulk fetch/cache works
         needed_work_ids = [
-            vector_to_work_id[v_id]
-            for v_id in all_vector_indices
-            if v_id in vector_to_work_id
+            vector_to_work_id[v_id] for v_id in all_vector_indices if v_id in vector_to_work_id
         ]
         works_by_id = self.get_works_by_ids(needed_work_ids)
 
@@ -4173,9 +4196,7 @@ class WEMIRepository:
             rows = conn.execute(stmt).mappings().fetchall()
             return [CorpusLinkage.model_validate(dict(r)) for r in rows]
 
-    def get_constituent_linkages_for_record(
-        self, record_id: str
-    ) -> list[CorpusConstituentLinkage]:
+    def get_constituent_linkages_for_record(self, record_id: str) -> list[CorpusConstituentLinkage]:
         """Fetch all constituent linkages for a container record, ordered by constituent ordinal."""
         stmt = (
             select(corpus_constituent_linkages_table)

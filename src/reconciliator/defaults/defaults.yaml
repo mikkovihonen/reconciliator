@@ -284,6 +284,12 @@ vocabularies:
   ingest_pref_label_languages: null
   ingest_alt_label_languages: null
 
+  preload:
+    enabled: true
+    preload_concepts: true
+    preload_pref_labels: true
+    preload_aliases: true
+
   subject_fields:
     "648":
       category: "chronological"
@@ -1441,6 +1447,8 @@ reconcile:
       - "heritage_model"
   fts_fallback:
     enabled: false
+    limit: 5
+    confidence_score: 0.80
     threshold: 0.70
     min_word_len: 3
   max_editions_compared: 25
@@ -1497,7 +1505,7 @@ sources:
       - "^https?://urn\\.fi/URN:NBN:fi:au:pn:"
     canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:pn:{identifier}"
     tag_prefixes: ["(fi-asteri-n)", "asteri-n", "kanto_pn", "kanto-pn"]
-    aliases: []
+    aliases: ["kanto"]
     subfield: "0"
   kanto_cn:
     entity_type: "agent"
@@ -1505,7 +1513,7 @@ sources:
       - "^https?://urn\\.fi/URN:NBN:fi:au:cn:"
     canonical_uri_template: "https://urn.fi/URN:NBN:fi:au:cn:{identifier}"
     tag_prefixes: ["(fi-asteri-c)", "asteri-c", "kanto_cn", "kanto-cn"]
-    aliases: []
+    aliases: ["kanto"]
     subfield: "0"
   asteri_work:
     entity_type: "work"

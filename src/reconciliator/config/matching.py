@@ -64,9 +64,7 @@ class ReconcileFTSFallbackConfig(BaseModel):
     enabled: bool = Field(
         default_factory=lambda: bool(_FTS_FALLBACK_DEFAULTS.get("enabled", False))
     )
-    limit: int = Field(
-        default_factory=lambda: int(_FTS_FALLBACK_DEFAULTS.get("limit", 5))
-    )
+    limit: int = Field(default_factory=lambda: int(_FTS_FALLBACK_DEFAULTS.get("limit", 5)))
     confidence_score: float = Field(
         default_factory=lambda: float(_FTS_FALLBACK_DEFAULTS.get("confidence_score", 0.80))
     )
@@ -235,9 +233,7 @@ class AggregateClusteringConfig(BaseModel):
 class WEMIClusterConfig(BaseModel):
     """Configuration for multiplex WEMI graph clustering and blocking."""
 
-    enabled: bool = Field(
-        default_factory=lambda: bool(_CLUSTER_DEFAULTS.get("enabled", True))
-    )
+    enabled: bool = Field(default_factory=lambda: bool(_CLUSTER_DEFAULTS.get("enabled", True)))
     similarity_threshold: float = Field(
         default_factory=lambda: float(_CLUSTER_DEFAULTS.get("similarity_threshold", 0.85))
     )
@@ -548,30 +544,22 @@ class CascadeRouterConfig(BaseModel):
 class RerankConfig(BaseModel):
     """Configuration for candidate reranking, metadata discriminators, and LLM judge."""
 
-    enabled: bool = Field(
-        default_factory=lambda: bool(_RERANK_DEFAULTS.get("enabled", True))
-    )
+    enabled: bool = Field(default_factory=lambda: bool(_RERANK_DEFAULTS.get("enabled", True)))
     engine: RerankEngineType = Field(
         default_factory=lambda: str(_RERANK_DEFAULTS.get("engine", "cascade"))  # type: ignore[assignment]
     )
-    model_name: Optional[str] = Field(
-        default_factory=lambda: _RERANK_DEFAULTS.get("model_name")
-    )
+    model_name: Optional[str] = Field(default_factory=lambda: _RERANK_DEFAULTS.get("model_name"))
     device: Literal["auto", "cpu", "cuda", "mps"] = Field(
         default_factory=lambda: _RERANK_DEFAULTS.get("device", "auto")
     )
-    batch_size: int = Field(
-        default_factory=lambda: int(_RERANK_DEFAULTS.get("batch_size", 16))
-    )
+    batch_size: int = Field(default_factory=lambda: int(_RERANK_DEFAULTS.get("batch_size", 16)))
     dense_weight: float = Field(
         default_factory=lambda: float(_RERANK_DEFAULTS.get("dense_weight", 0.5))
     )
     rerank_weight: float = Field(
         default_factory=lambda: float(_RERANK_DEFAULTS.get("rerank_weight", 0.5))
     )
-    top_k: int = Field(
-        default_factory=lambda: int(_RERANK_DEFAULTS.get("top_k", 20))
-    )
+    top_k: int = Field(default_factory=lambda: int(_RERANK_DEFAULTS.get("top_k", 20)))
     short_circuit: ShortCircuitConfig = Field(default_factory=ShortCircuitConfig)
     require_volume_match: bool = Field(
         default_factory=lambda: bool(_RERANK_DEFAULTS.get("require_volume_match", True))
@@ -661,7 +649,9 @@ class NotatedMusicFunnelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fallback_match_tier: str = Field(
         default_factory=lambda: str(
-            _FUNNELS_DEFAULTS.get("notated_music", {}).get("fallback_match_tier", "tier2_domain_key")
+            _FUNNELS_DEFAULTS.get("notated_music", {}).get(
+                "fallback_match_tier", "tier2_domain_key"
+            )
         )
     )
 
@@ -682,7 +672,9 @@ class FunnelPatternsConfig(BaseModel):
     )
     parallel_translators_signature: str = Field(
         default_factory=lambda: str(
-            _FUNNELS_DEFAULTS.get("patterns", {}).get("parallel_translators_signature", "(?i)parallel")
+            _FUNNELS_DEFAULTS.get("patterns", {}).get(
+                "parallel_translators_signature", "(?i)parallel"
+            )
         )
     )
     government_valto_urn: str = Field(
@@ -697,7 +689,9 @@ class FunnelPatternsConfig(BaseModel):
     )
     legal_statute_title: str = Field(
         default_factory=lambda: str(
-            _FUNNELS_DEFAULTS.get("patterns", {}).get("legal_statute_title", "(?i)laki|asetus|säädös")
+            _FUNNELS_DEFAULTS.get("patterns", {}).get(
+                "legal_statute_title", "(?i)laki|asetus|säädös"
+            )
         )
     )
 
@@ -716,4 +710,3 @@ class FunnelsConfig(BaseModel):
     recorded_sound: RecordedSoundFunnelConfig = Field(default_factory=RecordedSoundFunnelConfig)
     notated_music: NotatedMusicFunnelConfig = Field(default_factory=NotatedMusicFunnelConfig)
     patterns: FunnelPatternsConfig = Field(default_factory=FunnelPatternsConfig)
-

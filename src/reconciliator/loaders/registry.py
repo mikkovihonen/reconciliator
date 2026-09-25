@@ -437,9 +437,7 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
             "takes no vocab_store: authority records carry their own headings "
             "rather than subject terms needing folding to a modern ontology"
         )
-        not_produced["relator_normalisation"] = (
-            "authority headings carry no relator codes"
-        )
+        not_produced["relator_normalisation"] = "authority headings carry no relator codes"
         not_produced["constituents"] = (
             "an authority record describes a work, not a publication with contents"
         )
@@ -567,9 +565,7 @@ def _rdf_authority_capabilities() -> LoaderCapabilities:
                 "takes no vocab_store: RDF authority records carry their own concepts/entities "
                 "rather than subject terms needing folding"
             ),
-            "relator_normalisation": (
-                "RDF authority records do not carry relator codes"
-            ),
+            "relator_normalisation": ("RDF authority records do not carry relator codes"),
             "constituents": (
                 "an RDF authority record describes an agent/concept, not a publication with contents"
             ),

@@ -63,6 +63,16 @@ impl MarcDatafield {
             .map(|sf| sf.value.clone())
             .collect()
     }
+
+    #[pyo3(signature = (key, default=None))]
+    pub fn get(&self, key: &str, default: Option<String>) -> Option<String> {
+        match key {
+            "tag" => Some(self.tag.clone()),
+            "ind1" => Some(self.ind1.clone()),
+            "ind2" => Some(self.ind2.clone()),
+            _ => default,
+        }
+    }
 }
 
 #[pyclass(from_py_object)]
@@ -78,6 +88,12 @@ pub struct MarcRecordData {
 
 #[pymethods]
 impl MarcRecordData {
+    #[pyo3(signature = (key, default=None))]
+    pub fn get(&self, key: &str, default: Option<String>) -> Option<String> {
+        let _ = key;
+        default
+    }
+
     pub fn get_controlfield(&self, tag: &str) -> Option<String> {
         for (t, v) in &self.controlfields {
             if t == tag {
@@ -114,6 +130,92 @@ impl MarcRecordData {
             }
         }
         results
+    }
+
+    pub fn add_subfield(&mut self, tag: &str, code: &str, value: &str) -> bool {
+        for df in &mut self.datafields {
+            if df.tag == tag {
+                df.subfields.push(MarcSubfield {
+                    code: code.to_string(),
+                    value: value.to_string(),
+                });
+                return true;
+            }
+        }
+        false
+    }
+
+    #[pyo3(signature = (tag, ind1=" ", ind2=" ", subfields=Vec::new()))]
+    pub fn add_datafield(
+        &mut self,
+        tag: &str,
+        ind1: &str,
+        ind2: &str,
+        subfields: Vec<(String, String)>,
+    ) {
+        let sfs = subfields
+            .into_iter()
+            .map(|(c, v)| MarcSubfield { code: c, value: v })
+            .collect();
+        self.datafields.push(MarcDatafield {
+            tag: tag.to_string(),
+            ind1: ind1.to_string(),
+            ind2: ind2.to_string(),
+            subfields: sfs,
+        });
+    }
+
+    pub fn to_xml(&self) -> String {
+        let mut xml = String::with_capacity(1024);
+        xml.push_str("<record xmlns=\"http://www.loc.gov/MARC21/slim\">\n");
+        if let Some(ref ldr) = self.leader {
+            xml.push_str("  <leader>");
+            escape_xml_into(ldr, &mut xml);
+            xml.push_str("</leader>\n");
+        }
+        for (tag, val) in &self.controlfields {
+            xml.push_str("  <controlfield tag=\"");
+            escape_xml_into(tag, &mut xml);
+            xml.push_str("\">");
+            escape_xml_into(val, &mut xml);
+            xml.push_str("</controlfield>\n");
+        }
+        for df in &self.datafields {
+            xml.push_str("  <datafield tag=\"");
+            escape_xml_into(&df.tag, &mut xml);
+            xml.push_str("\" ind1=\"");
+            escape_xml_into(&df.ind1, &mut xml);
+            xml.push_str("\" ind2=\"");
+            escape_xml_into(&df.ind2, &mut xml);
+            xml.push_str("\">\n");
+            for sf in &df.subfields {
+                xml.push_str("    <subfield code=\"");
+                escape_xml_into(&sf.code, &mut xml);
+                xml.push_str("\">");
+                escape_xml_into(&sf.value, &mut xml);
+                xml.push_str("</subfield>\n");
+            }
+            xml.push_str("  </datafield>\n");
+        }
+        xml.push_str("</record>");
+        xml
+    }
+
+    pub fn to_xml_bytes(&self) -> Vec<u8> {
+        self.to_xml().into_bytes()
+    }
+}
+
+fn escape_xml_into(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
     }
 }
 
@@ -324,5 +426,32 @@ mod tests {
             rec.get_subfield("245", "b").as_deref(),
             Some("alaotsikko /")
         );
+    }
+
+    #[test]
+    fn test_marc_record_xml_serialization() {
+        let mut records = parse_marc_xml_str(SAMPLE_XML);
+        assert_eq!(records.len(), 1);
+        let rec = &mut records[0];
+
+        // Add subfield to existing 100 field
+        assert!(rec.add_subfield("100", "0", "http://example.org/agent/123"));
+
+        // Add new datafield
+        rec.add_datafield(
+            "758",
+            " ",
+            " ",
+            vec![("0".to_string(), "http://example.org/work/456".to_string())],
+        );
+
+        let xml = rec.to_xml();
+        assert!(xml.contains("<controlfield tag=\"001\">123456</controlfield>"));
+        assert!(xml.contains("<subfield code=\"0\">http://example.org/agent/123</subfield>"));
+        assert!(xml.contains("<datafield tag=\"758\" ind1=\" \" ind2=\" \">"));
+        assert!(xml.contains("<subfield code=\"0\">http://example.org/work/456</subfield>"));
+
+        let bytes = rec.to_xml_bytes();
+        assert_eq!(bytes, xml.into_bytes());
     }
 }

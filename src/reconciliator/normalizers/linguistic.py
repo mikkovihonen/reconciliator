@@ -12,12 +12,18 @@ import re
 import unicodedata
 from typing import Any, Container, Final, Iterable, Optional
 
+from reconciliator._core.normalizers import (
+    py_fold_diacritics as _rust_fold_diacritics,
+)
+from reconciliator._core.normalizers import (
+    py_fold_label as _rust_fold_label,
+)
+
 from reconciliator.config import (
     DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES,
     DEFAULT_BIOGRAPHICAL_DATE_PREFIXES,
     DEFAULT_BIOGRAPHICAL_ERA_AD,
     DEFAULT_BIOGRAPHICAL_ERA_BC,
-    DEFAULT_PRESERVED_DIACRITICS,
 )
 
 
@@ -108,13 +114,6 @@ def build_biographical_date_pattern(
 _BIOGRAPHICAL_DATE_PATTERN: Final[re.Pattern[str]] = build_biographical_date_pattern()
 
 
-from reconciliator._core.normalizers import (
-    py_fold_diacritics as _rust_fold_diacritics,
-    py_strip_biographical_dates as _rust_strip_biographical_dates,
-    py_fold_label as _rust_fold_label,
-)
-
-
 def fold_diacritics(s: str, preserved_diacritics: Optional[Container[str] | str] = None) -> str:
     """Selectively fold Latin diacritics; preserve specified diacritics (default: Finnish / Swedish åäöÅÄÖ).
 
@@ -140,16 +139,14 @@ def strip_biographical_dates(s: str, date_pattern: Optional[re.Pattern[str]] = N
     ``"Fleming, Ian, 1908-1964"``) while leaving non-date qualifiers
     (e.g. ``"Bond, James (fiktiivinen hahmo)"``) intact.
     """
-    if date_pattern is not None:
-        cleaned = s
-        while True:
-            new_cleaned = date_pattern.sub("", cleaned).rstrip()
-            if new_cleaned == cleaned:
-                break
-            cleaned = new_cleaned
-        return cleaned.rstrip(",:;/ \t\r\n")
-
-    return _rust_strip_biographical_dates(s)
+    pattern = date_pattern or _BIOGRAPHICAL_DATE_PATTERN
+    cleaned = s
+    while True:
+        new_cleaned = pattern.sub("", cleaned).rstrip()
+        if new_cleaned == cleaned:
+            break
+        cleaned = new_cleaned
+    return cleaned.rstrip(",:;/ \t\r\n")
 
 
 def strip_label_decoration(

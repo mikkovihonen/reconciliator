@@ -230,7 +230,9 @@ ingestion:
             )
         return 10
 
-    with patch("reconciliator.commands.ingest.ingest_oai_pipeline", side_effect=fake_pipeline) as mock_pipe:
+    with patch(
+        "reconciliator.commands.ingest.ingest_oai_pipeline", side_effect=fake_pipeline
+    ) as mock_pipe:
         # 1. Explicit --task-id
         res = runner.invoke(
             app,

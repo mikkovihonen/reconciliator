@@ -513,9 +513,7 @@ class WorkMatcher:
 
             extracted = extract_identifiers_from_target(target)
             extra_ids = (
-                batch_identifiers[i]
-                if batch_identifiers and i < len(batch_identifiers)
-                else None
+                batch_identifiers[i] if batch_identifiers and i < len(batch_identifiers) else None
             )
             if extra_ids:
                 for scheme, values in extra_ids.items():
@@ -762,23 +760,21 @@ class WorkMatcher:
             else DEFAULT_MAX_EDITIONS_COMPARED
         )
         work_ids = [work.id for work, _ in candidates if work.id]
-        uncached_work_ids = [
-            wid for wid in work_ids if wid not in self._work_manifestations_cache
-        ]
+        uncached_work_ids = [wid for wid in work_ids if wid not in self._work_manifestations_cache]
         if uncached_work_ids:
             if hasattr(self.repo, "get_manifestations_for_works"):
                 fetched_manifestations = self.repo.get_manifestations_for_works(uncached_work_ids)
                 self._work_manifestations_cache.update(fetched_manifestations)
             else:
                 for wid in uncached_work_ids:
-                    self._work_manifestations_cache[wid] = self.repo.get_manifestations_for_work(wid)
+                    self._work_manifestations_cache[wid] = self.repo.get_manifestations_for_work(
+                        wid
+                    )
 
         # Collect (work, manifestation) pairs that need hydration and are not in cache
         needed_pairs: list[tuple[WorkEntity, Optional[ManifestationEntity]]] = []
         for work, _ in candidates:
-            manifestations = (
-                self._work_manifestations_cache.get(work.id, []) if work.id else []
-            )
+            manifestations = self._work_manifestations_cache.get(work.id, []) if work.id else []
             for manifestation in (manifestations or [None])[:max_editions]:
                 cache_key = (
                     work.id if work else None,
@@ -823,8 +819,8 @@ class WorkMatcher:
                 else:
                     for mid in m_ids:
                         try:
-                            manifestation_idents_map[mid] = (
-                                self.repo.get_identifiers_for_entity("manifestation", mid)
+                            manifestation_idents_map[mid] = self.repo.get_identifiers_for_entity(
+                                "manifestation", mid
                             )
                         except Exception:
                             pass
@@ -850,9 +846,7 @@ class WorkMatcher:
             # is several editions: the record is compatible with the work if it
             # is compatible with any one of them, so each is evaluated and the
             # best verdict stands.
-            manifestations = (
-                self._work_manifestations_cache.get(work.id, []) if work.id else []
-            )
+            manifestations = self._work_manifestations_cache.get(work.id, []) if work.id else []
             for manifestation in (manifestations or [None])[:max_editions]:
                 candidate = self._hydrate_candidate_record(
                     work,
@@ -889,7 +883,9 @@ class WorkMatcher:
             )
         else:
             verdicts = [
-                self.evaluator.evaluate_candidate(target, c_rec, d_score, acceptance_threshold=threshold)
+                self.evaluator.evaluate_candidate(
+                    target, c_rec, d_score, acceptance_threshold=threshold
+                )
                 for c_rec, d_score in cand_pairs
             ]
 
@@ -898,9 +894,7 @@ class WorkMatcher:
             if not require_threshold and not verdict.accepted:
                 # Re-admit a candidate the fuzzy threshold rejected but the
                 # vetoes did not. See _hard_checks_pass.
-                verdict = verdict.model_copy(
-                    update={"accepted": self._hard_checks_pass(verdict)}
-                )
+                verdict = verdict.model_copy(update={"accepted": self._hard_checks_pass(verdict)})
             wid = work.id if work.id is not None else id(work)
             if wid not in best_by_work:
                 best_by_work[wid] = (work, verdict)
@@ -1043,9 +1037,7 @@ class WorkMatcher:
             identifiers=identifiers,
             agents=agents,
         )
-        max_cache = (
-            getattr(self.config, "entity_cache_size", 50000) if self.config else 50000
-        )
+        max_cache = getattr(self.config, "entity_cache_size", 50000) if self.config else 50000
         if hasattr(self, "_hydration_cache") and len(self._hydration_cache) < max_cache:
             self._hydration_cache[cache_key] = candidate_record
         return candidate_record

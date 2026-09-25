@@ -206,4 +206,3 @@ def build_index_cmd(
         f"[green]Indexed {counts['works']} works into {cfg.storage.work_index} and "
         f"{counts['manifestations']} manifestations into {cfg.storage.manifestation_index}[/green]"
     )
-

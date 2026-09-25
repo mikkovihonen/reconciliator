@@ -1,6 +1,7 @@
 pub mod clustering;
 pub mod normalizers;
 pub mod parsers;
+pub mod rerank;
 
 use pyo3::prelude::*;
 
@@ -17,5 +18,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     normalizers::register_submodule(m)?;
     clustering::register_submodule(m)?;
     parsers::register_submodule(m)?;
+    rerank::register_submodule(m)?;
     Ok(())
 }

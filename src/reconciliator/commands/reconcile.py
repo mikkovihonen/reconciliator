@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import queue
@@ -42,6 +41,7 @@ from reconciliator.loaders.marcxml import (
     build_target_record_from_marc,
     iter_marc_record_elements,
     parse_marc_record_elem,
+    parse_marc_xml_str_fast,
 )
 from reconciliator.models import (
     CorpusLinkage,
@@ -172,8 +172,30 @@ def _ingest_corpus_as_wemi(
         subjs: list[Any] = []
         try:
             if rec_fmt == "marcxml":
+                fast_rec = None
+                if isinstance(orig_payload, (bytes, str)):
+                    try:
+                        xml_str = (
+                            orig_payload.decode("utf-8")
+                            if isinstance(orig_payload, bytes)
+                            else orig_payload
+                        )
+                        parsed = parse_marc_xml_str_fast(xml_str)
+                        if parsed:
+                            fast_rec = parsed[0]
+                    except Exception:
+                        fast_rec = None
+                payload_elem = (
+                    fast_rec
+                    if fast_rec is not None
+                    else (
+                        etree.fromstring(orig_payload)
+                        if isinstance(orig_payload, (bytes, str))
+                        else orig_payload
+                    )
+                )
                 w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
-                    orig_payload,
+                    payload_elem,
                     source=source_name,
                     record_origin=source_name,
                     strip_isbd_punctuation=strip_isbd_punctuation,
@@ -182,7 +204,7 @@ def _ingest_corpus_as_wemi(
                     subject_sink=subjs,
                 )
                 if const_mode == "entities" and marc_const_prof:
-                    consts = extract_marc_constituents(orig_payload, marc_const_prof)
+                    consts = extract_marc_constituents(payload_elem, marc_const_prof)
                     if consts:
                         c_batch = build_embodied_constituents(
                             container_work=w,
@@ -219,9 +241,7 @@ def _ingest_corpus_as_wemi(
                     constituent_profile=bf_const_prof if const_mode != "off" else None,
                     constituent_sink=constituent_sink if const_mode != "off" else None,
                 )
-                keys = bibframe_entity_keys(
-                    m, w, agts, idents, constituents=constituent_sink
-                )
+                keys = bibframe_entity_keys(m, w, agts, idents, constituents=constituent_sink)
                 if const_mode == "entities" and constituent_sink:
                     c_batch = build_embodied_constituents(
                         container_work=w,
@@ -274,7 +294,29 @@ def _to_target_record(
     """Decompose or map raw bibliographic items into normalized MatchRecord instances."""
     try:
         if rec_fmt == "marcxml":
-            return build_target_record_from_marc(orig_payload, source="target")
+            fast_rec = None
+            if isinstance(orig_payload, (bytes, str)):
+                try:
+                    xml_str = (
+                        orig_payload.decode("utf-8")
+                        if isinstance(orig_payload, bytes)
+                        else orig_payload
+                    )
+                    parsed = parse_marc_xml_str_fast(xml_str)
+                    if parsed:
+                        fast_rec = parsed[0]
+                except Exception:
+                    fast_rec = None
+            payload_elem = (
+                fast_rec
+                if fast_rec is not None
+                else (
+                    etree.fromstring(orig_payload)
+                    if isinstance(orig_payload, (bytes, str))
+                    else orig_payload
+                )
+            )
+            return build_target_record_from_marc(payload_elem, source="target")
         elif rec_fmt == "bibframe_rdf":
             g, nodes = orig_payload
             instance_node = nodes[0] if nodes else None
@@ -432,10 +474,10 @@ def reconcile_cmd(
         console.print(f"[red]Target MARCXML file not found: {r_cfg.target_file}[/red]")
         raise typer.Exit(code=1)
 
-    vocab_store = VocabStore(cfg.storage.database_url)
     vocab_cfg = (
         cfg.ingestion.vocab.normalization if cfg.ingestion.vocab else None
     ) or cfg.vocabularies
+    vocab_store = VocabStore(cfg.storage.database_url, config=vocab_cfg)
     vocab_folder = VocabFolder(vocab_store, config=vocab_cfg)
     from reconciliator.embedding import create_vector_embedder
     from reconciliator.embedding.template import RecordTemplateEngine
@@ -597,7 +639,8 @@ def reconcile_cmd(
                     legacy_to_modern=getattr(vocab_cfg, "legacy_to_modern", None),
                     vocab_store=vocab_store,
                 )
-                yield "marcxml", copy.deepcopy(r_elem), raw_rec_item, b_offset
+                raw_xml = etree.tostring(r_elem, encoding="utf-8")
+                yield "marcxml", raw_xml, raw_rec_item, b_offset
 
     linkage_map: dict[str, CorpusLinkage] = {}
     work_cluster_map: dict[str, WorkCluster] = {}
@@ -821,9 +864,7 @@ def reconcile_cmd(
         # Modern WEMI resolution and reporting, from the single match above.
         linkage = linkage_map.get(target_wemi.record_id)
         w_cluster = work_cluster_map.get(linkage.work_cluster_id) if linkage else None
-        e_cluster = (
-            expression_cluster_map.get(linkage.expression_cluster_id) if linkage else None
-        )
+        e_cluster = expression_cluster_map.get(linkage.expression_cluster_id) if linkage else None
         m_cluster = (
             manifestation_cluster_map.get(linkage.manifestation_cluster_id) if linkage else None
         )
@@ -942,9 +983,7 @@ def reconcile_cmd(
         # Mutate / serialize and stream write if output_file requested
         if out_f is not None:
             if rec_fmt == "bibra":
-                enriched_json = enrich_bibra_json(
-                    orig_payload, res, target_record=target_record
-                )
+                enriched_json = enrich_bibra_json(orig_payload, res, target_record=target_record)
                 out_f.write(json.dumps(enriched_json, ensure_ascii=False).encode("utf-8"))
                 out_f.write(b"\n")
             elif rec_fmt == "bibframe_jsonld":
@@ -965,27 +1004,43 @@ def reconcile_cmd(
                 out_f.write(json.dumps(enriched_doc, ensure_ascii=False).encode("utf-8"))
                 out_f.write(b"\n")
             elif rec_fmt == "marcxml":
-                sibs = (
-                    corpus_repo.get_sibling_manifestation_record_ids(target_wemi.record_id)
-                    if is_clustered and corpus_repo
-                    else []
-                )
-                enricher.enrich_record_tree(
-                    orig_payload,
-                    res,
-                    enrich=r_cfg.enrich,
-                    fold_legacy=r_cfg.fold_legacy,
-                    wemi_result=wemi_res,
-                    linkage=linkage,
-                    work_cluster=w_cluster,
-                    expression_cluster=e_cluster,
-                    manifestation_cluster=m_cluster,
-                    target_record=target_wemi,
-                    enrichment_config=r_cfg.enrichment,
-                    sibling_ids=sibs,
-                )
-                out_f.write(etree.tostring(orig_payload, encoding="utf-8", pretty_print=True))
-                out_f.write(b"\n")
+                if not r_cfg.enrich:
+                    if isinstance(orig_payload, bytes):
+                        out_f.write(orig_payload)
+                    elif isinstance(orig_payload, str):
+                        out_f.write(orig_payload.encode("utf-8"))
+                    else:
+                        out_f.write(
+                            etree.tostring(orig_payload, encoding="utf-8", pretty_print=True)
+                        )
+                    out_f.write(b"\n")
+                else:
+                    sibs = (
+                        corpus_repo.get_sibling_manifestation_record_ids(target_wemi.record_id)
+                        if is_clustered and corpus_repo
+                        else []
+                    )
+                    payload_elem = (
+                        etree.fromstring(orig_payload)
+                        if isinstance(orig_payload, (bytes, str))
+                        else orig_payload
+                    )
+                    enricher.enrich_record_tree(
+                        payload_elem,
+                        res,
+                        enrich=r_cfg.enrich,
+                        fold_legacy=r_cfg.fold_legacy,
+                        wemi_result=wemi_res,
+                        linkage=linkage,
+                        work_cluster=w_cluster,
+                        expression_cluster=e_cluster,
+                        manifestation_cluster=m_cluster,
+                        target_record=target_wemi,
+                        enrichment_config=r_cfg.enrichment,
+                        sibling_ids=sibs,
+                    )
+                    out_f.write(etree.tostring(payload_elem, encoding="utf-8", pretty_print=True))
+                    out_f.write(b"\n")
         elif rec_fmt == "bibframe_rdf":
             g, nodes = orig_payload
             enrich_bibframe_graph(
@@ -1027,9 +1082,22 @@ def reconcile_cmd(
                     for rec_fmt, orig_payload, raw_rec, byte_offset in batch:
                         target_record = normalizer.normalize(raw_rec)
                         target_wemi = _to_target_record(
-                            rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
+                            rec_fmt,
+                            orig_payload,
+                            raw_rec,
+                            bf_profile,
+                            constituent_profile=target_const_prof,
                         )
-                        batch_items.append((rec_fmt, orig_payload, raw_rec, byte_offset, target_record, target_wemi))
+                        batch_items.append(
+                            (
+                                rec_fmt,
+                                orig_payload,
+                                raw_rec,
+                                byte_offset,
+                                target_record,
+                                target_wemi,
+                            )
+                        )
                         wemi_targets.append(target_wemi)
                     while not stop_event.is_set():
                         try:
@@ -1107,16 +1175,18 @@ def reconcile_cmd(
                     target_wemi,
                 ), wemi_res in zip(batch_items, wemi_results):
                     res = work_matcher.resolve_agents(wemi_res, target_record)
-                    processed_batch.append((
-                        rec_fmt,
-                        orig_payload,
-                        raw_rec,
-                        byte_offset,
-                        target_record,
-                        target_wemi,
-                        wemi_res,
-                        res,
-                    ))
+                    processed_batch.append(
+                        (
+                            rec_fmt,
+                            orig_payload,
+                            raw_rec,
+                            byte_offset,
+                            target_record,
+                            target_wemi,
+                            wemi_res,
+                            res,
+                        )
+                    )
 
                 if writer_error:
                     raise writer_error[0]
@@ -1212,4 +1282,3 @@ def reconcile_cmd(
         }
     )
     console.print("[green]Reconciliation complete! Emitted dual TSV report sets.[/green]")
-

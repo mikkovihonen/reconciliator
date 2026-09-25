@@ -2,10 +2,10 @@
 
 from lxml import etree
 
+from reconciliator.enrichment import MARCXMLEnricher
 from reconciliator.loaders.marcxml import _get_subfields
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.reconciliation import ReconciliationResult
-from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_enrichment_mode_injects_novel_only() -> None:

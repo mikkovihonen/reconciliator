@@ -15,6 +15,7 @@ and physical/electronic item holdings.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from typing import Any, Iterable, Optional
@@ -950,9 +951,7 @@ def decompose_bibframe_work(
 
     extracted_agents_with_role: list[tuple[AgentEntity, str]] = []
     for n in nodes_to_scan:
-        extracted = _extract_node_agents(
-            g, n, profile, source=source
-        )
+        extracted = _extract_node_agents(g, n, profile, source=source)
         for agent_ent, role, is_primary, marc_key in extracted:
             existing = all_agents_map.get(agent_ent.agent_uri)
             if existing is not None:
@@ -1450,7 +1449,7 @@ def extract_bibframe_constituents(
                             try:
                                 seq_num = int(str(seq_obj).strip())
                                 break
-                            except (ValueError, TypeError):
+                            except ValueError, TypeError:
                                 pass
                         if seq_num is not None:
                             break

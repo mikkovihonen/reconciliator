@@ -214,4 +214,3 @@ def prune_cmd(
         include_running=include_running,
     )
     console.print(f"[green]Successfully pruned {deleted} task(s).[/green]")
-

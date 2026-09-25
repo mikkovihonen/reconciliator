@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 from lxml import etree
 
+from reconciliator.enrichment import MARCXMLEnricher
 from reconciliator.ingestion.skosmos_downloader import SkosmosDownloader
 from reconciliator.ingestion.vocab import ingest_bridge_files
 from reconciliator.ingestion.wikidata import extract_wikidata_yso_aliases
@@ -34,7 +35,6 @@ from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.reconciliation import AgentAligner, ReconciliationResult
 from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 from reconciliator.vocab.bridges import get_bundled_bridge_files, parse_bridge_turtle
-from reconciliator.enrichment import MARCXMLEnricher
 
 # ---------------------------------------------------------------------------
 # 1. Native Diacritic Folding

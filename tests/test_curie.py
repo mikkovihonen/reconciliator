@@ -57,8 +57,6 @@ def test_format_wikidata_uri() -> None:
 
 def test_utils_reexports() -> None:
     from reconciliator.utils import (
-        extract_wikidata_qid,
-        parse_curie,
         to_curie,
     )
 

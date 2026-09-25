@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from lxml import etree
 
 from reconciliator.config import EnrichmentConfig
-from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.enrichment import MARCXMLEnricher
+from reconciliator.normalizers.relators import RelatorRegistry
 
 
 def test_relator_registry_canonical_and_formats() -> None:

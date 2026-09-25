@@ -1,6 +1,5 @@
 """Verification tests for native Rust reconciliator._core extension module."""
 
-import pytest
 from reconciliator import _core
 
 
@@ -203,6 +202,7 @@ yso:p200 a skos:Concept ;
 
 def test_rust_parse_turtle_file():
     from pathlib import Path
+
     ttl_path = Path("tests/fixtures/sample_finto.ttl")
     if ttl_path.is_file():
         concepts, mappings, edges = _core.parsers.py_parse_turtle_file(str(ttl_path))
@@ -210,3 +210,84 @@ def test_rust_parse_turtle_file():
         assert len(mappings) >= 3
 
 
+def test_rust_rerank_bm25():
+    rr = _core.rerank
+    scores = rr.py_bm25_score_batch(
+        "tuntematon sotilas",
+        ["tuntematon sotilas", "seitsemän veljestä", "sotilas ja poika"],
+    )
+    assert len(scores) == 3
+    assert scores[0] == 1.0
+    assert scores[1] == 0.0
+    assert 0.0 < scores[2] < 1.0
+
+
+def test_rust_rerank_discriminators():
+    rr = _core.rerank
+    assert rr.py_normalize_volume("Osa 2") == "osa 2"
+    assert rr.py_normalize_volume("Vol. 3") == "osa 3"
+    assert rr.py_normalize_volume("Osa II") == "osa 2"
+
+    assert rr.py_check_numeric_title_tokens_compatible("Book 1", "Book 1") is True
+    assert rr.py_check_numeric_title_tokens_compatible("Book 1", "Book 2") is False
+
+
+def test_rust_marcxml_mutations_and_xml():
+    xml = """<record xmlns="http://www.loc.gov/MARC21/slim">
+  <controlfield tag="001">112233</controlfield>
+  <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Virtanen, Ville</subfield></datafield>
+</record>"""
+    recs = _core.parsers.py_parse_marc_xml_str(xml)
+    assert len(recs) == 1
+    rec = recs[0]
+
+    assert rec.add_subfield("100", "0", "http://example.org/agent/123") is True
+    rec.add_datafield("758", " ", " ", [("0", "http://example.org/work/789")])
+
+    xml_out = rec.to_xml()
+    assert "http://example.org/agent/123" in xml_out
+    assert "http://example.org/work/789" in xml_out
+    assert b"http://example.org/work/789" in rec.to_xml_bytes()
+
+
+def test_rust_marc_record_wemi_decomposition():
+    from reconciliator.loaders.marcxml import (
+        build_target_record_from_marc,
+        decompose_marc_wemi,
+        parse_marc_xml_str_fast,
+    )
+
+    xml = """<record xmlns="http://www.loc.gov/MARC21/slim">
+  <leader>01234nam a2200349 c 4500</leader>
+  <controlfield tag="001">FI-MELI-123456</controlfield>
+  <controlfield tag="008">950101s1995    fi                  fin  </controlfield>
+  <datafield tag="020" ind1=" " ind2=" "><subfield code="a">978-951-0-12345-6</subfield></datafield>
+  <datafield tag="100" ind1="1" ind2=" "><subfield code="a">Virtanen, Ville,</subfield></datafield>
+  <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Testikirja /</subfield><subfield code="c">Ville Virtanen.</subfield></datafield>
+</record>"""
+
+    recs = parse_marc_xml_str_fast(xml)
+    assert len(recs) == 1
+    marc_rec = recs[0]
+
+    # Decompose into WEMI using native MarcRecordData
+    keys = []
+    w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
+        marc_rec,
+        source="test_src",
+        key_sink=keys,
+    )
+    assert w.work_type == "text"
+    assert w.title == "Testikirja"
+    assert w.title_normalized == "testikirja"
+    assert m.source_id == "FI-MELI-123456"
+    assert len(agts) >= 1
+    assert agts[0].name == "Virtanen, Ville"
+    assert len(keys) > 0
+
+    # Build MatchRecord using native MarcRecordData
+    match_rec = build_target_record_from_marc(marc_rec, source="test_src")
+    assert match_rec.record_id == "FI-MELI-123456"
+    assert match_rec.title == "Testikirja"
+    assert match_rec.author_key is not None
+    assert b"Testikirja" in match_rec.raw_payload

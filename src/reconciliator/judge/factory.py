@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import platform
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from reconciliator.judge.protocol import LLMJudgeBackend
 from reconciliator.judge.torch_backend import PytorchJudgeBackend

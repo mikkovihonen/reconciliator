@@ -45,9 +45,7 @@ def detect_vocabulary(uri: str, patterns: Optional[dict[str, list[str]]] = None)
         else get_vocabulary_patterns()
     )
     candidates: list[tuple[str, str]] = [
-        (pat, vocab)
-        for vocab, pats in active_patterns.items()
-        for pat in pats
+        (pat, vocab) for vocab, pats in active_patterns.items() for pat in pats
     ]
     candidates.sort(key=lambda item: len(item[0]), reverse=True)
     for pat, vocab in candidates:

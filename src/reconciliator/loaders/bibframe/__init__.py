@@ -16,7 +16,6 @@ from reconciliator.loaders.bibframe.decomposition import (
     decompose_bibframe_work,
     extract_marc_key_components,
 )
-
 from reconciliator.loaders.bibframe.jsonld_stream import (
     iter_jsonld_bibframe_records,
     parse_jsonld_dict,

@@ -85,7 +85,13 @@ def normalize_subject_vocabulary(
         supp_set = {v.strip().lower() for v in supported_vocabularies if v}
     else:
         supp_set = {
-            v.strip().lower() for v in defaults.get("supported_subject_vocabularies", []) if v
+            v.strip().lower()
+            for v in (
+                defaults.get("supported_subject_vocabularies")
+                or defaults.get("supported_subjects")
+                or []
+            )
+            if v
         }
 
     leg_map: dict[str, str]

@@ -43,7 +43,7 @@ def test_fts_config_defaults_and_validation():
 
     # 2. ReconcileFTSFallbackConfig
     rec_cfg = ReconcileFTSFallbackConfig()
-    assert rec_cfg.enabled is True
+    assert rec_cfg.enabled is False
     assert rec_cfg.limit == 5
     assert rec_cfg.confidence_score == 0.80
 
@@ -72,6 +72,7 @@ def test_fts_config_defaults_and_validation():
         subject_reports=dummy_reports,
     )
     assert isinstance(reconcile_cfg.fts_fallback, ReconcileFTSFallbackConfig)
+    assert reconcile_cfg.fts_fallback.enabled is False
     assert reconcile_cfg.fts_fallback.confidence_score == 0.80
 
 

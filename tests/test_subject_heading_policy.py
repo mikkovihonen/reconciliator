@@ -13,8 +13,8 @@ import pytest
 from lxml import etree
 
 from reconciliator.config import VocabulariesConfig
-from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 from reconciliator.enrichment import MARCXMLEnricher
+from reconciliator.vocab import VocabFolder, VocabStore, format_target_vocab
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MARC_NS = "http://www.loc.gov/MARC21/slim"

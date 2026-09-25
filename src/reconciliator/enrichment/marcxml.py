@@ -260,11 +260,7 @@ class MARCXMLEnricher:
                             ) or matched_field.findall(".//subfield[@code='0']"):
                                 s_text = (sub_elem.text or "").strip()
                                 s_src, s_sid = parse_curie(s_text)
-                                s_curie = (
-                                    to_curie(s_src, s_sid)
-                                    if s_src != "unknown"
-                                    else s_text
-                                )
+                                s_curie = to_curie(s_src, s_sid) if s_src != "unknown" else s_text
                                 if s_text == actionable_uri or (
                                     uri_src != "unknown" and s_curie == uri_curie
                                 ):
@@ -290,9 +286,9 @@ class MARCXMLEnricher:
                     term_elements = field.findall(
                         f".//{subfield_tag}[@code='{term_subfield_code}']"
                     ) or field.findall(f".//subfield[@code='{term_subfield_code}']")
-                    f4_elements = field.findall(
-                        f".//{subfield_tag}[@code='4']"
-                    ) or field.findall(".//subfield[@code='4']")
+                    f4_elements = field.findall(f".//{subfield_tag}[@code='4']") or field.findall(
+                        ".//subfield[@code='4']"
+                    )
 
                     if term_elements:
                         for term_elem in term_elements:

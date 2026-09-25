@@ -202,10 +202,15 @@ class VocabConcept(BaseModel):
                 if not data.get("vocabulary") and src and src != "unknown":
                     data["vocabulary"] = src
                 if not sid or sid.startswith(("http://", "https://", "urn:")):
-                    from reconciliator.vocab.detection import extract_concept_id
+                    from reconciliator.utils.curie import format_source_uri
+                    from reconciliator.vocab.detection import detect_vocabulary, extract_concept_id
 
-                    extracted = extract_concept_id(str(raw_uri))
-                    sid = extracted or sid
+                    voc = data.get("vocabulary", "")
+                    if detect_vocabulary(str(raw_uri)) or (
+                        voc and format_source_uri(voc, "test") != f"{voc}:test"
+                    ):
+                        extracted = extract_concept_id(str(raw_uri))
+                        sid = extracted or sid
                 data["concept_id"] = sid
         return data
 
@@ -251,10 +256,15 @@ class ConceptMapping(BaseModel):
                 if not data.get("legacy_vocab") and src and src != "unknown":
                     data["legacy_vocab"] = src
                 if not sid or sid.startswith(("http://", "https://", "urn:")):
-                    from reconciliator.vocab.detection import extract_concept_id
+                    from reconciliator.utils.curie import format_source_uri
+                    from reconciliator.vocab.detection import detect_vocabulary, extract_concept_id
 
-                    extracted = extract_concept_id(str(raw_l))
-                    sid = extracted or sid
+                    l_voc = data.get("legacy_vocab", "")
+                    if detect_vocabulary(str(raw_l)) or (
+                        l_voc and format_source_uri(l_voc, "test") != f"{l_voc}:test"
+                    ):
+                        extracted = extract_concept_id(str(raw_l))
+                        sid = extracted or sid
                 data["legacy_id"] = sid
             raw_t = data.get("target_uri") or data.get("target_curie")
             if raw_t and not data.get("target_id"):
@@ -262,10 +272,15 @@ class ConceptMapping(BaseModel):
                 if not data.get("target_vocab") and src and src != "unknown":
                     data["target_vocab"] = src
                 if not sid or sid.startswith(("http://", "https://", "urn:")):
-                    from reconciliator.vocab.detection import extract_concept_id
+                    from reconciliator.utils.curie import format_source_uri
+                    from reconciliator.vocab.detection import detect_vocabulary, extract_concept_id
 
-                    extracted = extract_concept_id(str(raw_t))
-                    sid = extracted or sid
+                    t_voc = data.get("target_vocab", "")
+                    if detect_vocabulary(str(raw_t)) or (
+                        t_voc and format_source_uri(t_voc, "test") != f"{t_voc}:test"
+                    ):
+                        extracted = extract_concept_id(str(raw_t))
+                        sid = extracted or sid
                 data["target_id"] = sid
         return data
 
@@ -277,10 +292,15 @@ class ConceptMapping(BaseModel):
     def legacy_uri(self) -> str:
         if self.legacy_id and self.legacy_id.startswith(("http://", "https://", "urn:")):
             return self.legacy_id
+        from reconciliator.utils.curie import format_source_uri
+
+        u = format_source_uri(self.legacy_vocab, self.legacy_id)
+        if u and not u.startswith(f"{self.legacy_vocab}:"):
+            return u
         from reconciliator.vocab import concept_id_to_uri
 
-        u = concept_id_to_uri(self.legacy_curie)
-        return u if u else self.legacy_curie
+        u_legacy = concept_id_to_uri(self.legacy_curie)
+        return u_legacy if u_legacy else self.legacy_curie
 
     @property
     def target_curie(self) -> str:
@@ -290,10 +310,15 @@ class ConceptMapping(BaseModel):
     def target_uri(self) -> str:
         if self.target_id and self.target_id.startswith(("http://", "https://", "urn:")):
             return self.target_id
+        from reconciliator.utils.curie import format_source_uri
+
+        u = format_source_uri(self.target_vocab, self.target_id)
+        if u and not u.startswith(f"{self.target_vocab}:"):
+            return u
         from reconciliator.vocab import concept_id_to_uri
 
-        u = concept_id_to_uri(self.target_curie)
-        return u if u else self.target_curie
+        u_legacy = concept_id_to_uri(self.target_curie)
+        return u_legacy if u_legacy else self.target_curie
 
 
 class ReconciliationMatch(BaseModel):

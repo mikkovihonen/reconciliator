@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -71,6 +72,38 @@ def init_vocab_db(engine: Any) -> None:
     create_schema_tables(engine, vocab_metadata.sorted_tables)
 
 
+class VocabMemoryIndex:
+    """Process-level shared in-memory index for a specific database."""
+
+    def __init__(self) -> None:
+        self.concepts_by_id: dict[tuple[str, str], VocabConcept] = {}
+        self.concepts_by_uri: dict[str, VocabConcept] = {}
+        self.pref_labels: dict[tuple[str, Optional[str], Optional[str]], tuple[str, str]] = {}
+        self.alias_index: dict[tuple[str, Optional[str]], tuple[str, str, str]] = {}
+        self.is_preloaded: bool = False
+        self.lock = threading.Lock()
+
+    def clear(self) -> None:
+        with self.lock:
+            self.concepts_by_id.clear()
+            self.concepts_by_uri.clear()
+            self.pref_labels.clear()
+            self.alias_index.clear()
+            self.is_preloaded = False
+
+
+_SHARED_INDEX_REGISTRY: dict[str, VocabMemoryIndex] = {}
+_REGISTRY_LOCK = threading.Lock()
+
+
+def get_shared_vocab_index(db_path: str) -> VocabMemoryIndex:
+    """Get or create process-level shared in-memory index for a database URL/path."""
+    with _REGISTRY_LOCK:
+        if db_path not in _SHARED_INDEX_REGISTRY:
+            _SHARED_INDEX_REGISTRY[db_path] = VocabMemoryIndex()
+        return _SHARED_INDEX_REGISTRY[db_path]
+
+
 class VocabStore:
     """Store for controlled vocabularies backed by SQLAlchemy 2.0 Engine."""
 
@@ -85,11 +118,137 @@ class VocabStore:
         self.linguistic = linguistic or LinguisticConfig()
         if engine is not None:
             self.engine = engine
-            self.db_path = engine.url.render_as_string(hide_password=False)
+            self.db_path = (
+                str(db_path)
+                if db_path is not None
+                else engine.url.render_as_string(hide_password=False)
+            )
         else:
             self.engine = get_engine(db_path)
-            self.db_path = self.engine.url.render_as_string(hide_password=False)
+            self.db_path = (
+                str(db_path)
+                if db_path is not None
+                else self.engine.url.render_as_string(hide_password=False)
+            )
         init_vocab_db(self.engine)
+        self._index = get_shared_vocab_index(self.db_path)
+        if getattr(self.config, "preload", None) and self.config.preload.enabled:
+            self.preload()
+
+    def preload(self) -> None:
+        """Preload controlled vocabulary concepts, preferred labels, and aliases into shared memory."""
+        preload_cfg = getattr(self.config, "preload", None)
+
+        if self._index.is_preloaded:
+            return
+
+        with self._index.lock:
+            if self._index.is_preloaded:
+                return
+
+            load_concepts = preload_cfg.preload_concepts if preload_cfg else True
+            load_pref = preload_cfg.preload_pref_labels if preload_cfg else True
+            load_aliases = preload_cfg.preload_aliases if preload_cfg else True
+
+            with self.engine.connect() as conn:
+                if load_concepts or load_pref:
+                    stmt = (
+                        select(
+                            concepts_table.c.vocabulary,
+                            concepts_table.c.concept_id,
+                            concepts_table.c.is_deprecated,
+                            concepts_table.c.target_field,
+                            concept_labels_table.c.lang,
+                            concept_labels_table.c.label,
+                        )
+                        .select_from(
+                            concepts_table.join(
+                                concept_labels_table,
+                                concepts_table.c.id == concept_labels_table.c.concept_row_id,
+                            )
+                        )
+                        .where(concept_labels_table.c.label_type == "pref")
+                    )
+                    rows = conn.execute(stmt).fetchall()
+                    for voc, cid, is_dep, tf, lang, lbl in rows:
+                        voc_clean = str(voc).strip().lower()
+                        cid_clean = str(cid).strip()
+                        lbl_clean = lbl.strip().lower() if lbl else ""
+                        l_clean = lang.strip().lower() if lang else ""
+                        norm_l = self.config.language_code_map.get(l_clean, l_clean)
+
+                        key = (voc_clean, cid_clean)
+                        if key not in self._index.concepts_by_id:
+                            concept = VocabConcept(
+                                uri=concept_id_to_uri(to_curie(voc_clean, cid_clean))
+                                or to_curie(voc_clean, cid_clean),
+                                vocabulary=voc_clean,
+                                concept_id=cid_clean,
+                                pref_labels={l_clean: lbl} if lbl else {},
+                                alt_labels={},
+                                is_deprecated=bool(is_dep),
+                                target_field=tf,
+                            )
+                            self._index.concepts_by_id[key] = concept
+                            if concept.uri:
+                                self._index.concepts_by_uri[concept.uri] = concept
+                        else:
+                            concept = self._index.concepts_by_id[key]
+                            if lbl and l_clean not in concept.pref_labels:
+                                concept.pref_labels[l_clean] = lbl
+
+                        if load_pref and lbl_clean:
+                            target_tuple = (voc_clean, cid_clean)
+                            self._index.pref_labels[(lbl_clean, voc_clean, norm_l)] = target_tuple
+                            if (lbl_clean, voc_clean, None) not in self._index.pref_labels:
+                                self._index.pref_labels[(lbl_clean, voc_clean, None)] = target_tuple
+                            if (lbl_clean, None, norm_l) not in self._index.pref_labels:
+                                self._index.pref_labels[(lbl_clean, None, norm_l)] = target_tuple
+                            if (lbl_clean, None, None) not in self._index.pref_labels:
+                                self._index.pref_labels[(lbl_clean, None, None)] = target_tuple
+
+                if load_aliases:
+                    alias_stmt = (
+                        select(
+                            concept_aliases_table.c.folded_label,
+                            concept_aliases_table.c.target_field,
+                            concept_aliases_table.c.vocabulary,
+                            concept_aliases_table.c.concept_id,
+                            concept_aliases_table.c.source,
+                        )
+                        .distinct(
+                            concept_aliases_table.c.folded_label,
+                            concept_aliases_table.c.target_field,
+                        )
+                        .order_by(
+                            concept_aliases_table.c.folded_label,
+                            concept_aliases_table.c.target_field,
+                            concept_aliases_table.c.is_preferred.desc(),
+                            concept_aliases_table.c.id.asc(),
+                        )
+                    )
+                    alias_rows = conn.execute(alias_stmt).fetchall()
+                    for f_lbl, tf, voc, cid, src in alias_rows:
+                        if not f_lbl or not cid:
+                            continue
+                        f_clean = str(f_lbl).strip()
+                        tf_clean = str(tf).strip() if tf else None
+                        voc_clean = str(voc).strip().lower()
+                        cid_clean = str(cid).strip()
+                        src_clean = str(src).strip() if src else ""
+                        self._index.alias_index[(f_clean, tf_clean)] = (
+                            voc_clean,
+                            cid_clean,
+                            src_clean,
+                        )
+                        if (f_clean, None) not in self._index.alias_index:
+                            self._index.alias_index[(f_clean, None)] = (
+                                voc_clean,
+                                cid_clean,
+                                src_clean,
+                            )
+
+            self._index.is_preloaded = True
 
     def get_connection(self) -> Any:
         """Get a configured connection context manager backed by the SQLAlchemy Engine."""
@@ -100,7 +259,8 @@ class VocabStore:
         self.engine.dispose()
 
     def clear_caches(self) -> None:
-        """Clear all in-memory LRU caches."""
+        """Clear all in-memory LRU caches and shared index."""
+        self._index.clear()
         if hasattr(self.find_concept_by_id, "cache_clear"):
             self.find_concept_by_id.cache_clear()
         if hasattr(self.find_concept_by_uri, "cache_clear"):
@@ -195,7 +355,9 @@ class VocabStore:
                 )
                 if is_postgres:
                     stmt = stmt.returning(
-                        concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
+                        concepts_table.c.id,
+                        concepts_table.c.vocabulary,
+                        concepts_table.c.concept_id,
                     )
                     res = conn.execute(stmt)
                     for r_id, voc, cid in res.fetchall():
@@ -204,15 +366,23 @@ class VocabStore:
                     conn.execute(stmt)
 
             # If any keys missing (e.g. non-postgres dialect), fallback query
-            missing_keys = [(c.vocabulary, c.concept_id) for c in concepts if (c.vocabulary, c.concept_id) not in row_id_map]
+            missing_keys = [
+                (c.vocabulary, c.concept_id)
+                for c in concepts
+                if (c.vocabulary, c.concept_id) not in row_id_map
+            ]
             if missing_keys:
                 key_batch_size = calculate_batch_size(num_columns=2)
                 for chunk_start in range(0, len(missing_keys), key_batch_size):
                     chunk_keys = missing_keys[chunk_start : chunk_start + key_batch_size]
                     q = select(
-                        concepts_table.c.id, concepts_table.c.vocabulary, concepts_table.c.concept_id
+                        concepts_table.c.id,
+                        concepts_table.c.vocabulary,
+                        concepts_table.c.concept_id,
                     ).where(
-                        tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(chunk_keys)
+                        tuple_(concepts_table.c.vocabulary, concepts_table.c.concept_id).in_(
+                            chunk_keys
+                        )
                     )
                     for r_id, voc, cid in conn.execute(q).fetchall():
                         row_id_map[(voc, cid)] = r_id
@@ -300,7 +470,9 @@ class VocabStore:
                 for m_id, m in zip(m_ids, chunk_m):
                     for lang, lbl in m.legacy_labels.items():
                         if lbl and lbl.strip():
-                            label_rows.append({"mapping_id": m_id, "lang": lang, "label": lbl.strip()})
+                            label_rows.append(
+                                {"mapping_id": m_id, "lang": lang, "label": lbl.strip()}
+                            )
 
                 if label_rows:
                     for l_idx in range(0, len(label_rows), label_batch_size):
@@ -458,6 +630,11 @@ class VocabStore:
             return None
         clean_voc = str(vocabulary).strip().lower()
         clean_id = str(concept_id).strip()
+        if self._index.is_preloaded:
+            key = (clean_voc, clean_id)
+            if key in self._index.concepts_by_id:
+                return self._index.concepts_by_id[key]
+
         with self.engine.connect() as conn:
             stmt = select(concepts_table).where(
                 concepts_table.c.vocabulary == clean_voc,
@@ -500,6 +677,8 @@ class VocabStore:
         if not uri:
             return None
         clean_uri = uri.strip()
+        if self._index.is_preloaded and clean_uri in self._index.concepts_by_uri:
+            return self._index.concepts_by_uri[clean_uri]
 
         # 1. Direct CURIE or URI decomposition
         src, sid = parse_curie(clean_uri)
@@ -543,6 +722,19 @@ class VocabStore:
         effective_lang = lang or getattr(self.config, "default_language", None) or ""
         clean_lbl = label.strip().lower()
         norm_l = self.config.language_code_map.get(effective_lang.lower(), effective_lang.lower())
+        if self._index.is_preloaded:
+            clean_voc = str(vocabulary).strip().lower() if vocabulary else None
+            hit = self._index.pref_labels.get((clean_lbl, clean_voc, norm_l))
+            if not hit and not lang:
+                hit = self._index.pref_labels.get((clean_lbl, clean_voc, None))
+            if not hit and not vocabulary:
+                hit = self._index.pref_labels.get(
+                    (clean_lbl, None, norm_l)
+                ) or self._index.pref_labels.get((clean_lbl, None, None))
+            if hit:
+                return self.find_concept_by_id(hit[0], hit[1])
+            return None
+
         with self.engine.connect() as conn:
             stmt = (
                 select(concepts_table.c.vocabulary, concepts_table.c.concept_id)
@@ -657,6 +849,11 @@ class VocabStore:
         """Look up migration mapping by legacy label."""
         effective_lang = lang or getattr(self.config, "default_language", None) or ""
         clean_lbl = label.strip().lower()
+        if legacy_vocab:
+            clean_leg = legacy_vocab.strip().lower()
+            legacy_sources = getattr(self.config, "legacy_to_modern", None)
+            if legacy_sources is not None and clean_leg not in legacy_sources:
+                return None
         norm_l = self.config.language_code_map.get(effective_lang.lower(), effective_lang.lower())
         with self.engine.connect() as conn:
             stmt = (
@@ -962,6 +1159,27 @@ class VocabStore:
         search_tokens = [clean_folded]
         if clean != clean_folded:
             search_tokens.append(clean)
+
+        if self._index.is_preloaded and self._index.alias_index:
+            for tok in search_tokens:
+                hit = None
+                if target_field:
+                    hit = self._index.alias_index.get((tok, target_field))
+                if not hit:
+                    hit = self._index.alias_index.get((tok, None))
+                if hit:
+                    voc, c_id, source_val = hit
+                    if vocabulary and voc != vocabulary.lower():
+                        continue
+                    concept = self.find_concept_by_id(voc, c_id)
+                    concept_curie = to_curie(voc, c_id)
+                    if not concept:
+                        concept = self.find_concept_by_uri(concept_curie)
+                    wikidata_qid = extract_wikidata_qid(concept_curie) or extract_wikidata_qid(
+                        source_val
+                    )
+                    return concept, wikidata_qid
+            return None, None
 
         priority_order: list[str] = []
         if target_field and target_field in getattr(self.config, "default_field_vocabularies", {}):

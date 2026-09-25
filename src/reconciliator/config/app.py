@@ -426,14 +426,26 @@ class AppConfig(BaseModel):
 
 
 def get_source_aliases(source: str, app_config: Optional[AppConfig] = None) -> list[str]:
-    """Return configured aliases for a given source name."""
+    """Return configured aliases for a given source name, or parent/sibling source names if source is an alias."""
     s_norm = (source or "").strip().lower()
+    sources_dict: dict[str, list[str]] = {}
     if app_config and app_config.sources:
-        cfg = app_config.sources.get(s_norm)
-        if cfg:
-            return list(cfg.aliases)
-    defaults = get_bundled_sources_defaults()
-    src_data = defaults.get(s_norm)
-    if isinstance(src_data, dict):
-        return list(src_data.get("aliases") or [])
-    return []
+        sources_dict = {k.lower(): list(v.aliases) for k, v in app_config.sources.items()}
+    else:
+        defaults = get_bundled_sources_defaults()
+        for k, v in defaults.items():
+            if isinstance(v, dict):
+                sources_dict[k.lower()] = [str(a).lower() for a in (v.get("aliases") or [])]
+
+    if s_norm in sources_dict and sources_dict[s_norm]:
+        return list(sources_dict[s_norm])
+
+    matched: list[str] = []
+    for k, aliases in sources_dict.items():
+        if s_norm in aliases:
+            if k not in matched:
+                matched.append(k)
+            for a in aliases:
+                if a != s_norm and a not in matched:
+                    matched.append(a)
+    return matched

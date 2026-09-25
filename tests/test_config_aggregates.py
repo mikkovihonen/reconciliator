@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-from reconciliator.config import AggregateClusteringConfig, WEMIClusterConfig
-from reconciliator.config import ConstituentsConfig
-from reconciliator.config import ReconcileConfig
+from reconciliator.config import (
+    AggregateClusteringConfig,
+    ConstituentsConfig,
+    ReconcileConfig,
+    WEMIClusterConfig,
+)
 
 
 def test_aggregate_clustering_config_defaults():

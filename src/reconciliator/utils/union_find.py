@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Generic, Iterable, Optional, TypeVar
 
+from reconciliator._core.clustering import (
+    py_cluster_connected_components as _rust_cluster,
+)
+
 T = TypeVar("T")
 
 
@@ -46,11 +50,6 @@ class UnionFind(Generic[T]):
         return dict(components)
 
     groups = get_components
-
-
-from reconciliator._core.clustering import (
-    py_cluster_connected_components as _rust_cluster,
-)
 
 
 def cluster_edges(nodes: list[T], edges: Iterable[tuple[T, T]]) -> dict[T, list[T]]:

@@ -573,8 +573,11 @@ class RecordNormalizer:
         raw_subjects = raw_data.get("subjects", {})
         rec_lang_folding = language or cfg.linguistic.default_language
 
+        folder_cfg = getattr(self.vocab_folder, "config", None)
         field_to_cat = (
-            self.vocab_folder.config.subject_field_category_map or get_subject_field_category_map()
+            getattr(cfg, "subject_field_category_map", None)
+            or getattr(folder_cfg, "subject_field_category_map", None)
+            or get_subject_field_category_map()
         )
         cat_default_field = {cat: tag for tag, cat in field_to_cat.items()}
         folded_categories: dict[str, list[SubjectItem]] = {cat: [] for cat in field_to_cat.values()}
@@ -582,7 +585,8 @@ class RecordNormalizer:
         for cat_name, items in raw_subjects.items():
             fallback_field = (
                 cat_default_field.get(cat_name)
-                or self.vocab_folder.config.default_vocab_target_field
+                or getattr(cfg, "default_subject_field", None)
+                or getattr(folder_cfg, "default_vocab_target_field", None)
                 or "650"
             )
             for item in items:

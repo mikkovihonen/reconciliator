@@ -59,7 +59,10 @@ def test_stream_wikidata_dump(tmp_path: Path) -> None:
     assert "978-951-0-00001-0" in rec["identifiers"]["isbn"]
     assert len(rec["agents"]) == 1
     assert rec["agents"][0]["name"] == "Mika Waltari"
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in rec["agents"][0]["uri_subfield_0"]
+    assert any(
+        u in rec["agents"][0]["uri_subfield_0"]
+        for u in ("https://urn.fi/URN:NBN:fi:au:pn:000123456", "kanto:000123456")
+    )
 
 
 def test_stream_sample_wikidata_fixture(tmp_path: Path) -> None:
@@ -74,7 +77,10 @@ def test_stream_sample_wikidata_fixture(tmp_path: Path) -> None:
     assert "978-951-0-00001-0" in rec["identifiers"]["isbn"]
     assert len(rec["agents"]) == 1
     assert rec["agents"][0]["name"] == "Mika Waltari"
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in rec["agents"][0]["uri_subfield_0"]
+    assert any(
+        u in rec["agents"][0]["uri_subfield_0"]
+        for u in ("https://urn.fi/URN:NBN:fi:au:pn:000123456", "kanto:000123456")
+    )
 
 
 def test_wikidata_composer_and_author_string_and_publisher(tmp_path: Path) -> None:

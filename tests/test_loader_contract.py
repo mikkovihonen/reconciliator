@@ -476,7 +476,6 @@ def test_a_blank_node_role_is_read_from_its_label(ctx: LoadContext):
     assert not any(_looks_like_blank_node(r) for r in roles)
 
 
-
 def test_a_role_the_registry_does_not_know_survives_as_itself(ctx: LoadContext):
     """Normalising is not the same as discarding: an unmapped role is still the
     best description available, and `check_output` must not treat it as a

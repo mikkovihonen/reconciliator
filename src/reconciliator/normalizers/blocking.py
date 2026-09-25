@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Optional
+
+from reconciliator._core.normalizers import (
+    py_compute_host_citation_key as _rust_compute_host_citation_key,
+    py_compute_series_key as _rust_compute_series_key,
+    py_compute_work_blocking_key as _rust_compute_work_blocking_key,
+    py_deterministic_key_hash as _rust_deterministic_key_hash,
+)
 
 from reconciliator.normalizers.agent import extract_surname, normalize_agent_name
 from reconciliator.normalizers.record import clean_title
@@ -39,14 +45,6 @@ def compute_author_key(name: Optional[str], surname: Optional[str] = None) -> st
     # Clean non-alphanumeric
     cleaned = re.sub(r"[^\w]", "", sur.lower(), flags=re.UNICODE)
     return cleaned
-
-
-from reconciliator._core.normalizers import (
-    py_compute_host_citation_key as _rust_compute_host_citation_key,
-    py_compute_series_key as _rust_compute_series_key,
-    py_compute_work_blocking_key as _rust_compute_work_blocking_key,
-    py_deterministic_key_hash as _rust_deterministic_key_hash,
-)
 
 
 def deterministic_key_hash(key_content: str) -> str:

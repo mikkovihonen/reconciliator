@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from reconciliator.judge.factory import create_judge_backend
+from reconciliator.judge import factory as judge_factory
 from reconciliator.judge.protocol import LLMJudgeBackend
 
 logger = logging.getLogger(__name__)
@@ -25,11 +25,11 @@ class LLMJudgeScorer:
         if backend is not None:
             self.backend = backend
         elif config is not None:
-            self.backend = create_judge_backend(config)
+            self.backend = judge_factory.create_judge_backend(config)
         else:
             from reconciliator.config import LLMJudgeConfig
 
-            self.backend = create_judge_backend(LLMJudgeConfig())
+            self.backend = judge_factory.create_judge_backend(LLMJudgeConfig())
 
     def score(self, query: str, document: str) -> float:
         """Compute matching score in [0.0, 1.0] for a query-document pair with optional symmetric scoring."""

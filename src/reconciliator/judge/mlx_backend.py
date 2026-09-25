@@ -112,8 +112,26 @@ class MLXJudgeBackend:
         self._pos_token_id = get_id(self.config.positive_token)
         self._neg_token_id = get_id(self.config.negative_token)
 
-        pos_words = [self.config.positive_token, "YES", "Yes", "yes", "True", "true", "Match", "match"]
-        neg_words = [self.config.negative_token, "NO", "No", "no", "False", "false", "Different", "different"]
+        pos_words = [
+            self.config.positive_token,
+            "YES",
+            "Yes",
+            "yes",
+            "True",
+            "true",
+            "Match",
+            "match",
+        ]
+        neg_words = [
+            self.config.negative_token,
+            "NO",
+            "No",
+            "no",
+            "False",
+            "false",
+            "Different",
+            "different",
+        ]
 
         pos_ids: set[int] = set()
         for w in pos_words:
@@ -147,7 +165,11 @@ class MLXJudgeBackend:
         """Compute positive score, negative score, and raw margin via single token or cluster log-sum-exp in MLX."""
         import mlx.core as mx
 
-        if getattr(self.config, "marginalize_tokens", True) and len(self._pos_token_ids) > 1 and len(self._neg_token_ids) > 1:
+        if (
+            getattr(self.config, "marginalize_tokens", True)
+            and len(self._pos_token_ids) > 1
+            and len(self._neg_token_ids) > 1
+        ):
             try:
                 pos_idx = mx.array(self._pos_token_ids)
                 neg_idx = mx.array(self._neg_token_ids)
@@ -203,7 +225,11 @@ class MLXJudgeBackend:
                     mx.eval(c.values)
 
         prior_bias = 0.0
-        if retain_cache and getattr(self.config, "calibrate_prior", True) and prompt_cache is not None:
+        if (
+            retain_cache
+            and getattr(self.config, "calibrate_prior", True)
+            and prompt_cache is not None
+        ):
             neutral_suffix = self.config.candidate_suffix_template.format(text="N/A")
             neutral_eval = self.evaluate_candidate(
                 base_cache=prompt_cache,

@@ -157,4 +157,3 @@ def db_status_cmd(
     )
 
     console.print(table)
-

@@ -478,4 +478,3 @@ def ingest_wikidata_cmd(
     console.print("[cyan]Streaming Wikidata entities into WEMI authority repository...[/cyan]")
     total = ingest_wikidata_pipeline(cfg.ingestion.wikidata, wemi_repo, tracker=tracker)
     console.print(f"[green]Successfully ingested {total} records from Wikidata.[/green]")
-

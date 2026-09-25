@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -256,7 +257,7 @@ def test_pytorch_backend_prefix_lm_mask_passed() -> None:
     # Should be 4D tensor with shape [1, 1, 4, 4] and dtype bool
     assert attn_mask.shape == (1, 1, 4, 4)
     assert attn_mask.dtype == torch.bool
-    assert torch.all(attn_mask == True)  # All tokens attend bidirectionally
+    assert torch.all(attn_mask)  # All tokens attend bidirectionally
 
 
 def test_llm_judge_symmetric_scoring() -> None:
@@ -304,7 +305,9 @@ def test_llm_judge_symmetric_scoring() -> None:
     #                      doc1 reverse = 0.86 (avg = (0.80+0.86)/2 = 0.83)
     eval_calls = []
 
-    def mock_eval_candidate(base_cache: Any, base_seq_len: int, candidate_suffix: str, prior_bias: float = 0.0) -> CandidateEvaluation:
+    def mock_eval_candidate(
+        base_cache: Any, base_seq_len: int, candidate_suffix: str, prior_bias: float = 0.0
+    ) -> CandidateEvaluation:
         eval_calls.append((base_cache, candidate_suffix))
         if base_cache == "cache_q":
             if "Cand 1" in candidate_suffix:

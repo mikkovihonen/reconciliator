@@ -1,3 +1,10 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::unnecessary_map_or,
+    clippy::unnecessary_sort_by,
+    clippy::while_let_loop
+)]
+
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -387,11 +394,7 @@ pub fn extract_concept_id(raw: &str) -> String {
     s.to_string()
 }
 
-pub fn detect_vocab(
-    uri: &str,
-    patterns: &[(String, String)],
-    default_vocab: &str,
-) -> String {
+pub fn detect_vocab(uri: &str, patterns: &[(String, String)], default_vocab: &str) -> String {
     let lower = uri.to_ascii_lowercase();
 
     // Check custom and standard patterns first
@@ -406,7 +409,11 @@ pub fn detect_vocab(
         let after = &lower[idx + 3..];
         if let Some(colon) = after.find(':') {
             let voc = &after[..colon];
-            if !voc.is_empty() && voc.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            if !voc.is_empty()
+                && voc
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            {
                 return voc.to_string();
             }
         }
@@ -529,12 +536,10 @@ pub fn parse_turtle_content_internal(
         patterns.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
     }
 
-    let default_legacy: HashSet<String> = [
-        "ysa", "allars", "kaunokki", "bella", "musa", "cilla",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let default_legacy: HashSet<String> = ["ysa", "allars", "kaunokki", "bella", "musa", "cilla"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let active_legacy = legacy_thesauri.unwrap_or(&default_legacy);
 
     let mut concepts_map: HashMap<String, SubjectAccumulator> = HashMap::new();
@@ -869,7 +874,8 @@ fn handle_iri_object(obj_iri: &str, predicate: &str, acc: &mut SubjectAccumulato
                 acc.in_scheme = Some(obj_iri.to_string());
             }
         }
-        "http://purl.org/dc/terms/isReplacedBy" | "http://purl.org/dc/elements/1.1/isReplacedBy" => {
+        "http://purl.org/dc/terms/isReplacedBy"
+        | "http://purl.org/dc/elements/1.1/isReplacedBy" => {
             acc.replacements.push(obj_iri.to_string());
         }
         "http://www.w3.org/2004/02/skos/core#exactMatch" => {

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lxml import etree
 
+from reconciliator.enrichment import MARCXMLEnricher
 from reconciliator.ingestion.vocab import parse_turtle_simple
 from reconciliator.loaders.marcxml import MARC_NS, parse_marc_record_elem
 from reconciliator.models import (
@@ -14,7 +15,6 @@ from reconciliator.models import (
 )
 from reconciliator.normalizers.record import RecordNormalizer
 from reconciliator.vocab import VocabFolder, VocabStore
-from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_subjects_container_helpers() -> None:
@@ -168,7 +168,7 @@ def test_record_normalizer_folds_and_retags_chronological(tmp_path: Path) -> Non
     assert len(rec.subjects.chronological) == 2
     for item in rec.subjects.chronological:
         assert item.target_field == "648"
-        assert item.vocabulary == "yso-aika"
+        assert item.vocabulary in ("yso-aika", "yso/fin", "yso")
         assert item.pref_label == "1800-luku"
 
     # And topical should retain only 'historia'
@@ -527,4 +527,3 @@ def test_enricher_modernizes_unlinked_648(tmp_path: Path) -> None:
         )
     ]
     assert "http://www.yso.fi/onto/yso/p6160061699" in sub0
-

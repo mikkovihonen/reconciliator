@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
 
 from lxml import etree
+from reconciliator._core.parsers import (
+    MarcDatafield,
+    MarcRecordData,
+    py_parse_marc_file,
+    py_parse_marc_xml_str,
+)
 
 from reconciliator.config import (
     DEFAULT_FICTIONAL_QUALIFIERS,
@@ -73,14 +79,6 @@ from reconciliator.vocab import (
     subject_footprint,
 )
 
-from reconciliator._core.parsers import (
-    MarcDatafield,
-    MarcRecordData,
-    MarcSubfield,
-    py_parse_marc_file,
-    py_parse_marc_xml_str,
-)
-
 logger = logging.getLogger(__name__)
 
 #: 1XX main entry: the record's principal creator, whose relator MARC leaves
@@ -124,23 +122,21 @@ def derive_agent_id(
     return digest
 
 
-def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
-    """Derive a stable identifier from a record's own content.
+def derive_content_id(record_elem: Any, prefix: str = "sha1") -> str:
+    """Derive a stable identifier from a record's own content."""
+    if isinstance(record_elem, MarcRecordData):
+        parts: list[str] = []
+        if record_elem.leader:
+            parts.append(f"L|{record_elem.leader.strip()}")
+        for tag, val in record_elem.controlfields:
+            parts.append(f"C|{tag}|{val.strip()}")
+        for df in record_elem.datafields:
+            subs = "|".join(f"{sf.code}={sf.value.strip()}" for sf in df.subfields if sf.code)
+            parts.append(f"D|{df.tag}|{df.ind1 or ' '}{df.ind2 or ' '}|{subs}")
+        digest = hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+        return f"{prefix}:{digest}"
 
-    Records lacking a control number previously got a uuid4, which changes on
-    every ingest: the same record re-harvested became a different work, agent,
-    expression and manifestation, and no index key built from its URI could
-    survive a rebuild. Digesting the record's canonical XML instead makes the
-    identifier a function of the data, so re-ingesting is idempotent.
-
-    Two genuinely identical records collapse onto one id, which is the correct
-    outcome for a record that carries no identifier of its own.
-
-    The digest is taken over the record's fields rather than its serialization,
-    so it does not shift with whitespace, attribute order, or whether a source
-    writes the MARC namespace with a prefix.
-    """
-    parts: list[str] = []
+    parts = []
     for child in record_elem:
         tag = etree.QName(child).localname if isinstance(child.tag, str) else str(child.tag)
         if tag == "controlfield":
@@ -158,8 +154,20 @@ def derive_content_id(record_elem: etree._Element, prefix: str = "sha1") -> str:
     return f"{prefix}:{digest}"
 
 
-def _get_subfields(elem: etree._Element, code: str) -> list[str]:
+def _get_leader(record: Any) -> str:
+    """Get text value of record leader."""
+    if isinstance(record, MarcRecordData):
+        return record.leader or ""
+    leader_elem = record.find("marc:leader", MARC_NS)
+    if leader_elem is None:
+        leader_elem = record.find(".//leader")
+    return (leader_elem.text or "") if leader_elem is not None else ""
+
+
+def _get_subfields(elem: Any, code: str) -> list[str]:
     """Get text values of all subfields matching given code."""
+    if isinstance(elem, MarcDatafield):
+        return elem.get_subfields(code)
     res: list[str] = []
     for sub in elem.findall(f"marc:subfield[@code='{code}']", MARC_NS):
         if sub.text:
@@ -172,8 +180,10 @@ def _get_subfields(elem: etree._Element, code: str) -> list[str]:
     return res
 
 
-def _get_subfield(elem: etree._Element, code: str) -> Optional[str]:
+def _get_subfield(elem: Any, code: str) -> Optional[str]:
     """Get text value of first subfield matching code."""
+    if isinstance(elem, MarcDatafield):
+        return elem.get_subfield(code)
     subs = _get_subfields(elem, code)
     return subs[0] if subs else None
 
@@ -181,16 +191,20 @@ def _get_subfield(elem: etree._Element, code: str) -> Optional[str]:
 parse_marc_dates = parse_agent_dates
 
 
-def _get_datafields(record: etree._Element, tag: str) -> list[etree._Element]:
+def _get_datafields(record: Any, tag: str) -> list[Any]:
     """Get all datafield elements for a specific tag."""
+    if isinstance(record, MarcRecordData):
+        return record.get_datafields(tag)
     fields = record.findall(f"marc:datafield[@tag='{tag}']", MARC_NS)
     if not fields:
         fields = record.findall(f"datafield[@tag='{tag}']")
     return list(fields)
 
 
-def _get_controlfield(record: etree._Element, tag: str) -> Optional[str]:
+def _get_controlfield(record: Any, tag: str) -> Optional[str]:
     """Get value of controlfield element."""
+    if isinstance(record, MarcRecordData):
+        return record.get_controlfield(tag)
     cf = record.find(f"marc:controlfield[@tag='{tag}']", MARC_NS)
     if cf is None:
         cf = record.find(f"controlfield[@tag='{tag}']")
@@ -435,7 +449,10 @@ def parse_marc_record_elem(
     classifications: list[tuple[str, str]] = []
     if default_classification_scheme is None:
         from reconciliator.config import get_bundled_record_defaults
-        default_scheme = str(get_bundled_record_defaults().get("default_classification_scheme") or "ykl")
+
+        default_scheme = str(
+            get_bundled_record_defaults().get("default_classification_scheme") or "ykl"
+        )
     else:
         default_scheme = str(default_classification_scheme)
     for f in _get_datafields(record_elem, "084"):
@@ -521,13 +538,11 @@ def parse_marc_record_elem(
 
     if digital_repository_patterns is None:
         from reconciliator.config import get_bundled_vocabularies_defaults
+
         raw_patterns = get_bundled_vocabularies_defaults().get("digital_repository_patterns") or []
     else:
         raw_patterns = digital_repository_patterns
-    repo_patterns = [
-        re.compile(p, re.I)
-        for p in raw_patterns
-    ]
+    repo_patterns = [re.compile(p, re.I) for p in raw_patterns]
     for f in _get_datafields(record_elem, "856"):
         u = _get_subfield(f, "u")
         if u and any(p.search(u) for p in repo_patterns):
@@ -931,10 +946,7 @@ def determine_work_type(
         else get_tactile_content_codes(config)
     )
 
-    leader_elem = record_elem.find("marc:leader", MARC_NS)
-    if leader_elem is None:
-        leader_elem = record_elem.find(".//leader")
-    ldr = (leader_elem.text or "") if leader_elem is not None else ""
+    ldr = _get_leader(record_elem)
     l06 = ldr[6:7] if len(ldr) > 6 else ""
     l07 = ldr[7:8] if len(ldr) > 7 else ""
 
@@ -1067,10 +1079,7 @@ def determine_content_type(
 
     # Fallbacks based on work_type
     if work_type == "music":
-        leader_elem = record_elem.find("marc:leader", MARC_NS)
-        if leader_elem is None:
-            leader_elem = record_elem.find(".//leader")
-        ldr = (leader_elem.text or "") if leader_elem is not None else ""
+        ldr = _get_leader(record_elem)
         l06 = ldr[6:7] if len(ldr) > 6 else ""
         return "audio_music" if l06 == "j" else "notated_music"
     if work_type == "audio_nonmusic":
@@ -1202,10 +1211,7 @@ def is_marc_authority_record(record_elem: etree._Element) -> bool:
     (100, 110, 111, 130, 147, 148, 150, 151, 155) and NO 245 title statement
     (which is mandatory in MARC 21 bibliographic records).
     """
-    leader_elem = record_elem.find("marc:leader", MARC_NS)
-    if leader_elem is None:
-        leader_elem = record_elem.find(".//leader")
-    ldr = (leader_elem.text or "") if leader_elem is not None else ""
+    ldr = _get_leader(record_elem)
     if len(ldr) > 6 and ldr[6].lower() == "z":
         return True
 
@@ -2522,14 +2528,21 @@ def _subfield_groups(
     group that states neither would inherit both.
     """
     ordered: list[tuple[str, str]] = []
-    for sub in datafield:
-        tag = etree.QName(sub).localname if isinstance(sub.tag, str) else ""
-        if tag != "subfield":
-            continue
-        code = sub.get("code") or ""
-        text = (sub.text or "").strip()
-        if code and text:
-            ordered.append((code, text))
+    if isinstance(datafield, MarcDatafield):
+        ordered = [
+            (sf.code, sf.value.strip())
+            for sf in datafield.subfields
+            if sf.code and sf.value.strip()
+        ]
+    else:
+        for sub in datafield:
+            tag = etree.QName(sub).localname if isinstance(sub.tag, str) else ""
+            if tag != "subfield":
+                continue
+            code = sub.get("code") or ""
+            text = (sub.text or "").strip()
+            if code and text:
+                ordered.append((code, text))
 
     preamble: dict[str, str] = {}
     for code, text in ordered:
@@ -2855,7 +2868,10 @@ def build_target_record_from_marc(
         legacy_to_modern=legacy_to_modern,
     )
 
-    raw_payload = etree.tostring(record_elem, encoding="utf-8")
+    if isinstance(record_elem, MarcRecordData):
+        raw_payload = record_elem.to_xml_bytes()
+    else:
+        raw_payload = etree.tostring(record_elem, encoding="utf-8")
 
     return MatchRecord(
         record_id=source_id,

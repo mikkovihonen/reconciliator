@@ -48,4 +48,3 @@ def _wemi_repo(cfg: Any, embedder: Optional[Any] = None) -> WEMIRepository:
         dimension=embedder.dimension,
         vector_engine_config=cfg.storage.vector_engine,
     )
-

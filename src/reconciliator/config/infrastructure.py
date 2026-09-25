@@ -35,9 +35,7 @@ class ComputeConfig(BaseModel):
     device: Literal["auto", "mps", "cuda", "cpu"] = Field(
         default_factory=lambda: _COMPUTE_DEFAULTS.get("device", "auto")
     )
-    threads: Optional[int] = Field(
-        default_factory=lambda: _COMPUTE_DEFAULTS.get("threads")
-    )
+    threads: Optional[int] = Field(default_factory=lambda: _COMPUTE_DEFAULTS.get("threads"))
 
 
 class EmbeddingConfig(BaseModel):
@@ -87,9 +85,9 @@ class TorchEngineConfig(BaseModel):
     """PyTorch vector index engine configuration."""
 
     dtype: Literal["float32", "float16", "bfloat16"] = Field(
-        default_factory=lambda: _STORAGE_DEFAULTS.get("vector_engine", {})
-        .get("torch", {})
-        .get("dtype", "float32")
+        default_factory=lambda: (
+            _STORAGE_DEFAULTS.get("vector_engine", {}).get("torch", {}).get("dtype", "float32")
+        )
     )
     mmap: bool = Field(
         default_factory=lambda: bool(
@@ -114,9 +112,9 @@ class FAISSEngineConfig(BaseModel):
     """FAISS vector index engine configuration."""
 
     index_type: Literal["flat", "sq8"] = Field(
-        default_factory=lambda: _STORAGE_DEFAULTS.get("vector_engine", {})
-        .get("faiss", {})
-        .get("index_type", "flat")
+        default_factory=lambda: (
+            _STORAGE_DEFAULTS.get("vector_engine", {}).get("faiss", {}).get("index_type", "flat")
+        )
     )
     mmap: bool = Field(
         default_factory=lambda: bool(
@@ -139,14 +137,14 @@ class USearchEngineConfig(BaseModel):
     """USearch vector index engine configuration."""
 
     metric: Literal["cos", "ip", "l2"] = Field(
-        default_factory=lambda: _STORAGE_DEFAULTS.get("vector_engine", {})
-        .get("usearch", {})
-        .get("metric", "cos")
+        default_factory=lambda: (
+            _STORAGE_DEFAULTS.get("vector_engine", {}).get("usearch", {}).get("metric", "cos")
+        )
     )
     dtype: Literal["f32", "f16", "i8", "b1"] = Field(
-        default_factory=lambda: _STORAGE_DEFAULTS.get("vector_engine", {})
-        .get("usearch", {})
-        .get("dtype", "f16")
+        default_factory=lambda: (
+            _STORAGE_DEFAULTS.get("vector_engine", {}).get("usearch", {}).get("dtype", "f16")
+        )
     )
     connectivity: int = Field(
         default_factory=lambda: int(
@@ -155,9 +153,7 @@ class USearchEngineConfig(BaseModel):
     )
     expansion_add: int = Field(
         default_factory=lambda: int(
-            _STORAGE_DEFAULTS.get("vector_engine", {})
-            .get("usearch", {})
-            .get("expansion_add", 128)
+            _STORAGE_DEFAULTS.get("vector_engine", {}).get("usearch", {}).get("expansion_add", 128)
         )
     )
     expansion_search: int = Field(
@@ -195,9 +191,11 @@ class VectorDaemonConfig(BaseModel):
         )
     )
     idle_timeout_seconds: Optional[int] = Field(
-        default_factory=lambda: _STORAGE_DEFAULTS.get("vector_engine", {})
-        .get("daemon", {})
-        .get("idle_timeout_seconds", 1800)
+        default_factory=lambda: (
+            _STORAGE_DEFAULTS.get("vector_engine", {})
+            .get("daemon", {})
+            .get("idle_timeout_seconds", 1800)
+        )
     )
     auto_save_interval_seconds: int = Field(
         default_factory=lambda: int(
@@ -273,9 +271,7 @@ class PostgresConfig(BaseModel):
         default_factory=lambda: str(_PG_DEFAULTS.get("database", "reconciliator"))
     )
     user: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("user", "postgres")))
-    password: str = Field(
-        default_factory=lambda: str(_PG_DEFAULTS.get("password", "postgres"))
-    )
+    password: str = Field(default_factory=lambda: str(_PG_DEFAULTS.get("password", "postgres")))
     database_url: Optional[str] = Field(default_factory=lambda: _PG_DEFAULTS.get("database_url"))
 
     pool_size: int = Field(default_factory=lambda: int(_PG_DEFAULTS.get("pool_size", 10)))
@@ -357,9 +353,7 @@ class PostgresConfig(BaseModel):
 class StorageConfig(BaseModel):
     """File paths for databases, vector indices, and backend engines."""
 
-    data_dir: Path = Field(
-        default_factory=lambda: Path(_STORAGE_DEFAULTS.get("data_dir", "data"))
-    )
+    data_dir: Path = Field(default_factory=lambda: Path(_STORAGE_DEFAULTS.get("data_dir", "data")))
     database_url: Optional[str] = None
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     concept_index: Optional[Path] = None
@@ -529,4 +523,3 @@ class EntraAuthConfig(BaseModel):
     dev_default_role: str = "Admin"
     dev_user_email: str = "dev@localhost"
     dev_user_name: str = "Local Developer"
-

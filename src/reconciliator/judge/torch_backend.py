@@ -143,8 +143,26 @@ class PytorchJudgeBackend:
         self._neg_token_id = get_id(self.config.negative_token)
 
         # Multi-token marginalization clusters
-        pos_words = [self.config.positive_token, "YES", "Yes", "yes", "True", "true", "Match", "match"]
-        neg_words = [self.config.negative_token, "NO", "No", "no", "False", "false", "Different", "different"]
+        pos_words = [
+            self.config.positive_token,
+            "YES",
+            "Yes",
+            "yes",
+            "True",
+            "true",
+            "Match",
+            "match",
+        ]
+        neg_words = [
+            self.config.negative_token,
+            "NO",
+            "No",
+            "no",
+            "False",
+            "false",
+            "Different",
+            "different",
+        ]
 
         pos_ids: set[int] = set()
         for w in pos_words:
@@ -186,10 +204,18 @@ class PytorchJudgeBackend:
 
     def _compute_decision_logits(self, last_logits: torch.Tensor) -> tuple[float, float, float]:
         """Compute positive score, negative score, and raw margin via single token or cluster log-sum-exp."""
-        if getattr(self.config, "marginalize_tokens", True) and len(self._pos_token_ids) > 1 and len(self._neg_token_ids) > 1:
+        if (
+            getattr(self.config, "marginalize_tokens", True)
+            and len(self._pos_token_ids) > 1
+            and len(self._neg_token_ids) > 1
+        ):
             try:
-                pos_idx = torch.tensor(self._pos_token_ids, device=last_logits.device, dtype=torch.long)
-                neg_idx = torch.tensor(self._neg_token_ids, device=last_logits.device, dtype=torch.long)
+                pos_idx = torch.tensor(
+                    self._pos_token_ids, device=last_logits.device, dtype=torch.long
+                )
+                neg_idx = torch.tensor(
+                    self._neg_token_ids, device=last_logits.device, dtype=torch.long
+                )
                 pos_val = float(torch.logsumexp(last_logits[pos_idx], dim=0).item())
                 neg_val = float(torch.logsumexp(last_logits[neg_idx], dim=0).item())
                 return pos_val, neg_val, pos_val - neg_val
@@ -238,7 +264,7 @@ class PytorchJudgeBackend:
         with torch.inference_mode():
             try:
                 outputs = self.model(**model_kwargs)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 # Fallback to standard 2D attention mask if model doesn't support 4D
                 model_kwargs["attention_mask"] = inputs.attention_mask
                 outputs = self.model(**model_kwargs)

@@ -17,10 +17,11 @@ import numpy as np
 from lxml import etree
 from rdflib import Graph, URIRef
 
-from reconciliator.commands import reconcile_cmd, reset_cmd
 from reconciliator.clustering import CorpusClusterer
+from reconciliator.commands import reconcile_cmd, reset_cmd
 from reconciliator.config import AppConfig
 from reconciliator.database import WEMIRepository
+from reconciliator.enrichment import MARCXMLEnricher
 from reconciliator.models import (
     ExpressionEntity,
     IdentifierEntity,
@@ -36,7 +37,6 @@ from reconciliator.reports import (
     ReportGenerator,
     WorkReportRow,
 )
-from reconciliator.enrichment import MARCXMLEnricher
 from tests.conftest import persist_match_records
 
 OWL_SAME_AS = URIRef("http://www.w3.org/2002/07/owl#sameAs")

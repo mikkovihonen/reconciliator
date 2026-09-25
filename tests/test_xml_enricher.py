@@ -2,10 +2,10 @@ from pathlib import Path
 
 from lxml import etree
 
+from reconciliator.enrichment import MARCXMLEnricher
 from reconciliator.loaders.marcxml import _get_subfields
 from reconciliator.models import Agent, BibliographicRecord
 from reconciliator.reconciliation import ReconciliationResult
-from reconciliator.enrichment import MARCXMLEnricher
 
 
 def test_enrich_agent_uris() -> None:
@@ -443,7 +443,9 @@ def test_enrich_agent_actionable_urns() -> None:
 
     enricher = MARCXMLEnricher()
     # Add a 710 datafield for Atena Kustannus
-    f710_elem = etree.SubElement(elem, "{http://www.loc.gov/MARC21/slim}datafield", tag="710", ind1="2", ind2=" ")
+    f710_elem = etree.SubElement(
+        elem, "{http://www.loc.gov/MARC21/slim}datafield", tag="710", ind1="2", ind2=" "
+    )
     s_a = etree.SubElement(f710_elem, "{http://www.loc.gov/MARC21/slim}subfield", code="a")
     s_a.text = "Atena Kustannus"
 
@@ -520,6 +522,7 @@ def test_enrich_subject_headings_full_actionable_urns() -> None:
 def test_enrich_subject_headings_record_language_selection() -> None:
     """Test that MARCXML enrichment adapts subject heading labels and $2 subcodes to record language and per-vocab config."""
     from unittest.mock import MagicMock
+
     from reconciliator.config import VocabulariesConfig
     from reconciliator.models import VocabConcept
     from reconciliator.vocab import VocabFolder
@@ -593,9 +596,13 @@ def test_enrich_subject_headings_record_language_selection() -> None:
     enricher_override = MARCXMLEnricher(vocab_folder=vf_override)
 
     elem_swe2 = etree.fromstring(xml_swe.strip())
-    enriched_override = enricher_override.enrich_record_tree(elem_swe2, enrich=False, fold_legacy=True)
+    enriched_override = enricher_override.enrich_record_tree(
+        elem_swe2, enrich=False, fold_legacy=True
+    )
 
-    fields_650_ov = enriched_override.findall(".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']")
+    fields_650_ov = enriched_override.findall(
+        ".//{http://www.loc.gov/MARC21/slim}datafield[@tag='650']"
+    )
     # YSO still Swedish
     assert _get_subfields(fields_650_ov[0], "a") == ["läkare"]
     assert _get_subfields(fields_650_ov[0], "2") == ["yso/swe"]

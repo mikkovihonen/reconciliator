@@ -220,14 +220,19 @@ def enrich_bibframe_graph(
             uri_ref = URIRef(uri)
             matched_part = None
             title_preds = p.expanded_title_predicates | {str(URIRef(p.expand_curie("bf:title")))}
-            main_t_preds = p.expanded_main_title_predicates | {str(URIRef(p.expand_curie("bf:mainTitle")))}
+            main_t_preds = p.expanded_main_title_predicates | {
+                str(URIRef(p.expand_curie("bf:mainTitle")))
+            }
             for part_obj in g.objects(work_node, part_pred):
                 if isinstance(part_obj, IdentifiedNode):
                     for t_pred in title_preds:
                         for title_obj in g.objects(part_obj, URIRef(t_pred)):
                             for mt_pred in main_t_preds:
                                 for main_t in g.objects(title_obj, URIRef(mt_pred)):
-                                    if str(main_t).strip().lower() in c_link.title.lower() or c_link.title.lower() in str(main_t).strip().lower():
+                                    if (
+                                        str(main_t).strip().lower() in c_link.title.lower()
+                                        or c_link.title.lower() in str(main_t).strip().lower()
+                                    ):
                                         matched_part = part_obj
                                         break
                                 if matched_part is not None:

@@ -164,4 +164,6 @@ telemetry:
 
     agent_lines = agent_detailed_tsv.read_text(encoding="utf-8").splitlines()
     assert len(agent_lines) >= 2  # Header + rows
-    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in agent_detailed_tsv.read_text(encoding="utf-8") or "kanto:000123456" in agent_detailed_tsv.read_text(encoding="utf-8")
+    assert "https://urn.fi/URN:NBN:fi:au:pn:000123456" in agent_detailed_tsv.read_text(
+        encoding="utf-8"
+    ) or "kanto:000123456" in agent_detailed_tsv.read_text(encoding="utf-8")

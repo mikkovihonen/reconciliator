@@ -6,11 +6,11 @@
 - End-to-end cross-format container clustering with constituent micro-clustering
 """
 
-import pytest
 from unittest.mock import MagicMock
-from reconciliator.models import MatchRecord, WorkCluster
+
 from reconciliator.clustering.corpus import CorpusClusterer, _lcs_length
 from reconciliator.config import AggregateClusteringConfig, WEMIClusterConfig
+from reconciliator.models import MatchRecord
 
 
 def test_lcs_length():

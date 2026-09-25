@@ -5,6 +5,11 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
+from reconciliator._core.normalizers import (
+    py_isbn_10_to_13 as _rust_isbn_10_to_13,
+    py_validate_isbn_13 as _rust_validate_isbn_13,
+)
+
 from reconciliator.utils.strings import clean_alphanumeric
 
 
@@ -38,13 +43,6 @@ def classify_identifier_scheme(val: str, hint: Optional[str] = None) -> tuple[st
         return ("ismn", v)
 
     return ("standard_number", v)
-
-
-from reconciliator._core.normalizers import (
-    py_clean_alphanumeric as _rust_clean_alphanumeric,
-    py_isbn_10_to_13 as _rust_isbn_10_to_13,
-    py_validate_isbn_13 as _rust_validate_isbn_13,
-)
 
 
 def isbn_10_to_13(isbn10: str) -> Optional[str]:

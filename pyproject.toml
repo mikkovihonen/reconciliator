@@ -19,7 +19,6 @@ dependencies = [
     "pydantic>=2.7.0",
     "pyjwt[crypto]>=2.8.0",
     "pyyaml>=6.0.1",
-    "rank-bm25>=0.2.2",
     "rapidfuzz>=3.9.0",
     "rdflib>=7.0.0",
     "rich>=13.7.0",
@@ -75,7 +74,6 @@ warn_unused_configs = true
 module = [
     "lxml.*",
     "yaml.*",
-    "rank_bm25.*",
     "faiss.*",
     "sentence_transformers.*",
     "torch.*",

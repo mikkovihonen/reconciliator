@@ -689,4 +689,3 @@ def test_numeric_title_and_volume_conflict_prevents_clustering(temp_dbs):
     assert l1.work_cluster_id != l2.work_cluster_id
     assert l1.expression_cluster_id != l2.expression_cluster_id
     assert l1.manifestation_cluster_id != l2.manifestation_cluster_id
-

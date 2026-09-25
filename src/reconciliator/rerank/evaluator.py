@@ -11,6 +11,11 @@ from reconciliator.rerank.factory import create_rerank_scorer
 if TYPE_CHECKING:
     from reconciliator.config import RerankConfig
 
+from reconciliator._core.rerank import (
+    py_check_numeric_title_tokens_compatible,
+    py_normalize_volume,
+)
+
 
 class CandidateEvaluator:
     """
@@ -53,20 +58,17 @@ class CandidateEvaluator:
             return True
 
         if target_volume and candidate_volume:
-            from reconciliator.normalizers.record import normalize_volume
-
-            target_norm = normalize_volume(target_volume) or target_volume.strip().lower()
-            candidate_norm = normalize_volume(candidate_volume) or candidate_volume.strip().lower()
+            target_norm = py_normalize_volume(target_volume) or target_volume.strip().lower()
+            candidate_norm = (
+                py_normalize_volume(candidate_volume) or candidate_volume.strip().lower()
+            )
             if target_norm != candidate_norm:
                 return False
 
         if target_title and candidate_title:
-            import re
-
-            pub_years = {str(y) for y in (target_year, candidate_year) if y and 1000 <= y <= 9999}
-            n1 = set(re.findall(r"\b\d+\b", target_title)) - pub_years
-            n2 = set(re.findall(r"\b\d+\b", candidate_title)) - pub_years
-            if (n1 - n2) and (n2 - n1):
+            if not py_check_numeric_title_tokens_compatible(
+                target_title, candidate_title, target_year, candidate_year
+            ):
                 return False
 
         return True

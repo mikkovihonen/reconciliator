@@ -254,7 +254,8 @@ def _verify_distribution_match(
             c_norm = c_item.strip().lower()
             if t_norm in c_norm or c_norm in t_norm:
                 return True, f"{label}_matched"
-            if fuzz.token_set_ratio(t_norm, c_norm) >= threshold:
+            score = fuzz.token_set_ratio(t_norm, c_norm)
+            if score >= threshold:
                 return True, f"{label}_similar"
 
     return False, f"{label}_mismatch"

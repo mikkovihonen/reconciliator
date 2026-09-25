@@ -16,6 +16,10 @@ from typing import Any, Optional
 
 from rapidfuzz import fuzz
 
+from reconciliator._core.clustering import (
+    py_evaluate_aggregate_overlap as _rust_evaluate_aggregate_overlap,
+    py_lcs_length as _rust_lcs_length,
+)
 from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.config import WEMIClusterConfig
 from reconciliator.database import WEMIRepository
@@ -36,16 +40,9 @@ from reconciliator.models import (
 from reconciliator.normalizers.blocking import compute_author_key, compute_title_stem
 from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import (
-    UnionFind,
     clean_alphanumeric,
     cluster_edges,
     extract_identifiers_from_target,
-)
-
-
-from reconciliator._core.clustering import (
-    py_evaluate_aggregate_overlap as _rust_evaluate_aggregate_overlap,
-    py_lcs_length as _rust_lcs_length,
 )
 
 
@@ -430,7 +427,8 @@ class CorpusClusterer:
         agg_cfg = getattr(self.config, "aggregates", None)
         if agg_cfg and agg_cfg.enabled:
             try:
-                from sqlalchemy import and_, select
+                from sqlalchemy import and_, nulls_last, select
+
                 from reconciliator.database.schema import (
                     agents_table,
                     contributions_table,
@@ -479,9 +477,7 @@ class CorpusClusterer:
                     )
                 )
                 if origins:
-                    stmt_const = stmt_const.where(
-                        manifestations_table.c.record_origin.in_(origins)
-                    )
+                    stmt_const = stmt_const.where(manifestations_table.c.record_origin.in_(origins))
                 stmt_const = stmt_const.order_by(
                     manifestations_table.c.source_id,
                     nulls_last(work_relationships_table.c.sequence_number),

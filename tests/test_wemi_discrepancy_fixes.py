@@ -743,7 +743,10 @@ ingestion:
 
     # Failed pipeline run stops further execution and exits with code 1
     with (
-        patch("reconciliator.commands.pipeline.ingest_vocab_cmd", side_effect=RuntimeError("Download timeout")),
+        patch(
+            "reconciliator.commands.pipeline.ingest_vocab_cmd",
+            side_effect=RuntimeError("Download timeout"),
+        ),
         patch("reconciliator.commands.pipeline.ingest_wikidata_cmd") as mock_wiki,
     ):
         result = runner.invoke(app, ["run", "--config", str(cfg_file)])

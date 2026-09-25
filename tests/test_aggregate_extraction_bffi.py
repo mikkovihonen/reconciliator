@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
+from rdflib import RDF, Graph, Literal, Namespace, URIRef
 
 from reconciliator.constituents import get_constituent_profile
 from reconciliator.loaders.bibframe.decomposition import (
@@ -142,4 +141,3 @@ def test_bffi_decomposition_with_constituent_sink():
     assert len(sink) == 1
     assert sink[0].title == "Kalliolle kukkulalle"
     assert sink[0].ordinal == 1
-

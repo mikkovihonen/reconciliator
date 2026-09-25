@@ -17,6 +17,7 @@ _LING_DEFAULTS = get_bundled_linguistic_defaults()
 _VOCAB_DEFAULTS = get_bundled_vocabularies_defaults()
 _ENRICH_DEFAULTS = get_bundled_enrichment_defaults()
 _HIERARCHY_DEFAULTS = dict(_VOCAB_DEFAULTS.get("hierarchy") or {})
+_PRELOAD_DEFAULTS = dict(_VOCAB_DEFAULTS.get("preload") or {})
 
 DEFAULT_LANGUAGE: str = str(_LING_DEFAULTS.get("default_language") or "")
 DEFAULT_PRESERVED_DIACRITICS: str = str(_LING_DEFAULTS.get("preserved_diacritics") or "")
@@ -119,10 +120,26 @@ class HierarchyConfig(BaseModel):
     )
 
 
+class VocabPreloadConfig(BaseModel):
+    """Configuration for in-memory vocabulary preloading."""
+
+    enabled: bool = Field(default_factory=lambda: bool(_PRELOAD_DEFAULTS.get("enabled", True)))
+    preload_concepts: bool = Field(
+        default_factory=lambda: bool(_PRELOAD_DEFAULTS.get("preload_concepts", True))
+    )
+    preload_pref_labels: bool = Field(
+        default_factory=lambda: bool(_PRELOAD_DEFAULTS.get("preload_pref_labels", True))
+    )
+    preload_aliases: bool = Field(
+        default_factory=lambda: bool(_PRELOAD_DEFAULTS.get("preload_aliases", True))
+    )
+
+
 class VocabulariesConfig(BaseModel):
     """Centralized controlled vocabulary definitions, priorities, and matching policies."""
 
     hierarchy: HierarchyConfig = Field(default_factory=HierarchyConfig)
+    preload: VocabPreloadConfig = Field(default_factory=VocabPreloadConfig)
     vocabularies: list[str] = Field(
         default_factory=lambda: list(_VOCAB_DEFAULTS.get("vocabularies", []))
     )
@@ -419,9 +436,7 @@ class EnrichmentConfig(BaseModel):
     role_format: Literal["bridged_uri", "code", "loc_uri"] = Field(
         default_factory=get_default_role_format  # type: ignore[assignment]
     )
-    inject_missing_role_terms: bool = Field(
-        default_factory=get_default_inject_missing_role_terms
-    )
+    inject_missing_role_terms: bool = Field(default_factory=get_default_inject_missing_role_terms)
     active_profiles: list[str] = Field(default_factory=lambda: ["bibframe", "bffi", "rda"])
     predicate_profiles: dict[str, dict[str, tuple[str, str]]] = Field(
         default_factory=lambda: {
@@ -500,4 +515,3 @@ class EnrichmentConfig(BaseModel):
                             coerced[prof][rel] = (str(pair[0]), str(pair[1]))
             return coerced
         return v
-

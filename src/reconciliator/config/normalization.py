@@ -10,7 +10,10 @@ from reconciliator.config.defaults import (
     get_bundled_record_defaults,
     get_bundled_sources_defaults,
 )
-from reconciliator.config.semantics import LinguisticConfig
+from reconciliator.config.semantics import (
+    LinguisticConfig,
+    get_subject_field_category_map,
+)
 
 _REC_DEFAULTS = get_bundled_record_defaults()
 
@@ -105,6 +108,10 @@ class RecordNormalizationConfig(BaseModel):
         }
     )
     custom_relator_terms: dict[str, str] = Field(default_factory=dict)
+    subject_field_category_map: dict[str, str] = Field(
+        default_factory=get_subject_field_category_map
+    )
+    default_subject_field: str = Field(default="650")
     linguistic: LinguisticConfig = Field(default_factory=LinguisticConfig)
 
 

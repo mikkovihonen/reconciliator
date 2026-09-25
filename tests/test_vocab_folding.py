@@ -92,7 +92,7 @@ def test_fold_kaunokki_genre_strictly_to_slm(populated_vocab_store: VocabStore) 
 
     assert t_field == "655"
     assert t_vocab == "slm/fin"
-    assert t_uri == "http://urn.fi/URN:NBN:fi:au:slm:s123"
+    assert t_uri == "https://urn.fi/URN:NBN:fi:au:slm:s123"
 
 
 def test_fold_musa_to_seko(populated_vocab_store: VocabStore) -> None:
@@ -105,7 +105,7 @@ def test_fold_musa_to_seko(populated_vocab_store: VocabStore) -> None:
 
     assert t_field == "382"
     assert t_vocab == "seko"
-    assert t_uri == "http://urn.fi/URN:NBN:fi:au:seko:s789"
+    assert t_uri == "https://urn.fi/URN:NBN:fi:au:seko:s789"
 
 
 def test_fold_sample_legacy_thesauri_fixture(populated_vocab_store: VocabStore) -> None:
@@ -131,7 +131,7 @@ def test_fold_sample_legacy_thesauri_fixture(populated_vocab_store: VocabStore) 
     topical_uris = [s.uri for s in norm1.subjects.topical]
     assert "http://www.yso.fi/onto/yso/p2591" in topical_uris
     genre_uris = [s.uri for s in norm1.subjects.genre_form]
-    assert "http://urn.fi/URN:NBN:fi:au:slm:s123" in genre_uris
+    assert "https://urn.fi/URN:NBN:fi:au:slm:s123" in genre_uris
 
 
 def test_fold_with_language_suffix(populated_vocab_store: VocabStore) -> None:

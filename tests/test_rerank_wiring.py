@@ -367,11 +367,15 @@ def test_llm_judge_score_batch_reuses_target_encoding():
         def __init__(self):
             self.eval_call_count = 0
             self.encoded_target = False
-            self.config = type("Config", (), {"symmetric_scoring": False, "candidate_suffix_template": "{text}"})()
+            self.config = type(
+                "Config", (), {"symmetric_scoring": False, "candidate_suffix_template": "{text}"}
+            )()
 
         def encode_target(self, text, retain_cache=True):
             self.encoded_target = True
-            return type("Encoding", (), {"kv_cache": object(), "base_seq_len": 10, "prior_bias": 0.0})()
+            return type(
+                "Encoding", (), {"kv_cache": object(), "base_seq_len": 10, "prior_bias": 0.0}
+            )()
 
         def evaluate_candidate(self, base_cache, base_seq_len, candidate_suffix, prior_bias):
             self.eval_call_count += 1
@@ -391,5 +395,3 @@ def test_llm_judge_score_batch_reuses_target_encoding():
     scores2 = scorer.score_batch("target query", ["cand 1"], target_encoding=fake_enc)
     assert scores2 == [0.99]
     assert mock_backend.encoded_target is False
-
-

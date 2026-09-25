@@ -77,9 +77,9 @@ def parse_bridge_turtle(content: str | Path, bridge_vocab: str = "bridge") -> li
     bridges: list[dict[str, Any]] = []
 
     # Find subjects that have skos:exactMatch or owl:sameAs
-    seen_subjects = list(dict.fromkeys(
-        list(g.subjects(SKOS.exactMatch, None)) + list(g.subjects(OWL.sameAs, None))
-    ))
+    seen_subjects = list(
+        dict.fromkeys(list(g.subjects(SKOS.exactMatch, None)) + list(g.subjects(OWL.sameAs, None)))
+    )
 
     for subj in seen_subjects:
         subj_uri = str(subj)
@@ -188,9 +188,7 @@ def get_bridged_role_map(
 
     # 2. Parse from specified bridge file or bundled loc-relators-bridge.ttl
     b_path = (
-        Path(bridge_file)
-        if bridge_file
-        else get_bundled_bridge_dir() / "loc-relators-bridge.ttl"
+        Path(bridge_file) if bridge_file else get_bundled_bridge_dir() / "loc-relators-bridge.ttl"
     )
     if b_path.is_file():
         mappings = parse_bridge_turtle(b_path, bridge_vocab="loc-relators")

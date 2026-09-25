@@ -302,8 +302,14 @@ def test_yso_paikat_and_aika_actionable_uris() -> None:
     assert to_actionable_uri("yso:p2591") == "http://www.yso.fi/onto/yso/p2591"
 
     # Legacy/divergent URLs canonicalized
-    assert to_actionable_uri("http://www.yso.fi/onto/yso-paikat/p104990") == "http://www.yso.fi/onto/yso/p104990"
-    assert to_actionable_uri("http://www.yso.fi/onto/yso-aika/p6197061979") == "http://www.yso.fi/onto/yso/p6197061979"
+    assert (
+        to_actionable_uri("http://www.yso.fi/onto/yso-paikat/p104990")
+        == "http://www.yso.fi/onto/yso/p104990"
+    )
+    assert (
+        to_actionable_uri("http://www.yso.fi/onto/yso-aika/p6197061979")
+        == "http://www.yso.fi/onto/yso/p6197061979"
+    )
 
 
 def test_resolve_target_language() -> None:
@@ -353,6 +359,7 @@ def test_resolve_target_language() -> None:
 def test_fold_subject_heading_multilingual_and_subcode() -> None:
     """Test fold_subject_heading multilingual label selection and accurate $2 subcode formatting."""
     from unittest.mock import MagicMock
+
     from reconciliator.config import VocabulariesConfig
     from reconciliator.models import VocabConcept
     from reconciliator.vocab import VocabFolder
@@ -420,4 +427,3 @@ def test_fold_subject_heading_multilingual_and_subcode() -> None:
     )
     assert t_label == "erikoislääkärit"
     assert t_vocab == "yso/fin"
-

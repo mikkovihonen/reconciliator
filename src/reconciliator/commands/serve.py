@@ -64,4 +64,3 @@ def serve_cmd(
         )
     console.print(f"[cyan]API Documentation: http://{host}:{port}/api/docs[/cyan]")
     uvicorn.run(api_app, host=host, port=port)
-

@@ -100,4 +100,3 @@ def daemon_restart_cmd(
     daemon_stop_cmd(config=resolved_config)
     time.sleep(0.5)
     daemon_start_cmd(config=resolved_config)
-

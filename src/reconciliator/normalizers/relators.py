@@ -104,7 +104,9 @@ class RelatorRegistry:
                             folded = fold_relator_term(lbl)
                             self._term_to_code_map.setdefault(folded, code)
                             self._term_to_code_map.setdefault(lbl.strip().casefold(), code)
-                            self._term_to_code_map.setdefault(lbl.strip().casefold().rstrip("."), code)
+                            self._term_to_code_map.setdefault(
+                                lbl.strip().casefold().rstrip("."), code
+                            )
 
                 self._term_to_code_map.setdefault(code, code)
         except Exception:
@@ -135,10 +137,7 @@ class RelatorRegistry:
             if self.vocab_store.is_known_relator(clean):
                 return True
 
-        return (
-            clean in self._term_to_code_map
-            or fold_relator_term(clean) in self._term_to_code_map
-        )
+        return clean in self._term_to_code_map or fold_relator_term(clean) in self._term_to_code_map
 
     def strip_relator(self, name: str) -> str:
         """Strip trailing role markers from name literals."""

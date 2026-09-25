@@ -11,4 +11,3 @@ __all__ = [
     "enrich_bibframe_graph",
     "enrich_bibframe_jsonld",
 ]
-
