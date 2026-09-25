@@ -1316,7 +1316,6 @@ reconcile:
   format: "auto"                 # "auto", "marcxml", "bibra", or "bibframe"
   batch_size: 32                 # Target-record micro-batch size for vectorized ingestion, bulk SQL, and matrix search
   entity_cache_size: 50000       # Maximum in-memory LRU cache capacity for canonical entities and identifier lookups
-  pipeline_double_buffering: true # Asynchronous 3-stage overlapping pipeline (Reader -> Matcher -> Writer)
   pipeline_queue_capacity: 2     # Bounded queue capacity between stages (keeps memory usage at O(B))
   output_file: "data/enriched_records.xml" # Destination for reconciled, enriched records
   enrich: true                   # true: inject novel $0/$1 URIs; false: audit/report only

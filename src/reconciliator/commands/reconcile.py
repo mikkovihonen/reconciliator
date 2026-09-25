@@ -661,7 +661,6 @@ def reconcile_cmd(
             pass
 
     reconcile_batch_size = max(1, getattr(r_cfg, "batch_size", 32))
-    use_double_buffering = bool(getattr(r_cfg, "pipeline_double_buffering", True))
     queue_cap = max(1, int(getattr(r_cfg, "pipeline_queue_capacity", 2)))
 
     def _chunked_iter(iterable: Iterator[Any], size: int) -> Iterator[list[Any]]:
@@ -1012,20 +1011,93 @@ def reconcile_cmd(
 
     total_records = 0
     try:
-        if not use_double_buffering:
-            for batch in _chunked_iter(_iter_records(), reconcile_batch_size):
-                batch_items = []
-                wemi_targets = []
-                for rec_fmt, orig_payload, raw_rec, byte_offset in batch:
-                    target_record = normalizer.normalize(raw_rec)
-                    target_wemi = _to_target_record(
-                        rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
-                    )
-                    batch_items.append((rec_fmt, orig_payload, raw_rec, byte_offset, target_record, target_wemi))
-                    wemi_targets.append(target_wemi)
+        in_queue: queue.Queue[Any] = queue.Queue(maxsize=queue_cap)
+        out_queue: queue.Queue[Any] = queue.Queue(maxsize=queue_cap)
+        stop_event = threading.Event()
+        reader_error: list[Exception] = []
+        writer_error: list[Exception] = []
 
+        def _reader_worker() -> None:
+            try:
+                for batch in _chunked_iter(_iter_records(), reconcile_batch_size):
+                    if stop_event.is_set():
+                        break
+                    batch_items = []
+                    wemi_targets = []
+                    for rec_fmt, orig_payload, raw_rec, byte_offset in batch:
+                        target_record = normalizer.normalize(raw_rec)
+                        target_wemi = _to_target_record(
+                            rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
+                        )
+                        batch_items.append((rec_fmt, orig_payload, raw_rec, byte_offset, target_record, target_wemi))
+                        wemi_targets.append(target_wemi)
+                    while not stop_event.is_set():
+                        try:
+                            in_queue.put((batch_items, wemi_targets), timeout=0.1)
+                            break
+                        except queue.Full:
+                            continue
+                while not stop_event.is_set():
+                    try:
+                        in_queue.put(None, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+            except Exception as exc:
+                reader_error.append(exc)
+                while not stop_event.is_set():
+                    try:
+                        in_queue.put(None, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+
+        def _writer_worker() -> None:
+            try:
+                while True:
+                    while not stop_event.is_set():
+                        try:
+                            item = out_queue.get(timeout=0.1)
+                            break
+                        except queue.Empty:
+                            continue
+                    else:
+                        break
+                    if item is None:
+                        out_queue.task_done()
+                        break
+                    for rec_item in item:
+                        if stop_event.is_set():
+                            break
+                        _process_output_item(*rec_item)
+                    out_queue.task_done()
+            except Exception as exc:
+                writer_error.append(exc)
+
+        reader_thread = threading.Thread(target=_reader_worker, daemon=True, name="ReconcileReader")
+        writer_thread = threading.Thread(target=_writer_worker, daemon=True, name="ReconcileWriter")
+        reader_thread.start()
+        writer_thread.start()
+
+        try:
+            while not stop_event.is_set():
+                try:
+                    batch_data = in_queue.get(timeout=0.1)
+                except queue.Empty:
+                    if reader_error:
+                        raise reader_error[0]
+                    if writer_error:
+                        raise writer_error[0]
+                    continue
+
+                if batch_data is None:
+                    if reader_error:
+                        raise reader_error[0]
+                    break
+                batch_items, wemi_targets = batch_data
                 wemi_results = work_matcher.match_targets_batch(wemi_targets)
 
+                processed_batch = []
                 for (
                     rec_fmt,
                     orig_payload,
@@ -1035,7 +1107,7 @@ def reconcile_cmd(
                     target_wemi,
                 ), wemi_res in zip(batch_items, wemi_results):
                     res = work_matcher.resolve_agents(wemi_res, target_record)
-                    _process_output_item(
+                    processed_batch.append((
                         rec_fmt,
                         orig_payload,
                         raw_rec,
@@ -1044,156 +1116,49 @@ def reconcile_cmd(
                         target_wemi,
                         wemi_res,
                         res,
-                    )
-        else:
-            in_queue: queue.Queue[Any] = queue.Queue(maxsize=queue_cap)
-            out_queue: queue.Queue[Any] = queue.Queue(maxsize=queue_cap)
-            stop_event = threading.Event()
-            reader_error: list[Exception] = []
-            writer_error: list[Exception] = []
+                    ))
 
-            def _reader_worker() -> None:
-                try:
-                    for batch in _chunked_iter(_iter_records(), reconcile_batch_size):
-                        if stop_event.is_set():
-                            break
-                        batch_items = []
-                        wemi_targets = []
-                        for rec_fmt, orig_payload, raw_rec, byte_offset in batch:
-                            target_record = normalizer.normalize(raw_rec)
-                            target_wemi = _to_target_record(
-                                rec_fmt, orig_payload, raw_rec, bf_profile, constituent_profile=target_const_prof
-                            )
-                            batch_items.append((rec_fmt, orig_payload, raw_rec, byte_offset, target_record, target_wemi))
-                            wemi_targets.append(target_wemi)
-                        while not stop_event.is_set():
-                            try:
-                                in_queue.put((batch_items, wemi_targets), timeout=0.1)
-                                break
-                            except queue.Full:
-                                continue
-                    while not stop_event.is_set():
-                        try:
-                            in_queue.put(None, timeout=0.1)
-                            break
-                        except queue.Full:
-                            continue
-                except Exception as exc:
-                    reader_error.append(exc)
-                    while not stop_event.is_set():
-                        try:
-                            in_queue.put(None, timeout=0.1)
-                            break
-                        except queue.Full:
-                            continue
-
-            def _writer_worker() -> None:
-                try:
-                    while True:
-                        while not stop_event.is_set():
-                            try:
-                                item = out_queue.get(timeout=0.1)
-                                break
-                            except queue.Empty:
-                                continue
-                        else:
-                            break
-                        if item is None:
-                            out_queue.task_done()
-                            break
-                        for rec_item in item:
-                            if stop_event.is_set():
-                                break
-                            _process_output_item(*rec_item)
-                        out_queue.task_done()
-                except Exception as exc:
-                    writer_error.append(exc)
-
-            reader_thread = threading.Thread(target=_reader_worker, daemon=True, name="ReconcileReader")
-            writer_thread = threading.Thread(target=_writer_worker, daemon=True, name="ReconcileWriter")
-            reader_thread.start()
-            writer_thread.start()
-
-            try:
-                while not stop_event.is_set():
-                    try:
-                        batch_data = in_queue.get(timeout=0.1)
-                    except queue.Empty:
-                        if reader_error:
-                            raise reader_error[0]
-                        if writer_error:
-                            raise writer_error[0]
-                        continue
-
-                    if batch_data is None:
-                        if reader_error:
-                            raise reader_error[0]
-                        break
-                    batch_items, wemi_targets = batch_data
-                    wemi_results = work_matcher.match_targets_batch(wemi_targets)
-
-                    processed_batch = []
-                    for (
-                        rec_fmt,
-                        orig_payload,
-                        raw_rec,
-                        byte_offset,
-                        target_record,
-                        target_wemi,
-                    ), wemi_res in zip(batch_items, wemi_results):
-                        res = work_matcher.resolve_agents(wemi_res, target_record)
-                        processed_batch.append((
-                            rec_fmt,
-                            orig_payload,
-                            raw_rec,
-                            byte_offset,
-                            target_record,
-                            target_wemi,
-                            wemi_res,
-                            res,
-                        ))
-
-                    if writer_error:
-                        raise writer_error[0]
-
-                    while not stop_event.is_set():
-                        try:
-                            out_queue.put(processed_batch, timeout=0.1)
-                            break
-                        except queue.Full:
-                            if writer_error:
-                                raise writer_error[0]
-                            continue
+                if writer_error:
+                    raise writer_error[0]
 
                 while not stop_event.is_set():
                     try:
-                        out_queue.put(None, timeout=0.1)
+                        out_queue.put(processed_batch, timeout=0.1)
                         break
                     except queue.Full:
                         if writer_error:
                             raise writer_error[0]
                         continue
 
-                writer_thread.join()
-                if writer_error:
-                    raise writer_error[0]
-            except Exception:
-                stop_event.set()
+            while not stop_event.is_set():
                 try:
-                    while not in_queue.empty():
-                        in_queue.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    while not out_queue.empty():
-                        out_queue.get_nowait()
-                except queue.Empty:
-                    pass
-                raise
-            finally:
-                stop_event.set()
-                reader_thread.join(timeout=2.0)
-                writer_thread.join(timeout=2.0)
+                    out_queue.put(None, timeout=0.1)
+                    break
+                except queue.Full:
+                    if writer_error:
+                        raise writer_error[0]
+                    continue
+
+            writer_thread.join()
+            if writer_error:
+                raise writer_error[0]
+        except Exception:
+            stop_event.set()
+            try:
+                while not in_queue.empty():
+                    in_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while not out_queue.empty():
+                    out_queue.get_nowait()
+            except queue.Empty:
+                pass
+            raise
+        finally:
+            stop_event.set()
+            reader_thread.join(timeout=2.0)
+            writer_thread.join(timeout=2.0)
     finally:
         if out_f is not None:
             if is_marcxml:

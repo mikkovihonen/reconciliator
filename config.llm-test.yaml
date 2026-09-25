@@ -74,7 +74,6 @@ reconcile:
   output_file: "data/llm_test/enriched.xml"
   batch_size: 32                     # Micro-batch size for Tier 1 bulk SQL and Tier 3 matrix search
   entity_cache_size: 50000           # Bounded LRU cache capacity for canonical entities & identifiers
-  pipeline_double_buffering: true    # Asynchronous 3-stage overlapping pipeline (Reader -> Matcher -> Writer)
   pipeline_queue_capacity: 2         # Bounded queue capacity between pipeline stages (O(B) memory)
   enrich: true
   fold_legacy: true

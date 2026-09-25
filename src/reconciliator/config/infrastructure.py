@@ -381,6 +381,7 @@ class StorageConfig(BaseModel):
             )
             if not is_default_data and "?" not in base_url:
                 import hashlib
+
                 import psycopg
 
                 schema = f"test_{hashlib.md5(str(d.resolve()).encode()).hexdigest()[:10]}"

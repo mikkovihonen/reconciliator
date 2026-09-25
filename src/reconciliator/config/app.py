@@ -147,9 +147,6 @@ class ReconcileConfig(IngestFilterConfig, FieldTruncationConfig):
         default_factory=lambda: int(_RECONCILE_DEFAULTS.get("entity_cache_size", 50000)),
         ge=1,
     )
-    pipeline_double_buffering: bool = Field(
-        default_factory=lambda: bool(_RECONCILE_DEFAULTS.get("pipeline_double_buffering", True))
-    )
     pipeline_queue_capacity: int = Field(
         default_factory=lambda: int(_RECONCILE_DEFAULTS.get("pipeline_queue_capacity", 2)),
         ge=1,

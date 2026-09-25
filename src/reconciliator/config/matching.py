@@ -13,7 +13,7 @@ from reconciliator.config.defaults import (
     get_bundled_llm_defaults,
     get_bundled_reconcile_defaults,
 )
-from reconciliator.funnels.spec import FunnelSpec
+from reconciliator.funnels.spec import FunnelSpec as FunnelSpec
 
 _RECONCILE_DEFAULTS = get_bundled_reconcile_defaults()
 _CLUSTER_DEFAULTS = dict(_RECONCILE_DEFAULTS.get("cluster") or {})

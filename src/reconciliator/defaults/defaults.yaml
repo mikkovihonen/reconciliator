@@ -1315,7 +1315,6 @@ consolidation:
 reconcile:
   batch_size: 32
   entity_cache_size: 50000
-  pipeline_double_buffering: true
   pipeline_queue_capacity: 2
   target_work_types: []
   exclude_work_types: []
