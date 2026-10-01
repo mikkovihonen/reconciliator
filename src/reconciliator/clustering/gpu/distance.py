@@ -8,7 +8,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 
-from reconciliator.clustering.gpu.device import resolve_compute_device
+from reconciliator.utils.device import resolve_compute_device
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ import torch
 
 from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.clustering.bipartite.spectral import GPUBipartiteSpectralEngine
-from reconciliator.clustering.gpu.device import clear_accelerator_memory, resolve_compute_device
+from reconciliator.utils.device import clear_accelerator_memory, resolve_compute_device
 from reconciliator.clustering.protocol import BaseCorpusClusterer
 from reconciliator.clustering.wemi_builder import (
     WEMIClusterBuilder,

@@ -12,9 +12,12 @@ from reconciliator.utils.curie import (
     to_curie,
 )
 from reconciliator.utils.device import (
+    clear_accelerator_memory,
     configure_execution_threads,
     configure_mixed_precision,
     get_optimal_batch_size,
+    is_gpu_available,
+    resolve_compute_device,
     resolve_device,
 )
 from reconciliator.utils.durations import parse_duration_seconds
@@ -61,9 +64,12 @@ __all__ = [
     "parse_curie",
     "to_curie",
     # device
+    "clear_accelerator_memory",
     "configure_execution_threads",
     "configure_mixed_precision",
     "get_optimal_batch_size",
+    "is_gpu_available",
+    "resolve_compute_device",
     "resolve_device",
     # module_ref
     "ModuleRefError",

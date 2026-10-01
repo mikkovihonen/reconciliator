@@ -18,22 +18,9 @@ from reconciliator.clustering.bigclust.validity import (
     ClusterValidityMetrics,
     compute_validity_indices,
 )
+from reconciliator.utils.device import clear_accelerator_memory
 
 logger = logging.getLogger(__name__)
-
-
-def empty_accelerator_cache(device: Optional[Union[str, torch.device]] = None) -> None:
-    """Empty cached memory allocations on Apple Metal (MPS) or CUDA accelerators."""
-    if torch.cuda.is_available():
-        try:
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
-    if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
-        try:
-            torch.mps.empty_cache()
-        except Exception:
-            pass
 
 
 @dataclass
@@ -232,7 +219,7 @@ class BigClustMetal:
         final_D = (A * A).sum(dim=1, keepdim=True) - 2.0 * torch.matmul(A, opt_sol.centroids.T) + final_norm_X
         _, final_assignments = torch.min(final_D, dim=1)
 
-        empty_accelerator_cache(self.device)
+        clear_accelerator_memory(self.device)
 
         return BigClustResult(
             optimal_k=opt_k,

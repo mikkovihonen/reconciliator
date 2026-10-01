@@ -7,6 +7,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from reconciliator.models import MatchRecord, MultiplexClusterResult
+from reconciliator.utils.device import clear_accelerator_memory
 
 
 @runtime_checkable
@@ -139,17 +140,13 @@ class BaseCorpusClusterer(ABC, CorpusClustererProtocol):
                 chunk = []
                 is_first = False
                 try:
-                    from reconciliator.clustering.bigclust.engine import empty_accelerator_cache
-
-                    empty_accelerator_cache()
+                    clear_accelerator_memory()
                 except Exception:
                     pass
         if chunk:
             yield self.cluster_records(chunk, persist=persist, incremental=not is_first)
             try:
-                from reconciliator.clustering.bigclust.engine import empty_accelerator_cache
-
-                empty_accelerator_cache()
+                clear_accelerator_memory()
             except Exception:
                 pass
 

@@ -8,6 +8,9 @@ from typing import Any, Literal, Optional
 import torch
 
 
+from reconciliator.utils.device import resolve_device
+
+
 def sigmoid(x: float) -> float:
     """Compute sigmoid of x."""
     try:
@@ -41,19 +44,9 @@ class CrossEncoderScorer:
         model: Optional[Any] = None,
     ) -> None:
         self.model_name = model_name
-        self.device = self._resolve_device(device)
+        self.device = resolve_device(device)
         self.batch_size = batch_size
         self._model = model
-
-    @staticmethod
-    def _resolve_device(device: str) -> str:
-        if device != "auto":
-            return device
-        if torch.cuda.is_available():
-            return "cuda"
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps"
-        return "cpu"
 
     def _get_model(self) -> Any:
         if self._model is None:

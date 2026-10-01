@@ -773,9 +773,9 @@ storage:
 
 def test_base_clusterer_formatting_and_builder_consolidation(sqlite_repo: WEMIRepository) -> None:
     """Verify BaseCorpusClusterer formatting methods and WEMIClusterBuilder work cluster assembly."""
-    from reconciliator.clustering.bigclust.engine import empty_accelerator_cache
     from reconciliator.clustering.bigclust.multiplex import BigClustMultiplexClusterer
     from reconciliator.clustering.wemi_builder import WEMIClusterBuilder
+    from reconciliator.utils.device import clear_accelerator_memory
 
     builder = WEMIClusterBuilder(sqlite_repo)
     clusterer = BigClustMultiplexClusterer(corpus_repo=sqlite_repo, wemi_repo=sqlite_repo)
@@ -808,7 +808,7 @@ def test_base_clusterer_formatting_and_builder_consolidation(sqlite_repo: WEMIRe
     assert wc.canonical_access_point is not None
 
     # Test accelerator cache purge lifecycle hook
-    empty_accelerator_cache()
+    clear_accelerator_memory()
 
 
 def test_agent_clusterer_semantic_disambiguation(sqlite_repo: WEMIRepository) -> None:

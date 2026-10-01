@@ -11,7 +11,7 @@ import safetensors
 import safetensors.torch
 import torch
 
-from reconciliator.utils.device import resolve_device
+from reconciliator.utils.device import clear_accelerator_memory, resolve_device
 
 
 class TorchVectorEngine:
@@ -271,14 +271,7 @@ class TorchVectorEngine:
                 res_scores = final_scores.float().numpy().astype(np.float32)
                 res_ids = top_ids.numpy().astype(np.int64)
         finally:
-            if (
-                self.device.type == "mps"
-                and hasattr(torch.backends, "mps")
-                and torch.backends.mps.is_available()
-            ):
-                torch.mps.empty_cache()
-            elif self.device.type == "cuda" and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            clear_accelerator_memory(self.device)
 
         return res_scores, res_ids
 

@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from reconciliator.clustering.gpu.device import clear_accelerator_memory, resolve_compute_device
+from reconciliator.utils.device import clear_accelerator_memory, resolve_compute_device
 from reconciliator.clustering.gpu.distance import compute_pairwise_distances
 
 logger = logging.getLogger(__name__)

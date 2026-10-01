@@ -15,11 +15,8 @@ from reconciliator.clustering.density import DensityCorpusClusterer
 from reconciliator.clustering.evaluator import BibliographicalEdgeEvaluator
 from reconciliator.clustering.factory import create_corpus_clusterer
 from reconciliator.clustering.gpu import (
-    clear_accelerator_memory,
     compute_pairwise_distances,
     compute_sparse_similarity_graph,
-    is_gpu_available,
-    resolve_compute_device,
 )
 from reconciliator.clustering.graph import MultiplexGraphClusterer
 from reconciliator.clustering.hierarchical import HierarchicalWEMIClusterer
@@ -75,14 +72,11 @@ __all__ = [
     "SammelbandBinding",
     "WEMIClusterBuilder",
     "WorkCluster",
-    "clear_accelerator_memory",
     "compute_pairwise_distances",
     "compute_sparse_similarity_graph",
     "create_corpus_clusterer",
     "extract_expression_partition_keys",
     "extract_manifestation_key",
     "infer_rda_content_type",
-    "is_gpu_available",
-    "resolve_compute_device",
     "select_canonical_work_record",
 ]

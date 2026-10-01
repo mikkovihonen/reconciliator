@@ -14,9 +14,11 @@ from reconciliator.clustering.correlation import CCPivotEngine, CorrelationCorpu
 from reconciliator.clustering.density import DensityCorpusClusterer, GPUDBSCANEngine
 from reconciliator.clustering.factory import create_corpus_clusterer
 from reconciliator.clustering.gpu import (
-    clear_accelerator_memory,
     compute_pairwise_distances,
     compute_sparse_similarity_graph,
+)
+from reconciliator.utils.device import (
+    clear_accelerator_memory,
     is_gpu_available,
     resolve_compute_device,
 )
