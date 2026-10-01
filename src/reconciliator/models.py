@@ -540,7 +540,13 @@ RecordOrigin = str
 
 EntityType = Literal["work", "expression", "manifestation", "item", "agent"]
 
-ClusterMethod = Literal["multiplex_graph", "connected_components", "dbscan", "hierarchical"]
+ClusterMethod = Literal[
+    "multiplex_graph",
+    "connected_components",
+    "dbscan",
+    "hierarchical",
+    "bigclust",
+]
 
 
 # ---------------------------------------------------------------------------
