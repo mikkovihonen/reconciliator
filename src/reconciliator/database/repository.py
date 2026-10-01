@@ -109,7 +109,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
     from reconciliator.config import RepositoryFTSConfig, VectorEngineConfig
-    from reconciliator.embedding.embedder import SentenceEmbedder
+    from reconciliator.embedding.protocol import VectorEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -3391,7 +3391,7 @@ class WEMIRepository:
 
     def build_wemi_indexes(
         self,
-        embedder: SentenceEmbedder,
+        embedder: VectorEmbedder,
         work_indexer: Optional[VectorIndex] = None,
         manifestation_indexer: Optional[VectorIndex] = None,
         batch_size: int = 128,
@@ -3496,7 +3496,7 @@ class WEMIRepository:
     def build_agent_index(
         self,
         agent_indexer: VectorIndex,
-        embedder: SentenceEmbedder,
+        embedder: VectorEmbedder,
         batch_size: int = 128,
         template_path: Optional[Path | str] = None,
     ) -> int:

@@ -7,7 +7,7 @@ determine optimal cluster count k* in continuous metric space.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional
 
 import torch
 

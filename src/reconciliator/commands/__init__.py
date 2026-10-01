@@ -24,6 +24,7 @@ from reconciliator.commands.wemi import (
     build_agent_index_cmd,
     build_index_cmd,
     cluster_agents_cmd,
+    cluster_corpus_cmd,
     consolidate_works_cmd,
 )
 
@@ -46,10 +47,12 @@ app.command("ingest-wikidata")(ingest_wikidata_cmd)
 app.command("reconcile")(reconcile_cmd)
 app.command("consolidate-works")(consolidate_works_cmd)
 app.command("cluster-agents")(cluster_agents_cmd)
+app.command("cluster-corpus")(cluster_corpus_cmd)
 app.command("build-agent-index")(build_agent_index_cmd)
 app.command("build-index")(build_index_cmd)
 app.command("run")(run_cmd)
 app.command("serve")(serve_cmd)
+
 
 
 def main() -> None:

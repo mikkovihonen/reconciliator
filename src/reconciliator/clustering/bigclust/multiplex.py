@@ -8,18 +8,18 @@ Performs two-phase hierarchical unsupervised clustering:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from collections import defaultdict
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import torch
 
+from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.clustering.bigclust.engine import BigClustMetal
 from reconciliator.database import WEMIRepository
-from reconciliator.embedding.embedder import SentenceEmbedder
+from reconciliator.embedding.protocol import VectorEmbedder
 from reconciliator.models import (
     CorpusLinkage,
     ExpressionCluster,
@@ -38,15 +38,17 @@ class BigClustMultiplexClusterer:
     def __init__(
         self,
         corpus_repo: WEMIRepository,
-        embedder: Optional[SentenceEmbedder] = None,
+        embedder: Optional[VectorEmbedder] = None,
         max_work_clusters: int = 50,
         max_expression_clusters_per_work: int = 10,
+        identity_manager: Optional[ClusterIdentityManager] = None,
         device: Optional[torch.device] = None,
     ) -> None:
         self.corpus_repo = corpus_repo
-        self.embedder = embedder or SentenceEmbedder()
+        self._embedder = embedder
         self.max_work_clusters = max_work_clusters
         self.max_expression_clusters_per_work = max_expression_clusters_per_work
+        self.identity_manager = identity_manager or ClusterIdentityManager(corpus_repo)
 
         if device is not None:
             self.device = device
@@ -57,10 +59,35 @@ class BigClustMultiplexClusterer:
         else:
             self.device = torch.device("cpu")
 
+    @property
+    def embedder(self) -> VectorEmbedder:
+        """Lazily initialize default SentenceEmbedder if not injected."""
+        if self._embedder is None:
+            from reconciliator.config import EmbeddingConfig
+            from reconciliator.embedding.embedder import SentenceEmbedder
+
+            self._embedder = SentenceEmbedder(EmbeddingConfig())
+        return self._embedder
+
+
+    def cluster_corpus(
+        self,
+        origins: Optional[list[str]] = None,
+        target_work_k: Optional[int] = None,
+    ) -> MultiplexClusterResult:
+        """Fetch staged records from repository, execute BigClust, and persist WEMI clusters."""
+        actual_origins = origins or self.corpus_repo.non_authoritative_sources() or None
+        records = self.corpus_repo.get_all_match_records(origins=actual_origins)
+        if not records:
+            return MultiplexClusterResult(records_clustered=0, elapsed_seconds=0.0)
+
+        return self.cluster_records(records, target_work_k=target_work_k, persist=True)
+
     def cluster_records(
         self,
         records: Sequence[MatchRecord],
         target_work_k: Optional[int] = None,
+        persist: bool = False,
     ) -> MultiplexClusterResult:
         """Execute two-phase Work and Expression clustering across given MatchRecords."""
         start_time = time.time()
@@ -117,33 +144,46 @@ class BigClustMultiplexClusterer:
             member_recs = [r for _, r in members]
             canon_rec = self._select_canonical_record(member_recs)
 
-            # Mint Work Cluster ID
-            w_hash = hashlib.sha256(
-                f"work::{canon_rec.author_key or ''}::{canon_rec.title_stem or canon_rec.title}".encode(
-                    "utf-8"
-                )
-            ).hexdigest()[:16]
-            work_cluster_id = f"va_work_{w_hash}"
+            # Mint Work Cluster ID and canonical access point via ClusterIdentityManager
+            seed = f"work::{canon_rec.author_key or ''}::{canon_rec.title_stem or canon_rec.title}"
+            work_cluster_id = self.identity_manager.mint_pid("work", seed=seed)
+            canonical_curie = self.identity_manager.format_canonical_uri("work", work_cluster_id)
+            access_point = self.identity_manager.format_work_access_point(
+                title=canon_rec.title,
+                author=canon_rec.author_key,
+                work_type=canon_rec.work_type,
+            )
+            member_origins = [
+                getattr(r, "source", None)
+                or (getattr(r, "record_origin", None))
+                or (r.work_curie.split(":")[0] if r.work_curie and ":" in r.work_curie else "")
+                for r in member_recs
+            ]
+            authority_status = self.identity_manager.determine_authority_status(
+                [o for o in member_origins if o]
+            )
+
 
             w_cluster = WorkCluster(
                 cluster_id=work_cluster_id,
                 work_type=canon_rec.work_type,
-                canonical_work_curie=f"reconciliator:{work_cluster_id}",
+                canonical_work_curie=canonical_curie,
                 canonical_title=canon_rec.title,
                 canonical_author=canon_rec.author_key or None,
-                authority_status="provisional",
-                canonical_access_point=(
-                    f"{canon_rec.author_key or ''} - {canon_rec.title}".strip(" -")
-                    or canon_rec.title
-                ),
+                authority_status=authority_status,
+                canonical_access_point=access_point,
             )
             work_clusters.append(w_cluster)
 
             if len(members) == 1:
                 # Single record work family -> trivial single expression
                 rec_idx, rec = members[0]
-                expr_cluster_id = f"va_expr_{w_hash}_0"
-                man_cluster_id = f"va_man_{w_hash}_0"
+                expr_cluster_id = self.identity_manager.mint_pid(
+                    "expression", seed=f"{work_cluster_id}_0"
+                )
+                man_cluster_id = self.identity_manager.mint_pid(
+                    "manifestation", seed=f"{work_cluster_id}_0_{rec.record_id}"
+                )
 
                 expression_clusters.append(
                     ExpressionCluster(
@@ -171,6 +211,7 @@ class BigClustMultiplexClusterer:
                     )
                 )
                 continue
+
 
             # Multi-record Work Family: Hierarchical Expression Sub-clustering
             expr_texts = [self._format_expression_text(r) for r in member_recs]
@@ -200,8 +241,12 @@ class BigClustMultiplexClusterer:
             # Create Expression clusters and link records
             for local_idx, (global_idx, rec) in enumerate(members):
                 e_sub_idx = int(expr_assignments[local_idx])
-                expr_cluster_id = f"va_expr_{w_hash}_{e_sub_idx}"
-                man_cluster_id = f"va_man_{w_hash}_{e_sub_idx}_{rec.record_id}"
+                expr_cluster_id = self.identity_manager.mint_pid(
+                    "expression", seed=f"{work_cluster_id}_{e_sub_idx}"
+                )
+                man_cluster_id = self.identity_manager.mint_pid(
+                    "manifestation", seed=f"{work_cluster_id}_{e_sub_idx}_{rec.record_id}"
+                )
 
                 # Ensure expression cluster exists in list
                 if not any(ec.cluster_id == expr_cluster_id for ec in expression_clusters):
@@ -231,6 +276,16 @@ class BigClustMultiplexClusterer:
                         confidence=round(1.0 / (1.0 + expr_result.optimal_metrics.davies_bouldin), 4),
                     )
                 )
+
+        if persist:
+            if work_clusters:
+                self.corpus_repo.insert_work_clusters_batch(work_clusters)
+            if expression_clusters:
+                self.corpus_repo.insert_expression_clusters_batch(expression_clusters)
+            if manifestation_clusters:
+                self.corpus_repo.insert_manifestation_clusters_batch(manifestation_clusters)
+            if corpus_linkages:
+                self.corpus_repo.insert_corpus_linkages_batch(corpus_linkages)
 
         elapsed = time.time() - start_time
         logger.info(

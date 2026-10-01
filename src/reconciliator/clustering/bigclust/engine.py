@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class IntermediateClusterSolution:
-    """Clustering solution for intermediate cluster count l."""
+    """Clustering solution for intermediate cluster count k."""
 
-    l: int
+    k: int
     centroids: torch.Tensor
     loss: float
     metrics: ClusterValidityMetrics
@@ -133,18 +133,18 @@ class BigClustMetal:
 
         curr_centroids = c1
         intermediate[1] = IntermediateClusterSolution(
-            l=1,
+            k=1,
             centroids=curr_centroids,
             loss=loss1,
             metrics=metrics1,
         )
 
-        logger.debug("BigClust [l=1]: Loss=%.4f", loss1)
+        logger.debug("BigClust [k=1]: Loss=%.4f", loss1)
 
         # -------------------------------------------------------------
-        # Incremental Global Optimization: l = 2 ... effective_k_max
+        # Incremental Global Optimization: stage_k = 2 ... effective_k_max
         # -------------------------------------------------------------
-        for l in range(2, effective_k_max + 1):
+        for stage_k in range(2, effective_k_max + 1):
             # Step 1: Candidate starting points for 1-center auxiliary problem
             candidates = self._generate_candidate_starting_points(A, curr_centroids, d_min)
 
@@ -166,10 +166,10 @@ class BigClustMetal:
             if best_aux_center is None:
                 best_aux_center = candidates[0].unsqueeze(0)
 
-            # Step 3: Initialize full l-cluster problem
+            # Step 3: Initialize full stage_k-cluster problem
             X_init = torch.cat([curr_centroids, best_aux_center], dim=0)
 
-            # Step 4: Solve full l-cluster joint optimization using SLMBA
+            # Step 4: Solve full stage_k-cluster joint optimization using SLMBA
             curr_centroids, full_loss = self.optimizer.optimize_clustering(
                 init_centers=X_init,
                 data=A,
@@ -183,16 +183,16 @@ class BigClustMetal:
             d_min, _ = torch.min(D, dim=1)
 
             metrics = compute_validity_indices(A, curr_centroids, device=self.device)
-            intermediate[l] = IntermediateClusterSolution(
-                l=l,
+            intermediate[stage_k] = IntermediateClusterSolution(
+                k=stage_k,
                 centroids=curr_centroids.clone(),
                 loss=metrics.loss,
                 metrics=metrics,
             )
 
             logger.debug(
-                "BigClust [l=%d]: Loss=%.4f, Davies-Bouldin=%.4f, Dunn=%.4f",
-                l,
+                "BigClust [k=%d]: Loss=%.4f, Davies-Bouldin=%.4f, Dunn=%.4f",
+                stage_k,
                 metrics.loss,
                 metrics.davies_bouldin,
                 metrics.dunn_index,

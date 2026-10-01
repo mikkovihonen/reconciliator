@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from reconciliator.clustering.agent import AgentClusterer
+from reconciliator.clustering.bigclust import (
+    BigClustMetal,
+    BigClustMultiplexClusterer,
+    BigClustResult,
+)
 from reconciliator.clustering.corpus import CorpusClusterer
 from reconciliator.models import (
     AgentCluster,
@@ -16,12 +21,6 @@ from reconciliator.models import (
     MultiplexClusterResult,
     SammelbandBinding,
     WorkCluster,
-)
-
-from reconciliator.clustering.bigclust import (
-    BigClustMetal,
-    BigClustMultiplexClusterer,
-    BigClustResult,
 )
 
 __all__ = [

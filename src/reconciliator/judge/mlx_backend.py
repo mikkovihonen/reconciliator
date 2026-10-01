@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import platform
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
@@ -13,6 +14,7 @@ from reconciliator.judge.protocol import CandidateEvaluation, TargetEncoding
 
 if TYPE_CHECKING:
     from reconciliator.config import LLMJudgeConfig
+    from reconciliator.models import BibliographicRecord
 
 logger = logging.getLogger(__name__)
 
@@ -246,17 +248,39 @@ class MLXJudgeBackend:
             prior_bias=prior_bias,
         )
 
-    def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
+    def embed_texts(
+        self, texts: Sequence[str], batch_size: Optional[int] = None
+    ) -> np.ndarray:
         """Batch dense encoding (SentenceEmbedder protocol parity)."""
         return self.encode_batch_dense(texts)
 
-    def encode_batch_dense(self, texts: list[str]) -> np.ndarray:
+    def encode_batch_dense(self, texts: Sequence[str]) -> np.ndarray:
         """Batch dense encoding for vector indexing."""
         if not texts:
             return np.empty((0, self.dimension), dtype=np.float32)
 
         vectors = [self.encode_target(t, retain_cache=False).dense_vector for t in texts]
         return np.vstack(vectors)
+
+    def serialize_record(self, record: BibliographicRecord | dict[str, Any]) -> str:
+        """Convert a record into dense descriptive text representation."""
+        if not hasattr(self, "_template_engine") or self._template_engine is None:
+            from reconciliator.embedding.template import RecordTemplateEngine
+
+            self._template_engine = RecordTemplateEngine()
+        return self._template_engine.render(record)
+
+    def embed_records(
+        self, records: Sequence[BibliographicRecord], batch_size: Optional[int] = None
+    ) -> np.ndarray:
+        """Serialize and encode a batch of BibliographicRecord models."""
+        texts = [self.serialize_record(r) for r in records]
+        return self.embed_texts(texts, batch_size=batch_size)
+
+    def embed_query(self, query: str) -> np.ndarray:
+        """Embed a single search query string into a dense 1D vector."""
+        vecs = self.embed_texts([query])
+        return vecs[0] if len(vecs) > 0 else np.zeros(self.dimension, dtype=np.float32)
 
     def evaluate_candidate(
         self,

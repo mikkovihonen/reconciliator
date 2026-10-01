@@ -62,3 +62,21 @@ def test_embedder_fp16_flag(mock_sentence_transformer: MagicMock) -> None:
         embedder = SentenceEmbedder(config)
         assert embedder.use_fp16 is False
         assert embedder.batch_size == 32
+
+
+def test_embedder_vector_embedder_conformance(mock_sentence_transformer: MagicMock) -> None:
+    """SentenceEmbedder must conform to VectorEmbedder protocol and support embed_query."""
+    from reconciliator.embedding.protocol import VectorEmbedder
+
+    with patch(
+        "reconciliator.embedding.embedder.SentenceTransformer",
+        return_value=mock_sentence_transformer,
+    ):
+        config = EmbeddingConfig(device="cpu")
+        embedder = SentenceEmbedder(config)
+
+        assert isinstance(embedder, VectorEmbedder)
+        q_vec = embedder.embed_query("test query")
+        assert isinstance(q_vec, np.ndarray)
+        assert q_vec.shape == (384,)
+

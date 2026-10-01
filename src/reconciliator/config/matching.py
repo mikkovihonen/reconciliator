@@ -230,10 +230,34 @@ class AggregateClusteringConfig(BaseModel):
     )
 
 
+class BigClustConfig(BaseModel):
+    """Configuration for BigClust continuous nonsmooth clustering on GPU."""
+
+    enabled: bool = Field(default=True)
+    max_work_clusters: int = Field(default=50)
+    min_work_clusters: int = Field(default=2)
+    max_expression_clusters_per_work: int = Field(default=10)
+    batch_size: int = Field(default=5000)
+    max_candidate_points: int = Field(default=20)
+    bundle_size: int = Field(default=7)
+    max_iter: int = Field(default=300)
+    device: str = Field(default="auto")
+
+
 class WEMIClusterConfig(BaseModel):
     """Configuration for multiplex WEMI graph clustering and blocking."""
 
     enabled: bool = Field(default_factory=lambda: bool(_CLUSTER_DEFAULTS.get("enabled", True)))
+    method: Literal[
+        "multiplex_graph",
+        "connected_components",
+        "dbscan",
+        "hierarchical",
+        "bigclust",
+    ] = Field(
+        default_factory=lambda: str(_CLUSTER_DEFAULTS.get("method", "multiplex_graph"))  # type: ignore[return-value]
+    )
+    bigclust: BigClustConfig = Field(default_factory=BigClustConfig)
     similarity_threshold: float = Field(
         default_factory=lambda: float(_CLUSTER_DEFAULTS.get("similarity_threshold", 0.85))
     )

@@ -1334,6 +1334,19 @@ reconcile:
   # Base directory for output reconciliation reports
   reports_dir: "data/reports"
 
+  # Corpus Staged Clustering (Intra-corpus Work Family & Expression Realization)
+  cluster:
+    enabled: true
+    method: "bigclust"                 # "bigclust" (GPU Metal/CUDA continuous MSSC) or "multiplex_graph"
+    bigclust:
+      max_work_clusters: 50            # Upper bound k_max for Work Family partitioning
+      max_expression_clusters_per_work: 10 # Upper bound k_max for Expression sub-clustering
+      batch_size: 5000                 # Subgradient batch size for large data matrix
+      max_iter: 300                    # SLMBA L-BFGS bundle optimizer iteration budget
+      bundle_size: 7                   # Subgradient bundle size
+      device: null                     # Device override: "mps", "cuda", "cpu", or null (auto)
+
+
   # Standalone Agent Fallback (Tier 3)
   fallback_agent_reconciliation: true # Enable fallback queries to agent.index
   agent_fallback_threshold: 0.90      # Dense similarity threshold for agent candidates

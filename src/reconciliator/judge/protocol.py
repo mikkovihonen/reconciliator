@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 import numpy as np
+
+from reconciliator.embedding.protocol import VectorEmbedder
+
+if TYPE_CHECKING:
+    from reconciliator.models import BibliographicRecord
 
 
 @dataclass
@@ -30,7 +36,7 @@ class CandidateEvaluation:
 
 
 @runtime_checkable
-class LLMJudgeBackend(Protocol):
+class LLMJudgeBackend(VectorEmbedder, Protocol):
     """Unified interface for hardware-native autoregressive LLM Judge backends."""
 
     @property
@@ -42,12 +48,28 @@ class LLMJudgeBackend(Protocol):
         """Process target record once to extract dense representation and base KV-cache."""
         ...
 
-    def encode_batch_dense(self, texts: list[str]) -> np.ndarray:
+    def encode_batch_dense(self, texts: Sequence[str]) -> np.ndarray:
         """Batch dense encoding for vector index ingestion."""
         ...
 
-    def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
+    def embed_texts(
+        self, texts: Sequence[str], batch_size: Optional[int] = None
+    ) -> np.ndarray:
         """Batch dense encoding (SentenceEmbedder protocol parity)."""
+        ...
+
+    def embed_records(
+        self, records: Sequence[BibliographicRecord], batch_size: Optional[int] = None
+    ) -> np.ndarray:
+        """Serialize and encode a batch of BibliographicRecord models."""
+        ...
+
+    def serialize_record(self, record: BibliographicRecord | dict[str, Any]) -> str:
+        """Convert a record into dense descriptive text representation."""
+        ...
+
+    def embed_query(self, query: str) -> np.ndarray:
+        """Embed a single search query string into a dense 1D vector."""
         ...
 
     def evaluate_candidate(
@@ -63,3 +85,4 @@ class LLMJudgeBackend(Protocol):
     def truncate_kv_cache(self, kv_cache: Any, base_seq_len: int) -> None:
         """Zero-copy in-place truncation of key/value tensors back to base_seq_len."""
         ...
+

@@ -206,3 +206,113 @@ def build_index_cmd(
         f"[green]Indexed {counts['works']} works into {cfg.storage.work_index} and "
         f"{counts['manifestations']} manifestations into {cfg.storage.manifestation_index}[/green]"
     )
+
+
+def cluster_corpus_cmd(
+    config: Path = typer.Option(
+        Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
+    ),
+    method: Optional[str] = typer.Option(
+        None, "--method", "-m", help="Clustering method override: 'bigclust' or 'multiplex_graph'"
+    ),
+    max_work_clusters: Optional[int] = typer.Option(
+        None, "--max-work-clusters", help="Max work clusters upper bound (k_max for BigClust)"
+    ),
+    max_expression_clusters: Optional[int] = typer.Option(
+        None, "--max-expression-clusters", help="Max expression clusters per work family"
+    ),
+    source: Optional[str] = typer.Option(
+        None, "--source", "-s", help="Filter clustering to a specific corpus source origin"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Evaluate clustering without persisting clusters to repository"
+    ),
+) -> None:
+    from reconciliator.config.matching import BigClustConfig, WEMIClusterConfig
+
+    resolved_config = _resolve_cli_config(config)
+    cfg = load_config(resolved_config)
+    configure_logging(cfg.logging)
+
+    method_val = method.default if hasattr(method, "default") else method
+    max_w_val = (
+        max_work_clusters.default
+        if hasattr(max_work_clusters, "default")
+        else max_work_clusters
+    )
+    max_e_val = (
+        max_expression_clusters.default
+        if hasattr(max_expression_clusters, "default")
+        else max_expression_clusters
+    )
+    source_val = source.default if hasattr(source, "default") else source
+    dry_run_val = dry_run.default if hasattr(dry_run, "default") else dry_run
+
+    wemi_repo = _wemi_repo(cfg)
+    cluster_cfg = (cfg.reconcile.cluster if cfg.reconcile else None) or WEMIClusterConfig()
+
+
+    if method_val:
+        cluster_cfg.method = str(method_val).strip()
+
+    if max_w_val is not None or max_e_val is not None:
+        if cluster_cfg.bigclust is None:
+            cluster_cfg.bigclust = BigClustConfig()
+        if max_w_val is not None:
+            cluster_cfg.bigclust.max_work_clusters = int(max_w_val)
+        if max_e_val is not None:
+            cluster_cfg.bigclust.max_expression_clusters_per_work = int(max_e_val)
+
+    embedder = None
+    try:
+        from reconciliator.embedding import create_vector_embedder
+
+        embedder = create_vector_embedder(cfg)
+    except Exception as e:
+        console.print(
+            f"[yellow]Notice: vector embedder could not be loaded ({e}), using default.[/yellow]"
+        )
+
+    origins = [str(source_val)] if source_val else (wemi_repo.non_authoritative_sources() or None)
+
+    console.print(
+        f"[cyan]Executing corpus clustering (method='{cluster_cfg.method}', origins={origins})...[/cyan]"
+    )
+
+    if cluster_cfg.method == "bigclust":
+        from reconciliator.clustering.bigclust import BigClustMultiplexClusterer
+
+        bc_cfg = cluster_cfg.bigclust
+        max_w = bc_cfg.max_work_clusters if bc_cfg else 50
+        max_e = bc_cfg.max_expression_clusters_per_work if bc_cfg else 10
+
+        records = wemi_repo.get_all_match_records(origins=origins)
+        if not records:
+            console.print("[yellow]No staged records found to cluster.[/yellow]")
+            return
+
+        clusterer = BigClustMultiplexClusterer(
+            corpus_repo=wemi_repo,
+            embedder=embedder,
+            max_work_clusters=max_w,
+            max_expression_clusters_per_work=max_e,
+        )
+        res = clusterer.cluster_records(records, persist=not bool(dry_run_val))
+    else:
+        from reconciliator.clustering.corpus import CorpusClusterer
+
+        clusterer = CorpusClusterer(
+            corpus_repo=wemi_repo,
+            wemi_repo=wemi_repo,
+            config=cluster_cfg,
+            corpus_origins=origins,
+        )
+        res = clusterer.cluster_corpus()
+
+    verb = "Evaluated" if dry_run_val else "Persisted"
+    console.print(
+        f"[green]{verb} {res.records_clustered} staged record(s) into "
+        f"{res.work_clusters_count} Work cluster(s), {res.expression_clusters_count} Expression cluster(s), "
+        f"and {res.manifestation_clusters_count} Manifestation cluster(s) in {res.elapsed_seconds:.2f}s.[/green]"
+    )
+

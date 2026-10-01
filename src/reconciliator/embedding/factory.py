@@ -9,11 +9,12 @@ if TYPE_CHECKING:
     from reconciliator.config import AppConfig
 
 from reconciliator.embedding.embedder import SentenceEmbedder
+from reconciliator.embedding.protocol import VectorEmbedder
 
 logger = logging.getLogger(__name__)
 
 
-_EMBEDDER_CACHE: dict[tuple[str, Any], Any] = {}
+_EMBEDDER_CACHE: dict[tuple[str, Any], VectorEmbedder] = {}
 
 
 def clear_embedder_cache() -> None:
@@ -21,7 +22,8 @@ def clear_embedder_cache() -> None:
     _EMBEDDER_CACHE.clear()
 
 
-def create_vector_embedder(cfg: AppConfig, use_cache: bool = True) -> Any:
+def create_vector_embedder(cfg: AppConfig, use_cache: bool = True) -> VectorEmbedder:
+
     """Instantiate the configured vector embedder (either SentenceEmbedder or LLMJudgeBackend).
 
     Driven by cfg.vector_model ('embedding' or 'llm').

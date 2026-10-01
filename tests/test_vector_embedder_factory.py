@@ -93,3 +93,51 @@ def test_llm_judge_backend_protocol_parity() -> None:
         res = backend.embed_texts(["doc1", "doc2"], batch_size=8)
         assert res.shape == (2, 64)
         mock_encode_batch.assert_called_once_with(["doc1", "doc2"])
+
+
+def test_vector_embedder_runtime_protocol_conformance() -> None:
+    """Both SentenceEmbedder and PytorchJudgeBackend must conform to VectorEmbedder at runtime."""
+    from reconciliator.embedding.protocol import BaseVectorEmbedder, VectorEmbedder
+    from reconciliator.models import BibliographicRecord
+
+    # 1. LLMJudgeBackend is a subprotocol of VectorEmbedder
+    assert VectorEmbedder in LLMJudgeBackend.__mro__
+    assert issubclass(SentenceEmbedder, BaseVectorEmbedder)
+
+    # 2. SentenceEmbedder conforms to VectorEmbedder and inherits BaseVectorEmbedder
+    emb_cfg = EmbeddingConfig(model_name="mock-model")
+    with patch("reconciliator.embedding.embedder.SentenceTransformer") as mock_st_cls:
+        mock_st = MagicMock()
+        mock_st.get_embedding_dimension.return_value = 128
+        mock_st.encode.return_value = np.ones((1, 128), dtype=np.float32)
+        mock_st_cls.return_value = mock_st
+
+        sent_embedder = SentenceEmbedder(emb_cfg)
+        assert isinstance(sent_embedder, VectorEmbedder)
+        assert isinstance(sent_embedder, BaseVectorEmbedder)
+        assert sent_embedder.dimension == 128
+        q_vec = sent_embedder.embed_query("query")
+        assert q_vec.shape == (128,)
+
+    # 3. PytorchJudgeBackend conforms to VectorEmbedder
+    judge_cfg = LLMJudgeConfig(model_name="mock-llm", device="cpu")
+    backend = PytorchJudgeBackend(judge_cfg, model=MagicMock(), tokenizer=MagicMock())
+    backend._dimension = 64
+
+    with patch.object(backend, "encode_batch_dense") as mock_encode_dense:
+        mock_encode_dense.return_value = np.ones((1, 64), dtype=np.float32)
+
+        assert isinstance(backend, VectorEmbedder)
+        assert backend.dimension == 64
+
+        q_vec = backend.embed_query("sample query")
+        assert q_vec.shape == (64,)
+
+        rec = BibliographicRecord(source_id="1", source="melinda", title="Tuntematon sotilas")
+        serialized = backend.serialize_record(rec)
+        assert isinstance(serialized, str)
+        assert len(serialized) > 0
+
+        rec_embeddings = backend.embed_records([rec])
+        assert rec_embeddings.shape == (1, 64)
+

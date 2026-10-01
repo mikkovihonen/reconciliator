@@ -20,7 +20,7 @@ import numpy as np
 
 from reconciliator.config import ReconcileConfig, ReconcileFTSFallbackConfig
 from reconciliator.database import WEMIRepository
-from reconciliator.embedding.embedder import SentenceEmbedder
+from reconciliator.embedding.protocol import VectorEmbedder
 from reconciliator.funnels import (
     BUILTIN_SPECS,
     FunnelContext,
@@ -117,7 +117,7 @@ class WorkMatcher:
     def __init__(
         self,
         wemi_repo: WEMIRepository,
-        embedder: Optional[SentenceEmbedder] = None,
+        embedder: Optional[VectorEmbedder] = None,
         config: Optional[ReconcileConfig] = None,
         authoritative_only: bool = True,
         agent_indexer: Optional[VectorIndex] = None,

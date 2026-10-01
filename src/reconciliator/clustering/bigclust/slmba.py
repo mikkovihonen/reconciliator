@@ -29,6 +29,7 @@ class SLMBAParameters:
     func_tol: float = 1e-7
     non_monotone_window: int = 5
     batch_rotation_interval: int = 10
+    use_fp16: bool = False
 
 
 class MetalSLMBAOptimizer:
@@ -73,7 +74,6 @@ class MetalSLMBAOptimizer:
         X = init_centers.clone().to(self.device).float()
         A = data.to(self.device).float()
         N, d = A.shape
-        k = X.shape[0]
 
         B = min(batch_size or N, N)
         use_minibatch = B < N
@@ -292,16 +292,22 @@ class MetalSLMBAOptimizer:
     ) -> Tuple[float, torch.Tensor]:
         """Compute full MSSC loss and subgradient on Metal GPU."""
         # ||a_i - x_j||^2 = ||a_i||^2 - 2 <a_i, x_j> + ||x_j||^2
-        norm_A = (A * A).sum(dim=1, keepdim=True)  # [B, 1]
-        norm_X = (X * X).sum(dim=1, keepdim=True).T  # [1, k]
-        # Cross term via GEMM
-        D = norm_A - 2.0 * torch.matmul(A, X.T) + norm_X  # [B, k]
+        norm_A = (A * A).sum(dim=1, keepdim=True)  # [B, 1] float32
+        norm_X = (X * X).sum(dim=1, keepdim=True).T  # [1, k] float32
+
+        if self.params.use_fp16 and self.device.type in ("mps", "cuda"):
+            with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+                cross = torch.matmul(A, X.T).float()
+        else:
+            cross = torch.matmul(A, X.T)
+
+        D = torch.clamp(norm_A - 2.0 * cross + norm_X, min=0.0)  # [B, k] float32
 
         min_dist, j_star = torch.min(D, dim=1)  # [B], [B]
         loss = min_dist.sum().item()
 
         # Subgradient: G_j = 2 * sum_{i: j*(i)=j} (x_j - a_i)
-        grad = torch.zeros_like(X)
+        grad = torch.zeros_like(X, dtype=torch.float32)
         diff = X[j_star] - A
         grad.index_add_(0, j_star, 2.0 * diff)
         return loss, grad
@@ -311,15 +317,16 @@ class MetalSLMBAOptimizer:
     ) -> Tuple[float, torch.Tensor]:
         """Compute auxiliary loss and subgradient for single new center on Metal GPU."""
         diff = A - y  # [B, d]
-        dist_y = (diff * diff).sum(dim=1)  # [B]
-        better_mask = dist_y < d_prev  # [B] bool
+        dist_y = torch.clamp((diff * diff).sum(dim=1), min=0.0)  # [B] float32
 
+        better_mask = dist_y < d_prev  # [B] bool
         loss = torch.where(better_mask, dist_y, d_prev).sum().item()
 
-        grad = torch.zeros_like(y)
+        grad = torch.zeros_like(y, dtype=torch.float32)
         if better_mask.any():
             grad = 2.0 * (y - A[better_mask]).sum(dim=0, keepdim=True)
         return loss, grad
+
 
     def _compute_lbfgs_direction(
         self,

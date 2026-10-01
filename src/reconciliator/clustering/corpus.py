@@ -18,6 +18,8 @@ from rapidfuzz import fuzz
 
 from reconciliator._core.clustering import (
     py_evaluate_aggregate_overlap as _rust_evaluate_aggregate_overlap,
+)
+from reconciliator._core.clustering import (
     py_lcs_length as _rust_lcs_length,
 )
 from reconciliator.authority.lifecycle import ClusterIdentityManager
@@ -409,6 +411,21 @@ class CorpusClusterer:
 
     def cluster_corpus(self) -> MultiplexClusterResult:
         """Execute full intra-corpus co-reference clustering pipeline across staged records."""
+        if getattr(self.config, "method", "multiplex_graph") == "bigclust":
+            from reconciliator.clustering.bigclust import BigClustMultiplexClusterer
+
+            bc_cfg = getattr(self.config, "bigclust", None)
+            max_w = getattr(bc_cfg, "max_work_clusters", 50) if bc_cfg else 50
+            max_e = getattr(bc_cfg, "max_expression_clusters_per_work", 10) if bc_cfg else 10
+            clusterer = BigClustMultiplexClusterer(
+                corpus_repo=self.corpus_repo,
+                embedder=getattr(self.matcher, "embedder", None) if self.matcher else None,
+                max_work_clusters=max_w,
+                max_expression_clusters_per_work=max_e,
+                identity_manager=self.identity_manager,
+            )
+            return clusterer.cluster_corpus(origins=self.corpus_origins)
+
         start_time = time.time()
         origins = self.corpus_origins or self.corpus_repo.non_authoritative_sources() or None
         records = self.corpus_repo.get_all_match_records(origins=origins)

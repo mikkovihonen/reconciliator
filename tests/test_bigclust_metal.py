@@ -9,8 +9,9 @@ Tests:
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from collections.abc import Sequence
+from typing import Any, Optional
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -21,9 +22,8 @@ from reconciliator.clustering.bigclust import (
     BigClustMultiplexClusterer,
     MetalSLMBAOptimizer,
     SLMBAParameters,
-    compute_validity_indices,
 )
-from reconciliator.database import WEMIRepository
+from reconciliator.embedding.protocol import BaseVectorEmbedder
 from reconciliator.models import MatchRecord
 
 
@@ -37,37 +37,46 @@ def device() -> torch.device:
     return torch.device("cpu")
 
 
-from unittest.mock import MagicMock
-
 @pytest.fixture
 def mock_repo() -> MagicMock:
     """Fixture providing a mock WEMIRepository without requiring PostgreSQL."""
     return MagicMock()
 
 
-class MockSentenceEmbedder:
-    """Deterministic mock embedder for clustering unit tests."""
+class MockSentenceEmbedder(BaseVectorEmbedder):
+    """Deterministic mock embedder conforming to VectorEmbedder for clustering tests."""
 
     def __init__(self, dim: int = 64) -> None:
-        self.dim = dim
+        self._dim = dim
 
-    def embed_texts(self, texts: list[str]) -> np.ndarray:
+    @property
+    def dimension(self) -> int:
+        return self._dim
+
+    def serialize_record(self, record: Any) -> str:
+        if isinstance(record, dict):
+            return str(record.get("title", ""))
+        return str(getattr(record, "title", ""))
+
+    def embed_texts(
+        self, texts: Sequence[str] | list[str], batch_size: Optional[int] = None
+    ) -> np.ndarray:
         """Deterministic pseudo-embeddings based on text tokens."""
-        embeddings = np.zeros((len(texts), self.dim), dtype=np.float32)
+        embeddings = np.zeros((len(texts), self.dimension), dtype=np.float32)
         for i, text in enumerate(texts):
             # Seed based on content to create well-separated semantic clusters
             low = text.lower()
             if "sinuhe" in low or "waltari" in low:
-                base = np.array([2.0, 2.0] + [0.0] * (self.dim - 2), dtype=np.float32)
+                base = np.array([2.0, 2.0] + [0.0] * (self.dimension - 2), dtype=np.float32)
             elif "tuntematon" in low or "linna" in low or "soldier" in low:
-                base = np.array([-2.0, -2.0] + [0.0] * (self.dim - 2), dtype=np.float32)
+                base = np.array([-2.0, -2.0] + [0.0] * (self.dimension - 2), dtype=np.float32)
             elif "kalevala" in low or "lonnrot" in low:
-                base = np.array([2.0, -2.0] + [0.0] * (self.dim - 2), dtype=np.float32)
+                base = np.array([2.0, -2.0] + [0.0] * (self.dimension - 2), dtype=np.float32)
             else:
-                base = np.zeros(self.dim, dtype=np.float32)
+                base = np.zeros(self.dimension, dtype=np.float32)
 
             # Expression-level variation (e.g. language/translation)
-            noise = np.zeros(self.dim, dtype=np.float32)
+            noise = np.zeros(self.dimension, dtype=np.float32)
             if "swedish" in low or "svenska" in low:
                 noise[2] = 0.8
             elif "english" in low:
@@ -77,6 +86,7 @@ class MockSentenceEmbedder:
 
             embeddings[i] = base + noise
         return embeddings
+
 
 
 def test_slmba_optimizer_convergence(device):
@@ -128,11 +138,12 @@ def test_bigclust_incremental_fit_and_k_selection(device):
     engine = BigClustMetal(k_max=6, k_min=2, max_candidate_points=10, device=device)
     result = engine.fit(data)
 
-    # 1. Intermediate solutions exist for all l = 1..6
-    for l in range(1, 7):
-        assert l in result.intermediate_solutions
-        sol = result.intermediate_solutions[l]
-        assert sol.centroids.shape == (l, dim)
+    # 1. Intermediate solutions exist for all stage_k = 1..6
+    for stage_k in range(1, 7):
+        assert stage_k in result.intermediate_solutions
+        sol = result.intermediate_solutions[stage_k]
+        assert sol.k == stage_k
+        assert sol.centroids.shape == (stage_k, dim)
         assert sol.loss > 0.0
 
     # 2. Optimal k* should match ground truth (4 clusters)
@@ -237,3 +248,40 @@ def test_bigclust_multiplex_wide_pilot(mock_repo, device):
     assert res.expression_clusters_count >= 3
     assert res.manifestation_clusters_count == 6
     assert res.elapsed_seconds > 0.0
+
+
+def test_corpus_clusterer_bigclust_dispatch(mock_repo):
+    """Verify that CorpusClusterer delegates to BigClust when config.method is 'bigclust'."""
+    from reconciliator.clustering.corpus import CorpusClusterer
+    from reconciliator.config.matching import WEMIClusterConfig
+
+    config = WEMIClusterConfig(method="bigclust")
+    mock_repo.get_all_match_records.return_value = []
+    mock_repo.non_authoritative_sources.return_value = []
+
+    clusterer = CorpusClusterer(corpus_repo=mock_repo, config=config)
+    res = clusterer.cluster_corpus()
+
+    assert res.records_clustered == 0
+    assert mock_repo.get_all_match_records.called
+
+
+def test_slmba_optimizer_mixed_precision_fp16(device):
+    """Verify that SLMBA converges and reduces loss with mixed precision (use_fp16=True)."""
+    torch.manual_seed(42)
+    c1 = torch.randn(1, 32, device=device) + 4.0
+    c2 = torch.randn(1, 32, device=device) - 4.0
+    pts1 = c1 + 0.2 * torch.randn(40, 32, device=device)
+    pts2 = c2 + 0.2 * torch.randn(40, 32, device=device)
+    data = torch.cat([pts1, pts2], dim=0)
+
+    init_centers = torch.randn(2, 32, device=device)
+    params = SLMBAParameters(max_iter=30, use_fp16=True)
+    optimizer = MetalSLMBAOptimizer(params=params, device=device)
+
+    opt_centers, final_loss = optimizer.optimize_clustering(init_centers, data)
+    assert opt_centers.shape == (2, 32)
+    assert opt_centers.dtype == torch.float32
+    assert final_loss > 0.0
+
+

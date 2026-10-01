@@ -95,3 +95,63 @@ ingestion:
             assert unquote(store.db_path) == unquote(conf.storage.database_url)
             passed_config = mock_pipeline.call_args.kwargs.get("config")
             assert passed_config.authoritative is expected_authoritative
+
+
+def test_cli_cluster_corpus_bigclust_routing(tmp_path: Path) -> None:
+    """Verify that cluster-corpus with --method bigclust invokes BigClustMultiplexClusterer."""
+    from unittest.mock import MagicMock
+
+    from reconciliator.models import MultiplexClusterResult
+
+    runner = CliRunner()
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        f"""
+storage:
+  data_dir: "{tmp_path}"
+"""
+    )
+
+    mock_res = MultiplexClusterResult(
+        work_clusters_count=3,
+        expression_clusters_count=5,
+        manifestation_clusters_count=8,
+        records_clustered=8,
+        elapsed_seconds=0.12,
+    )
+
+    with patch("reconciliator.commands.wemi._wemi_repo") as mock_repo_fn, \
+         patch("reconciliator.clustering.bigclust.BigClustMultiplexClusterer") as mock_bigclust_cls:
+        mock_repo = MagicMock()
+        mock_repo.get_all_match_records.return_value = [MagicMock()]
+        mock_repo.non_authoritative_sources.return_value = ["test_corpus"]
+        mock_repo_fn.return_value = mock_repo
+
+        mock_instance = MagicMock()
+        mock_instance.cluster_records.return_value = mock_res
+        mock_bigclust_cls.return_value = mock_instance
+
+        result = runner.invoke(
+            app,
+            [
+                "cluster-corpus",
+                "--config",
+                str(cfg_file),
+                "--method",
+                "bigclust",
+                "--max-work-clusters",
+                "25",
+                "--max-expression-clusters",
+                "5",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Evaluated 8 staged record(s) into 3 Work cluster(s)" in result.output
+        mock_bigclust_cls.assert_called_once()
+        assert mock_bigclust_cls.call_args.kwargs["max_work_clusters"] == 25
+        assert mock_bigclust_cls.call_args.kwargs["max_expression_clusters_per_work"] == 5
+        mock_instance.cluster_records.assert_called_once_with(
+            mock_repo.get_all_match_records.return_value, persist=False
+        )
+

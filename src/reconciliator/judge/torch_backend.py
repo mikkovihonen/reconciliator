@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
@@ -15,8 +16,10 @@ from reconciliator.utils.device import resolve_device
 
 if TYPE_CHECKING:
     from reconciliator.config import LLMJudgeConfig
+    from reconciliator.models import BibliographicRecord
 
 logger = logging.getLogger(__name__)
+
 
 
 class PytorchJudgeBackend:
@@ -300,11 +303,13 @@ class PytorchJudgeBackend:
             prior_bias=prior_bias,
         )
 
-    def embed_texts(self, texts: list[str], batch_size: Optional[int] = None) -> np.ndarray:
+    def embed_texts(
+        self, texts: Sequence[str], batch_size: Optional[int] = None
+    ) -> np.ndarray:
         """Batch dense encoding (SentenceEmbedder protocol parity)."""
         return self.encode_batch_dense(texts)
 
-    def encode_batch_dense(self, texts: list[str]) -> np.ndarray:
+    def encode_batch_dense(self, texts: Sequence[str]) -> np.ndarray:
         """
         Batch dense encoding for offline vector index ingestion.
         Returns L2-normalized [N, dimension] numpy array.
@@ -312,11 +317,13 @@ class PytorchJudgeBackend:
         if not texts:
             return np.empty((0, self.dimension), dtype=np.float32)
 
+        text_list = list(texts)
         batch_size = max(1, self.config.batch_size)
         all_embeddings: list[np.ndarray] = []
 
-        for i in range(0, len(texts), batch_size):
-            chunk = texts[i : i + batch_size]
+        for i in range(0, len(text_list), batch_size):
+            chunk = text_list[i : i + batch_size]
+
             prompts = [self.config.target_template.format(text=t) for t in chunk]
             inputs = self.tokenizer(
                 prompts,
@@ -348,6 +355,26 @@ class PytorchJudgeBackend:
                 all_embeddings.append(normed.to(torch.float32).cpu().numpy())
 
         return np.vstack(all_embeddings)
+
+    def serialize_record(self, record: BibliographicRecord | dict[str, Any]) -> str:
+        """Convert a record into dense descriptive text representation."""
+        if not hasattr(self, "_template_engine") or self._template_engine is None:
+            from reconciliator.embedding.template import RecordTemplateEngine
+
+            self._template_engine = RecordTemplateEngine()
+        return self._template_engine.render(record)
+
+    def embed_records(
+        self, records: Sequence[BibliographicRecord], batch_size: Optional[int] = None
+    ) -> np.ndarray:
+        """Serialize and encode a batch of BibliographicRecord models."""
+        texts = [self.serialize_record(r) for r in records]
+        return self.embed_texts(texts, batch_size=batch_size)
+
+    def embed_query(self, query: str) -> np.ndarray:
+        """Embed a single search query string into a dense 1D vector."""
+        vecs = self.embed_texts([query])
+        return vecs[0] if len(vecs) > 0 else np.zeros(self.dimension, dtype=np.float32)
 
     def evaluate_candidate(
         self,
