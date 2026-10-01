@@ -64,8 +64,8 @@ dmypy.json
 config.yaml
 
 # Reconciliator data, databases, vector indices, and output reports
-data/
-reports/
+/data/
+/reports/
 *.db
 *.db-wal
 *.db-shm

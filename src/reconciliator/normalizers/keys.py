@@ -7,12 +7,13 @@ and shapes them into persistent EntityKey rows bound to WEMI entities.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from reconciliator.models import (
     AgentEntity,
     EntityKey,
     IdentifierEntity,
+    ManifestationEntity,
     WorkEntity,
 )
 from reconciliator.normalizers.blocking import (
@@ -72,9 +73,14 @@ def decode_analytic(value: str) -> tuple[str, Optional[str]]:
 
 
 def to_manifestation_entity_keys(
-    manifestation_uri: str, domain_keys: dict[str, list[str]]
+    manifestation: Union[ManifestationEntity, str], domain_keys: dict[str, list[str]]
 ) -> list[EntityKey]:
     """Shape a domain keys dictionary into EntityKey rows bound to a manifestation."""
+    manifestation_uri = (
+        manifestation.manifestation_uri
+        if isinstance(manifestation, ManifestationEntity)
+        else str(manifestation)
+    )
     return [
         EntityKey(
             entity_type="manifestation",
@@ -233,7 +239,7 @@ def derive_bibframe_keys(
 
 
 def marc_entity_keys(
-    manifestation_uri: str,
+    manifestation: Union[ManifestationEntity, str],
     record_elem: Any,
     parsed: dict[str, Any],
     work_type: str,
@@ -242,13 +248,13 @@ def marc_entity_keys(
 ) -> list[EntityKey]:
     """Shape MARC domain keys directly into EntityKey rows bound to a manifestation."""
     return to_manifestation_entity_keys(
-        manifestation_uri,
+        manifestation,
         derive_domain_keys(record_elem, parsed, work_type, author_key, title_stem),
     )
 
 
 def bibframe_entity_keys(
-    manifestation_uri: str,
+    manifestation: Union[ManifestationEntity, str],
     work: WorkEntity,
     agents: list[AgentEntity],
     identifiers: list[IdentifierEntity],
@@ -258,7 +264,7 @@ def bibframe_entity_keys(
 ) -> list[EntityKey]:
     """Shape BIBFRAME domain keys directly into EntityKey rows bound to a manifestation."""
     return to_manifestation_entity_keys(
-        manifestation_uri,
+        manifestation,
         derive_bibframe_keys(
             work,
             agents,

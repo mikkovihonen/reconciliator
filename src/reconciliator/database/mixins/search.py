@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.database.mixins.common import row_to_dict
@@ -405,3 +405,70 @@ class SearchRepositoryMixin:
             manifestation_indexer.save(metadata=metadata)
         if agent_indexer is not None:
             agent_indexer.save(metadata=metadata)
+
+    def find_works_by_author_and_title(
+        self,
+        author_key: Optional[str],
+        title_stem: str,
+        work_type: Optional[str] = None,
+        authoritative_only: bool = True,
+    ) -> list[WorkEntity]:
+        """Look up works by title stem and optional author key, from authoritative sources."""
+        clean_title = title_stem.strip().lower()
+        if not clean_title:
+            return []
+
+        auth_sources = self.authoritative_sources() if authoritative_only else []
+
+        def attempt(match_type: str, pattern: str) -> list[WorkEntity]:
+            with self.get_connection() as conn:
+                stmt = select(works_table).select_from(
+                    works_table.outerjoin(
+                        agents_table, works_table.c.primary_agent_id == agents_table.c.id
+                    )
+                )
+                if match_type == "eq":
+                    stmt = stmt.where(works_table.c.title_normalized == pattern)
+                elif match_type == "prefix":
+                    stmt = stmt.where(works_table.c.title_normalized.like(f"{pattern}%"))
+                else:
+                    stmt = stmt.where(works_table.c.title_normalized.like(f"%{pattern}%"))
+
+                if author_key:
+                    clean_author = author_key.strip().lower()
+                    stmt = stmt.where(
+                        or_(
+                            works_table.c.primary_agent_id.is_(None),
+                            agents_table.c.surname.like(f"%{clean_author}%"),
+                            agents_table.c.name_normalized.like(f"%{clean_author}%"),
+                        )
+                    )
+                if work_type:
+                    stmt = stmt.where(works_table.c.work_type == work_type)
+                if authoritative_only and auth_sources:
+                    stmt = stmt.where(works_table.c.record_origin.in_(auth_sources))
+                stmt = stmt.limit(20)
+                return [_row_to_work(r) for r in conn.execute(stmt).fetchall()]
+
+        for mtype in ("eq", "prefix", "substr"):
+            found = attempt(mtype, clean_title)
+            if found:
+                return found
+        return []
+
+    def find_works_by_type(
+        self,
+        work_type: str,
+        limit: int = 50,
+        authoritative_only: bool = True,
+    ) -> list[WorkEntity]:
+        """Fetch works of a given work_type from authoritative sources."""
+        auth_sources = self.authoritative_sources() if authoritative_only else []
+        stmt = select(works_table).where(works_table.c.work_type == work_type)
+        if authoritative_only and auth_sources:
+            stmt = stmt.where(works_table.c.record_origin.in_(auth_sources))
+        stmt = stmt.limit(limit)
+        with self.get_connection() as conn:
+            rows = conn.execute(stmt).fetchall()
+            return [_row_to_work(r) for r in rows]
+

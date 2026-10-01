@@ -5,32 +5,33 @@ from __future__ import annotations
 from lxml import etree
 
 from reconciliator.ingestion.wikidata import _extract_author_data
-from reconciliator.loaders.marcxml import parse_marc_dates, parse_marc_record_elem
+from reconciliator.loaders.marcxml import parse_marc_record_elem
+from reconciliator.normalizers.agent import parse_agent_dates
 from reconciliator.normalizers.record import RecordNormalizer
 
 
 def test_parse_marc_dates_variants() -> None:
     # Full range
-    assert parse_marc_dates("1908-1979") == (1908, 1979)
-    assert parse_marc_dates("ca. 1850 - 1910") == (1850, 1910)
-    assert parse_marc_dates("noin 1850-1910.") == (1850, 1910)
-    assert parse_marc_dates("1850?-1910?") == (1850, 1910)
+    assert parse_agent_dates("1908-1979") == (1908, 1979)
+    assert parse_agent_dates("ca. 1850 - 1910") == (1850, 1910)
+    assert parse_agent_dates("noin 1850-1910.") == (1850, 1910)
+    assert parse_agent_dates("1850?-1910?") == (1850, 1910)
 
     # Birth only
-    assert parse_marc_dates("1948-") == (1948, None)
-    assert parse_marc_dates("s. 1950") == (1950, None)
-    assert parse_marc_dates("f. 1925") == (1925, None)
-    assert parse_marc_dates("b. 1930") == (1930, None)
+    assert parse_agent_dates("1948-") == (1948, None)
+    assert parse_agent_dates("s. 1950") == (1950, None)
+    assert parse_agent_dates("f. 1925") == (1925, None)
+    assert parse_agent_dates("b. 1930") == (1930, None)
 
     # Death only
-    assert parse_marc_dates("-1920") == (None, 1920)
-    assert parse_marc_dates("k. 2012") == (None, 2012)
-    assert parse_marc_dates("d. 1999") == (None, 1999)
+    assert parse_agent_dates("-1920") == (None, 1920)
+    assert parse_agent_dates("k. 2012") == (None, 2012)
+    assert parse_agent_dates("d. 1999") == (None, 1999)
 
     # Century / invalid
-    assert parse_marc_dates("1800-luku") == (None, None)
-    assert parse_marc_dates(None) == (None, None)
-    assert parse_marc_dates("") == (None, None)
+    assert parse_agent_dates("1800-luku") == (None, None)
+    assert parse_agent_dates(None) == (None, None)
+    assert parse_agent_dates("") == (None, None)
 
 
 def test_marcxml_agent_rich_fields_extraction() -> None:

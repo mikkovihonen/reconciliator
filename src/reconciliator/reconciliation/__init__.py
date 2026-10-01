@@ -28,6 +28,9 @@ from reconciliator.reconciliation.results import (
     ReconciliationResult,
     WEMIMatchResult,
 )
+from reconciliator.reconciliation.runner import (
+    ReconciliationPipelineRunner,
+)
 from reconciliator.reconciliation.stages import (
     AgentResolutionStage,
     CandidateRankingStage,
@@ -37,6 +40,7 @@ from reconciliator.reconciliation.stages import (
 )
 
 __all__ = [
+    "ReconciliationPipelineRunner",
     "WorkMatcher",
     "_merge_funnel_specs",
     "DEFAULT_MAX_EDITIONS_COMPARED",

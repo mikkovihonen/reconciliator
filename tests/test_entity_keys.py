@@ -245,9 +245,9 @@ def test_bibframe_keys_derive_from_entities_not_the_graph():
     from rdflib import Graph
 
     from reconciliator.loaders.bibframe.decomposition import (
-        bibframe_entity_keys,
         decompose_bibframe_work,
     )
+    from reconciliator.normalizers.keys import bibframe_entity_keys
 
     ttl = """
     @prefix bf: <http://id.loc.gov/ontologies/bibframe/> .

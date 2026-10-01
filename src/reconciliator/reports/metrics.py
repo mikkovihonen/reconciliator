@@ -1,536 +1,70 @@
-"""Dual decoupled TSV report generators adhering to strict TSV hygiene standards."""
+"""Metric calculation strategies for reconciliation reports."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 from reconciliator.config import AppConfig, ReconcileConfig, VocabIngestConfig
-from reconciliator.utils.tsv import sanitize_tsv_cell as sanitize_tsv_cell
-from reconciliator.utils.tsv import write_summary_tsv, write_tsv_file
-from reconciliator.vocab import strip_vocabulary_subcode
-
-
-def _get_model_field_default(model_cls: type, field_name: str) -> list[str]:
-    """Extract default list from a Pydantic model field definition if available."""
-    field_info = getattr(model_cls, "model_fields", {}).get(field_name)
-    if field_info is not None:
-        val = field_info.get_default(call_default_factory=True)
-        if isinstance(val, (list, tuple)):
-            return [str(x) for x in val]
-    return []
-
-
-def describe_agent_vocabulary(vocab: str) -> str:
-    """Dynamically format human-readable description for an agent vocabulary."""
-    if not vocab:
-        return "Unspecified agent vocabulary"
-    v_clean = vocab.strip().upper()
-    if v_clean in ("OTHER", "UNCLASSIFIED", "UNKNOWN"):
-        return "Unclassified or external agent identifier URIs"
-    if v_clean in ("WIKIDATA", "WD"):
-        return "Wikidata entity QID URIs ($1)"
-    return f"{v_clean} agent identifier URIs ($0)"
-
-
-def describe_source_thesaurus(thesaurus: str) -> str:
-    """Dynamically format human-readable description for a source thesaurus."""
-    if not thesaurus:
-        return "Legacy terms with no $2 or local tags"
-    norm = thesaurus.strip().lower()
-    if norm in ("unspecified_legacy", "unspecified", "none", "legacy"):
-        return "Legacy terms with no $2 or local tags"
-
-    if norm == "allars":
-        label = "Allärs"
-    elif len(norm) <= 4:
-        label = norm.upper()
-    else:
-        label = norm.capitalize()
-
-    return f"Terms originated from {label}"
-
-
-def describe_target_ontology(ontology: str) -> str:
-    """Dynamically format human-readable description for a target ontology."""
-    if not ontology:
-        return "Unspecified target ontology"
-    norm = ontology.strip().lower()
-    if norm in ("wikidata", "wd"):
-        return "Mapped to Wikidata Entity URIs"
-
-    if "-" in norm:
-        prefix, *rest = norm.split("-")
-        ont_label = f"{prefix.upper()}-{'-'.join(rest)}"
-    else:
-        ont_label = norm.upper()
-
-    return f"Mapped to {ont_label}"
-
-
-def describe_tag_migration(key: str) -> str:
-    """Dynamically generate human-readable description based on what happened in what field."""
-    parts = key.split("_to_")
-    if len(parts) != 2:
-        return f"Subject migration/folding {key}"
-
-    left_tokens = parts[0].split("_")
-    right_tokens = parts[1].split("_")
-
-    src_tag = left_tokens[0]
-    src_v = left_tokens[1].upper() if len(left_tokens) > 1 else None
-
-    if len(right_tokens) == 2:
-        tgt_tag, tgt_v = right_tokens[0], right_tokens[1].upper()
-    elif len(right_tokens) == 1:
-        if right_tokens[0].isdigit():
-            tgt_tag, tgt_v = right_tokens[0], None
-        else:
-            tgt_tag, tgt_v = src_tag, right_tokens[0].upper()
-    else:
-        return f"Subject migration/folding {key}"
-
-    # 1. Intra-field vocabulary folding (same field, different vocabulary)
-    if src_tag == tgt_tag and src_v and tgt_v:
-        return f"In {src_tag}, {src_v} folded to {tgt_v}"
-
-    # 2. Retagging with source vocabulary (tag change + vocab change)
-    if src_tag != tgt_tag and src_v and tgt_v:
-        return f"Terms in {src_tag} ({src_v}) retagged to {tgt_tag} {tgt_v}"
-
-    # 3. Pure retagging (tag change, optional target vocabulary)
-    if tgt_v:
-        return f"Terms in {src_tag} retagged to {tgt_tag} {tgt_v}"
-    return f"Terms in {src_tag} retagged to {tgt_tag}"
-
-
-class _DynamicDescriptions(dict[str, str]):
-    """Dynamic dict-like mapping that resolves keys via a generator function."""
-
-    def __init__(self, generator: Any) -> None:
-        super().__init__()
-        self._generator = generator
-
-    def __getitem__(self, key: str) -> str:
-        return str(self._generator(key))
-
-    def __contains__(self, key: object) -> bool:
-        return True
-
-    def get(self, key: str, default: Any = None) -> str:
-        return str(self._generator(key))
-
-
-DEFAULT_AGENT_VOCAB_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(describe_agent_vocabulary)
-DEFAULT_SOURCE_THESAURUS_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(
-    describe_source_thesaurus
+from reconciliator.reports.descriptions import (
+    _get_model_field_default,
+    derive_quality_brackets,
+    describe_agent_vocabulary,
+    describe_source_thesaurus,
+    describe_tag_migration,
+    describe_target_ontology,
+    normalize_vocab_code,
 )
-DEFAULT_TARGET_ONTOLOGY_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(
-    describe_target_ontology
+from reconciliator.reports.models import (
+    AgentReportRow,
+    ExpressionReportRow,
+    SubjectReportRow,
+    WorkReportRow,
 )
-DEFAULT_TAG_MIGRATION_DESCRIPTIONS: dict[str, str] = _DynamicDescriptions(describe_tag_migration)
+
+if TYPE_CHECKING:
+    pass
 
 
-def normalize_vocab_code(vocab: Optional[str]) -> str:
-    """Normalize vocabulary code by stripping language subcodes (e.g. yso/fin -> yso)."""
-    if not vocab:
-        return ""
-    clean = vocab.strip()
-    if not clean.startswith("http"):
-        clean = strip_vocabulary_subcode(clean)
-    return clean.lower()
+class AgentMetricsCalculator:
+    """Calculates tidy summary metrics for agent reconciliation."""
 
+    @staticmethod
+    def calculate(
+        agent_rows: list[AgentReportRow],
+        config: Optional[AppConfig] = None,
+        total_records: int = 0,
+        matched_records: int = 0,
+        total_agent_fields: int = 0,
+        reconciled_agent_fields: int = 0,
+        start_time: str = "",
+        elapsed_seconds: float = 0.0,
+    ) -> list[tuple[str, str, str, str, str]]:
+        reconcile_cfg = config.reconcile if config else None
 
-@dataclass
-class AgentReportRow:
-    target_record_id: str
-    target_title: str
-    target_year: Optional[int]
-    target_isbn: Optional[str]
-    field_tag: str
-    field_occurrence: int
-    subfield_code: str
-    target_heading: str
-    target_role: Optional[str]
-    uri: str
-    vocabulary: str
-    authority_label: Optional[str]
-    authority_record_id: str
-    authority_source: str
-    match_tier: str
-    match_score: float
-    dense_score: Optional[float]
-    rerank_score: Optional[float]
-    agent_name_score: Optional[float]
-    action: str  # "injected", "proposed", "existing", "suppressed_by_priority", "filtered_vocab", "below_threshold"
-    is_novel: bool
-    qualifier: Optional[str] = None
-    dates: Optional[str] = None
-    fuller_name: Optional[str] = None
-    affiliation: Optional[str] = None
-    birth_year: Optional[int] = None
-    death_year: Optional[int] = None
-
-
-@dataclass
-class SubjectReportRow:
-    target_record_id: str
-    target_title: str
-    source_field_tag: str
-    field_occurrence: int
-    source_heading: str
-    source_vocab: Optional[str]
-    source_uri: Optional[str]
-    language: str
-    target_field_tag: str
-    target_vocab: Optional[str]
-    target_uri: Optional[str]
-    target_pref_label: Optional[str]
-    mapping_type: str
-    action: str  # "injected", "proposed", "existing", "unmapped", "ambiguous"
-    is_novel: bool
-    tag_changed: bool
-
-
-@dataclass
-class WorkReportRow:
-    target_record_id: str
-    work_type: str
-    target_title: str
-    target_author: Optional[str]
-    target_year: Optional[int]
-    work_blocking_key: Optional[str]
-    matched_work_uri: Optional[str]
-    wikidata_qid: Optional[str]
-    match_tier: str
-    funnel_used: str
-    confidence_score: float
-    is_clustered: bool
-    cluster_id: Optional[str]
-    action: str  # "injected", "hoisted", "minted", "unmatched"
-    # The URI this record resolved to on its own, before its work cluster's
-    # canonical URI was applied. Differs from matched_work_uri when sibling
-    # records in the same cluster matched different authority sources.
-    record_level_work_uri: Optional[str] = None
-
-
-@dataclass
-class ExpressionReportRow:
-    target_record_id: str
-    work_uri: Optional[str]
-    expression_uri: Optional[str]
-    content_type: str
-    language: str
-    version_designation: Optional[str]
-    translators: Optional[str]
-    performers: Optional[str]
-    match_tier: str
-    confidence_score: float
-    cluster_id: Optional[str]
-    action: str  # "injected", "aligned", "synthesized", "minted"
-
-
-AGENT_TSV_COLUMNS = [
-    "target_record_id",
-    "target_title",
-    "target_year",
-    "target_isbn",
-    "field_tag",
-    "field_occurrence",
-    "subfield_code",
-    "target_heading",
-    "target_role",
-    "uri",
-    "vocabulary",
-    "authority_label",
-    "authority_record_id",
-    "authority_source",
-    "match_tier",
-    "match_score",
-    "dense_score",
-    "rerank_score",
-    "agent_name_score",
-    "action",
-    "is_novel",
-]
-
-SUBJECT_TSV_COLUMNS = [
-    "target_record_id",
-    "target_title",
-    "source_field_tag",
-    "field_occurrence",
-    "source_heading",
-    "source_vocab",
-    "source_uri",
-    "language",
-    "target_field_tag",
-    "target_vocab",
-    "target_uri",
-    "target_pref_label",
-    "mapping_type",
-    "action",
-    "is_novel",
-    "tag_changed",
-]
-
-WORK_TSV_COLUMNS = [
-    "target_record_id",
-    "work_type",
-    "target_title",
-    "target_author",
-    "target_year",
-    "work_blocking_key",
-    "matched_work_uri",
-    "wikidata_qid",
-    "match_tier",
-    "funnel_used",
-    "confidence_score",
-    "is_clustered",
-    "cluster_id",
-    "action",
-    "record_level_work_uri",
-]
-
-EXPRESSION_TSV_COLUMNS = [
-    "target_record_id",
-    "work_uri",
-    "expression_uri",
-    "content_type",
-    "language",
-    "version_designation",
-    "translators",
-    "performers",
-    "match_tier",
-    "confidence_score",
-    "cluster_id",
-    "action",
-]
-
-SUMMARY_COLUMNS = ["section", "metric", "value", "percentage", "description"]
-WEMI_SUMMARY_COLUMNS = ["section", "metric", "value", "percentage", "description"]
-
-
-@dataclass
-class QualityBracket:
-    """Represents a score interval for quality reporting."""
-
-    metric: str
-    low: Optional[float]
-    high: float
-    is_top: bool
-    description: str
-
-    def matches(self, score: float) -> bool:
-        if self.is_top:
-            return score >= (self.low if self.low is not None else 0.0)
-        if self.low is None:
-            return score < self.high
-        return self.low <= score < self.high
-
-
-def derive_quality_brackets(
-    reconcile_cfg: Optional[ReconcileConfig],
-) -> list[QualityBracket]:
-    """Derive quality score brackets based on application thresholds or custom brackets.
-
-    Returns a list of QualityBracket objects ordered from highest to lowest score.
-    """
-    if reconcile_cfg and reconcile_cfg.quality_brackets:
-        cutoffs = sorted(reconcile_cfg.quality_brackets)
-        brackets: list[QualityBracket] = []
-        top_cut = cutoffs[-1]
-        brackets.append(
-            QualityBracket(
-                metric=f"score_{top_cut:.2f}_to_1.00",
-                low=top_cut,
-                high=1.0,
-                is_top=True,
-                description=f"Candidate matches with score in [{top_cut:.2f}, 1.00]",
-            )
-        )
-        for i in range(len(cutoffs) - 1, 0, -1):
-            low = cutoffs[i - 1]
-            high = cutoffs[i]
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_{low:.2f}_to_{high:.2f}",
-                    low=low,
-                    high=high,
-                    is_top=False,
-                    description=f"Candidate matches with score in [{low:.2f}, {high:.2f})",
-                )
-            )
-        lowest = cutoffs[0]
-        if lowest > 0.0:
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_below_{lowest:.2f}",
-                    low=None,
-                    high=lowest,
-                    is_top=False,
-                    description=f"Candidate matches with score below {lowest:.2f}",
-                )
-            )
-        return brackets
-
-    t_accept = round(reconcile_cfg.threshold, 2) if reconcile_cfg else 0.85
-    if (
-        reconcile_cfg
-        and reconcile_cfg.rerank
-        and reconcile_cfg.rerank.short_circuit
-        and reconcile_cfg.rerank.short_circuit.enabled
-    ):
-        t_short = round(reconcile_cfg.rerank.short_circuit.threshold, 2)
-    elif reconcile_cfg is None:
-        t_short = 0.98
-    else:
-        t_short = 0.95
-
-    t_short = min(1.0, max(0.0, t_short))
-    t_accept = min(1.0, max(0.0, t_accept))
-
-    brackets = []
-    if t_short > t_accept:
-        t_mid = round((t_accept + t_short) / 2, 2)
-        if t_mid > t_accept and t_mid < t_short:
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_{t_short:.2f}_to_1.00",
-                    low=t_short,
-                    high=1.0,
-                    is_top=True,
-                    description=f"Candidate matches with score in [{t_short:.2f}, 1.00] (high-confidence / short-circuit)",
-                )
-            )
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_{t_mid:.2f}_to_{t_short:.2f}",
-                    low=t_mid,
-                    high=t_short,
-                    is_top=False,
-                    description=f"Candidate matches with score in [{t_mid:.2f}, {t_short:.2f}) (robust hybrid reranked)",
-                )
-            )
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_{t_accept:.2f}_to_{t_mid:.2f}",
-                    low=t_accept,
-                    high=t_mid,
-                    is_top=False,
-                    description=f"Candidate matches with score in [{t_accept:.2f}, {t_mid:.2f}) (meeting acceptance threshold)",
-                )
-            )
-        else:
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_{t_short:.2f}_to_1.00",
-                    low=t_short,
-                    high=1.0,
-                    is_top=True,
-                    description=f"Candidate matches with score in [{t_short:.2f}, 1.00] (high-confidence)",
-                )
-            )
-            brackets.append(
-                QualityBracket(
-                    metric=f"score_{t_accept:.2f}_to_{t_short:.2f}",
-                    low=t_accept,
-                    high=t_short,
-                    is_top=False,
-                    description=f"Candidate matches with score in [{t_accept:.2f}, {t_short:.2f}) (meeting acceptance threshold)",
-                )
-            )
-    else:
-        brackets.append(
-            QualityBracket(
-                metric=f"score_{t_accept:.2f}_to_1.00",
-                low=t_accept,
-                high=1.0,
-                is_top=True,
-                description=f"Candidate matches with score in [{t_accept:.2f}, 1.00] (meeting acceptance threshold)",
-            )
-        )
-
-    if t_accept > 0.0:
-        brackets.append(
-            QualityBracket(
-                metric=f"score_below_{t_accept:.2f}",
-                low=None,
-                high=t_accept,
-                is_top=False,
-                description=f"Candidate matches with score below {t_accept:.2f} (below acceptance threshold)",
-            )
-        )
-
-    return brackets
-
-
-class ReportGenerator:
-    """Generates dual decoupled TSV report sets for Agent and Subject reconciliation."""
-
-    def __init__(self, config: Optional[AppConfig] = None) -> None:
-        self.config = config or AppConfig()
-        self.agent_rows: list[AgentReportRow] = []
-        self.subject_rows: list[SubjectReportRow] = []
-        self.work_rows: list[WorkReportRow] = []
-        self.expression_rows: list[ExpressionReportRow] = []
-
-        self.total_records = 0
-        self.matched_records = 0
-        self.total_agent_fields = 0
-        self.reconciled_agent_fields = 0
-        self.start_time = datetime.now(timezone.utc).isoformat()
-        self.elapsed_seconds = 0.0
-
-    def add_agent_row(self, row: AgentReportRow) -> None:
-        self.agent_rows.append(row)
-
-    def add_subject_row(self, row: SubjectReportRow) -> None:
-        self.subject_rows.append(row)
-
-    def add_work_row(self, row: WorkReportRow) -> None:
-        self.work_rows.append(row)
-
-    def add_expression_row(self, row: ExpressionReportRow) -> None:
-        self.expression_rows.append(row)
-
-    def write_agent_detailed_report(self, file_path: Path) -> None:
-        """Write agent_reconciliation_uris.tsv with exact 21 columns."""
-        write_tsv_file(file_path, AGENT_TSV_COLUMNS, self.agent_rows)
-
-    def write_agent_summary_report(self, file_path: Path) -> None:
-        """Write agent_reconciliation_summary.tsv in tidy 5-column schema."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        reconcile_cfg = self.config.reconcile if self.config else None
-
-        total_uris = len(self.agent_rows)
-        novel_injected = sum(1 for r in self.agent_rows if r.action == "injected")
-        existing_verified = sum(1 for r in self.agent_rows if r.action == "existing")
+        total_uris = len(agent_rows)
+        novel_injected = sum(1 for r in agent_rows if r.action == "injected")
+        existing_verified = sum(1 for r in agent_rows if r.action == "existing")
         suppressed_priority = sum(
-            1 for r in self.agent_rows if r.action == "suppressed_by_priority"
+            1 for r in agent_rows if r.action == "suppressed_by_priority"
         )
-        filtered_vocab = sum(1 for r in self.agent_rows if r.action == "filtered_vocab")
+        filtered_vocab = sum(1 for r in agent_rows if r.action == "filtered_vocab")
 
-        # Field metrics
-        agent_fields = {(r.target_record_id, r.field_occurrence) for r in self.agent_rows}
+        agent_fields = {(r.target_record_id, r.field_occurrence) for r in agent_rows}
         reconciled_fields = {
             (r.target_record_id, r.field_occurrence)
-            for r in self.agent_rows
+            for r in agent_rows
             if r.action in ("injected", "existing", "proposed")
         }
-        total_fields_count = len(agent_fields) or self.total_agent_fields
-        reconciled_fields_count = len(reconciled_fields) or self.reconciled_agent_fields
+        total_fields_count = len(agent_fields) or total_agent_fields
+        reconciled_fields_count = len(reconciled_fields) or reconciled_agent_fields
 
-        # Tier metrics
-        tier1 = sum(1 for r in self.agent_rows if r.match_tier == "tier1_exact_id")
-        tier2 = sum(1 for r in self.agent_rows if r.match_tier == "tier2_dense")
-        tier3 = sum(1 for r in self.agent_rows if r.match_tier == "tier3_hybrid_rerank")
+        tier1 = sum(1 for r in agent_rows if r.match_tier == "tier1_exact_id")
+        tier2 = sum(1 for r in agent_rows if r.match_tier == "tier2_dense")
+        tier3 = sum(1 for r in agent_rows if r.match_tier == "tier3_hybrid_rerank")
         tier_denom = max(1, tier1 + tier2 + tier3)
 
-        # Vocabulary metrics - dynamically aggregated from rows and ordered by config
         vocab_counts: dict[str, int] = {}
-        for r in self.agent_rows:
+        for r in agent_rows:
             v_name = r.vocabulary.upper() if r.vocabulary else "OTHER"
             vocab_counts[v_name] = vocab_counts.get(v_name, 0) + 1
         vocab_denom = max(1, total_uris)
@@ -557,14 +91,12 @@ class ReportGenerator:
             for v in reporting_vocabs
         ]
 
-        # Source metrics
         source_counts: dict[str, int] = {}
-        for r in self.agent_rows:
+        for r in agent_rows:
             s_name = r.authority_source.lower() if r.authority_source else "unknown"
             source_counts[s_name] = source_counts.get(s_name, 0) + 1
         source_denom = max(1, sum(source_counts.values()))
 
-        # Execution threshold metadata
         sc_threshold_str = (
             f"{reconcile_cfg.rerank.short_circuit.threshold:.4f}"
             if reconcile_cfg
@@ -615,17 +147,16 @@ class ReportGenerator:
             else:
                 rerank_engine_desc = str(rerank_engine)
 
-        # Quality score brackets - derived dynamically from application thresholds or config
         brackets = derive_quality_brackets(reconcile_cfg)
-        quality_denom = max(1, len(self.agent_rows))
+        quality_denom = max(1, len(agent_rows))
         quality_metric_rows = []
         for b in brackets:
-            count = sum(1 for r in self.agent_rows if b.matches(r.match_score))
+            count = sum(1 for r in agent_rows if b.matches(r.match_score))
             pct = f"{(count / quality_denom) * 100:.1f}%"
             quality_metric_rows.append(("quality", b.metric, str(count), pct, b.description))
 
         rows = [
-            ("execution", "timestamp", self.start_time, "", "Execution start timestamp"),
+            ("execution", "timestamp", start_time, "", "Execution start timestamp"),
             (
                 "execution",
                 "target_file",
@@ -692,29 +223,29 @@ class ReportGenerator:
             (
                 "execution",
                 "elapsed_seconds",
-                f"{self.elapsed_seconds:.1f}",
+                f"{elapsed_seconds:.1f}",
                 "",
                 "Agent reconciliation runtime in seconds",
             ),
             (
                 "records",
                 "total_records",
-                str(self.total_records),
+                str(total_records),
                 "100.0%",
                 "Total target MARCXML records processed",
             ),
             (
                 "records",
                 "records_matched",
-                str(self.matched_records),
-                f"{(self.matched_records / max(1, self.total_records)) * 100:.1f}%",
+                str(matched_records),
+                f"{(matched_records / max(1, total_records)) * 100:.1f}%",
                 "Records with accepted authority match",
             ),
             (
                 "records",
                 "records_unmatched",
-                str(self.total_records - self.matched_records),
-                f"{((self.total_records - self.matched_records) / max(1, self.total_records)) * 100:.1f}%",
+                str(total_records - matched_records),
+                f"{((total_records - matched_records) / max(1, total_records)) * 100:.1f}%",
                 "Records with zero candidate matches above threshold",
             ),
             (
@@ -807,36 +338,39 @@ class ReportGenerator:
 
         rows.extend(source_metric_rows)
         rows.extend(quality_metric_rows)
+        return rows
 
-        write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
 
-    def write_subject_detailed_report(self, file_path: Path) -> None:
-        """Write subject_reconciliation_uris.tsv with exact 16 columns."""
-        write_tsv_file(file_path, SUBJECT_TSV_COLUMNS, self.subject_rows)
+class SubjectMetricsCalculator:
+    """Calculates tidy summary metrics for subject reconciliation."""
 
-    def write_subject_summary_report(self, file_path: Path) -> None:
-        """Write subject_reconciliation_summary.tsv in tidy 5-column schema."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        reconcile_cfg = self.config.reconcile if self.config else None
+    @staticmethod
+    def calculate(
+        subject_rows: list[SubjectReportRow],
+        config: Optional[AppConfig] = None,
+        total_records: int = 0,
+        start_time: str = "",
+        elapsed_seconds: float = 0.0,
+    ) -> list[tuple[str, str, str, str, str]]:
+        reconcile_cfg = config.reconcile if config else None
 
-        total_headings = len(self.subject_rows)
-        mapped = sum(1 for r in self.subject_rows if r.target_uri)
-        unmapped = sum(1 for r in self.subject_rows if not r.target_uri or r.action == "unmapped")
-        already_canonical = sum(1 for r in self.subject_rows if r.action == "existing")
-        ambiguous = sum(1 for r in self.subject_rows if r.action == "ambiguous")
+        total_headings = len(subject_rows)
+        mapped = sum(1 for r in subject_rows if r.target_uri)
+        unmapped = sum(1 for r in subject_rows if not r.target_uri or r.action == "unmapped")
+        already_canonical = sum(1 for r in subject_rows if r.action == "existing")
+        ambiguous = sum(1 for r in subject_rows if r.action == "ambiguous")
 
-        # Record level breakdowns
         records_with_subs: dict[str, list[SubjectReportRow]] = {}
-        for r in self.subject_rows:
+        for r in subject_rows:
             records_with_subs.setdefault(r.target_record_id, []).append(r)
 
-        total_rec_count = max(self.total_records, len(records_with_subs))
+        total_rec_count = max(total_records, len(records_with_subs))
         rec_with_subs_count = len(records_with_subs)
         fully_reconciled = 0
         partially_reconciled = 0
         with_unmapped = 0
 
-        for r_id, rows_list in records_with_subs.items():
+        for _r_id, rows_list in records_with_subs.items():
             mapped_in_rec = sum(1 for r in rows_list if r.target_uri)
             if mapped_in_rec == len(rows_list):
                 fully_reconciled += 1
@@ -845,17 +379,15 @@ class ReportGenerator:
             if mapped_in_rec < len(rows_list):
                 with_unmapped += 1
 
-        # Mapping type counts
-        exact_match = sum(1 for r in self.subject_rows if r.mapping_type == "exact_match")
-        pref_label = sum(1 for r in self.subject_rows if r.mapping_type == "pref_label_lookup")
-        is_replaced = sum(1 for r in self.subject_rows if r.mapping_type == "is_replaced_by")
-        alt_label = sum(1 for r in self.subject_rows if r.mapping_type == "alt_label_lookup")
+        exact_match = sum(1 for r in subject_rows if r.mapping_type == "exact_match")
+        pref_label = sum(1 for r in subject_rows if r.mapping_type == "pref_label_lookup")
+        is_replaced = sum(1 for r in subject_rows if r.mapping_type == "is_replaced_by")
+        alt_label = sum(1 for r in subject_rows if r.mapping_type == "alt_label_lookup")
         mapped_denom = max(1, mapped)
 
-        # Dynamic source thesauri breakdown
         source_thesauri_counts: dict[str, int] = {}
         unspec_count = 0
-        for r in self.subject_rows:
+        for r in subject_rows:
             norm_s = normalize_vocab_code(r.source_vocab)
             if not norm_s:
                 unspec_count += 1
@@ -863,15 +395,15 @@ class ReportGenerator:
                 source_thesauri_counts[norm_s] = source_thesauri_counts.get(norm_s, 0) + 1
         thesauri_denom = max(1, total_headings)
 
-        vocab_norm_cfg = self.config.vocabularies if self.config else None
+        vocab_norm_cfg = config.vocabularies if config else None
         if vocab_norm_cfg and vocab_norm_cfg.legacy_to_modern:
             legacy_thesauri = list(vocab_norm_cfg.legacy_to_modern.keys())
         elif (
-            self.config
-            and self.config.ingestion.vocab
-            and self.config.ingestion.vocab.legacy_thesauri
+            config
+            and config.ingestion.vocab
+            and config.ingestion.vocab.legacy_thesauri
         ):
-            legacy_thesauri = [th.lower() for th in self.config.ingestion.vocab.legacy_thesauri]
+            legacy_thesauri = [th.lower() for th in config.ingestion.vocab.legacy_thesauri]
         else:
             default_thesauri = _get_model_field_default(VocabIngestConfig, "legacy_thesauri")
             legacy_thesauri = [th.lower() for th in default_thesauri]
@@ -904,9 +436,8 @@ class ReportGenerator:
             )
         )
 
-        # Dynamic target ontologies distribution
         target_ontology_counts: dict[str, int] = {}
-        for r in self.subject_rows:
+        for r in subject_rows:
             norm_t = normalize_vocab_code(r.target_vocab)
             if norm_t:
                 target_ontology_counts[norm_t] = target_ontology_counts.get(norm_t, 0) + 1
@@ -937,10 +468,8 @@ class ReportGenerator:
             for ont in target_ontology_keys
         ]
 
-        # Dynamic tag migrations and foldings
         tag_migrations_counts: dict[str, int] = {}
-
-        for r in self.subject_rows:
+        for r in subject_rows:
             src_tag = r.source_field_tag
             tgt_tag = r.target_field_tag
             src_v = normalize_vocab_code(r.source_vocab)
@@ -974,10 +503,10 @@ class ReportGenerator:
                 )
             ]
 
-        throughput = round(total_headings / max(0.001, self.elapsed_seconds), 1)
+        throughput = round(total_headings / max(0.001, elapsed_seconds), 1)
 
         rows = [
-            ("execution", "timestamp", self.start_time, "", "Execution start timestamp"),
+            ("execution", "timestamp", start_time, "", "Execution start timestamp"),
             (
                 "execution",
                 "target_file",
@@ -1002,16 +531,14 @@ class ReportGenerator:
             (
                 "execution",
                 "database_url",
-                str(
-                    self.config.storage.database_url if self.config and self.config.storage else ""
-                ),
+                str(config.storage.database_url if config and config.storage else ""),
                 "",
                 "PostgreSQL database connection URL",
             ),
             (
                 "execution",
                 "elapsed_seconds",
-                f"{self.elapsed_seconds:.1f}",
+                f"{elapsed_seconds:.1f}",
                 "",
                 "Subject reconciliation runtime in seconds",
             ),
@@ -1124,34 +651,29 @@ class ReportGenerator:
             *target_ontology_metric_rows,
             *tag_migration_metric_rows,
         ]
+        return rows
 
-        write_summary_tsv(file_path, SUMMARY_COLUMNS, rows)
 
-    def write_work_report(self, file_path: Path) -> None:
-        """Write work_reconciliation.tsv containing work-level links across 42 domains."""
-        write_tsv_file(file_path, WORK_TSV_COLUMNS, self.work_rows)
+class WEMIMetricsCalculator:
+    """Calculates tidy summary metrics for WEMI work and expression reconciliation."""
 
-    def write_expression_report(self, file_path: Path) -> None:
-        """Write expression_reconciliation.tsv containing expression-level realization links."""
-        write_tsv_file(file_path, EXPRESSION_TSV_COLUMNS, self.expression_rows)
+    @staticmethod
+    def calculate(
+        work_rows: list[WorkReportRow],
+        expression_rows: list[ExpressionReportRow],
+    ) -> list[tuple[str, str, str, str, str]]:
+        total_works = len(work_rows)
+        matched_works = sum(1 for r in work_rows if r.matched_work_uri)
+        clustered_works = sum(1 for r in work_rows if r.is_clustered)
+        total_exps = len(expression_rows)
 
-    def write_wemi_summary_report(self, file_path: Path) -> None:
-        """Write wemi_reconciliation_summary.tsv summarizing work & expression reconciliation."""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        total_works = len(self.work_rows)
-        matched_works = sum(1 for r in self.work_rows if r.matched_work_uri)
-        clustered_works = sum(1 for r in self.work_rows if r.is_clustered)
-        total_exps = len(self.expression_rows)
-
-        # Content type breakdown
         ct_counts: dict[str, int] = {}
-        for er in self.expression_rows:
+        for er in expression_rows:
             ct = er.content_type or "text"
             ct_counts[ct] = ct_counts.get(ct, 0) + 1
 
-        # Work type breakdown across 42 domains
         wt_counts: dict[str, int] = {}
-        for wr in self.work_rows:
+        for wr in work_rows:
             wt = wr.work_type or "text"
             wt_counts[wt] = wt_counts.get(wt, 0) + 1
 
@@ -1208,4 +730,4 @@ class ReportGenerator:
                 )
             )
 
-        write_summary_tsv(file_path, WEMI_SUMMARY_COLUMNS, rows)
+        return rows

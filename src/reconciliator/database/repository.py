@@ -29,10 +29,13 @@ from reconciliator.database.mixins import (
     AuthorityAgentRepositoryMixin,
     ChangesetRepositoryMixin,
     ClusterRepositoryMixin,
+    ConsolidationRepositoryMixin,
+    EntityLookupRepositoryMixin,
     HarvestStateRepositoryMixin,
     MatchRecordRepositoryMixin,
     PaginationRepositoryMixin,
     SearchRepositoryMixin,
+    SourceManagementMixin,
     VectorCacheRepositoryMixin,
 )
 from reconciliator.database.ops import calculate_batch_size, insert_batch
@@ -145,6 +148,9 @@ class WEMIRepository(
     ChangesetRepositoryMixin,
     SearchRepositoryMixin,
     PaginationRepositoryMixin,
+    SourceManagementMixin,
+    ConsolidationRepositoryMixin,
+    EntityLookupRepositoryMixin,
 ):
     """Unified repository managing WEMI tables, corpus staging/clustering, harvest state,
     FTS5 lexical search, and tripartite vector indices in authority.db and its corpus database.

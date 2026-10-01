@@ -23,10 +23,10 @@ from reconciliator.vocab.manager import (
     normalize_subject_vocabulary,
     resolve_subject_concept_id,
 )
+from reconciliator.vocab.mixins.concept import is_language_allowed
 from reconciliator.vocab.store import (
     VocabStore,
     init_vocab_db,
-    is_language_allowed,
 )
 from reconciliator.vocab.subjects import (
     FoldedSubject,
