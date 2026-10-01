@@ -230,28 +230,177 @@ class AggregateClusteringConfig(BaseModel):
     )
 
 
+_CORRELATION_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("correlation") or {})
+_HIERARCHICAL_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("hierarchical") or {})
+_DBSCAN_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("dbscan") or {})
+_MCL_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("mcl") or {})
+_BIPARTITE_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("bipartite") or {})
+_BIGCLUST_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("bigclust") or {})
+_HYBRID_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("hybrid") or {})
+
+
 class BigClustConfig(BaseModel):
     """Configuration for BigClust continuous nonsmooth clustering on GPU."""
 
-    enabled: bool = Field(default=True)
-    max_work_clusters: int = Field(default=50)
-    min_work_clusters: int = Field(default=2)
-    max_expression_clusters_per_work: int = Field(default=10)
-    batch_size: int = Field(default=5000)
-    max_candidate_points: int = Field(default=20)
-    bundle_size: int = Field(default=7)
-    max_iter: int = Field(default=300)
-    device: str = Field(default="auto")
+    enabled: bool = Field(
+        default_factory=lambda: bool(_BIGCLUST_DEFAULTS.get("enabled", True))
+    )
+    max_work_clusters: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_work_clusters", 50))
+    )
+    min_work_clusters: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("min_work_clusters", 2))
+    )
+    max_expression_clusters_per_work: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_expression_clusters_per_work", 10))
+    )
+    batch_size: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("batch_size", 5000))
+    )
+    max_candidate_points: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_candidate_points", 20))
+    )
+    bundle_size: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("bundle_size", 7))
+    )
+    max_iter: int = Field(
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_iter", 300))
+    )
+    device: str = Field(
+        default_factory=lambda: str(_BIGCLUST_DEFAULTS.get("device", "auto"))
+    )
 
 
 class HybridClusterConfig(BaseModel):
     """Configuration for hybrid BigClust coarse macro-partitioning + graph fine-reranking."""
 
-    boundary_margin: float = Field(default=0.15)
-    fine_threshold: float = Field(default=0.70)
-    max_candidates_per_boundary: int = Field(default=20)
-    twilight_lower: float = Field(default=0.55)
-    neural_boundary_threshold: float = Field(default=0.75)
+    boundary_margin: float = Field(
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("boundary_margin", 0.15))
+    )
+    fine_threshold: float = Field(
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("fine_threshold", 0.70))
+    )
+    max_candidates_per_boundary: int = Field(
+        default_factory=lambda: int(_HYBRID_DEFAULTS.get("max_candidates_per_boundary", 20))
+    )
+    twilight_lower: float = Field(
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("twilight_lower", 0.55))
+    )
+    neural_boundary_threshold: float = Field(
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("neural_boundary_threshold", 0.75))
+    )
+
+
+class CorrelationClusteringConfig(BaseModel):
+    """Configuration for GPU-accelerated Correlation Clustering (CC-Pivot)."""
+
+    enabled: bool = Field(
+        default_factory=lambda: bool(_CORRELATION_DEFAULTS.get("enabled", True))
+    )
+    algorithm: Literal["parallel_pivot", "serial_pivot", "qp_relaxation"] = Field(
+        default_factory=lambda: str(_CORRELATION_DEFAULTS.get("algorithm", "parallel_pivot"))  # type: ignore[return-value]
+    )
+    positive_threshold: float = Field(
+        default_factory=lambda: float(_CORRELATION_DEFAULTS.get("positive_threshold", 0.70))
+    )
+    max_parallel_pivots: int = Field(
+        default_factory=lambda: int(_CORRELATION_DEFAULTS.get("max_parallel_pivots", 256))
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: str(_CORRELATION_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
+    )
+
+
+class HierarchicalClusterConfig(BaseModel):
+    """Configuration for GPU-accelerated multi-tier WEMI HAC."""
+
+    linkage: Literal["average", "single", "complete", "ward"] = Field(
+        default_factory=lambda: str(_HIERARCHICAL_DEFAULTS.get("linkage", "average"))  # type: ignore[return-value]
+    )
+    work_distance_threshold: float = Field(
+        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("work_distance_threshold", 0.35))
+    )
+    expression_distance_threshold: float = Field(
+        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("expression_distance_threshold", 0.15))
+    )
+    manifestation_distance_threshold: float = Field(
+        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("manifestation_distance_threshold", 0.05))
+    )
+    metric: Literal["cosine", "euclidean"] = Field(
+        default_factory=lambda: str(_HIERARCHICAL_DEFAULTS.get("metric", "cosine"))  # type: ignore[return-value]
+    )
+    batch_size: int = Field(
+        default_factory=lambda: int(_HIERARCHICAL_DEFAULTS.get("batch_size", 4096))
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: str(_HIERARCHICAL_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
+    )
+
+
+class DBSCANClusterConfig(BaseModel):
+    """Configuration for GPU-accelerated density-based clustering."""
+
+    eps: float = Field(
+        default_factory=lambda: float(_DBSCAN_DEFAULTS.get("eps", 0.25))
+    )
+    min_samples: int = Field(
+        default_factory=lambda: int(_DBSCAN_DEFAULTS.get("min_samples", 2))
+    )
+    metric: Literal["cosine", "euclidean"] = Field(
+        default_factory=lambda: str(_DBSCAN_DEFAULTS.get("metric", "cosine"))  # type: ignore[return-value]
+    )
+    noise_strategy: Literal["singleton", "isolate", "discard"] = Field(
+        default_factory=lambda: str(_DBSCAN_DEFAULTS.get("noise_strategy", "singleton"))  # type: ignore[return-value]
+    )
+    tile_size: int = Field(
+        default_factory=lambda: int(_DBSCAN_DEFAULTS.get("tile_size", 4096))
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: str(_DBSCAN_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
+    )
+
+
+class MarkovClusterConfig(BaseModel):
+    """Configuration for GPU-accelerated Markov Cluster Algorithm (MCL)."""
+
+    expansion_power: int = Field(
+        default_factory=lambda: int(_MCL_DEFAULTS.get("expansion_power", 2))
+    )
+    inflation_power: float = Field(
+        default_factory=lambda: float(_MCL_DEFAULTS.get("inflation_power", 2.0))
+    )
+    max_iterations: int = Field(
+        default_factory=lambda: int(_MCL_DEFAULTS.get("max_iterations", 30))
+    )
+    convergence_tol: float = Field(
+        default_factory=lambda: float(_MCL_DEFAULTS.get("convergence_tol", 1e-5))
+    )
+    pruning_threshold: float = Field(
+        default_factory=lambda: float(_MCL_DEFAULTS.get("pruning_threshold", 1e-4))
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: str(_MCL_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
+    )
+
+
+class BipartiteCoClusterConfig(BaseModel):
+    """Configuration for joint Work-Agent bipartite spectral co-clustering."""
+
+    latent_dimensions: int = Field(
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("latent_dimensions", 32))
+    )
+    work_k: int = Field(
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("work_k", 50))
+    )
+    agent_k: int = Field(
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("agent_k", 50))
+    )
+    iterations: int = Field(
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("iterations", 100))
+    )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: str(_BIPARTITE_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
+    )
 
 
 class WEMIClusterConfig(BaseModel):
@@ -266,11 +415,24 @@ class WEMIClusterConfig(BaseModel):
         "bigclust",
         "hybrid_bigclust_graph",
         "hybrid",
+        "correlation_pivot",
+        "hierarchical_wemi",
+        "gpu_dbscan",
+        "gpu_mcl",
+        "bipartite_coclust",
     ] = Field(
         default_factory=lambda: str(_CLUSTER_DEFAULTS.get("method", "multiplex_graph"))  # type: ignore[return-value]
     )
+    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+        default_factory=lambda: str(_CLUSTER_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
+    )
     bigclust: BigClustConfig = Field(default_factory=BigClustConfig)
     hybrid: HybridClusterConfig = Field(default_factory=HybridClusterConfig)
+    correlation: CorrelationClusteringConfig = Field(default_factory=CorrelationClusteringConfig)
+    hierarchical: HierarchicalClusterConfig = Field(default_factory=HierarchicalClusterConfig)
+    dbscan: DBSCANClusterConfig = Field(default_factory=DBSCANClusterConfig)
+    mcl: MarkovClusterConfig = Field(default_factory=MarkovClusterConfig)
+    bipartite: BipartiteCoClusterConfig = Field(default_factory=BipartiteCoClusterConfig)
     similarity_threshold: float = Field(
         default_factory=lambda: float(_CLUSTER_DEFAULTS.get("similarity_threshold", 0.85))
     )

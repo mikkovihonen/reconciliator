@@ -1360,8 +1360,60 @@ reconcile:
       max_escalated_candidates: 5
   cluster:
     enabled: false
+    method: "multiplex_graph"
+    device: "auto"
     similarity_threshold: 0.85
     multiplex: false
+    correlation:
+      enabled: true
+      algorithm: "parallel_pivot"
+      positive_threshold: 0.70
+      max_parallel_pivots: 256
+      device: "auto"
+    hierarchical:
+      linkage: "average"
+      work_distance_threshold: 0.35
+      expression_distance_threshold: 0.15
+      manifestation_distance_threshold: 0.05
+      metric: "cosine"
+      batch_size: 4096
+      device: "auto"
+    dbscan:
+      eps: 0.25
+      min_samples: 2
+      metric: "cosine"
+      noise_strategy: "singleton"
+      tile_size: 4096
+      device: "auto"
+    mcl:
+      expansion_power: 2
+      inflation_power: 2.0
+      max_iterations: 30
+      convergence_tol: 0.00001
+      pruning_threshold: 0.0001
+      device: "auto"
+    bipartite:
+      latent_dimensions: 32
+      work_k: 50
+      agent_k: 50
+      iterations: 100
+      device: "auto"
+    bigclust:
+      enabled: true
+      max_work_clusters: 50
+      min_work_clusters: 2
+      max_expression_clusters_per_work: 10
+      batch_size: 5000
+      max_candidate_points: 20
+      bundle_size: 7
+      max_iter: 300
+      device: "auto"
+    hybrid:
+      boundary_margin: 0.15
+      fine_threshold: 0.70
+      max_candidates_per_boundary: 20
+      twilight_lower: 0.55
+      neural_boundary_threshold: 0.75
     multiplex_layers:
       - "primary_author_title"
       - "isbn"

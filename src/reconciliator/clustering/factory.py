@@ -50,6 +50,61 @@ def create_corpus_clusterer(
 
     method = getattr(cfg, "method", "multiplex_graph")
 
+    if method == "correlation_pivot":
+        from reconciliator.clustering.correlation import CorrelationCorpusClusterer
+
+        return CorrelationCorpusClusterer(
+            corpus_repo=corpus_repo,
+            wemi_repo=effective_wemi,
+            embedder=actual_embedder,
+            config=getattr(cfg, "correlation", None),
+            identity_manager=id_mgr,
+        )
+
+    if method == "hierarchical_wemi":
+        from reconciliator.clustering.hierarchical import HierarchicalWEMIClusterer
+
+        return HierarchicalWEMIClusterer(
+            corpus_repo=corpus_repo,
+            wemi_repo=effective_wemi,
+            embedder=actual_embedder,
+            config=getattr(cfg, "hierarchical", None),
+            identity_manager=id_mgr,
+        )
+
+    if method == "gpu_dbscan":
+        from reconciliator.clustering.density import DensityCorpusClusterer
+
+        return DensityCorpusClusterer(
+            corpus_repo=corpus_repo,
+            wemi_repo=effective_wemi,
+            embedder=actual_embedder,
+            config=getattr(cfg, "dbscan", None),
+            identity_manager=id_mgr,
+        )
+
+    if method == "gpu_mcl":
+        from reconciliator.clustering.mcl import MarkovCorpusClusterer
+
+        return MarkovCorpusClusterer(
+            corpus_repo=corpus_repo,
+            wemi_repo=effective_wemi,
+            embedder=actual_embedder,
+            config=getattr(cfg, "mcl", None),
+            identity_manager=id_mgr,
+        )
+
+    if method == "bipartite_coclust":
+        from reconciliator.clustering.bipartite import BipartiteCoClusterer
+
+        return BipartiteCoClusterer(
+            corpus_repo=corpus_repo,
+            wemi_repo=effective_wemi,
+            embedder=actual_embedder,
+            config=getattr(cfg, "bipartite", None),
+            identity_manager=id_mgr,
+        )
+
     if method == "bigclust":
         from reconciliator.clustering.bigclust import BigClustMultiplexClusterer
 
