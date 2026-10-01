@@ -40,22 +40,35 @@ def calculate_batch_size(
     return safe_max_size
 
 
-def normalize_row(row: Any, table: Optional[Table] = None) -> dict[str, Any]:
+def normalize_row(
+    row: Any,
+    table: Optional[Table] = None,
+    table_cols: Optional[set[str]] = None,
+) -> dict[str, Any]:
     """Convert an entity (Pydantic model, Mapping, or dict) into a plain dictionary."""
-    if hasattr(row, "model_dump"):
+    if isinstance(row, dict):
+        d = row
+    elif hasattr(row, "__dict__") and not hasattr(row, "model_dump"):
+        d = row.__dict__
+    elif hasattr(row, "model_dump"):
         d = row.model_dump(mode="python")
     elif isinstance(row, Mapping):
         d = dict(row)
-    elif hasattr(row, "__dict__"):
-        d = dict(row.__dict__)
     else:
         d = dict(row)
 
-    if table is not None:
-        table_cols = {c.name for c in table.c}
+    if table is not None or table_cols is not None:
+        if table_cols is None and table is not None:
+            table_cols = getattr(table, "_column_names_set", None)
+            if table_cols is None:
+                table_cols = {c.name for c in table.c}
+                try:
+                    table._column_names_set = table_cols
+                except Exception:
+                    pass
         filtered: dict[str, Any] = {}
         for k, v in d.items():
-            if k in table_cols:
+            if table_cols is not None and k in table_cols:
                 # Omit primary key or server_default column if None so Postgres sequence / default fires
                 if (k == "id" or k == "created_at") and v is None:
                     continue
@@ -103,8 +116,14 @@ def upsert_batch(
         return [] if return_ids else None
 
     # Normalize rows against table columns
-    table_cols = {c.name for c in table.c}
-    normalized_rows: list[dict[str, Any]] = [normalize_row(r, table) for r in rows]
+    table_cols = getattr(table, "_column_names_set", None)
+    if table_cols is None:
+        table_cols = {c.name for c in table.c}
+        try:
+            table._column_names_set = table_cols
+        except Exception:
+            pass
+    normalized_rows: list[dict[str, Any]] = [normalize_row(r, table, table_cols=table_cols) for r in rows]
 
     # Inspect present keys
     col_names = set()
@@ -175,8 +194,14 @@ def insert_batch(
     if not rows:
         return [] if return_ids else None
 
-    table_cols = {c.name for c in table.c}
-    normalized_rows: list[dict[str, Any]] = [normalize_row(r, table) for r in rows]
+    table_cols = getattr(table, "_column_names_set", None)
+    if table_cols is None:
+        table_cols = {c.name for c in table.c}
+        try:
+            table._column_names_set = table_cols
+        except Exception:
+            pass
+    normalized_rows: list[dict[str, Any]] = [normalize_row(r, table, table_cols=table_cols) for r in rows]
 
     col_names = set()
     for r in normalized_rows:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Sequence
 
 import torch
 
@@ -72,4 +72,12 @@ class CrossEncoderScorer:
         pairs = [[query, doc] for doc in documents]
         model = self._get_model()
         preds = model.predict(pairs, batch_size=self.batch_size)
+        return [normalize_cross_encoder_score(float(p)) for p in preds]
+
+    def score_pairs(self, pairs: Sequence[tuple[str, str] | list[str]]) -> list[float]:
+        """Compute similarity scores for multiple query-document pairs in batches on GPU."""
+        if not pairs:
+            return []
+        model = self._get_model()
+        preds = model.predict(list(pairs), batch_size=self.batch_size)
         return [normalize_cross_encoder_score(float(p)) for p in preds]

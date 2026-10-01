@@ -254,7 +254,10 @@ class WorkConsolidator:
         if (n1 - n2) and (n2 - n1):
             return 0.0
 
-        title_sim = fuzz.token_set_ratio(a.title_normalized, b.title_normalized) / 100.0
+        if a.title_normalized == b.title_normalized:
+            title_sim = 1.0
+        else:
+            title_sim = fuzz.token_set_ratio(a.title_normalized, b.title_normalized) / 100.0
 
         if a.author_keys and b.author_keys:
             if a.author_keys & b.author_keys:

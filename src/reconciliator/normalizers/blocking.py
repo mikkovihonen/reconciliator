@@ -21,16 +21,20 @@ from reconciliator.normalizers.agent import extract_surname, normalize_agent_nam
 from reconciliator.normalizers.record import clean_title
 
 
+_RE_NON_ALPHANUM_WS = re.compile(r"[^\w\s]", re.UNICODE)
+_RE_WHITESPACE = re.compile(r"\s+")
+_RE_NON_ALPHANUM = re.compile(r"[^\w]", re.UNICODE)
+
+
 def compute_title_stem(title: str, lang: Optional[str] = None) -> str:
     """Extract a normalized title stem stripped of punctuation, non-filing articles, and accents."""
     if not title:
         return ""
     cleaned = clean_title(title, strip_articles=True, lang=lang)
     # Lowercase and replace non-alphanumeric with spaces
-    stem = re.sub(r"[^\w\s]", " ", cleaned.lower(), flags=re.UNICODE)
+    stem = _RE_NON_ALPHANUM_WS.sub(" ", cleaned.lower())
     # Collapse multiple whitespace
-    stem = re.sub(r"\s+", " ", stem).strip()
-    return stem
+    return _RE_WHITESPACE.sub(" ", stem).strip()
 
 
 def compute_author_key(name: Optional[str], surname: Optional[str] = None) -> str:
@@ -48,8 +52,7 @@ def compute_author_key(name: Optional[str], surname: Optional[str] = None) -> st
         else:
             sur = ""
     # Clean non-alphanumeric
-    cleaned = re.sub(r"[^\w]", "", sur.lower(), flags=re.UNICODE)
-    return cleaned
+    return _RE_NON_ALPHANUM.sub("", sur.lower())
 
 
 def deterministic_key_hash(key_content: str) -> str:

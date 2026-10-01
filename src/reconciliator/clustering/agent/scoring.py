@@ -173,6 +173,9 @@ class AgentFeatureScorer(FeatureScorer[dict[str, Any], AgentEvaluationContext]):
         best_name_sim = 0.0
         for n1 in names1:
             for n2 in names2:
+                if n1 == n2:
+                    best_name_sim = 1.0
+                    break
                 if config.token_matching_algorithm == "token_set_ratio":
                     sim = (
                         fuzz.token_set_ratio(n1, n2, processor=utils.default_process)
@@ -184,6 +187,8 @@ class AgentFeatureScorer(FeatureScorer[dict[str, Any], AgentEvaluationContext]):
                     )
                 if sim > best_name_sim:
                     best_name_sim = sim
+            if best_name_sim >= 1.0:
+                break
         context.calculated_name_score = best_name_sim
 
         score_sum = weights.name_weight * best_name_sim

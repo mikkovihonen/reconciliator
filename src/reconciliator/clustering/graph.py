@@ -184,16 +184,32 @@ class MultiplexGraphClusterer(BaseCorpusClusterer):
         keys = list(groups)
         rep_by_source = {groups[k][0].record_id: k for k in keys}
 
-        sem_edges: list[tuple[str, str]] = []
+        active_keys: list[str] = []
+        texts: list[str] = []
         for key in keys:
             rep = groups[key][0]
             text = rep.serialized_manifestation or rep.title
-            if not text:
-                continue
+            if text:
+                active_keys.append(key)
+                texts.append(text)
+
+        if not texts:
+            return groups
+
+        try:
+            if hasattr(embedder, "encode_batch_dense"):
+                vectors = embedder.encode_batch_dense(texts)
+            else:
+                vectors = embedder.embed_texts(texts)
+        except Exception:
+            return groups
+
+        sem_edges: list[tuple[str, str]] = []
+        for i, key in enumerate(active_keys):
+            vec = vectors[i : i + 1]
             try:
-                vector = embedder.embed_texts([text])
                 hits = self.corpus_repo.search_manifestation_vectors(
-                    vector, top_k=min(len(keys), 20)
+                    vec, top_k=min(len(keys), 20)
                 )
             except Exception:
                 continue

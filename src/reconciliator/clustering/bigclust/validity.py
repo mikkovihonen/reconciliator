@@ -60,20 +60,20 @@ def compute_validity_indices(
     min_sq_dist, assignments = torch.min(sq_dist, dim=1)
     loss = min_sq_dist.sum().item()
 
-    # 2. Compute average and maximum cluster radius
-    avg_radius = torch.zeros(k, device=dev)
-    max_radius = torch.zeros(k, device=dev)
+    # 2. Compute average and maximum cluster radius (fully vectorized without python loops)
+    dists_assigned = torch.sqrt(min_sq_dist)
+    counts = torch.zeros(k, dtype=torch.float32, device=dev).scatter_add(
+        0, assignments, torch.ones_like(dists_assigned)
+    )
+    sum_radius = torch.zeros(k, dtype=torch.float32, device=dev).scatter_add(
+        0, assignments, dists_assigned
+    )
+    avg_radius = torch.where(counts > 0, sum_radius / counts, torch.zeros_like(sum_radius))
 
-    for j in range(k):
-        mask = assignments == j
-        count = mask.sum().item()
-        if count > 0:
-            dists_j = euc_dist[mask, j]
-            avg_radius[j] = dists_j.mean()
-            max_radius[j] = dists_j.max()
-        else:
-            avg_radius[j] = 0.0
-            max_radius[j] = 0.0
+    max_radius = torch.zeros(k, dtype=torch.float32, device=dev).scatter_reduce(
+        0, assignments, dists_assigned, reduce="amax", include_self=False
+    )
+    max_radius = torch.where(counts > 0, max_radius, torch.zeros_like(max_radius))
 
     # 3. Compute inter-centroid Euclidean distances
     cent_norm = (X * X).sum(dim=1, keepdim=True)

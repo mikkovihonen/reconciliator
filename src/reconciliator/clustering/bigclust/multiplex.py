@@ -320,15 +320,23 @@ class BigClustMultiplexClusterer(BaseCorpusClusterer):
             max_sims_np = max_sims.cpu().numpy()
             best_indices_np = best_indices.cpu().numpy()
 
+            cluster_author_cache: dict[str, Optional[str]] = {}
             for idx, rec in enumerate(records):
                 sim = float(max_sims_np[idx])
                 if sim >= self.similarity_threshold:
                     c_id = c_ids[int(best_indices_np[idx])]
                     compatible = True
                     try:
-                        existing_w = self.wemi_repo.get_work_cluster_full(c_id)
-                        if existing_w and existing_w.canonical_author and rec.author_key:
-                            if fuzz.ratio(existing_w.canonical_author.lower(), rec.author_key.lower()) < 60:
+                        if c_id not in cluster_author_cache:
+                            existing_w = self.wemi_repo.get_work_cluster_full(c_id)
+                            cluster_author_cache[c_id] = (
+                                existing_w.canonical_author.lower()
+                                if existing_w and existing_w.canonical_author
+                                else None
+                            )
+                        canon_author = cluster_author_cache[c_id]
+                        if canon_author and rec.author_key:
+                            if fuzz.ratio(canon_author, rec.author_key.lower()) < 60:
                                 compatible = False
                     except Exception:
                         pass

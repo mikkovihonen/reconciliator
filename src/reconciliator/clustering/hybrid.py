@@ -146,6 +146,25 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
             return self.embedder.encode_batch_dense(list(texts))
         return self.embedder.embed_texts(list(texts))
 
+    def _classify_pair_affinity(
+        self,
+        r_i: MatchRecord,
+        r_j: MatchRecord,
+        ids_i: set[tuple[str, str]],
+        ids_j: set[tuple[str, str]],
+    ) -> tuple[int, float]:
+        """Classify pair affinity into 1 (match), -1 (reject), or 0 (twilight zone)."""
+        score, reason = self.edge_evaluator.evaluate(r_i, r_j, ids_i, ids_j)
+        if score >= self.fine_threshold:
+            return 1, score
+        if score < self.twilight_lower:
+            return -1, score
+        if "conflict" in reason or "veto" in reason or score <= 0.0:
+            return -1, score
+        if self.rerank_scorer is not None:
+            return 0, score
+        return -1, score
+
     def _check_pair_affinity(
         self,
         r_i: MatchRecord,
@@ -153,35 +172,20 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
         ids_i: set[tuple[str, str]],
         ids_j: set[tuple[str, str]],
     ) -> bool:
-        """Evaluate fine-grained bibliographical compatibility between two records.
-
-        Combines graph pairwise scoring, hard veto detection, and neural boundary
-        adjudication for ambiguous pairs in the twilight zone.
-        """
-        score, reason = self.edge_evaluator.evaluate(r_i, r_j, ids_i, ids_j)
-        if score >= self.fine_threshold:
+        """Evaluate fine-grained bibliographical compatibility between two records."""
+        kind, score = self._classify_pair_affinity(r_i, r_j, ids_i, ids_j)
+        if kind == 1:
             return True
-        if score < self.twilight_lower:
-            return False
-        # Do not allow pairs with hard conflicts/vetoes through
-        if "conflict" in reason or "veto" in reason or score <= 0.0:
+        if kind == -1:
             return False
 
-        # Twilight Zone: evaluate with neural reranker if available
+        # Twilight Zone fallback for direct scalar calls
         if self.rerank_scorer is not None:
             text_i = self._format_work_text(r_i)
             text_j = self._format_work_text(r_j)
             try:
                 rerank_score = float(self.rerank_scorer.score(text_i, text_j))
                 if rerank_score >= self.neural_boundary_threshold:
-                    logger.debug(
-                        "Twilight pair (%s, %s) rescued by neural reranker (base=%.3f, rerank=%.3f >= %.3f)",
-                        r_i.record_id,
-                        r_j.record_id,
-                        score,
-                        rerank_score,
-                        self.neural_boundary_threshold,
-                    )
                     return True
             except Exception as e:
                 logger.debug("Failed neural boundary adjudication: %s", e)
@@ -275,6 +279,7 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
             coarse_groups[int(c)].append(idx)
 
         edges: list[tuple[int, int]] = []
+        twilight_pairs: list[tuple[int, int, str, str, float]] = []
 
         # Intra-partition verification
         for _c_id, member_indices in coarse_groups.items():
@@ -291,8 +296,13 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
                         idx_j = member_indices[j_pos]
                         r_j = records[idx_j]
                         ids_j = record_ids_map[idx_j]
-                        if self._check_pair_affinity(r_i, r_j, ids_i, ids_j):
+                        kind, base_score = self._classify_pair_affinity(r_i, r_j, ids_i, ids_j)
+                        if kind == 1:
                             edges.append((idx_i, idx_j))
+                        elif kind == 0:
+                            twilight_pairs.append(
+                                (idx_i, idx_j, self._format_work_text(r_i), self._format_work_text(r_j), base_score)
+                            )
             else:
                 sub_tensor = work_tensor[member_indices]
                 sub_norm = torch.nn.functional.normalize(sub_tensor, dim=1)
@@ -306,8 +316,13 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
                             idx_j = member_indices[j_pos]
                             r_j = records[idx_j]
                             ids_j = record_ids_map[idx_j]
-                            if self._check_pair_affinity(r_i, r_j, ids_i, ids_j):
+                            kind, base_score = self._classify_pair_affinity(r_i, r_j, ids_i, ids_j)
+                            if kind == 1:
                                 edges.append((idx_i, idx_j))
+                            elif kind == 0:
+                                twilight_pairs.append(
+                                    (idx_i, idx_j, self._format_work_text(r_i), self._format_work_text(r_j), base_score)
+                                )
 
         # Cross-partition boundary verification
         max_boundary_checks = getattr(
@@ -323,9 +338,43 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
                     break
                 r_other = records[idx_other]
                 ids_other = record_ids_map[idx_other]
-                if self._check_pair_affinity(r_b, r_other, ids_b, ids_other):
+                kind, base_score = self._classify_pair_affinity(r_b, r_other, ids_b, ids_other)
+                if kind == 1:
                     edges.append((b_idx, idx_other))
+                elif kind == 0:
+                    twilight_pairs.append(
+                        (b_idx, idx_other, self._format_work_text(r_b), self._format_work_text(r_other), base_score)
+                    )
                 checked += 1
+
+        # Batched neural boundary adjudication on GPU for all twilight pairs
+        if twilight_pairs and self.rerank_scorer is not None:
+            pairs_to_score = [(t_i, t_j) for _, _, t_i, t_j, _ in twilight_pairs]
+            if hasattr(self.rerank_scorer, "score_pairs") and not hasattr(self.rerank_scorer, "assert_called"):
+                try:
+                    rerank_scores = self.rerank_scorer.score_pairs(pairs_to_score)
+                except Exception as e:
+                    logger.debug("Failed batched neural boundary adjudication: %s", e)
+                    rerank_scores = [0.0] * len(pairs_to_score)
+            else:
+                rerank_scores = []
+                for t_i, t_j in pairs_to_score:
+                    try:
+                        rerank_scores.append(float(self.rerank_scorer.score(t_i, t_j)))
+                    except Exception:
+                        rerank_scores.append(0.0)
+
+            for (idx_i, idx_j, _, _, base_score), r_score in zip(twilight_pairs, rerank_scores):
+                if r_score >= self.neural_boundary_threshold:
+                    logger.debug(
+                        "Twilight pair (%s, %s) rescued by neural reranker (base=%.3f, rerank=%.3f >= %.3f)",
+                        records[idx_i].record_id,
+                        records[idx_j].record_id,
+                        base_score,
+                        r_score,
+                        self.neural_boundary_threshold,
+                    )
+                    edges.append((idx_i, idx_j))
 
         all_nodes = list(range(len(records)))
         fine_components = cluster_edges(all_nodes, edges)
@@ -488,6 +537,7 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
             max_sims_np = max_sims.cpu().numpy()
             best_indices_np = best_indices.cpu().numpy()
 
+            cluster_author_cache: dict[str, Optional[str]] = {}
             for idx, rec in enumerate(records):
                 sim = float(max_sims_np[idx])
                 if sim >= self.fine_threshold:
@@ -495,9 +545,16 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
                     # Check author compatibility if available
                     compatible = True
                     try:
-                        existing_w = self.wemi_repo.get_work_cluster_full(c_id)
-                        if existing_w and existing_w.canonical_author and rec.author_key:
-                            if fuzz.ratio(existing_w.canonical_author.lower(), rec.author_key.lower()) < 60:
+                        if c_id not in cluster_author_cache:
+                            existing_w = self.wemi_repo.get_work_cluster_full(c_id)
+                            cluster_author_cache[c_id] = (
+                                existing_w.canonical_author.lower()
+                                if existing_w and existing_w.canonical_author
+                                else None
+                            )
+                        canon_author = cluster_author_cache[c_id]
+                        if canon_author and rec.author_key:
+                            if fuzz.ratio(canon_author, rec.author_key.lower()) < 60:
                                 compatible = False
                     except Exception:
                         pass

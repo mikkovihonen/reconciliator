@@ -46,7 +46,10 @@ class AgentAligner:
             for cand_rec in candidate_records:
                 for cand_agent in cand_rec.agents:
                     cand_name = cand_agent.name.lower()
-                    score = fuzz.token_sort_ratio(target_name, cand_name)
+                    if target_name == cand_name:
+                        score = 100.0
+                    else:
+                        score = fuzz.token_sort_ratio(target_name, cand_name)
 
                     if score >= self.similarity_threshold:
                         # Extract $0 URIs (Asteri, ISNI, VIAF)

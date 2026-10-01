@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from reconciliator.config import (
     DEFAULT_CLASSIFICATION_PRIORITY,
+    DEFAULT_ISO_639_2_TO_1,
     DEFAULT_NON_FILING_ARTICLES,
     DEFAULT_PUBLISHER_SUFFIXES,
     DEFAULT_ROMAN_NUMERALS,
@@ -38,15 +39,23 @@ from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.vocab import VocabFolder, extract_concept_id, normalize_subject_vocabulary
 
 
-_ISO_639_2_TO_1: dict[str, str] = {
-    "fin": "fi",
-    "swe": "sv",
-    "eng": "en",
-    "ger": "de",
-    "deu": "de",
-    "fre": "fr",
-    "fra": "fr",
+_ISO_639_2_TO_1: dict[str, str] = DEFAULT_ISO_639_2_TO_1
+
+
+_PRECOMPUTED_SORTED_DEFAULT_ARTICLES: list[str] = sorted(
+    [a.lower() for arts in DEFAULT_NON_FILING_ARTICLES.values() for a in arts],
+    key=len,
+    reverse=True,
+)
+_PRECOMPUTED_STRIPPED_DEFAULT_ARTICLES: set[str] = {
+    a.strip().lower() for arts in DEFAULT_NON_FILING_ARTICLES.values() for a in arts
 }
+
+_PRECOMPUTED_ARTICLES_BY_LANG: dict[str, tuple[list[str], set[str]]] = {}
+for _k, _arts in DEFAULT_NON_FILING_ARTICLES.items():
+    _sorted = sorted([a.lower() for a in _arts], key=len, reverse=True)
+    _stripped = {a.strip().lower() for a in _arts}
+    _PRECOMPUTED_ARTICLES_BY_LANG[_k] = (_sorted, _stripped)
 
 
 def clean_title(
@@ -54,6 +63,7 @@ def clean_title(
     strip_articles: bool = True,
     articles: Optional[dict[str, list[str]] | set[str] | list[str]] = None,
     lang: Optional[str] = None,
+    iso_639_map: Optional[dict[str, str]] = None,
 ) -> str:
     """Clean and standardize title string, stripping ISBD punctuation and non-filing articles."""
     if not title:
@@ -62,40 +72,67 @@ def clean_title(
     t = re.sub(r"\s+[/:=;]\s*$", "", title.strip())
     t = re.sub(r"[\s.]+$", "", t)
 
+    active_iso_map = iso_639_map if iso_639_map is not None else DEFAULT_ISO_639_2_TO_1
+
     if strip_articles:
-        active_articles = articles if articles is not None else DEFAULT_NON_FILING_ARTICLES
-        if isinstance(active_articles, dict):
-            target_articles: list[str] = []
+        if articles is None:
             if lang:
                 norm_lang = lang.strip().lower()
-                norm_lang_2 = _ISO_639_2_TO_1.get(norm_lang, norm_lang)
-                if norm_lang in active_articles:
-                    target_articles = list(active_articles[norm_lang])
-                elif norm_lang_2 in active_articles:
-                    target_articles = list(active_articles[norm_lang_2])
+                norm_lang_2 = active_iso_map.get(norm_lang, norm_lang)
+                cached = _PRECOMPUTED_ARTICLES_BY_LANG.get(norm_lang) or _PRECOMPUTED_ARTICLES_BY_LANG.get(norm_lang_2)
+                if cached is not None:
+                    target_sorted, stripped_arts = cached
                 else:
-                    target_articles = []
+                    target_sorted, stripped_arts = [], set()
             else:
-                for arts in active_articles.values():
-                    target_articles.extend(arts)
+                target_sorted = _PRECOMPUTED_SORTED_DEFAULT_ARTICLES
+                stripped_arts = _PRECOMPUTED_STRIPPED_DEFAULT_ARTICLES
+
             t_lower = t.lower()
             matched = False
-            for art in sorted(target_articles, key=len, reverse=True):
-                art_norm = art.lower()
+            for art_norm in target_sorted:
                 if t_lower.startswith(art_norm):
                     t = t[len(art_norm) :].strip()
                     matched = True
                     break
             if not matched:
                 tokens = t.split()
-                stripped_arts = {a.strip().lower() for a in target_articles}
                 if len(tokens) > 1 and tokens[0].lower() in stripped_arts:
                     t = " ".join(tokens[1:])
         else:
-            tokens = t.split()
-            stripped_arts = {a.strip().lower() for a in active_articles}
-            if len(tokens) > 1 and tokens[0].lower() in stripped_arts:
-                t = " ".join(tokens[1:])
+            active_articles = articles
+            if isinstance(active_articles, dict):
+                target_articles: list[str] = []
+                if lang:
+                    norm_lang = lang.strip().lower()
+                    norm_lang_2 = active_iso_map.get(norm_lang, norm_lang)
+                    if norm_lang in active_articles:
+                        target_articles = list(active_articles[norm_lang])
+                    elif norm_lang_2 in active_articles:
+                        target_articles = list(active_articles[norm_lang_2])
+                    else:
+                        target_articles = []
+                else:
+                    for arts in active_articles.values():
+                        target_articles.extend(arts)
+                t_lower = t.lower()
+                matched = False
+                for art in sorted(target_articles, key=len, reverse=True):
+                    art_norm = art.lower()
+                    if t_lower.startswith(art_norm):
+                        t = t[len(art_norm) :].strip()
+                        matched = True
+                        break
+                if not matched:
+                    tokens = t.split()
+                    stripped_arts_custom = {a.strip().lower() for a in target_articles}
+                    if len(tokens) > 1 and tokens[0].lower() in stripped_arts_custom:
+                        t = " ".join(tokens[1:])
+            else:
+                tokens = t.split()
+                stripped_arts_custom = {a.strip().lower() for a in active_articles}
+                if len(tokens) > 1 and tokens[0].lower() in stripped_arts_custom:
+                    t = " ".join(tokens[1:])
 
     return re.sub(r"\s+", " ", t).strip()
 
@@ -352,6 +389,7 @@ class RecordNormalizer:
             strip_articles=True,
             articles=cfg.non_filing_articles,
             lang=target_lang,
+            iso_639_map=cfg.iso_639_2_to_1,
         )
         subtitle = raw_data.get("subtitle")
         if subtitle:

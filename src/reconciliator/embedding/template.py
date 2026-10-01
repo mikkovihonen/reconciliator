@@ -147,10 +147,12 @@ class RecordTemplateEngine:
 
     def render(self, record: Any, **kwargs: Any) -> str:
         """Render a record (BibliographicRecord, entity model, or dict) into a serialized string."""
-        if hasattr(record, "model_dump"):
-            context = record.model_dump()
-        elif isinstance(record, dict):
+        if isinstance(record, dict):
             context = dict(record)
+        elif hasattr(record, "__dict__"):
+            context = dict(record.__dict__)
+        elif hasattr(record, "model_dump"):
+            context = record.model_dump()
         else:
             context = {}
 

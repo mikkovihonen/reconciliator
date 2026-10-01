@@ -429,6 +429,28 @@ class PytorchJudgeBackend:
             # Guarantee zero-copy in-place truncation even if forward pass errors
             self.truncate_kv_cache(base_cache, base_seq_len)
 
+    def evaluate_candidates_batch(
+        self,
+        base_cache: Any,
+        base_seq_len: int,
+        candidate_suffixes: Sequence[str],
+        prior_bias: float = 0.0,
+    ) -> list[CandidateEvaluation]:
+        """
+        Evaluate a sequence of candidate suffixes against the locked base KV-cache.
+        """
+        if not candidate_suffixes:
+            return []
+        return [
+            self.evaluate_candidate(
+                base_cache=base_cache,
+                base_seq_len=base_seq_len,
+                candidate_suffix=suffix,
+                prior_bias=prior_bias,
+            )
+            for suffix in candidate_suffixes
+        ]
+
     def truncate_kv_cache(self, kv_cache: Any, base_seq_len: int) -> None:
         """
         Slice key and value tensors back to base_seq_len without memory reallocations or copying.

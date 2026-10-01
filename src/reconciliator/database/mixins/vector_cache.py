@@ -205,24 +205,24 @@ class VectorCacheRepositoryMixin:
             logger.debug("Failed to retrieve cached embeddings: %s", e)
 
         # Identify missing texts that need model computation
-        missing_texts: list[str] = []
+        missing_items: list[tuple[str, str]] = []
         seen_missing_hashes: set[str] = set()
 
         for t, h in zip(text_list, hashes):
             if h not in cached_vectors and h not in seen_missing_hashes:
-                missing_texts.append(t)
+                missing_items.append((t, h))
                 seen_missing_hashes.add(h)
 
         newly_computed: dict[str, np.ndarray] = {}
-        if missing_texts:
+        if missing_items:
+            missing_texts = [item[0] for item in missing_items]
             if hasattr(embedder, "encode_batch_dense"):
                 computed_arr = embedder.encode_batch_dense(missing_texts)
             else:
                 computed_arr = embedder.embed_texts(missing_texts)
             if dim is None and len(computed_arr) > 0:
                 dim = computed_arr.shape[1]
-            for t, vec in zip(missing_texts, computed_arr):
-                h = hashlib.sha256(t.encode("utf-8")).hexdigest()
+            for (_, h), vec in zip(missing_items, computed_arr):
                 newly_computed[h] = vec
 
             # Persist newly computed vectors to repository cache
@@ -242,11 +242,15 @@ class VectorCacheRepositoryMixin:
                 except Exception as e:
                     logger.debug("Failed to store cached embeddings: %s", e)
 
+            # Zero-copy fast path when entire batch was computed and no duplicates
+            if not cached_vectors and len(missing_items) == len(text_list):
+                return computed_arr.astype(np.float32, copy=False)
+
         all_vectors = {**cached_vectors, **newly_computed}
         first_vec = next(iter(all_vectors.values()), None)
         actual_dim = len(first_vec) if first_vec is not None else (dim or 768)
 
-        result_matrix = np.empty((len(text_list), actual_dim), dtype=np.float32)
-        for idx, h in enumerate(hashes):
-            result_matrix[idx] = all_vectors[h]
-        return result_matrix
+        if not all_vectors:
+            return np.empty((len(text_list), actual_dim), dtype=np.float32)
+
+        return np.array([all_vectors[h] for h in hashes], dtype=np.float32)

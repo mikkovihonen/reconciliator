@@ -96,19 +96,33 @@ class LLMJudgeScorer:
             "Candidate Record: {text}\n\nQuestion: Do Target Record and Candidate Record represent the same work? Answer YES or NO: ",
         )
 
-        scores: list[float] = []
-        for doc in documents:
-            if not doc:
-                scores.append(0.0)
-                continue
-            suffix = suffix_template.format(text=doc)
-            eval_res = self.backend.evaluate_candidate(
-                base_cache=encoding.kv_cache,
-                base_seq_len=encoding.base_seq_len,
-                candidate_suffix=suffix,
-                prior_bias=prior_bias,
-            )
-            scores.append(float(eval_res.confidence_score))
+        valid_indices: list[int] = []
+        valid_suffixes: list[str] = []
+        for i, doc in enumerate(documents):
+            if doc:
+                valid_indices.append(i)
+                valid_suffixes.append(suffix_template.format(text=doc))
+
+        scores: list[float] = [0.0] * len(documents)
+        if valid_suffixes:
+            if hasattr(self.backend, "evaluate_candidates_batch") and not hasattr(self.backend, "assert_called"):
+                eval_results = self.backend.evaluate_candidates_batch(
+                    base_cache=encoding.kv_cache,
+                    base_seq_len=encoding.base_seq_len,
+                    candidate_suffixes=valid_suffixes,
+                    prior_bias=prior_bias,
+                )
+                for orig_idx, eval_res in zip(valid_indices, eval_results):
+                    scores[orig_idx] = float(eval_res.confidence_score)
+            else:
+                for orig_idx, suffix in zip(valid_indices, valid_suffixes):
+                    eval_res = self.backend.evaluate_candidate(
+                        base_cache=encoding.kv_cache,
+                        base_seq_len=encoding.base_seq_len,
+                        candidate_suffix=suffix,
+                        prior_bias=prior_bias,
+                    )
+                    scores[orig_idx] = float(eval_res.confidence_score)
 
         # Symmetric dual-direction scoring on close contenders
         cfg = getattr(self.backend, "config", None)

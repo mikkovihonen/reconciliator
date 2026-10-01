@@ -325,23 +325,25 @@ class SearchRepositoryMixin:
 
             with self.get_connection() as conn:
                 rows = conn.execute(stmt).fetchall()
+                map_records_to_insert: list[dict[str, Any]] = []
                 for i in range(0, len(rows), batch_size):
                     batch = rows[i : i + batch_size]
                     ids = [int(r[0]) for r in batch]
                     texts = [str(r[1]) for r in batch]
                     vectors = self.embed_texts_cached(embedder, texts, entity_type=kind)
                     vector_ids = indexer.add_vectors(vectors, ids=ids)
-                    values_to_insert = [
-                        {"vector_id": v_id, id_col_name: ent_id}
-                        for v_id, ent_id in zip(vector_ids, ids)
-                    ]
-                    map_stmt = pg_insert(map_table_obj).values(values_to_insert)
-                    map_stmt = map_stmt.on_conflict_do_update(
-                        index_elements=[map_table_obj.c.vector_id],
-                        set_={id_col_name: getattr(map_stmt.excluded, id_col_name)},
-                    )
-                    conn.execute(map_stmt)
+                    for v_id, ent_id in zip(vector_ids, ids):
+                        map_records_to_insert.append({"vector_id": v_id, id_col_name: ent_id})
                     counts[kind] += len(ids)
+
+                    if len(map_records_to_insert) >= 1000 or (i + batch_size) >= len(rows):
+                        map_stmt = pg_insert(map_table_obj).values(map_records_to_insert)
+                        map_stmt = map_stmt.on_conflict_do_update(
+                            index_elements=[map_table_obj.c.vector_id],
+                            set_={id_col_name: getattr(map_stmt.excluded, id_col_name)},
+                        )
+                        conn.execute(map_stmt)
+                        map_records_to_insert.clear()
             indexer.save()
 
         return counts

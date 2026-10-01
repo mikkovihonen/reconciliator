@@ -42,32 +42,54 @@ class AgentMetricsCalculator:
         reconcile_cfg = config.reconcile if config else None
 
         total_uris = len(agent_rows)
-        novel_injected = sum(1 for r in agent_rows if r.action == "injected")
-        existing_verified = sum(1 for r in agent_rows if r.action == "existing")
-        suppressed_priority = sum(
-            1 for r in agent_rows if r.action == "suppressed_by_priority"
-        )
-        filtered_vocab = sum(1 for r in agent_rows if r.action == "filtered_vocab")
-
-        agent_fields = {(r.target_record_id, r.field_occurrence) for r in agent_rows}
-        reconciled_fields = {
-            (r.target_record_id, r.field_occurrence)
-            for r in agent_rows
-            if r.action in ("injected", "existing", "proposed")
-        }
-        total_fields_count = len(agent_fields) or total_agent_fields
-        reconciled_fields_count = len(reconciled_fields) or reconciled_agent_fields
-
-        tier1 = sum(1 for r in agent_rows if r.match_tier == "tier1_exact_id")
-        tier2 = sum(1 for r in agent_rows if r.match_tier == "tier2_dense")
-        tier3 = sum(1 for r in agent_rows if r.match_tier == "tier3_hybrid_rerank")
-        tier_denom = max(1, tier1 + tier2 + tier3)
-
+        novel_injected = 0
+        existing_verified = 0
+        suppressed_priority = 0
+        filtered_vocab = 0
+        agent_fields: set[tuple[str, int]] = set()
+        reconciled_fields: set[tuple[str, int]] = set()
+        tier1 = 0
+        tier2 = 0
+        tier3 = 0
         vocab_counts: dict[str, int] = {}
+        source_counts: dict[str, int] = {}
+
         for r in agent_rows:
+            act = r.action
+            if act == "injected":
+                novel_injected += 1
+                reconciled_fields.add((r.target_record_id, r.field_occurrence))
+            elif act == "existing":
+                existing_verified += 1
+                reconciled_fields.add((r.target_record_id, r.field_occurrence))
+            elif act == "proposed":
+                reconciled_fields.add((r.target_record_id, r.field_occurrence))
+            elif act == "suppressed_by_priority":
+                suppressed_priority += 1
+            elif act == "filtered_vocab":
+                filtered_vocab += 1
+
+            agent_fields.add((r.target_record_id, r.field_occurrence))
+
+            mt = r.match_tier
+            if mt == "tier1_exact_id":
+                tier1 += 1
+            elif mt == "tier2_dense":
+                tier2 += 1
+            elif mt == "tier3_hybrid_rerank":
+                tier3 += 1
+
             v_name = r.vocabulary.upper() if r.vocabulary else "OTHER"
             vocab_counts[v_name] = vocab_counts.get(v_name, 0) + 1
+
+            s_name = r.authority_source.lower() if r.authority_source else "unknown"
+            source_counts[s_name] = source_counts.get(s_name, 0) + 1
+
+        total_fields_count = len(agent_fields) or total_agent_fields
+        reconciled_fields_count = len(reconciled_fields) or reconciled_agent_fields
+        tier_denom = max(1, tier1 + tier2 + tier3)
         vocab_denom = max(1, total_uris)
+        source_denom = max(1, sum(source_counts.values()))
 
         if reconcile_cfg and reconcile_cfg.agent_priority:
             configured_vocabs = [v.upper() for v in reconcile_cfg.agent_priority]
@@ -90,12 +112,6 @@ class AgentMetricsCalculator:
             )
             for v in reporting_vocabs
         ]
-
-        source_counts: dict[str, int] = {}
-        for r in agent_rows:
-            s_name = r.authority_source.lower() if r.authority_source else "unknown"
-            source_counts[s_name] = source_counts.get(s_name, 0) + 1
-        source_denom = max(1, sum(source_counts.values()))
 
         sc_threshold_str = (
             f"{reconcile_cfg.rerank.short_circuit.threshold:.4f}"
@@ -355,14 +371,44 @@ class SubjectMetricsCalculator:
         reconcile_cfg = config.reconcile if config else None
 
         total_headings = len(subject_rows)
-        mapped = sum(1 for r in subject_rows if r.target_uri)
-        unmapped = sum(1 for r in subject_rows if not r.target_uri or r.action == "unmapped")
-        already_canonical = sum(1 for r in subject_rows if r.action == "existing")
-        ambiguous = sum(1 for r in subject_rows if r.action == "ambiguous")
-
+        mapped = 0
+        unmapped = 0
+        already_canonical = 0
+        ambiguous = 0
+        exact_match = 0
+        pref_label = 0
+        is_replaced = 0
+        alt_label = 0
+        unspec_count = 0
         records_with_subs: dict[str, list[SubjectReportRow]] = {}
+        source_thesauri_counts: dict[str, int] = {}
+
         for r in subject_rows:
             records_with_subs.setdefault(r.target_record_id, []).append(r)
+            if r.target_uri:
+                mapped += 1
+            if not r.target_uri or r.action == "unmapped":
+                unmapped += 1
+            if r.action == "existing":
+                already_canonical += 1
+            elif r.action == "ambiguous":
+                ambiguous += 1
+
+            m_type = r.mapping_type
+            if m_type == "exact_match":
+                exact_match += 1
+            elif m_type == "pref_label_lookup":
+                pref_label += 1
+            elif m_type == "is_replaced_by":
+                is_replaced += 1
+            elif m_type == "alt_label_lookup":
+                alt_label += 1
+
+            norm_s = normalize_vocab_code(r.source_vocab)
+            if not norm_s:
+                unspec_count += 1
+            else:
+                source_thesauri_counts[norm_s] = source_thesauri_counts.get(norm_s, 0) + 1
 
         total_rec_count = max(total_records, len(records_with_subs))
         rec_with_subs_count = len(records_with_subs)
@@ -379,20 +425,7 @@ class SubjectMetricsCalculator:
             if mapped_in_rec < len(rows_list):
                 with_unmapped += 1
 
-        exact_match = sum(1 for r in subject_rows if r.mapping_type == "exact_match")
-        pref_label = sum(1 for r in subject_rows if r.mapping_type == "pref_label_lookup")
-        is_replaced = sum(1 for r in subject_rows if r.mapping_type == "is_replaced_by")
-        alt_label = sum(1 for r in subject_rows if r.mapping_type == "alt_label_lookup")
         mapped_denom = max(1, mapped)
-
-        source_thesauri_counts: dict[str, int] = {}
-        unspec_count = 0
-        for r in subject_rows:
-            norm_s = normalize_vocab_code(r.source_vocab)
-            if not norm_s:
-                unspec_count += 1
-            else:
-                source_thesauri_counts[norm_s] = source_thesauri_counts.get(norm_s, 0) + 1
         thesauri_denom = max(1, total_headings)
 
         vocab_norm_cfg = config.vocabularies if config else None
@@ -663,19 +696,22 @@ class WEMIMetricsCalculator:
         expression_rows: list[ExpressionReportRow],
     ) -> list[tuple[str, str, str, str, str]]:
         total_works = len(work_rows)
-        matched_works = sum(1 for r in work_rows if r.matched_work_uri)
-        clustered_works = sum(1 for r in work_rows if r.is_clustered)
-        total_exps = len(expression_rows)
+        matched_works = 0
+        clustered_works = 0
+        wt_counts: dict[str, int] = {}
+        for wr in work_rows:
+            if wr.matched_work_uri:
+                matched_works += 1
+            if wr.is_clustered:
+                clustered_works += 1
+            wt = wr.work_type or "text"
+            wt_counts[wt] = wt_counts.get(wt, 0) + 1
 
+        total_exps = len(expression_rows)
         ct_counts: dict[str, int] = {}
         for er in expression_rows:
             ct = er.content_type or "text"
             ct_counts[ct] = ct_counts.get(ct, 0) + 1
-
-        wt_counts: dict[str, int] = {}
-        for wr in work_rows:
-            wt = wr.work_type or "text"
-            wt_counts[wt] = wt_counts.get(wt, 0) + 1
 
         rows = [
             (
