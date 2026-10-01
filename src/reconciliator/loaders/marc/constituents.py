@@ -6,12 +6,13 @@ import re
 from typing import Optional
 
 from lxml import etree
-
 from reconciliator._core.parsers import MarcDatafield
-from reconciliator.loaders.marc.xml_utils import _get_datafields
+
 from reconciliator.constituents import ConstituentProfile
-from reconciliator.constituents.record import Constituent, finalise as finalise_constituents
+from reconciliator.constituents.record import Constituent
+from reconciliator.constituents.record import finalise as finalise_constituents
 from reconciliator.loaders.base import strip_isbd
+from reconciliator.loaders.marc.xml_utils import _get_datafields
 
 
 def _subfield_groups(

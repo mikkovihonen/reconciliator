@@ -11,7 +11,7 @@ from reconciliator.indexer import (
     USearchVectorEngine,
     create_vector_engine,
 )
-from reconciliator.indexer.ipc.daemon import IndexPoolManager
+from reconciliator.indexer.ipc.pool import IndexPoolManager
 
 
 def test_usearch_basic_lifecycle(tmp_path: Path) -> None:

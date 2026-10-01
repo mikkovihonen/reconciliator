@@ -6,218 +6,91 @@ import logging
 from typing import Any, Optional
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from reconciliator.database.schema import (
-    corpus_linkages_table,
-    expression_clusters_table,
-    manifestation_clusters_table,
-    work_clusters_table,
-    works_table,
-)
-from reconciliator.models import (
-    CorpusLinkage,
-    ExpressionCluster,
-    ManifestationCluster,
-    WorkCluster,
+    work_consolidations_table,
+    work_relationships_table,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class ConsolidationRepositoryMixin:
-    """Mixin providing work consolidation, clustering, and linkage queries."""
+    """Repository mixin providing work consolidation and equivalence mapping queries."""
 
-    engine: Any
+    def get_connection(self) -> Any:
+        raise NotImplementedError
 
-    def consolidate_works(
-        self,
-        target_work_id: int,
-        duplicate_work_ids: list[int],
-        reason: str = "cluster_consolidation",
+    def get_read_connection(self) -> Any:
+        raise NotImplementedError
+    def apply_work_consolidations(self, group_map: dict[str, list[str]]) -> int:
+        """Apply work-level cluster groupings to work_consolidations_table."""
+        if not group_map:
+            return 0
+        updates = 0
+        mapping: dict[int, int] = {}
+        for canon_source_id, member_ids in group_map.items():
+            w_canon = self.get_work_by_source_id(canon_source_id)
+            if not w_canon or not w_canon.id:
+                continue
+            canon_pk = w_canon.id
+
+            for mid in member_ids:
+                w = self.get_work_by_source_id(mid)
+                if w and w.id:
+                    mapping[w.id] = canon_pk
+                    updates += 1
+        if mapping:
+            self.set_canonical_works(mapping)
+        return updates
+
+    def set_canonical_works(
+        self, mapping: dict[int, int], evidence_map: Optional[dict[int, str]] = None
     ) -> None:
-        """Merge duplicate works into a single canonical target work."""
-        if not duplicate_work_ids:
+        """Record the elected canonical work for each consolidated work id."""
+        if not mapping:
             return
-
-        with self.engine.begin() as conn:
-            from reconciliator.database.schema import (
-                contributions_table,
-                expressions_table,
-                manifestations_table,
-                work_relationships_table,
+        rows = [
+            {
+                "work_id": work_id,
+                "canonical_work_id": canonical,
+                "evidence": (evidence_map or {}).get(work_id),
+            }
+            for work_id, canonical in mapping.items()
+        ]
+        with self.get_connection() as conn:
+            stmt = pg_insert(work_consolidations_table).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["work_id"],
+                set_={
+                    "canonical_work_id": stmt.excluded.canonical_work_id,
+                    "evidence": stmt.excluded.evidence,
+                },
             )
+            conn.execute(stmt)
 
+    def clear_canonical_works(self) -> None:
+        """Undo consolidation, leaving every work its own canonical."""
+        self.reset_work_consolidations()
+
+    def reset_work_consolidations(self) -> None:
+        """Clear work_consolidations and same_work_as relationships."""
+        with self.get_connection() as conn:
+            conn.execute(delete(work_consolidations_table))
             conn.execute(
-                expressions_table.update()
-                .where(expressions_table.c.work_id.in_(duplicate_work_ids))
-                .values(work_id=target_work_id)
-            )
-
-            conn.execute(
-                manifestations_table.update()
-                .where(manifestations_table.c.work_id.in_(duplicate_work_ids))
-                .values(work_id=target_work_id)
-            )
-
-            conn.execute(
-                contributions_table.update()
-                .where(
-                    contributions_table.c.entity_type == "work",
-                    contributions_table.c.entity_id.in_(duplicate_work_ids),
-                )
-                .values(entity_id=target_work_id)
-            )
-
-            conn.execute(
-                work_relationships_table.update()
-                .where(work_relationships_table.c.source_work_id.in_(duplicate_work_ids))
-                .values(source_work_id=target_work_id)
-            )
-            conn.execute(
-                work_relationships_table.update()
-                .where(work_relationships_table.c.target_work_id.in_(duplicate_work_ids))
-                .values(target_work_id=target_work_id)
-            )
-
-            conn.execute(
-                delete(works_table).where(works_table.c.id.in_(duplicate_work_ids))
-            )
-
-    def insert_work_cluster(self, cluster: WorkCluster) -> None:
-        """Insert or replace a WorkCluster record in work_clusters."""
-        with self.engine.begin() as conn:
-            conn.execute(
-                work_clusters_table.insert().values(
-                    cluster_id=cluster.cluster_id,
-                    canonical_work_uri=cluster.canonical_work_uri,
-                    member_count=cluster.member_count,
-                    signature=cluster.signature,
+                delete(work_relationships_table).where(
+                    work_relationships_table.c.relationship_type == "same_work_as"
                 )
             )
 
-    def get_all_work_clusters(self) -> list[WorkCluster]:
-        """Fetch all stored work clusters."""
-        with self.engine.connect() as conn:
-            rows = conn.execute(select(work_clusters_table)).fetchall()
-            return [
-                WorkCluster(
-                    cluster_id=r.cluster_id,
-                    canonical_work_uri=r.canonical_work_uri,
-                    member_count=r.member_count,
-                    signature=r.signature,
-                )
-                for r in rows
-            ]
-
-    def insert_expression_cluster(self, cluster: ExpressionCluster) -> None:
-        """Insert or replace an ExpressionCluster record in expression_clusters."""
-        with self.engine.begin() as conn:
-            conn.execute(
-                expression_clusters_table.insert().values(
-                    cluster_id=cluster.cluster_id,
-                    canonical_expression_uri=cluster.canonical_expression_uri,
-                    content_type=cluster.content_type,
-                    language=cluster.language,
-                    version_designation=cluster.version_designation,
-                    member_count=cluster.member_count,
-                )
-            )
-
-    def get_all_expression_clusters(self) -> list[ExpressionCluster]:
-        """Fetch all stored expression clusters."""
-        with self.engine.connect() as conn:
-            rows = conn.execute(select(expression_clusters_table)).fetchall()
-            return [
-                ExpressionCluster(
-                    cluster_id=r.cluster_id,
-                    canonical_expression_uri=r.canonical_expression_uri,
-                    content_type=r.content_type,
-                    language=r.language,
-                    version_designation=r.version_designation,
-                    member_count=r.member_count,
-                )
-                for r in rows
-            ]
-
-    def insert_manifestation_cluster(self, cluster: ManifestationCluster) -> None:
-        """Insert or replace a ManifestationCluster record."""
-        with self.engine.begin() as conn:
-            conn.execute(
-                manifestation_clusters_table.insert().values(
-                    cluster_id=cluster.cluster_id,
-                    canonical_manifestation_uri=cluster.canonical_manifestation_uri,
-                    carrier_type=cluster.carrier_type,
-                    publication_year=cluster.publication_year,
-                    publisher=cluster.publisher,
-                    member_count=cluster.member_count,
-                )
-            )
-
-    def get_all_manifestation_clusters(self) -> list[ManifestationCluster]:
-        """Fetch all stored manifestation clusters."""
-        with self.engine.connect() as conn:
-            rows = conn.execute(select(manifestation_clusters_table)).fetchall()
-            return [
-                ManifestationCluster(
-                    cluster_id=r.cluster_id,
-                    canonical_manifestation_uri=r.canonical_manifestation_uri,
-                    carrier_type=r.carrier_type,
-                    publication_year=r.publication_year,
-                    publisher=r.publisher,
-                    member_count=r.member_count,
-                )
-                for r in rows
-            ]
-
-    def insert_corpus_linkage(self, linkage: CorpusLinkage) -> None:
-        """Insert or update a CorpusLinkage record in corpus_linkages."""
-        with self.engine.begin() as conn:
-            conn.execute(
-                corpus_linkages_table.insert().values(
-                    record_id=linkage.record_id,
-                    work_cluster_id=linkage.work_cluster_id,
-                    expression_cluster_id=linkage.expression_cluster_id,
-                    manifestation_cluster_id=linkage.manifestation_cluster_id,
-                    final_work_uri=linkage.final_work_uri,
-                    final_expression_uri=linkage.final_expression_uri,
-                    final_manifestation_uri=linkage.final_manifestation_uri,
-                )
-            )
-
-    def get_all_corpus_linkages(self) -> list[CorpusLinkage]:
-        """Fetch all stored corpus linkages."""
-        with self.engine.connect() as conn:
-            rows = conn.execute(select(corpus_linkages_table)).fetchall()
-            return [
-                CorpusLinkage(
-                    record_id=r.record_id,
-                    work_cluster_id=r.work_cluster_id,
-                    expression_cluster_id=r.expression_cluster_id,
-                    manifestation_cluster_id=r.manifestation_cluster_id,
-                    final_work_uri=r.final_work_uri,
-                    final_expression_uri=r.final_expression_uri,
-                    final_manifestation_uri=r.final_manifestation_uri,
-                )
-                for r in rows
-            ]
-
-    def get_sibling_manifestation_record_ids(self, record_id: str) -> list[str]:
-        """Return record_ids of sibling manifestations in the same work cluster."""
-        with self.engine.connect() as conn:
-            current = conn.execute(
-                select(corpus_linkages_table.c.work_cluster_id).where(
-                    corpus_linkages_table.c.record_id == record_id
-                )
-            ).fetchone()
-            if not current or not current[0]:
-                return []
-
-            w_cid = current[0]
-            sibs = conn.execute(
-                select(corpus_linkages_table.c.record_id).where(
-                    corpus_linkages_table.c.work_cluster_id == w_cid,
-                    corpus_linkages_table.c.record_id != record_id,
-                )
-            ).fetchall()
-            return [r[0] for r in sibs]
-
+    def get_work_equivalence_map(self) -> dict[int, int]:
+        """Map each consolidated work id to its group's canonical work id."""
+        stmt = select(
+            work_consolidations_table.c.work_id,
+            work_consolidations_table.c.canonical_work_id,
+        ).where(
+            work_consolidations_table.c.canonical_work_id != work_consolidations_table.c.work_id,
+        )
+        with self.get_connection() as conn:
+            return {r[0]: r[1] for r in conn.execute(stmt)}

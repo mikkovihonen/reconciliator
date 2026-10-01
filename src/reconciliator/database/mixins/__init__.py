@@ -6,6 +6,7 @@ from reconciliator.database.mixins.cluster import ClusterRepositoryMixin
 from reconciliator.database.mixins.common import row_to_dict
 from reconciliator.database.mixins.consolidation import ConsolidationRepositoryMixin
 from reconciliator.database.mixins.harvest_state import HarvestStateRepositoryMixin
+from reconciliator.database.mixins.ingest import WEMIIngestionRepositoryMixin
 from reconciliator.database.mixins.lookup import EntityLookupRepositoryMixin
 from reconciliator.database.mixins.match_records import MatchRecordRepositoryMixin
 from reconciliator.database.mixins.pagination import PaginationRepositoryMixin
@@ -25,5 +26,6 @@ __all__ = [
     "SearchRepositoryMixin",
     "SourceManagementMixin",
     "VectorCacheRepositoryMixin",
+    "WEMIIngestionRepositoryMixin",
     "row_to_dict",
 ]

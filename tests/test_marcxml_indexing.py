@@ -2,7 +2,7 @@
 
 from lxml import etree
 
-from reconciliator.ingestion.oai import _WEMIBatchAccumulator
+from reconciliator.ingestion.oai import WEMIBatchAccumulator
 from reconciliator.loaders.marcxml import (
     _get_controlfield,
     _get_datafields,
@@ -135,7 +135,7 @@ def test_decompose_marc_authority() -> None:
 
 
 def test_batch_accumulator_merge_payload() -> None:
-    acc = _WEMIBatchAccumulator(source_name="test")
+    acc = WEMIBatchAccumulator(source_name="test")
     p1 = {
         "record_count": 2,
         "works": [WorkEntity(source="s", source_id="w1", title="W1", title_normalized="w1")],

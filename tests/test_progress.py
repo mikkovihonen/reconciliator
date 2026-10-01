@@ -11,12 +11,12 @@ from reconciliator.progress import (
     format_task_table,
     get_task_progress,
     list_tasks,
-    parse_duration_seconds,
     prune_tasks,
     render_status_json,
     render_telemetry_tui,
     run_telemetry_tui,
 )
+from reconciliator.utils.durations import parse_duration_seconds
 
 
 @pytest.fixture

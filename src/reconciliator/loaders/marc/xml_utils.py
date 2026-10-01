@@ -6,7 +6,6 @@ import hashlib
 from typing import Any, Optional
 
 from lxml import etree
-
 from reconciliator._core.parsers import MarcDatafield, MarcRecordData
 
 MARC_NS = {"marc": "http://www.loc.gov/MARC21/slim"}

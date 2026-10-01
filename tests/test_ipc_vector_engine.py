@@ -12,12 +12,12 @@ import numpy as np
 import pytest
 
 from reconciliator.config import AppConfig, StorageConfig, VectorEngineConfig
-from reconciliator.indexer.ipc.client import DaemonLifecycleManager, IPCVectorIndexClient
-from reconciliator.indexer.ipc.daemon import (
+from reconciliator.indexer.ipc import (
     IndexPoolManager,
     VectorDaemonRequestHandler,
     VectorDaemonServer,
 )
+from reconciliator.indexer.ipc.client import DaemonLifecycleManager, IPCVectorIndexClient
 from reconciliator.indexer.ipc.protocol import (
     OP_PING,
     decode_add_vectors,

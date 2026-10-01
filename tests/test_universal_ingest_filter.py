@@ -12,7 +12,7 @@ from reconciliator.config import (
     ReconcileConfig,
     WikidataIngestConfig,
 )
-from reconciliator.ingestion.oai import _WEMIBatchAccumulator
+from reconciliator.ingestion.oai import WEMIBatchAccumulator
 from reconciliator.ingestion.wikidata import decompose_wikidata_entity, parse_wikidata_entity
 from reconciliator.loaders.base import DecomposedRecord
 from reconciliator.models import (
@@ -122,7 +122,7 @@ def test_wemi_batch_accumulator_filtering() -> None:
         target_languages=["fin"],
         from_year=1980,
     )
-    acc = _WEMIBatchAccumulator(source_name="test_src", filter_config=filter_cfg)
+    acc = WEMIBatchAccumulator(source_name="test_src", filter_config=filter_cfg)
 
     # 1. Matching record
     matching_work = WorkEntity(

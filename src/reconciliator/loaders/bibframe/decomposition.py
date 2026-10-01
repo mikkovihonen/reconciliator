@@ -1,33 +1,48 @@
-"""BIBFRAME and BFFI Work-Expression-Manifestation-Item (WEMI) decomposition engine.
-
-Implements the 6-condition Graph Decomposition Decision Matrix:
-- C-1: Finnish BFFI 1.0 4-tier direct extraction (Manifestation -> Expression -> Work)
-- C-2: Finnish BFFI 1.0 missing expression node (Manifestation -> Work) with synthesized default expression
-- C-3: LC BIBFRAME 3.0 Hub hoisting (Instance -> Work -> Hub) with Hub as canonical Work centroid
-- C-4: LC BIBFRAME 2.0 / 3.0 translation decomposition (Instance -> Work -> translationOf)
-- C-5: Performed Music Ontology (PMO) Performance realization (Performance -> performedWork)
-- C-6: LC BIBFRAME 2.0 single-work partitioning (Instance -> Work) splitting attributes into W and E
-
-Extracts PMO mediums of performance, bffi:marcKey provenance, structural inter-work relationships,
-and physical/electronic item holdings.
-"""
+"""High-level BIBFRAME and BFFI WEMI decomposition orchestrator."""
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, Optional
 
-from rdflib import RDF, RDFS, SKOS, BNode, Graph, IdentifiedNode, Literal, URIRef
+from rdflib import RDF, Graph, IdentifiedNode, URIRef
 
-from reconciliator.config import (
-    get_category_default_field_map,
-    get_subject_field_category_map,
-)
 from reconciliator.embedding.template import WEMISerializationEngine
-from reconciliator.loaders.bibframe.base import (
-    normalize_role_uri_or_label,
+from reconciliator.loaders.bibframe.classification import (
+    _BF_CLASSIFYING_PREDICATES,
+    BIBFRAME_CONTENT_TYPES,
+    BIBFRAME_CONTENT_WORK_TYPES,
+    BIBFRAME_WORK_TYPES,
+    _is_series,
+    determine_bibframe_content_type,
+    determine_bibframe_work_type,
+)
+from reconciliator.loaders.bibframe.constituents import (
+    _expand_both,
+    _part_creator,
+    _part_title,
+    extract_bibframe_constituents,
+)
+from reconciliator.loaders.bibframe.entities import (
+    _extract_identifiers,
+    _extract_items,
+    _extract_language,
+    _extract_mediums_of_performance,
+    _extract_node_agents,
+    _extract_title_elements,
+    _extract_work_relationships,
+    extract_bibframe_subjects,
+)
+from reconciliator.loaders.bibframe.graph_utils import (
+    _get_literals,
+    _get_uris,
+    _identifiers_as_bag,
+    bibframe_work_uri,
+    derive_bibframe_node_id,
+    extract_marc_key_components,
+    is_blank_node,
 )
 from reconciliator.loaders.bibframe.profiles import (
     BIBFRAMESchemaProfile,
@@ -49,10 +64,7 @@ from reconciliator.models import (
     WorkRelationship,
     WorkType,
 )
-from reconciliator.normalizers.blocking import (
-    compute_author_key,
-    compute_title_stem,
-)
+from reconciliator.normalizers.blocking import compute_author_key, compute_title_stem
 from reconciliator.normalizers.keys import (
     derive_bibframe_keys,
 )
@@ -60,540 +72,43 @@ from reconciliator.vocab import (
     detect_vocabulary,
     extract_concept_id,
     fold_subjects,
-    vocabulary_hint_from_uri,
 )
+
+if TYPE_CHECKING:
+    from reconciliator.loaders.bibframe.profiles import BIBFRAMESchemaProfile
 
 logger = logging.getLogger(__name__)
 
-
-def extract_marc_key_components(
-    marc_key: str, profile: Optional[BIBFRAMESchemaProfile] = None
-) -> Optional[tuple[str, str, str]]:
-    """Extract (tag, indicators, subfields) from a provenance literal string.
-
-    Example:
-        '1001 $aWaltari, Mika,$d1908-1979,$ewriter' -> ('100', '1 ', '$aWaltari, Mika,$d1908-1979,$ewriter')
-    """
-    from reconciliator.loaders.bibframe.profiles import get_profile
-
-    p = profile or get_profile()
-    m = re.match(p.provenance_regex, marc_key.strip())
-    if m:
-        return m.group(1), m.group(2), m.group(3)
-    return None
-
-
-def _get_literals(g: Graph, subject: IdentifiedNode, predicates: list[str] | set[str]) -> list[str]:
-    """Retrieve unique string values for given predicates on a subject."""
-    results: list[str] = []
-    for pred in predicates:
-        pred_ref = URIRef(pred) if not isinstance(pred, URIRef) else pred
-        for obj in g.objects(subject, pred_ref):
-            if isinstance(obj, Literal):
-                val = str(obj).strip()
-                if val and val not in results:
-                    results.append(val)
-            elif isinstance(obj, IdentifiedNode):
-                for label in g.objects(obj, RDFS.label):
-                    val = str(label).strip()
-                    if val and val not in results:
-                        results.append(val)
-                for label in g.objects(obj, SKOS.prefLabel):
-                    val = str(label).strip()
-                    if val and val not in results:
-                        results.append(val)
-    return results
-
-
-def _get_uris(g: Graph, subject: IdentifiedNode, predicates: list[str] | set[str]) -> list[str]:
-    """Retrieve unique URIRef strings for given predicates on a subject."""
-    results: list[str] = []
-    for pred in predicates:
-        pred_ref = URIRef(pred) if not isinstance(pred, URIRef) else pred
-        for obj in g.objects(subject, pred_ref):
-            if isinstance(obj, URIRef):
-                u = str(obj).strip()
-                if u and u not in results:
-                    results.append(u)
-    return results
-
-
-def _extract_title_elements(
-    g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile
-) -> tuple[str, Optional[str], Optional[str], list[str]]:
-    """Extract (main_title, subtitle, uniform_title, variant_titles) from a node."""
-    main_title = ""
-    subtitle: Optional[str] = None
-    uniform_title: Optional[str] = None
-    variant_titles: list[str] = []
-
-    for pred in profile.expanded_title_predicates:
-        for title_obj in g.objects(node, URIRef(pred)):
-            if isinstance(title_obj, Literal):
-                val = str(title_obj).strip()
-                if not main_title:
-                    main_title = val
-                else:
-                    variant_titles.append(val)
-            elif isinstance(title_obj, IdentifiedNode):
-                types = {str(t) for t in g.objects(title_obj, RDF.type)}
-                is_variant = bool(profile.expanded_title_variant_classes.intersection(types))
-
-                m_titles = _get_literals(g, title_obj, profile.expanded_main_title_predicates)
-                s_titles = _get_literals(g, title_obj, profile.expanded_subtitle_predicates)
-                p_names = _get_literals(g, title_obj, profile.expanded_part_name_predicates)
-                p_numbers = _get_literals(g, title_obj, profile.expanded_part_number_predicates)
-
-                mt = m_titles[0] if m_titles else ""
-                st = s_titles[0] if s_titles else None
-                parts = p_numbers + p_names
-                if parts and mt:
-                    mt = f"{mt} {' '.join(parts)}"
-
-                if is_variant:
-                    if mt and mt not in variant_titles:
-                        variant_titles.append(mt)
-                else:
-                    if mt and not main_title:
-                        main_title = mt
-                        if st and not subtitle:
-                            subtitle = st
-                    elif mt and mt not in variant_titles:
-                        variant_titles.append(mt)
-
-    if not main_title:
-        labels = _get_literals(g, node, [str(RDFS.label), str(SKOS.prefLabel)])
-        if labels:
-            main_title = labels[0]
-
-    return main_title, subtitle, uniform_title, variant_titles
-
-
-def _extract_language(
-    g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile
-) -> Optional[str]:
-    """Extract language code from node."""
-    for l_pred in profile.expanded_language_predicates:
-        for l_obj in g.objects(node, URIRef(l_pred)):
-            if isinstance(l_obj, URIRef):
-                return str(l_obj).rstrip("/").split("/")[-1].lower()
-            elif isinstance(l_obj, Literal):
-                return str(l_obj).strip().lower()
-    return None
-
-
-def _extract_node_agents(
-    g: Graph,
-    node: IdentifiedNode,
-    profile: BIBFRAMESchemaProfile,
-    source: str = "bibframe",
-) -> list[tuple[AgentEntity, str, bool, Optional[str]]]:
-    """Extract agents associated with a node.
-
-    Returns list of (AgentEntity, role_code, is_primary, marc_key).
-    """
-    agents: list[tuple[AgentEntity, str, bool, Optional[str]]] = []
-
-    for contrib_pred in profile.expanded_contribution_predicates:
-        for contrib_obj in g.objects(node, URIRef(contrib_pred)):
-            if not isinstance(contrib_obj, IdentifiedNode):
-                continue
-
-            # Provenance literal
-            marc_key: Optional[str] = None
-            if profile.expanded_provenance_predicate:
-                mk_lits = _get_literals(g, contrib_obj, [profile.expanded_provenance_predicate])
-                if mk_lits:
-                    marc_key = mk_lits[0]
-
-            # Primary contribution check
-            contrib_types = {str(t) for t in g.objects(contrib_obj, RDF.type)}
-            is_primary = bool(
-                profile.expanded_agent_primary_contribution_classes.intersection(contrib_types)
-            )
-            if not is_primary and marc_key:
-                parsed_mk = extract_marc_key_components(marc_key, profile=profile)
-                if parsed_mk and parsed_mk[0] in (
-                    profile.agent_default_tags.get("personal", "100"),
-                    profile.agent_default_tags.get("corporate", "110"),
-                    profile.agent_default_tags.get("meeting", "111"),
-                ):
-                    is_primary = True
-
-            # Role extraction
-            role = "aut" if is_primary else "ctb"
-            for role_pred in profile.expanded_role_predicates:
-                for role_obj in g.objects(contrib_obj, URIRef(role_pred)):
-                    # A role is usually a blank node carrying a label -
-                    # `bf:role [ rdfs:label "kääntäjä" ]` - and the label was
-                    # never read here, so `str(role_obj)` handed the normaliser
-                    # rdflib's parse-local node label. The stored role was that
-                    # label: unusable as a role, and different on every parse.
-                    role_label: Optional[str] = None
-                    if isinstance(role_obj, IdentifiedNode):
-                        role_labels = _get_literals(
-                            g, role_obj, profile.expanded_role_label_predicates
-                        )
-                        role_label = role_labels[0] if role_labels else None
-                    role_text = "" if is_blank_node(role_obj) else str(role_obj)
-                    norm = normalize_role_uri_or_label(
-                        role_text,
-                        label=role_label,
-                        profile=profile,
-                    )
-                    if norm:
-                        role = norm
-                        break
-
-            # Agent entity
-            found_agent = False
-            for agent_pred in profile.expanded_agent_predicates:
-                for agent_obj in g.objects(contrib_obj, URIRef(agent_pred)):
-                    if not isinstance(agent_obj, IdentifiedNode):
-                        continue
-                    agent_uri = str(agent_obj)
-                    labels = _get_literals(
-                        g,
-                        agent_obj,
-                        profile.expanded_agent_label_predicates,
-                    )
-                    agent_name = labels[0] if labels else agent_uri.rstrip("/").split("/")[-1]
-
-                    # A blank-node agent - common in BFFI, where the agent sits
-                    # inside the contribution rather than in an authority file -
-                    # gets an id derived from its own triples. The guard here used
-                    # to test `startswith("_:")`, which `str(BNode())` never
-                    # produces, so the agent_uri was a parse-local label: a fresh
-                    # agent row for the same person on every ingest.
-                    agent_uri_clean = (
-                        agent_uri
-                        if not is_blank_node(agent_obj)
-                        else f"urn:agent:{source}:{derive_bibframe_node_id(g, agent_obj)}"
-                    )
-                    agent = AgentEntity(
-                        agent_uri=agent_uri_clean,
-                        source=source,
-                        name=agent_name,
-                        name_normalized=agent_name.strip().lower(),
-                    )
-                    agents.append((agent, role, is_primary, marc_key))
-                    found_agent = True
-
-            # Literal agent fallback
-            if not found_agent:
-                simple_lits = _get_literals(
-                    g, contrib_obj, profile.expanded_agent_simple_predicates
-                )
-                for lit_str in simple_lits:
-                    raw_name = lit_str.strip()
-                    if not raw_name:
-                        continue
-                    norm_name = raw_name.lower()
-                    safe_slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", norm_name).strip("_")
-                    clean_uri = f"urn:reconciliator:agent:{safe_slug or 'unknown'}"
-                    agent = AgentEntity(
-                        agent_uri=clean_uri,
-                        source=source,
-                        name=raw_name,
-                        name_normalized=norm_name,
-                    )
-                    agents.append((agent, role, is_primary, marc_key))
-
-    return agents
-
-
-def extract_bibframe_subjects(
-    g: Graph, nodes: list[IdentifiedNode], profile: BIBFRAMESchemaProfile
-) -> dict[str, list[dict[str, Any]]]:
-    """Extract categorised subjects from a BIBFRAME graph.
-
-    Moved here from `rdflib_loader`, where it was private, so the decomposer can
-    use it too: the target path read `bf:subject` and the ingest path did not, so
-    a BIBFRAME work reached the datastore with no subjects at all - no terms in
-    its serialised text, and an empty subject footprint on each of its agents.
-    """
-    field_category_map = get_subject_field_category_map()
-    cat_default_field = get_category_default_field_map()
-    default_target_field = profile.default_subject_field or cat_default_field["topical"]
-    default_category = field_category_map[default_target_field]
-    subjects: dict[str, list[dict[str, Any]]] = {cat: [] for cat in field_category_map.values()}
-    seen_uris: set[str] = set()
-
-    type_to_field = profile.subject_type_fields
-    source_preds = profile.expanded_source_predicates
-
-    for node in nodes:
-        # Subject predicates
-        for subj_pred in profile.expanded_subject_predicates:
-            for subj_obj in g.objects(node, URIRef(subj_pred)):
-                if not isinstance(subj_obj, IdentifiedNode):
-                    continue
-
-                uri: Optional[str] = str(subj_obj) if isinstance(subj_obj, URIRef) else None
-                types = {str(t) for t in g.objects(subj_obj, RDF.type)}
-
-                headings = _get_literals(g, subj_obj, profile.expanded_subject_label_predicates)
-                heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
-                if not heading:
-                    continue
-
-                # Determine target field from configured RDF types
-                target_field = default_target_field
-                for type_sub, f_tag in type_to_field.items():
-                    if any(type_sub in t for t in types):
-                        target_field = f_tag
-                        break
-
-                # Vocabulary detection from URI or configured source predicates
-                vocab: Optional[str] = None
-                if uri:
-                    detected_v = detect_vocabulary(uri)
-                    # The pattern table lists only the modern vocabularies, so a
-                    # legacy URI - ysa, allars, musa, kaunokki - is not detected.
-                    # It does name itself in its own path, and a BIBFRAME subject
-                    # has no MARC $2 to declare it with, so without this a legacy
-                    # heading reached the target record with no vocabulary and
-                    # nothing to fold.
-                    vocab = detected_v.lower() if detected_v else vocabulary_hint_from_uri(uri)
-
-                for src_pred in source_preds:
-                    for src_obj in g.objects(subj_obj, URIRef(src_pred)):
-                        if isinstance(src_obj, Literal):
-                            vocab = str(src_obj).strip()
-                        elif isinstance(src_obj, IdentifiedNode):
-                            src_labels = _get_literals(
-                                g, src_obj, [str(RDFS.label), str(RDF.value), str(SKOS.prefLabel)]
-                            )
-                            if src_labels:
-                                vocab = src_labels[0]
-
-                item_key = (heading, vocab or "", target_field)
-                if item_key in seen_uris:
-                    continue
-                seen_uris.add(item_key)
-
-                item = {
-                    "heading": heading,
-                    "vocabulary": vocab,
-                    "uri": uri,
-                    "field": target_field,
-                }
-                category = field_category_map.get(target_field, default_category)
-                subjects[category].append(item)
-
-    # Medium of performance predicates
-    mop_field = cat_default_field["medium_of_performance"]
-    mop_category = field_category_map[mop_field]
-    for node in nodes:
-        for mop_pred in profile.expanded_music_performance_predicates:
-            for mop_obj in g.objects(node, URIRef(mop_pred)):
-                if not isinstance(mop_obj, IdentifiedNode):
-                    continue
-                uri = str(mop_obj) if isinstance(mop_obj, URIRef) else None
-                headings = _get_literals(g, mop_obj, [str(RDFS.label), str(SKOS.prefLabel)])
-                heading = headings[0] if headings else (uri.split("/")[-1] if uri else "")
-                if not heading:
-                    continue
-                vocab = None
-                if uri:
-                    detected_v = detect_vocabulary(uri)
-                    vocab = detected_v.lower() if detected_v else profile.default_music_vocabulary
-                subjects[mop_category].append(
-                    {
-                        "heading": heading,
-                        "field": mop_field,
-                        "vocabulary": vocab,
-                        "uri": uri,
-                    }
-                )
-
-    return subjects
-
-
-def _extract_identifiers(
-    g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile
-) -> list[IdentifierEntity]:
-    """Extract standard identifiers from an instance or work node."""
-    identifiers: list[IdentifierEntity] = []
-    scheme_map = profile.expanded_identifier_scheme_mappings
-
-    for id_pred in profile.expanded_identifier_predicates:
-        for id_obj in g.objects(node, URIRef(id_pred)):
-            val: Optional[str] = None
-            scheme: Optional[str] = None
-
-            if isinstance(id_obj, Literal):
-                val = str(id_obj).strip()
-                scheme = "other"
-            elif isinstance(id_obj, IdentifiedNode):
-                vals = _get_literals(
-                    g,
-                    id_obj,
-                    [
-                        str(RDF.value),
-                        profile.expand_curie("bf:value"),
-                        profile.expand_curie("bffi:value"),
-                    ],
-                )
-                val = vals[0] if vals else None
-
-                sources = _get_literals(
-                    g,
-                    id_obj,
-                    profile.expanded_source_predicates | {str(RDFS.label)},
-                )
-                if sources:
-                    s_low = sources[0].lower()
-                    for cand_scheme, cands in scheme_map.items():
-                        if any(c.lower() in s_low for c in cands):
-                            scheme = cand_scheme
-                            break
-
-                if not scheme:
-                    id_types = {str(t) for t in g.objects(id_obj, RDF.type)}
-                    for cand_scheme, cands in scheme_map.items():
-                        if id_types.intersection(cands):
-                            scheme = cand_scheme
-                            break
-
-            if val and scheme:
-                norm_val = re.sub(r"[^0-9a-zA-Z]", "", val).lower()
-                identifiers.append(
-                    IdentifierEntity(
-                        entity_type="manifestation",
-                        entity_id=0,
-                        scheme=scheme,
-                        value=val,
-                        value_normalized=norm_val,
-                    )
-                )
-
-    return identifiers
-
-
-def _extract_mediums_of_performance(
-    g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile
-) -> list[dict[str, Any]]:
-    """Extract PMO / BIBFRAME mediums of performance."""
-    mediums: list[dict[str, Any]] = []
-    pmo_preds = profile.expanded_music_performance_predicates
-
-    for pred in pmo_preds:
-        for mop_obj in g.objects(node, URIRef(pred)):
-            mop_uri = str(mop_obj) if isinstance(mop_obj, URIRef) else None
-            labels = _get_literals(
-                g,
-                mop_obj,
-                profile.expanded_agent_label_predicates
-                | {profile.expand_curie("pmo:mediumOfPerformance")},
-            )
-            label = labels[0] if labels else (mop_uri.split("/")[-1] if mop_uri else "medium")
-
-            counts = _get_literals(
-                g,
-                mop_obj,
-                [profile.expand_curie("pmo:playerCount"), profile.expand_curie("bf:count")],
-            )
-            player_count = int(counts[0]) if counts and counts[0].isdigit() else 1
-
-            mediums.append(
-                {
-                    "uri": mop_uri,
-                    "label": label,
-                    "player_count": player_count,
-                }
-            )
-
-    return mediums
-
-
-def _extract_items(
-    g: Graph,
-    instance_node: IdentifiedNode,
-    manifestation_id: str,
-    source: str,
-    profile: BIBFRAMESchemaProfile,
-) -> list[ItemEntity]:
-    """Extract Item entities linked to an Instance."""
-    items: list[ItemEntity] = []
-
-    for pred in profile.expanded_item_predicates:
-        for item_obj in g.objects(instance_node, URIRef(pred)):
-            if not isinstance(item_obj, IdentifiedNode):
-                continue
-            item_uri = str(item_obj)
-            barcodes = _get_literals(g, item_obj, profile.expanded_item_barcode_predicates)
-            shelfmarks = _get_literals(g, item_obj, profile.expanded_item_shelfmark_predicates)
-            orgs = _get_uris(g, item_obj, profile.expanded_item_holding_predicates)
-
-            items.append(
-                ItemEntity(
-                    manifestation_id=0,
-                    item_uri=item_uri,
-                    source=source,
-                    source_id=item_uri,
-                    holding_organization=orgs[0] if orgs else None,
-                    barcode=barcodes[0] if barcodes else None,
-                    shelfmark=shelfmarks[0] if shelfmarks else None,
-                )
-            )
-
-    return items
-
-
-#: Part/whole predicates whose meaning depends on what is at the other end, and
-#: the relationship type to use when that end is a series.
-_SERIES_SENSE: dict[str, str] = {
-    "constituent_of": "series_member_of",
-    "has_constituent": "has_series_member",
-}
-
-
-def _extract_work_relationships(
-    g: Graph,
-    work_node: IdentifiedNode,
-    work_id: str,
-    profile: BIBFRAMESchemaProfile,
-    source: str = "bibframe",
-) -> list[WorkRelationship]:
-    """Extract structural and derivative relationships from a work node.
-
-    Both endpoints are named by URI. They used to be left at id 0 with no URI at
-    all, which made every edge unstorable: the target violated the foreign key,
-    so a graph stating any of these predicates would have failed its batch. An
-    edge whose target is not a work this ingest creates is still dropped by
-    `insert_wemi_batch`, with a warning - a relationship to a row we do not have
-    cannot be stored - but one pointing at a constituent now binds.
-    """
-    relationships: list[WorkRelationship] = []
-    source_uri = bibframe_work_uri(g, work_node, source)
-
-    for pred_uri, rel_type in profile.expanded_relationship_predicates.items():
-        for target_obj in g.objects(work_node, URIRef(pred_uri)):
-            if not isinstance(target_obj, IdentifiedNode):
-                continue
-            resolved = rel_type
-            if rel_type in _SERIES_SENSE and _is_series(g, target_obj, profile):
-                # `bf:partOf` pointing at a series *is* series membership; the
-                # same predicate pointing at a work is containment.
-                resolved = _SERIES_SENSE[rel_type]
-            relationships.append(
-                WorkRelationship(
-                    source_work_id=0,
-                    target_work_id=0,
-                    source_work_uri=source_uri,
-                    target_work_uri=bibframe_work_uri(g, target_obj, source),
-                    relationship_type=resolved,
-                )
-            )
-
-    return relationships
-
-
-def _is_series(g: Graph, node: IdentifiedNode, profile: BIBFRAMESchemaProfile) -> bool:
-    types = {str(t) for t in g.objects(node, RDF.type)}
-    return bool(types & profile.expanded_series_classes)
-
+__all__ = [
+    "BIBFRAME_CONTENT_TYPES",
+    "BIBFRAME_CONTENT_WORK_TYPES",
+    "BIBFRAME_WORK_TYPES",
+    "_BF_CLASSIFYING_PREDICATES",
+    "_expand_both",
+    "_extract_identifiers",
+    "_extract_items",
+    "_extract_language",
+    "_extract_mediums_of_performance",
+    "_extract_node_agents",
+    "_extract_title_elements",
+    "_extract_work_relationships",
+    "_get_literals",
+    "_get_uris",
+    "_identifiers_as_bag",
+    "_is_series",
+    "_part_creator",
+    "_part_title",
+    "bibframe_work_uri",
+    "build_target_record_from_bibframe",
+    "decompose_bibframe_work",
+    "derive_bibframe_node_id",
+    "determine_bibframe_content_type",
+    "determine_bibframe_work_type",
+    "extract_bibframe_constituents",
+    "extract_bibframe_subjects",
+    "extract_marc_key_components",
+    "is_blank_node",
+]
 
 def decompose_bibframe_work(
     g: Graph,
@@ -1208,320 +723,6 @@ def decompose_bibframe_work(
         contributions,
     )
 
-
-def _identifiers_as_bag(identifiers: list[IdentifierEntity]) -> dict[str, list[str]]:
-    """Shape IdentifierEntity rows as the scheme -> values bag MatchRecord carries."""
-    bag: dict[str, list[str]] = {}
-    for ident in identifiers:
-        bucket = bag.setdefault(ident.scheme.lower().strip(), [])
-        if ident.value not in bucket:
-            bucket.append(ident.value)
-    return bag
-
-
-# BIBFRAME Work subclasses and bf:content values, mapped to WorkType. Unlike the
-# MARC side - where classification comes from leader/007/008 positions and Finnish
-# genre headings - the BIBFRAME vocabulary names these types explicitly, so the
-# mapping is a lookup rather than a heuristic.
-#
-# Without it every BibFrame record defaulted to "text" (or "hub"/"music" under two
-# graph conditions), so a BibFrame cartographic resource, thesis or dataset reached
-# the monograph funnel: only 5 of 42 funnels were reachable from a BibFrame record.
-BIBFRAME_WORK_TYPES: dict[str, str] = {
-    "Cartography": "cartography",
-    "Dataset": "dataset",
-    "MovingImage": "moving_image",
-    "StillImage": "still_image",
-    "NotatedMusic": "music",
-    "NotatedMovement": "choreography",
-    "Audio": "music",
-    "Object": "realia",
-    "Multimedia": "multimedia",
-    "Manuscript": "manuscript",
-    "Archival": "archive_fonds",
-    "Serial": "serial",
-    "Integrating": "integrating",
-    "Print": "text",
-    "Text": "text",
-}
-
-# bf:content / rdaco values, checked after the class, since a Work may carry a
-# generic class with a specific content type.
-BIBFRAME_CONTENT_WORK_TYPES: dict[str, str] = {
-    "cartographic": "cartography",
-    "performed": "music",
-    "notated-music": "music",
-    "notated music": "music",
-    "computer-dataset": "dataset",
-    "computer-program": "software",
-    "two-dimensional-moving-image": "moving_image",
-    "three-dimensional-moving-image": "moving_image",
-    "still-image": "still_image",
-    "three-dimensional-form": "realia",
-    "spoken-word": "audio_nonmusic",
-}
-
-
-_BIBFRAME = "http://id.loc.gov/ontologies/bibframe/"
-_BF_CLASSIFYING_PREDICATES = (
-    URIRef(_BIBFRAME + "content"),
-    URIRef(_BIBFRAME + "genreForm"),
-)
-
-
-# The expression content type implied by a BIBFRAME class. Needed because the
-# funnel split between notated music and recorded sound keys on content_type -
-# both are work_type "music" - so without this every BibFrame music record, score
-# or recording, reached the recorded-sound funnel.
-BIBFRAME_CONTENT_TYPES: dict[str, str] = {
-    "NotatedMusic": "notated_music",
-    "Audio": "audio_music",
-    "NotatedMovement": "choreographic_movement",
-    "Cartography": "cartographic_image",
-    "StillImage": "still_image",
-    "Dataset": "dataset",
-    "MovingImage": "moving_image",
-    "Object": "three_dimensional",
-}
-
-
-def determine_bibframe_content_type(
-    g: Graph,
-    *nodes: Optional[IdentifiedNode],
-    default: Optional[str] = None,
-) -> Optional[str]:
-    """The content type a BIBFRAME class implies, or `default` when unrecognised."""
-    for node in nodes:
-        if node is None:
-            continue
-        for type_uri in g.objects(node, RDF.type):
-            local = str(type_uri).rstrip("/").split("/")[-1].split("#")[-1]
-            if local in BIBFRAME_CONTENT_TYPES:
-                return BIBFRAME_CONTENT_TYPES[local]
-    return default
-
-
-def determine_bibframe_work_type(
-    g: Graph,
-    *nodes: Optional[IdentifiedNode],
-    default: str = "text",
-) -> str:
-    """Classify a BIBFRAME work from its rdf:type and bf:content.
-
-    Checks each given node in order - typically the Work then the Instance - and
-    returns the first recognised classification. Local-name matching, because
-    profiles differ on whether they emit `bf:` or the expanded LoC namespace.
-    """
-    for node in nodes:
-        if node is None:
-            continue
-        for type_uri in g.objects(node, RDF.type):
-            local = str(type_uri).rstrip("/").split("/")[-1].split("#")[-1]
-            if local in BIBFRAME_WORK_TYPES:
-                return BIBFRAME_WORK_TYPES[local]
-
-    for node in nodes:
-        if node is None:
-            continue
-        for pred in _BF_CLASSIFYING_PREDICATES:
-            for obj in g.objects(node, pred):
-                text = str(obj).rstrip("/").split("/")[-1].split("#")[-1].lower()
-                for needle, work_type in BIBFRAME_CONTENT_WORK_TYPES.items():
-                    if needle in text:
-                        return work_type
-
-    return default
-
-
-def is_blank_node(node: Any) -> bool:
-    """Whether an RDF term is a blank node.
-
-    `str(BNode())` returns a *bare* label - "Nc5b5385e..." - with no "_:"
-    prefix; only `.n3()` adds one. Every `startswith("_:")` guard in this module
-    was therefore dead code that never fired, which is how parse-local labels
-    came to be used as work, expression and manifestation URIs.
-    """
-    return isinstance(node, BNode)
-
-
-def derive_bibframe_node_id(g: Graph, node: Optional[IdentifiedNode]) -> str:
-    """A stable identifier for a BIBFRAME node.
-
-    A node with a real URI is identified by it. A blank node is not: rdflib mints
-    a fresh label on every parse, so identity taken from the label changes each
-    time the same file is ingested - new work, expression and manifestation URIs,
-    no upsert match, duplicate rows, and an `ingest_mode: replace` that cannot
-    help because the ids differ between runs.
-
-    This mirrors `derive_content_id` on the MARC side: identity from content, not
-    from position or parse order. The digest covers the node's own
-    predicate/object pairs, with a blank-node object replaced by a digest of
-    *its* pairs - one level of recursion, which is what BIBFRAME titles need,
-    since `bf:title [ a bf:Title ; bf:mainTitle "X" ]` puts the title itself
-    behind a blank node.
-    """
-    if node is None:
-        return ""
-    if not is_blank_node(node):
-        return str(node)
-
-    def pairs(subject: Any, depth: int) -> list[str]:
-        out: list[str] = []
-        for predicate, obj in sorted(g.predicate_objects(subject), key=lambda po: str(po[0])):
-            obj_text = str(obj)
-            if is_blank_node(obj):
-                if depth <= 0:
-                    continue
-                inner = hashlib.sha1("\n".join(pairs(obj, depth - 1)).encode("utf-8")).hexdigest()[
-                    :16
-                ]
-                obj_text = f"_:{inner}"
-            out.append(f"{predicate}\t{obj_text}")
-        return out
-
-    digest = hashlib.sha1("\n".join(pairs(node, 1)).encode("utf-8")).hexdigest()[:16]
-    return f"sha1:{digest}"
-
-
-def extract_bibframe_constituents(
-    g: Graph,
-    work_node: Optional[IdentifiedNode],
-    constituent_profile: Any,
-    profile: BIBFRAMESchemaProfile,
-    *,
-    source: str = "bibframe",
-    record_id: str = "<unknown>",
-) -> list[Any]:
-    """Read the parts a source's constituent profile points at.
-
-    The constituent profile says *where* the parts are - `predicate: bf:hasPart`
-    - and the schema profile says how this dialect writes a title and an agent,
-    because that is what it is for. Neither duplicates the other.
-
-    A part keeps its own node URI as its identity when it has one: the graph
-    stating it is better evidence than a digest of its title. A blank-node part
-    falls back to the content digest, like MARC.
-    """
-    from reconciliator.constituents.record import Constituent
-    from reconciliator.constituents.record import finalise as finalise_constituents
-
-    if work_node is None or constituent_profile is None:
-        return []
-
-    found: list[Constituent] = []
-    for precedence, field in enumerate(getattr(constituent_profile, "fields", [])):
-        if not field.predicate:
-            continue  # a MARC entry; not this format's business
-        for pred_uri in _expand_both(profile, field.predicate):
-            for part in g.objects(work_node, URIRef(pred_uri)):
-                if not isinstance(part, IdentifiedNode):
-                    continue
-                title = _part_title(g, part, field, profile)
-                creator = _part_creator(g, part, profile)
-
-                prov_pred = getattr(field, "provenance_predicate", None)
-                if prov_pred and (not title or not creator):
-                    for p_uri in _expand_both(profile, prov_pred):
-                        mk_lits = _get_literals(g, part, [p_uri])
-                        if mk_lits:
-                            parsed = extract_marc_key_components(mk_lits[0], profile=profile)
-                            if parsed:
-                                _tag, _inds, sf_str = parsed
-                                sf_map = dict(re.findall(r"[\$\x1f]([a-z0-9])([^\$\x1f]+)", sf_str))
-                                if not title:
-                                    title = sf_map.get("a") or sf_map.get("t")
-                                if not creator:
-                                    creator = sf_map.get("g") or sf_map.get("c")
-
-                if not title:
-                    continue
-
-                title = re.sub(r"[\s/.,;:]+$", "", title).strip()
-                if creator:
-                    creator = re.sub(r"[\s/.,;:]+$", "", creator).strip()
-
-                seq_num: Optional[int] = None
-                for seq_pred in getattr(field, "sequence_predicates", []):
-                    for seq_uri in _expand_both(profile, seq_pred):
-                        for seq_obj in g.objects(part, URIRef(seq_uri)):
-                            try:
-                                seq_num = int(str(seq_obj).strip())
-                                break
-                            except ValueError, TypeError:
-                                pass
-                        if seq_num is not None:
-                            break
-
-                found.append(
-                    Constituent(
-                        title=title,
-                        creator=creator,
-                        ordinal=seq_num,
-                        shape=constituent_profile.shape_of(field),
-                        component_type=field.component_type,
-                        contributes_to_container=field.contributes_to_container,
-                        source_field=field.predicate,
-                        precedence=precedence,
-                        identity_ref=(
-                            None if is_blank_node(part) else derive_bibframe_node_id(g, part)
-                        ),
-                    )
-                )
-
-    return finalise_constituents(found, constituent_profile, record_id=record_id)
-
-
-def _expand_both(profile: BIBFRAMESchemaProfile, curie: str) -> set[str]:
-    """A predicate as written and as expanded, since profiles use both forms."""
-    return {curie, profile.expand_curie(curie)}
-
-
-def _part_title(
-    g: Graph, part: IdentifiedNode, field: Any, profile: BIBFRAMESchemaProfile
-) -> Optional[str]:
-    """A part's title, through the field's predicate and then the dialect's.
-
-    `bf:title` points at a Title *node* whose string sits behind `bf:mainTitle`,
-    so reading the predicate alone yields a node rather than a title.
-    """
-    for pred_uri in _expand_both(profile, field.title or "bf:title"):
-        for obj in g.objects(part, URIRef(pred_uri)):
-            if isinstance(obj, Literal):
-                text = str(obj).strip()
-                if text:
-                    return text
-            elif isinstance(obj, IdentifiedNode):
-                literals = _get_literals(
-                    g,
-                    obj,
-                    profile.expanded_main_title_predicates | {str(RDFS.label), str(RDF.value)},
-                )
-                if literals:
-                    return literals[0]
-    # Then the dialect's own title machinery, which handles the shapes a profile
-    # does not spell out.
-    title, _subtitle, _uniform, _variants = _extract_title_elements(g, part, profile)
-    return title or None
-
-
-def _part_creator(g: Graph, part: IdentifiedNode, profile: BIBFRAMESchemaProfile) -> Optional[str]:
-    """The first agent named on a part, by the dialect's own rules."""
-    for agent, _role, _is_primary, _marc_key in _extract_node_agents(g, part, profile):
-        if agent.name:
-            return agent.name
-    return None
-
-
-def bibframe_work_uri(g: Graph, node: Optional[IdentifiedNode], source: str) -> str:
-    """The work URI (CURIE) a node will be stored under.
-
-    Mirrors how `decompose_bibframe_work` builds it: every work is stored under
-    the canonical CURIE `source:node_id`.
-    """
-    if node is None:
-        return ""
-    node_id = derive_bibframe_node_id(g, node)
-    return f"{source}:{node_id}"
 
 
 def build_target_record_from_bibframe(

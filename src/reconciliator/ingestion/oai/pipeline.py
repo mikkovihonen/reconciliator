@@ -1,8 +1,4 @@
-"""AsyncIO and ProcessPool hybrid OAI-PMH, ResourceSync, and MARCXML ingestion into WEMI storage.
-
-Harvesting is decoupled from database writes and checkpointed to harvest_state so
-an interrupted run resumes where it stopped.
-"""
+"""End-to-end ingestion pipeline coordinating harvesting, parsing, and persistence."""
 
 from __future__ import annotations
 
@@ -12,504 +8,24 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Optional
-
-from lxml import etree
-from rdflib import Graph
+from typing import Any, Optional
 
 from reconciliator.config import OAIIngestConfig
 from reconciliator.constituents import resolve_for_source
 from reconciliator.database import WEMIRepository
 from reconciliator.harvest.oai_pmh import OAIPMHHarvester, partition_date_range
-from reconciliator.ingestion.sanitizer import sanitize_batch_payload
-from reconciliator.loaders.base import DecomposedRecord, LoadContext
-from reconciliator.loaders.bibframe import (
-    get_profile,
-    stream_bibframe_records,
+from reconciliator.ingestion.oai.accumulator import WEMIBatchAccumulator
+from reconciliator.ingestion.oai.parser import init_oai_worker, parse_and_decompose_page
+from reconciliator.ingestion.oai.streaming import (
+    resolve_harvest_window,
+    stream_file_raw_elements,
 )
-from reconciliator.loaders.marcxml import (
-    extract_marc_source_id,
-)
-from reconciliator.loaders.registry import load_record
+from reconciliator.ingestion.oai.writer import write_wemi_batch
+from reconciliator.loaders.marcxml import extract_marc_source_id
 from reconciliator.models import HarvestState
 from reconciliator.progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
-
-OAI_NS = {
-    "oai": "http://www.openarchives.org/OAI/2.0/",
-    "marc": "http://www.loc.gov/MARC21/slim",
-}
-
-_worker_vocab_store: Optional[Any] = None
-_worker_context: dict[str, Any] = {}
-
-
-def _init_oai_worker(context: dict[str, Any]) -> None:
-    """Initialize worker process static context once on process pool startup."""
-    global _worker_context
-    _worker_context = context
-    db_url = context.get("db_url")
-    if db_url:
-        _get_worker_vocab_store(db_url)
-
-
-def _get_worker_vocab_store(db_url: Optional[str]) -> Optional[Any]:
-    global _worker_vocab_store
-    if db_url and _worker_vocab_store is None:
-        try:
-            from reconciliator.vocab import VocabStore
-
-            _worker_vocab_store = VocabStore(db_url)
-        except Exception:
-            _worker_vocab_store = None
-    return _worker_vocab_store
-
-
-class _WEMIBatchAccumulator:
-    """Stages decomposed WEMI entities until a batch is ready to hand to the writer."""
-
-    def __init__(
-        self,
-        source_name: str,
-        id_source: str = "auto",
-        include_items: bool = False,
-        vocab_store: Optional[Any] = None,
-        strip_isbd_punctuation: bool = True,
-        isbd_punctuation: str = " ./,;:",
-        constituents: Optional[Any] = None,
-        filter_config: Optional[Any] = None,
-    ) -> None:
-        self.source_name = source_name
-        self.id_source = id_source
-        self.include_items = include_items
-        self.strip_isbd_punctuation = strip_isbd_punctuation
-        self.isbd_punctuation = isbd_punctuation
-        self.vocab_store = vocab_store
-        self.constituents = constituents
-        self.filter_config = filter_config
-        self.staged_records = 0
-
-        self.works: list[Any] = []
-        self.expressions: list[Any] = []
-        self.manifestations: list[Any] = []
-        self.items: list[Any] = []
-        self.agents: list[Any] = []
-        self.contributions: list[Any] = []
-        self.relationships: list[Any] = []
-        self.agent_relationships: list[Any] = []
-        self.identifiers: list[Any] = []
-        self.associations: list[Any] = []
-        self.entity_keys: list[Any] = []
-        self.entity_subjects: list[Any] = []
-
-    @property
-    def pending(self) -> int:
-        return self.staged_records
-
-    def add_record(self, record: DecomposedRecord) -> bool:
-        if self.filter_config is not None and record.works:
-            expr_lang = record.expressions[0].language if record.expressions else None
-            pub_year = record.manifestations[0].publication_year if record.manifestations else None
-            accepted = any(
-                self.filter_config.accepts(
-                    work_type=w.work_type,
-                    language=w.original_language or expr_lang,
-                    year=pub_year,
-                )
-                for w in record.works
-            )
-            if not accepted:
-                return False
-
-        self.staged_records += 1
-        self.works.extend(record.works)
-        self.expressions.extend(record.expressions)
-        self.manifestations.extend(record.manifestations)
-        self.items.extend(record.items)
-        self.agents.extend(record.agents)
-        self.contributions.extend(record.contributions)
-        self.relationships.extend(record.relationships)
-        self.agent_relationships.extend(record.agent_relationships)
-        self.identifiers.extend(record.identifiers)
-        self.associations.extend(record.associations)
-        self.entity_keys.extend(record.entity_keys)
-        self.entity_subjects.extend(record.entity_subjects)
-        return True
-
-    def add(self, item: Any) -> bool:
-        ctx = LoadContext(
-            source=self.source_name,
-            record_origin=self.source_name,
-            id_source=self.id_source,
-            include_items=self.include_items,
-            vocab_store=self.vocab_store,
-            strip_isbd_punctuation=self.strip_isbd_punctuation,
-            isbd_punctuation=self.isbd_punctuation,
-            constituents=self.constituents,
-        )
-        record = load_record(item, ctx)
-        return self.add_record(record)
-
-    def merge_payload(self, payload: dict[str, Any]) -> None:
-        """Merge an existing batch payload dictionary into this accumulator."""
-        count = int(payload.get("record_count") or 0)
-        self.staged_records += count
-        for key in (
-            "works",
-            "expressions",
-            "manifestations",
-            "items",
-            "agents",
-            "contributions",
-            "relationships",
-            "agent_relationships",
-            "identifiers",
-            "associations",
-            "entity_keys",
-            "entity_subjects",
-        ):
-            items = payload.get(key)
-            if items:
-                getattr(self, key).extend(items)
-
-    def take(self) -> dict[str, Any]:
-        record_count = self.staged_records
-        self.staged_records = 0
-
-        payload = {
-            "works": self.works,
-            "expressions": self.expressions,
-            "manifestations": self.manifestations,
-            "items": self.items,
-            "agents": self.agents,
-            "relationships": self.relationships,
-            "agent_relationships": self.agent_relationships,
-            "identifiers": self.identifiers,
-            "associations": self.associations,
-            "contributions": self.contributions,
-            "entity_keys": self.entity_keys,
-            "entity_subjects": self.entity_subjects,
-            "record_count": record_count,
-            "record_origin": self.source_name,
-        }
-        self.works = []
-        self.expressions = []
-        self.manifestations = []
-        self.items = []
-        self.agents = []
-        self.contributions = []
-        self.relationships = []
-        self.agent_relationships = []
-        self.identifiers = []
-        self.associations = []
-        self.entity_keys = []
-        self.entity_subjects = []
-        return payload
-
-
-def parse_and_decompose_page(
-    page_bytes: bytes,
-    source_name: Optional[str] = None,
-    id_source: Optional[str] = None,
-    include_items: Optional[bool] = None,
-    strip_isbd_punctuation: Optional[bool] = None,
-    isbd_punctuation: Optional[str] = None,
-    database_url: Optional[str] = None,
-    skip_ids: Optional[set[str]] = None,
-    format: Optional[str] = None,
-    constituents: Optional[Any] = None,
-    task_id: Optional[str] = None,
-    filter_config: Optional[Any] = None,
-) -> tuple[dict[str, Any], int, int, int]:
-    """Parse raw XML page bytes and decompose MARCXML/BibFrame records in a worker process.
-
-    Returns:
-        (batch_payload_dict, decomposed_records_count, skipped_records_count, error_count)
-    """
-    eff_source_name = source_name or _worker_context.get("source_name", "unknown")
-    eff_id_source = id_source or _worker_context.get("id_source", "auto")
-    eff_include_items = (
-        include_items if include_items is not None else _worker_context.get("include_items", False)
-    )
-    eff_strip_isbd = (
-        strip_isbd_punctuation
-        if strip_isbd_punctuation is not None
-        else _worker_context.get("strip_isbd_punctuation", True)
-    )
-    eff_isbd_punct = isbd_punctuation or _worker_context.get("isbd_punctuation", " ./,;:")
-    eff_database_url = database_url or _worker_context.get("db_url")
-    eff_skip_ids = skip_ids if skip_ids is not None else _worker_context.get("skip_ids")
-    eff_format = format or _worker_context.get("format", "marcxml")
-    eff_constituents = constituents or _worker_context.get("constituents")
-    eff_filter_config = filter_config or _worker_context.get("filter_config")
-
-    if task_id:
-        from reconciliator.logging import init_worker_logging
-
-        init_worker_logging(task_id)
-
-    from reconciliator.logging import log_validation
-
-    parser = etree.XMLParser(recover=True, resolve_entities=False)
-    error_count = 0
-    try:
-        root = etree.fromstring(page_bytes, parser=parser)
-    except Exception as exc:
-        log_validation(
-            logger,
-            action="skip_page",
-            entity="oai_page_xml",
-            source_id=eff_source_name,
-            reason=f"XMLSyntaxError in OAI page: {exc}",
-            task_id=task_id,
-        )
-        return {}, 0, 0, 1
-
-    records = root.findall(".//oai:record", OAI_NS)
-    if not records:
-        records = root.findall(".//record")
-
-    vocab_store = _get_worker_vocab_store(eff_database_url)
-
-    ctx = LoadContext(
-        source=eff_source_name,
-        record_origin=eff_source_name,
-        id_source=eff_id_source,
-        include_items=eff_include_items,
-        vocab_store=vocab_store,
-        strip_isbd_punctuation=eff_strip_isbd,
-        isbd_punctuation=eff_isbd_punct,
-        constituents=eff_constituents,
-    )
-
-    acc = _WEMIBatchAccumulator(
-        source_name=eff_source_name,
-        id_source=eff_id_source,
-        include_items=eff_include_items,
-        vocab_store=vocab_store,
-        strip_isbd_punctuation=eff_strip_isbd,
-        isbd_punctuation=eff_isbd_punct,
-        constituents=eff_constituents,
-        filter_config=eff_filter_config,
-    )
-
-    skipped_count = 0
-    decomposed_count = 0
-
-    for rec in records:
-        hdr = rec.find("oai:header", OAI_NS)
-        if hdr is None:
-            hdr = rec.find(".//header")
-        if hdr is not None and hdr.get("status") == "deleted":
-            continue
-
-        header_id: Optional[str] = None
-        if hdr is not None:
-            id_el = hdr.find("oai:identifier", OAI_NS)
-            if id_el is None:
-                id_el = hdr.find(".//identifier")
-            if id_el is not None and id_el.text:
-                header_id = id_el.text.strip()
-
-        metadata_elem = rec.find("oai:metadata", OAI_NS)
-        if metadata_elem is not None and len(metadata_elem) > 0:
-            target_elem = metadata_elem[0]
-        else:
-            marc_rec = rec.find(".//marc:record", OAI_NS)
-            target_elem = marc_rec if marc_rec is not None else rec
-
-        if header_id:
-            target_elem.set("_oai_identifier", header_id)
-
-        if eff_skip_ids:
-            raw_id = extract_marc_source_id(target_elem, id_source=eff_id_source)
-            if raw_id and raw_id in eff_skip_ids:
-                skipped_count += 1
-                continue
-
-        try:
-            if eff_format == "bibframe":
-                raw_xml = etree.tostring(target_elem, encoding="utf-8")
-                g = Graph()
-                g.parse(data=raw_xml.decode("utf-8"), format="xml")
-                item_to_load = g
-            else:
-                item_to_load = target_elem
-
-            rec_decomp = load_record(item_to_load, ctx)
-            if acc.add_record(rec_decomp):
-                decomposed_count += 1
-            else:
-                skipped_count += 1
-        except Exception as exc:
-            error_count += 1
-            log_validation(
-                logger,
-                action="skip_record",
-                entity="oai_record",
-                source_id=header_id or "unknown",
-                reason=f"Failed to decompose record: {exc}",
-                task_id=task_id,
-            )
-
-    return acc.take(), decomposed_count, skipped_count, error_count
-
-
-def write_wemi_batch(
-    repo: WEMIRepository,
-    payload: dict[str, Any],
-    chunk_size: Optional[int] = None,
-    config: Optional[OAIIngestConfig] = None,
-    task_id: str = "",
-    tracker: Optional[ProgressTracker] = None,
-) -> int:
-    """Persist a batch detached by `_WEMIBatchAccumulator.take()` using multi-row bulk upserts."""
-    if config is not None and config.truncate_overlong_values:
-        sanitize_batch_payload(payload, config=config, task_id=task_id, tracker=tracker)
-
-    record_count = int(payload.get("record_count") or 0)
-    record_origin = str(payload.get("record_origin") or "unknown")
-
-    works = payload.get("works") or []
-    agents = payload.get("agents") or []
-    manifestations = payload.get("manifestations") or []
-    expressions = payload.get("expressions") or []
-    if not (works or agents or manifestations or expressions):
-        return 0
-
-    try:
-        repo.insert_wemi_batch(
-            works=works,
-            expressions=payload.get("expressions") or [],
-            manifestations=payload.get("manifestations") or [],
-            items=payload.get("items") or [],
-            agents=agents,
-            relationships=payload.get("relationships") or [],
-            agent_relationships=payload.get("agent_relationships") or [],
-            identifiers=payload.get("identifiers") or [],
-            manifestation_expressions=payload.get("associations") or [],
-            contributions=payload.get("contributions") or [],
-            entity_keys=payload.get("entity_keys") or [],
-            entity_subjects=payload.get("entity_subjects") or [],
-            record_origin=record_origin,
-            chunk_size=chunk_size,
-            use_synchronous_commit_off=getattr(config, "use_synchronous_commit_off", False)
-            if config
-            else False,
-        )
-    except Exception as exc:
-        from sqlalchemy.exc import DataError
-
-        if isinstance(exc, DataError) and config is not None and config.truncate_overlong_values:
-            from reconciliator.logging import log_validation
-
-            log_validation(
-                logger,
-                action="skip_batch",
-                entity="wemi_batch",
-                source_id=record_origin,
-                reason=f"database DataError: {exc}",
-                task_id=task_id,
-                tracker=tracker,
-            )
-            return 0
-        raise
-
-    return record_count or (len(works) or len(agents))
-
-
-async def _resolve_harvest_window(
-    source_name: str,
-    config: OAIIngestConfig,
-) -> tuple[Optional[str], Optional[str]]:
-    """Resolve the (from, until) window for a partitioned harvest."""
-    from_date = config.from_date
-    until_date = config.until_date
-
-    if config.workers <= 1 or config.source_type != "oai" or not config.oai_url:
-        return from_date, until_date
-
-    if not from_date:
-        harvester = OAIPMHHarvester(
-            endpoint_url=config.oai_url,
-            metadata_prefix=config.metadata_prefix,
-            set_spec=config.set_spec,
-            request_delay=config.request_delay,
-            timeout=config.timeout,
-            max_retries=config.max_retries,
-            base_delay=config.base_delay,
-            http2=config.http2,
-            prefetch=config.prefetch,
-        )
-        discovered = await harvester.get_earliest_datestamp()
-        if discovered:
-            from_date = discovered
-            if not until_date:
-                until_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            logger.info(
-                "Source '%s': auto-discovered earliestDatestamp '%s'. Partitioning across %d workers up to %s.",
-                source_name,
-                from_date,
-                config.workers,
-                until_date,
-            )
-        else:
-            logger.warning(
-                "Source '%s': multi-worker harvest requested (%d workers) but from_date was "
-                "omitted and earliestDatestamp could not be discovered. Falling back to a "
-                "single continuous stream.",
-                source_name,
-                config.workers,
-            )
-    elif not until_date:
-        until_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    return from_date, until_date
-
-
-def stream_file_raw_elements(
-    source_name: str,
-    config: OAIIngestConfig,
-) -> Iterator[Any]:
-    """Stream raw elements from a local MARCXML or Bibframe file."""
-    if not config.input_path:
-        raise ValueError(
-            f"input_path must be specified for source '{source_name}' when source_type is 'file'"
-        )
-    if config.format == "bibframe":
-        profile = get_profile(config.schema_profile) if config.schema_profile else None
-        for _raw_rec, _offset, orig_doc in stream_bibframe_records(
-            config.input_path, profile=profile, source=source_name
-        ):
-            if isinstance(orig_doc, tuple) and orig_doc:
-                orig_doc = orig_doc[0]
-            if isinstance(orig_doc, Graph):
-                yield orig_doc
-            else:
-                g = Graph()
-                import orjson
-
-                g.parse(data=orjson.dumps(orig_doc).decode("utf-8"), format="json-ld")
-                yield g
-    else:
-        path = str(config.input_path)
-        f_in: Any
-        if path.endswith(".gz"):
-            import gzip
-
-            f_in = gzip.open(path, "rb")
-        else:
-            f_in = open(path, "rb")
-        try:
-            context = etree.iterparse(f_in, events=("end",))
-            for _, elem in context:
-                tag = elem.tag
-                if tag.endswith("record") and not tag.endswith("collection"):
-                    yield elem
-                    elem.clear()
-        finally:
-            f_in.close()
 
 
 async def ingest_oai_pipeline(
@@ -611,7 +127,7 @@ async def ingest_oai_pipeline(
             source_name,
         )
 
-    from_date, until_date = await _resolve_harvest_window(source_name, effective_config)
+    from_date, until_date = await resolve_harvest_window(source_name, effective_config)
 
     if from_date and until_date and effective_config.workers > 1:
         slices = partition_date_range(from_date, until_date, effective_config.slice_days)
@@ -800,8 +316,7 @@ async def ingest_oai_pipeline(
 
     try:
         if not is_oai:
-            # File or ResourceSync source
-            acc = _WEMIBatchAccumulator(
+            acc = WEMIBatchAccumulator(
                 source_name=source_name,
                 id_source=effective_config.id_source,
                 include_items=effective_config.include_items,
@@ -826,7 +341,6 @@ async def ingest_oai_pipeline(
             if acc.pending:
                 await enqueue_batch({"batch": acc.take()})
         else:
-            # OAI-PMH harvest with ProcessPoolExecutor and AsyncIO
             worker_ctx = {
                 "source_name": source_name,
                 "id_source": effective_config.id_source,
@@ -841,7 +355,7 @@ async def ingest_oai_pipeline(
             }
             process_pool = ProcessPoolExecutor(
                 max_workers=effective_config.workers,
-                initializer=_init_oai_worker,
+                initializer=init_oai_worker,
                 initargs=(worker_ctx,),
             )
             semaphore = asyncio.Semaphore(effective_config.max_concurrent_requests)

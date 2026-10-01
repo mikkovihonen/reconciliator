@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from reconciliator.config import OAIIngestConfig, VectorEngineConfig
 from reconciliator.database import WEMIRepository, works_table
-from reconciliator.ingestion.oai import _resolve_harvest_window, ingest_oai_pipeline
+from reconciliator.ingestion.oai import ingest_oai_pipeline, resolve_harvest_window
 from tests.test_oai_pmh import make_marc_record
 
 
@@ -419,7 +419,7 @@ def test_single_worker_never_queries_identify() -> None:
         "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
         new_callable=AsyncMock,
     ) as identify:
-        assert asyncio.run(_resolve_harvest_window("melinda", cfg)) == (None, None)
+        assert asyncio.run(resolve_harvest_window("melinda", cfg)) == (None, None)
     identify.assert_not_called()
 
 
@@ -427,7 +427,7 @@ def test_from_date_without_until_defaults_to_today() -> None:
     from datetime import datetime, timezone
 
     cfg = oai_config(workers=2, from_date="2026-08-01", until_date=None, slice_days=10)
-    resolved_from, resolved_until = asyncio.run(_resolve_harvest_window("melinda", cfg))
+    resolved_from, resolved_until = asyncio.run(resolve_harvest_window("melinda", cfg))
 
     assert resolved_from == "2026-08-01"
     assert resolved_until == datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -439,7 +439,7 @@ def test_explicit_window_is_left_alone() -> None:
         "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
         new_callable=AsyncMock,
     ) as identify:
-        assert asyncio.run(_resolve_harvest_window("melinda", cfg)) == ("2024-01-01", "2024-06-30")
+        assert asyncio.run(resolve_harvest_window("melinda", cfg)) == ("2024-01-01", "2024-06-30")
     identify.assert_not_called()
 
 
@@ -449,5 +449,5 @@ def test_file_source_never_queries_identify() -> None:
         "reconciliator.harvest.oai_pmh.OAIPMHHarvester.get_earliest_datestamp",
         new_callable=AsyncMock,
     ) as identify:
-        assert asyncio.run(_resolve_harvest_window("localfile", cfg)) == (None, None)
+        assert asyncio.run(resolve_harvest_window("localfile", cfg)) == (None, None)
     identify.assert_not_called()
