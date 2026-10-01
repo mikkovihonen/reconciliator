@@ -18,7 +18,6 @@ from reconciliator._core.normalizers import (
 from reconciliator._core.normalizers import (
     py_fold_label as _rust_fold_label,
 )
-
 from reconciliator.config import (
     DEFAULT_BIOGRAPHICAL_CENTURY_SUFFIXES,
     DEFAULT_BIOGRAPHICAL_DATE_PREFIXES,

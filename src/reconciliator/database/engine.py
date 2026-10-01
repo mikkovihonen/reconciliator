@@ -73,6 +73,8 @@ def get_engine(
             target_str = target_str.replace("postgresql+psycopg:/", "postgresql+psycopg://", 1)
         elif target_str.startswith("postgresql:/") and not target_str.startswith("postgresql://"):
             target_str = target_str.replace("postgresql:/", "postgresql://", 1)
+        elif target_str.startswith("sqlite://"):
+            return create_engine(target_str)
         elif not (target_str.startswith("postgresql://") or target_str.startswith("postgresql+")):
             if schema is None:
                 p = Path(target_str)
@@ -153,6 +155,10 @@ def create_schema_tables(conn: Any, tables: Sequence[Table]) -> None:
     if isinstance(conn, Engine):
         with conn.begin() as c:
             create_schema_tables(c, tables)
+        return
+    dialect_name = getattr(getattr(conn, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        metadata.create_all(conn)
         return
     existing = set(
         conn.exec_driver_sql(

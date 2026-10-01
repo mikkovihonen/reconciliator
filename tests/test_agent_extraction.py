@@ -190,7 +190,7 @@ def test_marcxml_agent_subject_counts_harvesting_and_filtering() -> None:
     assert "yso-paikat:p105994" not in r_subj_counts
 
     # 3. Verify decompose_marc_wemi preserves subject data in intermediate dict
-    *_, agent_entities, _, _, _, _ = decompose_marc_wemi(root, source="test")
+    agent_entities = decompose_marc_wemi(root, source="test").agents
     assert len(agent_entities) == 1
     # subject_counts is no longer on AgentEntity model, but remains in intermediate dict
     # The subject data is now tracked via contributions_table, not agent fields.

@@ -7,9 +7,10 @@ from typing import Iterable, Optional
 
 from reconciliator._core.normalizers import (
     py_isbn_10_to_13 as _rust_isbn_10_to_13,
+)
+from reconciliator._core.normalizers import (
     py_validate_isbn_13 as _rust_validate_isbn_13,
 )
-
 from reconciliator.utils.strings import clean_alphanumeric
 
 

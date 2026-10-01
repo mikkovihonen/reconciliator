@@ -7,11 +7,16 @@ from typing import Optional
 
 from reconciliator._core.normalizers import (
     py_compute_host_citation_key as _rust_compute_host_citation_key,
+)
+from reconciliator._core.normalizers import (
     py_compute_series_key as _rust_compute_series_key,
+)
+from reconciliator._core.normalizers import (
     py_compute_work_blocking_key as _rust_compute_work_blocking_key,
+)
+from reconciliator._core.normalizers import (
     py_deterministic_key_hash as _rust_deterministic_key_hash,
 )
-
 from reconciliator.normalizers.agent import extract_surname, normalize_agent_name
 from reconciliator.normalizers.record import clean_title
 

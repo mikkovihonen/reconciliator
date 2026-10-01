@@ -110,15 +110,15 @@ def test_parse_marc_record_elem() -> None:
 
 def test_decompose_marc_wemi() -> None:
     elem = etree.fromstring(SAMPLE_BIB_XML)
-    w, e, m, items, agents, rels, idents, assoc, contribs = decompose_marc_wemi(
+    res = decompose_marc_wemi(
         elem,
         source="melinda",
         id_source="marc_001",
     )
-    assert w.title == "Testikirja"
-    assert len(agents) == 1
-    assert agents[0].name == "Virtanen, Ville"
-    assert m.publication_year == 1995
+    assert res.work.title == "Testikirja"
+    assert len(res.agents) == 1
+    assert res.agents[0].name == "Virtanen, Ville"
+    assert res.manifestation.publication_year == 1995
 
 
 def test_decompose_marc_authority() -> None:

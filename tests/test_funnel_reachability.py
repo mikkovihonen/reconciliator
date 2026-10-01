@@ -29,6 +29,7 @@ from reconciliator.funnels.builtin import BUILTIN_SPECS
 from reconciliator.funnels.spec import FunnelWhen
 
 LOADER = pathlib.Path(__file__).resolve().parents[1] / "src/reconciliator/loaders/marcxml.py"
+KEYS_FILE = pathlib.Path(__file__).resolve().parents[1] / "src/reconciliator/normalizers/keys.py"
 
 # Funnels no MARC record can currently reach, each because the loader does not
 # classify the record type they key on. Fixing one means teaching
@@ -47,8 +48,12 @@ KNOWN_UNREACHABLE_FROM_MARC = {
 
 
 def _function_body(name: str) -> ast.FunctionDef:
-    tree = ast.parse(LOADER.read_text())
-    return next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+    for path in (LOADER, KEYS_FILE):
+        tree = ast.parse(path.read_text())
+        for n in tree.body:
+            if isinstance(n, ast.FunctionDef) and n.name == name:
+                return n
+    raise ValueError(f"function {name} not found")
 
 
 def _returned_literals(name: str) -> set[str]:
@@ -677,8 +682,8 @@ def _key_types_written() -> set[str]:
     """First argument of every `_add(...)` in either loader's key derivation."""
     written: set[str] = set()
     for module, func in (
-        ("src/reconciliator/loaders/marcxml.py", "derive_domain_keys"),
-        ("src/reconciliator/loaders/bibframe/decomposition.py", "derive_bibframe_keys"),
+        ("src/reconciliator/normalizers/keys.py", "derive_domain_keys"),
+        ("src/reconciliator/normalizers/keys.py", "derive_bibframe_keys"),
     ):
         tree = ast.parse(pathlib.Path(module).read_text())
         fn = next(

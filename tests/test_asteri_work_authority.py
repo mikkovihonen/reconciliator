@@ -73,17 +73,8 @@ def test_marcxml_loader_extracts_asteri_work_240() -> None:
     assert "000015266" in parsed["work_identifiers"]["asteri_work"]
 
     # 2. Test decompose_marc_wemi
-    (
-        work,
-        expression,
-        manifestation,
-        items,
-        agents,
-        relationships,
-        identifiers,
-        associations,
-        contributions,
-    ) = decompose_marc_wemi(elem, source="fennica")
+    res = decompose_marc_wemi(elem, source="fennica")
+    identifiers = res.identifiers
 
     work_id_entities = [
         ident
@@ -228,7 +219,7 @@ def test_configurable_multiple_work_authority_sources() -> None:
     assert "000099999" in parsed["identifiers"]["asteri_work"]
 
     # When decomposed, both work authorities produce work IdentifierEntities dynamically
-    *_, identifiers, _, _ = decompose_marc_wemi(elem, work_authority_sources=custom_work_sources)
+    identifiers = decompose_marc_wemi(elem, work_authority_sources=custom_work_sources).identifiers
     work_entities = [i for i in identifiers if i.entity_type == "work"]
     schemes = {i.scheme: i.source_id for i in work_entities}
 
@@ -258,12 +249,14 @@ def test_default_carrier_source_from_config() -> None:
     elem = etree.fromstring(xml.encode("utf-8"))
 
     # Default configuration
-    work_default, _, manif_default, *_ = decompose_marc_wemi(elem)
+    res_default = decompose_marc_wemi(elem)
+    work_default, manif_default = res_default.work, res_default.manifestation
     assert work_default.source == "melinda"
     assert manif_default.source == "melinda"
 
     # With custom configured default_carrier_source
-    work_custom, _, manif_custom, *_ = decompose_marc_wemi(elem, config=custom_cfg)
+    res_custom = decompose_marc_wemi(elem, config=custom_cfg)
+    work_custom, manif_custom = res_custom.work, res_custom.manifestation
     assert work_custom.source == "fennica_carrier"
     assert manif_custom.source == "fennica_carrier"
 
@@ -295,7 +288,7 @@ def test_agent_multiple_identifiers_extracted_uniformly() -> None:
     assert agent_id_map.get("wikidata") == "Q42"
 
     # Verify decompose_marc_wemi persists all agent identifiers without dropping non-ORCIDs
-    *_, identifiers, _, _ = decompose_marc_wemi(elem)
+    identifiers = decompose_marc_wemi(elem).identifiers
     agent_entities = [i for i in identifiers if i.entity_type == "agent"]
     decomp_map = {i.source: i.source_id for i in agent_entities}
 

@@ -15,7 +15,6 @@ and physical/electronic item holdings.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 from typing import Any, Iterable, Optional
@@ -38,7 +37,6 @@ from reconciliator.models import (
     AgentEntity,
     CarrierType,
     ContributionEntity,
-    EntityKey,
     EntitySubject,
     ExpressionContentType,
     ExpressionEntity,
@@ -53,11 +51,11 @@ from reconciliator.models import (
 )
 from reconciliator.normalizers.blocking import (
     compute_author_key,
-    compute_music_work_key,
     compute_title_stem,
-    compute_work_blocking_key,
 )
-from reconciliator.utils import to_manifestation_entity_keys
+from reconciliator.normalizers.keys import (
+    derive_bibframe_keys,
+)
 from reconciliator.vocab import (
     detect_vocabulary,
     extract_concept_id,
@@ -1524,73 +1522,6 @@ def bibframe_work_uri(g: Graph, node: Optional[IdentifiedNode], source: str) -> 
         return ""
     node_id = derive_bibframe_node_id(g, node)
     return f"{source}:{node_id}"
-
-
-def derive_bibframe_keys(
-    work: WorkEntity,
-    agents: list[AgentEntity],
-    identifiers: list[IdentifierEntity],
-    author_key: Optional[str] = None,
-    title_stem: Optional[str] = None,
-    constituents: Optional[list[Any]] = None,
-) -> dict[str, list[str]]:
-    """Derive domain blocking keys for a BIBFRAME record.
-
-    Unlike the MARC side these derive from the decomposed entities rather than
-    the source graph, so no second parse is needed and no sink parameter either.
-    """
-    if author_key is None:
-        author_key = compute_author_key(agents[0].name if agents else None)
-    if title_stem is None:
-        title_stem = compute_title_stem(work.title, lang=work.original_language)
-
-    keys: dict[str, list[str]] = {}
-
-    def _add(key_type: str, val: Optional[str]) -> None:
-        if val and str(val).strip():
-            keys.setdefault(key_type, [])
-            clean = str(val).strip()
-            if clean not in keys[key_type]:
-                keys[key_type].append(clean)
-
-    _add("author", author_key)
-    _add("title_stem", title_stem)
-    _add("work", compute_work_blocking_key(author_key, title_stem))
-    if work.work_type == "music":
-        _add("music_work", compute_music_work_key(author_key, work.title))
-
-    first_isbn = next((i.value for i in identifiers if i.scheme == "isbn"), None)
-    first_issn = next((i.value for i in identifiers if i.scheme == "issn"), None)
-    _add("standard", first_isbn or first_issn)
-
-    # Translators, computed exactly as on the MARC side. This was declared
-    # impossible here because roles were not normalised, so no BibFrame agent
-    # ever carried "trl"; now that they do, the key that funnel HH dispatches on
-    # and the clusterer scores with is derivable from BIBFRAME too.
-
-    if constituents:
-        for c in constituents:
-            c_title = getattr(c, "title", None)
-            if c_title:
-                c_creator = getattr(c, "creator", None)
-                _add("analytic", json.dumps([c_title, c_creator], ensure_ascii=False))
-                _add("analytic_title", c_title)
-
-    return keys
-
-
-def bibframe_entity_keys(
-    manifestation: ManifestationEntity,
-    work: WorkEntity,
-    agents: list[AgentEntity],
-    identifiers: list[IdentifierEntity],
-    constituents: Optional[list[Any]] = None,
-) -> list[EntityKey]:
-    """Shape `derive_bibframe_keys` output as EntityKey rows bound to the manifestation."""
-    return to_manifestation_entity_keys(
-        manifestation.manifestation_uri,
-        derive_bibframe_keys(work, agents, identifiers, constituents=constituents),
-    )
 
 
 def build_target_record_from_bibframe(

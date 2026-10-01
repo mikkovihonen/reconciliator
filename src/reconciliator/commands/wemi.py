@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from rich.table import Table
@@ -213,7 +213,10 @@ def cluster_corpus_cmd(
         Path("config.yaml"), "--config", "-c", help="Path to YAML configuration file"
     ),
     method: Optional[str] = typer.Option(
-        None, "--method", "-m", help="Clustering method override: 'bigclust' or 'multiplex_graph'"
+        None,
+        "--method",
+        "-m",
+        help="Clustering method override: 'hybrid', 'bigclust', or 'multiplex_graph'",
     ),
     max_work_clusters: Optional[int] = typer.Option(
         None, "--max-work-clusters", help="Max work clusters upper bound (k_max for BigClust)"
@@ -226,6 +229,15 @@ def cluster_corpus_cmd(
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Evaluate clustering without persisting clusters to repository"
+    ),
+    incremental: bool = typer.Option(
+        False, "--incremental", help="Warm-start clustering using existing centroids"
+    ),
+    streaming: bool = typer.Option(
+        False, "--streaming", help="Stream records in chunks to minimize peak memory"
+    ),
+    chunk_size: int = typer.Option(
+        10000, "--chunk-size", help="Batch chunk size for streaming clustering"
     ),
 ) -> None:
     from reconciliator.config.matching import BigClustConfig, WEMIClusterConfig
@@ -247,10 +259,12 @@ def cluster_corpus_cmd(
     )
     source_val = source.default if hasattr(source, "default") else source
     dry_run_val = dry_run.default if hasattr(dry_run, "default") else dry_run
+    incremental_val = incremental.default if hasattr(incremental, "default") else incremental
+    streaming_val = streaming.default if hasattr(streaming, "default") else streaming
+    chunk_size_val = chunk_size.default if hasattr(chunk_size, "default") else chunk_size
 
     wemi_repo = _wemi_repo(cfg)
     cluster_cfg = (cfg.reconcile.cluster if cfg.reconcile else None) or WEMIClusterConfig()
-
 
     if method_val:
         cluster_cfg.method = str(method_val).strip()
@@ -279,40 +293,58 @@ def cluster_corpus_cmd(
         f"[cyan]Executing corpus clustering (method='{cluster_cfg.method}', origins={origins})...[/cyan]"
     )
 
-    if cluster_cfg.method == "bigclust":
-        from reconciliator.clustering.bigclust import BigClustMultiplexClusterer
+    from reconciliator.clustering import create_corpus_clusterer
 
-        bc_cfg = cluster_cfg.bigclust
-        max_w = bc_cfg.max_work_clusters if bc_cfg else 50
-        max_e = bc_cfg.max_expression_clusters_per_work if bc_cfg else 10
+    clusterer = create_corpus_clusterer(
+        config=cluster_cfg,
+        corpus_repo=wemi_repo,
+        wemi_repo=wemi_repo,
+        embedder=embedder,
+        corpus_origins=origins,
+    )
 
+    verb = "Evaluated" if dry_run_val else "Persisted"
+    if bool(streaming_val):
+        record_stream = wemi_repo.get_match_records_stream(
+            origins=origins, chunk_size=int(chunk_size_val)
+        )
+        total_clustered = 0
+        total_w = 0
+        total_e = 0
+        total_m = 0
+        total_time = 0.0
+        for chunk_res in clusterer.cluster_records_stream(
+            record_stream, chunk_size=int(chunk_size_val), persist=not bool(dry_run_val)
+        ):
+            total_clustered += chunk_res.records_clustered
+            total_w += chunk_res.work_clusters_count
+            total_e += chunk_res.expression_clusters_count
+            total_m += chunk_res.manifestation_clusters_count
+            total_time += chunk_res.elapsed_seconds
+
+        if total_clustered == 0:
+            console.print("[yellow]No staged records found to cluster.[/yellow]")
+            return
+
+        console.print(
+            f"[green]{verb} {total_clustered} staged record(s) via streaming into "
+            f"{total_w} Work cluster(s), {total_e} Expression cluster(s), "
+            f"and {total_m} Manifestation cluster(s) in {total_time:.2f}s.[/green]"
+        )
+    else:
         records = wemi_repo.get_all_match_records(origins=origins)
         if not records:
             console.print("[yellow]No staged records found to cluster.[/yellow]")
             return
 
-        clusterer = BigClustMultiplexClusterer(
-            corpus_repo=wemi_repo,
-            embedder=embedder,
-            max_work_clusters=max_w,
-            max_expression_clusters_per_work=max_e,
-        )
-        res = clusterer.cluster_records(records, persist=not bool(dry_run_val))
-    else:
-        from reconciliator.clustering.corpus import CorpusClusterer
+        kwargs: dict[str, Any] = {"persist": not bool(dry_run_val)}
+        if bool(incremental_val):
+            kwargs["incremental"] = True
 
-        clusterer = CorpusClusterer(
-            corpus_repo=wemi_repo,
-            wemi_repo=wemi_repo,
-            config=cluster_cfg,
-            corpus_origins=origins,
+        res = clusterer.cluster_records(records, **kwargs)
+        console.print(
+            f"[green]{verb} {res.records_clustered} staged record(s) into "
+            f"{res.work_clusters_count} Work cluster(s), {res.expression_clusters_count} Expression cluster(s), "
+            f"and {res.manifestation_clusters_count} Manifestation cluster(s) in {res.elapsed_seconds:.2f}s.[/green]"
         )
-        res = clusterer.cluster_corpus()
-
-    verb = "Evaluated" if dry_run_val else "Persisted"
-    console.print(
-        f"[green]{verb} {res.records_clustered} staged record(s) into "
-        f"{res.work_clusters_count} Work cluster(s), {res.expression_clusters_count} Expression cluster(s), "
-        f"and {res.manifestation_clusters_count} Manifestation cluster(s) in {res.elapsed_seconds:.2f}s.[/green]"
-    )
 

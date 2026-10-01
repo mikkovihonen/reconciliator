@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -354,6 +355,18 @@ manifestation_vectors_table = Table(
         nullable=False,
     ),
     Index("idx_manifestation_vectors_manif_id", "manifestation_id"),
+)
+
+entity_embeddings_table = Table(
+    "entity_embeddings",
+    metadata,
+    Column("content_hash", String, primary_key=True),
+    Column("model_name", String, primary_key=True),
+    Column("entity_type", String, nullable=False, default="work"),
+    Column("dimension", Integer, nullable=False),
+    Column("embedding_bytes", LargeBinary, nullable=False),
+    Column("created_at", DateTime, server_default=func.current_timestamp()),
+    Index("idx_entity_embeddings_lookup", "content_hash", "model_name"),
 )
 
 harvest_state_table = Table(
@@ -957,6 +970,7 @@ __all__ = [
     "work_consolidations_table",
     "work_vectors_table",
     "manifestation_vectors_table",
+    "entity_embeddings_table",
     "harvest_state_table",
     "concepts_table",
     "concept_labels_table",

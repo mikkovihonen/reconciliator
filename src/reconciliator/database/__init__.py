@@ -23,6 +23,11 @@ from reconciliator.database.engine import (
     reset_all_storage,
     set_metadata,
 )
+from reconciliator.database.mixins import (
+    HarvestStateRepositoryMixin,
+    MatchRecordRepositoryMixin,
+    VectorCacheRepositoryMixin,
+)
 from reconciliator.database.ops import (
     calculate_batch_size,
     insert_batch,
@@ -51,6 +56,7 @@ from reconciliator.database.schema import (
     corpus_manifestation_clusters_table,
     corpus_work_clusters_table,
     db_metadata_table,
+    entity_embeddings_table,
     entity_keys_table,
     entity_pins_table,
     entity_subjects_table,
@@ -95,6 +101,7 @@ __all__ = [
     "work_consolidations_table",
     "work_vectors_table",
     "manifestation_vectors_table",
+    "entity_embeddings_table",
     "harvest_state_table",
     "concepts_table",
     "concept_labels_table",
@@ -143,4 +150,7 @@ __all__ = [
     "insert_batch",
     # Repository
     "WEMIRepository",
+    "HarvestStateRepositoryMixin",
+    "MatchRecordRepositoryMixin",
+    "VectorCacheRepositoryMixin",
 ]

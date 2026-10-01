@@ -277,7 +277,7 @@ def test_marcxml_domain_fields_parsing():
     assert parsed["system_requirements"] == ["Requires 16 GB RAM and GPU acceleration"]
 
     # 2. Test decompose_marc_wemi IdentifierEntity creation
-    _, _, _, _, _, _, identifiers, _, _ = decompose_marc_wemi(elem)
+    identifiers = decompose_marc_wemi(elem).identifiers
     schemes = {i.scheme: i.value for i in identifiers}
     assert schemes.get("fingerprint") == "e-te e-re r-e- thal 1544R"
     assert schemes.get("patent_number") == "FI123456B"
@@ -788,8 +788,8 @@ def test_marc_original_title_and_narrators_serialization():
 
     elem = etree.fromstring(xml_data)
     res = decompose_marc_wemi(elem, source="test")
-    work = res[0]
-    expression = res[1]
+    work = res.work
+    expression = res.expression
 
     # H-35: original_title is extracted and serialized
     assert work.original_title == "Sinuhe egyptiläinen"

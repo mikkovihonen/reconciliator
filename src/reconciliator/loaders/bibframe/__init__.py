@@ -11,7 +11,6 @@ from reconciliator.loaders.bibframe.base import (
     parse_agent_dict,
 )
 from reconciliator.loaders.bibframe.decomposition import (
-    bibframe_entity_keys,
     build_target_record_from_bibframe,
     decompose_bibframe_work,
     extract_marc_key_components,
@@ -28,6 +27,9 @@ from reconciliator.loaders.bibframe.profiles import (
 from reconciliator.loaders.bibframe.rdflib_loader import (
     iter_bibframe_records,
     parse_bibframe_graph,
+)
+from reconciliator.normalizers.keys import (
+    bibframe_entity_keys,
 )
 
 

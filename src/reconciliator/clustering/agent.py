@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
+import numpy as np
 from rapidfuzz import fuzz, utils
 from sqlalchemy import select
+
+if TYPE_CHECKING:
+    from reconciliator.embedding.protocol import VectorEmbedder
 
 from reconciliator.authority.lifecycle import ClusterIdentityManager
 from reconciliator.config import AgentClusterConfig, AppConfig
@@ -48,6 +52,7 @@ class AgentClusterer:
         config: Optional[AgentClusterConfig] = None,
         hierarchy_service: Optional[Any] = None,
         identity_manager: Optional[ClusterIdentityManager] = None,
+        embedder: Optional[VectorEmbedder] = None,
     ) -> None:
         self.repo = repo
         if config is not None:
@@ -56,6 +61,7 @@ class AgentClusterer:
             self.config = AppConfig().agent_clustering
         self.hierarchy_service = hierarchy_service
         self.identity_manager = identity_manager or ClusterIdentityManager(repo)
+        self.embedder = embedder
 
     def cluster_agents(self) -> AgentClusterResult:
         """Execute full agent clustering pipeline across sources."""
@@ -855,4 +861,78 @@ class AgentClusterer:
 
         composite_score = score_sum / weight_sum if weight_sum > 0 else 0.0
 
+        # Semantic embedding disambiguation & homonym protection
+        if getattr(self.config, "enable_semantic_disambiguation", True) and self.embedder is not None:
+            text1 = self._format_agent_text(a1, attrs1, affils1, concepts1)
+            text2 = self._format_agent_text(a2, attrs2, affils2, concepts2)
+            sem_sim = self._get_agent_semantic_similarity(text1, text2)
+            if sem_sim is not None:
+                # 1. Homonym divergence veto:
+                # High name similarity but strongly conflicting/divergent biographical semantics
+                # and no hard shared corroboration (works, coauthors, affils, concepts)
+                veto_thresh = getattr(self.config, "semantic_homonym_veto_threshold", 0.40)
+                if (
+                    name_score >= 0.90
+                    and sem_sim < veto_thresh
+                    and not has_corroboration
+                ):
+                    return 0.0, "veto_semantic_homonym_divergence"
+
+                # 2. Semantic corroboration boost:
+                boost_thresh = getattr(self.config, "semantic_boost_threshold", 0.85)
+                if sem_sim >= boost_thresh:
+                    composite_score = min(1.0, composite_score + 0.10 * sem_sim)
+                    return composite_score, "weighted_scoring_semantic_corroborated"
+
         return composite_score, "weighted_scoring"
+
+    def _format_agent_text(
+        self,
+        agent: dict[str, Any],
+        attrs: dict[str, list[str]],
+        affils: set[str],
+        concepts: set[str],
+    ) -> str:
+        """Format a rich textual biographical projection of an agent for semantic embedding."""
+        parts = []
+        name = agent.get("name") or agent.get("name_normalized")
+        if name:
+            parts.append(f"Name: {name}")
+        b, d = agent.get("birth_year"), agent.get("death_year")
+        dates = agent.get("dates") or ""
+        if b is not None or d is not None:
+            parts.append(f"Years: {b or ''}-{d or ''}")
+        elif dates:
+            parts.append(f"Dates: {dates}")
+        if affils:
+            parts.append(f"Affiliation: {', '.join(sorted(affils))}")
+        if concepts:
+            parts.append(f"Field: {', '.join(sorted(concepts))}")
+        quals = attrs.get("qualifier", [])
+        if quals:
+            parts.append(f"Qualifier: {', '.join(sorted(quals))}")
+        return " | ".join(parts) if parts else str(agent.get("id"))
+
+    def _get_agent_semantic_similarity(
+        self,
+        text1: str,
+        text2: str,
+    ) -> Optional[float]:
+        """Calculate cosine similarity between two agent biographical representations."""
+        if self.embedder is None:
+            return None
+        try:
+            vecs = self.repo.embed_texts_cached(
+                embedder=self.embedder,
+                texts=[text1, text2],
+                entity_type="agent",
+            )
+            if len(vecs) == 2:
+                v1, v2 = vecs[0], vecs[1]
+                norm1 = float(np.linalg.norm(v1))
+                norm2 = float(np.linalg.norm(v2))
+                if norm1 > 0 and norm2 > 0:
+                    return float(np.dot(v1, v2) / (norm1 * norm2))
+        except Exception as e:
+            logger.debug("Failed to calculate agent semantic similarity: %s", e)
+        return None

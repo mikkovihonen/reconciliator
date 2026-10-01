@@ -361,3 +361,47 @@ class WEMISerializationEngine:
             ctx = {}
         ctx.update(kwargs)
         return self.agent_engine.render(ctx)
+
+    def render_match_record_work(self, record: Any) -> str:
+        """Render a MatchRecord into its Work-level dense embedding string."""
+        subjects = [{"pref_label": s} for s in (getattr(record, "subjects", None) or [])]
+        authors = [{"name": record.author_key}] if getattr(record, "author_key", None) else []
+        return self.render_work(
+            work={
+                "preferred_title": (
+                    getattr(record, "uniform_title", None)
+                    or getattr(record, "title", None)
+                    or getattr(record, "record_id", "Unknown")
+                ),
+                "uniform_title": getattr(record, "uniform_title", None),
+                "work_type": getattr(record, "work_type", "text"),
+                "original_language": getattr(record, "language", "") or "",
+            },
+            authors=authors,
+            subjects=subjects,
+        )
+
+    def render_match_record_expression(
+        self, record: Any, work_title: Optional[str] = None
+    ) -> str:
+        """Render a MatchRecord into its Expression-level dense embedding string."""
+        keys = getattr(record, "keys", {}) or {}
+        trans = (
+            [{"name": keys["translators_signature"][0]}]
+            if "translators_signature" in keys
+            else []
+        )
+        return self.render_expression(
+            expression={
+                "work_title": (
+                    work_title
+                    or getattr(record, "uniform_title", None)
+                    or getattr(record, "title", "")
+                ),
+                "expression_title": getattr(record, "title", ""),
+                "language": getattr(record, "language", "und"),
+                "content_type": getattr(record, "work_type", "text"),
+                "version_designation": getattr(record, "volume_designation", None),
+            },
+            translators=trans,
+        )

@@ -284,14 +284,15 @@ def test_marcxml_decompose_extracts_entity_subjects(vocab_store: VocabStore):
     </record>""".encode()
 
     record_elem = etree.fromstring(xml)
-    subjs: list[EntitySubject] = []
 
-    work, expr, manif, items, agents, rels, idents, assoc, contribs = decompose_marc_wemi(
+    res = decompose_marc_wemi(
         record_elem,
         source="melinda",
-        subject_sink=subjs,
         vocab_store=vocab_store,
     )
+    subjs = res.subjects
+    contribs = res.contributions
+    agents = res.agents
 
     # Verify subjects extracted
     assert len(subjs) >= 3
@@ -376,8 +377,8 @@ def test_marcxml_decompose_extracts_medium_of_performance():
         </datafield>
     </record>"""
     record_elem = etree.fromstring(xml)
-    subjs: list[EntitySubject] = []
-    decompose_marc_wemi(record_elem, source="melinda", subject_sink=subjs)
+    res = decompose_marc_wemi(record_elem, source="melinda")
+    subjs = res.subjects
     mop = next(s for s in subjs if s.relation_type == "medium_of_performance")
     assert mop.raw_label == "viulu"
     assert mop.entity_type == "work"

@@ -271,19 +271,17 @@ def test_rust_marc_record_wemi_decomposition():
     marc_rec = recs[0]
 
     # Decompose into WEMI using native MarcRecordData
-    keys = []
-    w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
+    res = decompose_marc_wemi(
         marc_rec,
         source="test_src",
-        key_sink=keys,
     )
-    assert w.work_type == "text"
-    assert w.title == "Testikirja"
-    assert w.title_normalized == "testikirja"
-    assert m.source_id == "FI-MELI-123456"
-    assert len(agts) >= 1
-    assert agts[0].name == "Virtanen, Ville"
-    assert len(keys) > 0
+    assert res.work.work_type == "text"
+    assert res.work.title == "Testikirja"
+    assert res.work.title_normalized == "testikirja"
+    assert res.manifestation.source_id == "FI-MELI-123456"
+    assert len(res.agents) >= 1
+    assert res.agents[0].name == "Virtanen, Ville"
+    assert len(res.keys) > 0
 
     # Build MatchRecord using native MarcRecordData
     match_rec = build_target_record_from_marc(marc_rec, source="test_src")

@@ -18,16 +18,33 @@ from reconciliator.reconciliation.consolidation import (
     WorkConsolidator,
     WorkSignature,
 )
-from reconciliator.reconciliation.matcher import WorkMatcher, _merge_funnel_specs
+from reconciliator.reconciliation.matcher import (
+    DEFAULT_MAX_EDITIONS_COMPARED,
+    WorkMatcher,
+    _merge_funnel_specs,
+)
 from reconciliator.reconciliation.results import (
     ConstituentWorkMatch,
     ReconciliationResult,
     WEMIMatchResult,
 )
+from reconciliator.reconciliation.stages import (
+    AgentResolutionStage,
+    CandidateRankingStage,
+    CandidateRetrievalStage,
+    IdentifierMatchingStage,
+    extract_agent_uris_from_identifiers,
+)
 
 __all__ = [
     "WorkMatcher",
     "_merge_funnel_specs",
+    "DEFAULT_MAX_EDITIONS_COMPARED",
+    "IdentifierMatchingStage",
+    "CandidateRetrievalStage",
+    "CandidateRankingStage",
+    "AgentResolutionStage",
+    "extract_agent_uris_from_identifiers",
     "ReconciliationResult",
     "ConstituentWorkMatch",
     "WEMIMatchResult",

@@ -75,6 +75,6 @@ def extract_target_analytics(target: MatchRecord) -> list[tuple[str, Optional[st
     These come from MARC 700/710/505 `$t`, parsed once by the loader into
     `entity_keys` rather than re-parsed from the payload on every match attempt.
     """
-    from reconciliator.loaders.marcxml import decode_analytic
+    from reconciliator.normalizers.keys import decode_analytic
 
     return [decode_analytic(v) for v in target.get_keys("analytic")]

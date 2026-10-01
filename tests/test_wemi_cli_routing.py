@@ -20,6 +20,7 @@ def test_cli_ingest_wikidata_wemi_routing(tmp_path: Path) -> None:
         f"""
 storage:
   data_dir: "{tmp_path}"
+  database_url: "sqlite:///{tmp_path}/test.db"
 
 ingestion:
   wikidata:
@@ -58,6 +59,7 @@ def test_every_source_routes_to_the_single_authority_database(tmp_path: Path) ->
         f"""
 storage:
   data_dir: "{tmp_path}"
+  database_url: "sqlite:///{tmp_path}/test.db"
 
 embedding:
   model_name: "TurkuNLP/sbert-cased-finnish-paraphrase"
@@ -121,7 +123,10 @@ storage:
     )
 
     with patch("reconciliator.commands.wemi._wemi_repo") as mock_repo_fn, \
+         patch("reconciliator.embedding.create_vector_embedder") as mock_embedder_fn, \
          patch("reconciliator.clustering.bigclust.BigClustMultiplexClusterer") as mock_bigclust_cls:
+        mock_embedder = MagicMock()
+        mock_embedder_fn.return_value = mock_embedder
         mock_repo = MagicMock()
         mock_repo.get_all_match_records.return_value = [MagicMock()]
         mock_repo.non_authoritative_sources.return_value = ["test_corpus"]

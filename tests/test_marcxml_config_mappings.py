@@ -78,7 +78,7 @@ def test_custom_genre_vocabulary_mapping() -> None:
     assert work_type == "comic"
 
     # Also test via decompose_marc_wemi
-    work, _, _, _, _, _, _, _, _ = decompose_marc_wemi(elem, config=custom_cfg)
+    work = decompose_marc_wemi(elem, config=custom_cfg).work
     assert work.work_type == "comic"
 
 

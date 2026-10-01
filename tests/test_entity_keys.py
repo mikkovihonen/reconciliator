@@ -14,13 +14,15 @@ from lxml import etree
 from reconciliator.database import WEMIRepository
 from reconciliator.indexer import TorchVectorEngine
 from reconciliator.loaders.marcxml import (
-    decode_analytic,
     decompose_marc_wemi,
-    derive_domain_keys,
-    encode_analytic,
     extract_marc_analytics,
 )
 from reconciliator.models import EntityKey
+from reconciliator.normalizers.keys import (
+    decode_analytic,
+    derive_domain_keys,
+    encode_analytic,
+)
 
 MARC_NS = "http://www.loc.gov/MARC21/slim"
 
@@ -127,37 +129,38 @@ def test_derive_domain_keys_deduplicates_repeated_values():
 
 
 def test_key_sink_binds_keys_to_the_manifestation_uri():
-    sink: list[EntityKey] = []
-    _, _, manif, *_ = decompose_marc_wemi(_record("R1", "Sinuhe"), source="melinda", key_sink=sink)
-    assert sink
-    assert {k.entity_uri for k in sink} == {manif.manifestation_uri}
-    assert {k.entity_type for k in sink} == {"manifestation"}
+    decomp = decompose_marc_wemi(_record("R1", "Sinuhe"), source="melinda")
+    assert decomp.keys
+    assert {k.entity_uri for k in decomp.keys} == {decomp.manifestation.manifestation_uri}
+    assert {k.entity_type for k in decomp.keys} == {"manifestation"}
 
 
-def test_decompose_without_sink_is_unchanged():
-    """The sink is optional; omitting it must not alter the returned tuple."""
-    assert len(decompose_marc_wemi(_record("R1", "Sinuhe"), source="melinda")) == 9
+def test_decompose_returns_decomposed_wemi_result():
+    """Decompose returns strongly-typed DecomposedWEMIResult."""
+    from reconciliator.loaders.marcxml import DecomposedWEMIResult
+
+    res = decompose_marc_wemi(_record("R1", "Sinuhe"), source="melinda")
+    assert isinstance(res, DecomposedWEMIResult)
 
 
 # --- persistence ----------------------------------------------------------
 
 
 def _ingest(repo: WEMIRepository, control: str, title: str, source: str = "melinda"):
-    sink: list[EntityKey] = []
-    w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
-        _record(control, title), source=source, key_sink=sink
+    res = decompose_marc_wemi(
+        _record(control, title), source=source
     )
     repo.insert_wemi_batch(
-        works=[w],
-        expressions=[e],
-        manifestations=[m],
-        agents=agts,
-        identifiers=idents,
-        contributions=contribs,
-        entity_keys=sink,
+        works=[res.work],
+        expressions=[res.expression],
+        manifestations=[res.manifestation],
+        agents=res.agents,
+        identifiers=res.identifiers,
+        contributions=res.contributions,
+        entity_keys=res.keys,
         record_origin=source,
     )
-    return m
+    return res.manifestation
 
 
 def test_keys_persist_and_read_back_as_a_bag(repo: WEMIRepository):
@@ -169,22 +172,23 @@ def test_keys_persist_and_read_back_as_a_bag(repo: WEMIRepository):
 
 def test_multi_record_batch_does_not_collapse_keys_onto_the_first_row(repo: WEMIRepository):
     """Regression guard: positional binding once attributed a whole batch to row 0."""
-    sink: list[EntityKey] = []
+    all_keys: list[EntityKey] = []
     works, exprs, manifs, idents = [], [], [], []
     for ctrl, title in (("R1", "Sinuhe egyptilainen"), ("R2", "Turms kuolematon")):
-        w, e, m, _itms, _agts, _rels, ids, _assoc, _c = decompose_marc_wemi(
-            _record(ctrl, title), source="melinda", key_sink=sink
+        res = decompose_marc_wemi(
+            _record(ctrl, title), source="melinda"
         )
-        works.append(w)
-        exprs.append(e)
-        manifs.append(m)
-        idents.extend(ids)
+        works.append(res.work)
+        exprs.append(res.expression)
+        manifs.append(res.manifestation)
+        idents.extend(res.identifiers)
+        all_keys.extend(res.keys)
     repo.insert_wemi_batch(
         works=works,
         expressions=exprs,
         manifestations=manifs,
         identifiers=idents,
-        entity_keys=sink,
+        entity_keys=all_keys,
         record_origin="melinda",
     )
 

@@ -36,9 +36,7 @@ class MarcBibliographicLoader(RecordLoader):
     def _decompose(self, item: Any, ctx: LoadContext) -> DecomposedRecord:
         from reconciliator.loaders.marcxml import decompose_marc_wemi
 
-        keys: list[Any] = []
-        subjects: list[Any] = []
-        w, e, m, items, agents, rels, idents, assoc, contribs = decompose_marc_wemi(
+        decomp = decompose_marc_wemi(
             item,
             source=ctx.source,
             id_source=ctx.id_source,
@@ -50,23 +48,21 @@ class MarcBibliographicLoader(RecordLoader):
             vocab_store=ctx.vocab_store,
             strip_isbd_punctuation=ctx.strip_isbd_punctuation,
             isbd_punctuation=ctx.isbd_punctuation,
-            key_sink=keys,
-            subject_sink=subjects,
         )
         record = DecomposedRecord(
-            works=[w],
-            expressions=[e],
-            manifestations=[m],
-            items=list(items),
-            agents=list(agents),
-            relationships=list(rels),
-            identifiers=list(idents),
-            associations=list(assoc),
-            contributions=list(contribs),
-            entity_keys=keys,
-            entity_subjects=subjects,
+            works=[decomp.work],
+            expressions=[decomp.expression],
+            manifestations=[decomp.manifestation],
+            items=list(decomp.items),
+            agents=list(decomp.agents),
+            relationships=list(decomp.relationships),
+            identifiers=list(decomp.identifiers),
+            associations=list(decomp.associations),
+            contributions=list(decomp.contributions),
+            entity_keys=decomp.keys,
+            entity_subjects=decomp.subjects,
         )
-        _add_constituents(record, item, ctx, w, e, m, keys=None)
+        _add_constituents(record, item, ctx, decomp.work, decomp.expression, decomp.manifestation, keys=None)
         return record
 
 
@@ -389,9 +385,9 @@ def _marc_capabilities(name: str, *, keys: bool, folds: bool) -> LoaderCapabilit
         GENRE_PATTERNS,
         GENRE_WORK_TYPES,
         RDA_CONTENT_TYPES,
-        derive_domain_keys,
         determine_work_type,
     )
+    from reconciliator.normalizers.keys import derive_domain_keys
     from reconciliator.vocab import get_vocabulary_patterns
 
     # Read from the functions rather than transcribed, so a declaration cannot

@@ -100,7 +100,7 @@ def test_identifiers_are_not_read_from_the_payload():
 
 
 def test_analytics_come_from_keys_not_the_payload():
-    from reconciliator.loaders.marcxml import encode_analytic
+    from reconciliator.normalizers.keys import encode_analytic
     from reconciliator.utils import extract_target_analytics, extract_target_track_titles
 
     target = MatchRecord(

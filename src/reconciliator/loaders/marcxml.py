@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
 
@@ -64,14 +64,13 @@ from reconciliator.models import (
 from reconciliator.normalizers.agent import parse_agent_dates
 from reconciliator.normalizers.blocking import (
     compute_author_key,
-    compute_host_citation_key,
-    compute_music_work_key,
-    compute_series_key,
     compute_title_stem,
-    compute_work_blocking_key,
+)
+from reconciliator.normalizers.keys import (
+    derive_domain_keys,
+    to_manifestation_entity_keys,
 )
 from reconciliator.normalizers.relators import normalize_role
-from reconciliator.utils import to_manifestation_entity_keys
 from reconciliator.utils.curie import parse_curie, to_curie
 from reconciliator.vocab import (
     extract_concept_id,
@@ -1877,6 +1876,23 @@ def decompose_marc_authority(
     return ([], [], [], [], [], [], [], [], [])
 
 
+@dataclass
+class DecomposedWEMIResult:
+    """Decomposed core WEMI hierarchy and associated relational entities from a bibliographic record."""
+
+    work: WorkEntity
+    expression: ExpressionEntity
+    manifestation: ManifestationEntity
+    items: list[ItemEntity] = field(default_factory=list)
+    agents: list[AgentEntity] = field(default_factory=list)
+    relationships: list[WorkRelationship] = field(default_factory=list)
+    identifiers: list[IdentifierEntity] = field(default_factory=list)
+    associations: list[ManifestationExpressionAssociation] = field(default_factory=list)
+    contributions: list[ContributionEntity] = field(default_factory=list)
+    keys: list[EntityKey] = field(default_factory=list)
+    subjects: list[EntitySubject] = field(default_factory=list)
+
+
 def decompose_marc_wemi(
     record_elem: etree._Element,
     source: Optional[str] = None,
@@ -1888,29 +1904,11 @@ def decompose_marc_wemi(
     work_authority_sources: Optional[Iterable[str]] = None,
     legacy_to_modern: Optional[dict[str, str]] = None,
     vocab_store: Optional[Any] = None,
-    key_sink: Optional[list[EntityKey]] = None,
-    subject_sink: Optional[list[EntitySubject]] = None,
     strip_isbd_punctuation: bool = True,
     isbd_punctuation: str = DEFAULT_ISBD_PUNCTUATION,
     config: Optional[Any] = None,
-) -> tuple[
-    WorkEntity,
-    ExpressionEntity,
-    ManifestationEntity,
-    list[ItemEntity],
-    list[AgentEntity],
-    list[WorkRelationship],
-    list[IdentifierEntity],
-    list[ManifestationExpressionAssociation],
-    list[ContributionEntity],
-]:
-    """Decompose a single MARCXML record into the WEMI entity core hierarchy.
-
-    `key_sink`, when given, collects the record's derived domain blocking keys as
-    `EntityKey` rows bound to the manifestation URI. It is a sink rather than an
-    eleventh tuple element so that adding it does not break the ten-way unpacking
-    at every existing call site; the tuple is slated to become a result object.
-    """
+) -> DecomposedWEMIResult:
+    """Decompose a single MARCXML record into the WEMI entity core hierarchy."""
     if source is None:
         source = get_default_carrier_source(config)
 
@@ -1939,6 +1937,9 @@ def decompose_marc_wemi(
 
     engine = serialization_engine or WEMISerializationEngine()
 
+    keys: list[EntityKey] = []
+    subjects: list[EntitySubject] = []
+
     # Check 758 Work / Instance links if present
     work_uri = None
     for f in _get_datafields(record_elem, "758"):
@@ -1954,22 +1955,21 @@ def decompose_marc_wemi(
     carrier_type = determine_carrier_type(record_elem, config=config)
 
     # Variant titles from 246 (Varying Form of Title) and 740 (Uncontrolled
-    # Related/Analytical Title) are routed through subject_sink so they're
+    # Related/Analytical Title) are routed to subjects so they're
     # searchable via BM25 and the dense work index — the same mechanism
     # MarcAuthorityLoader uses for 4XX tracing entries.
-    if subject_sink is not None:
-        for vt in parsed.get("variant_titles") or []:
-            if vt:
-                subject_sink.append(
-                    EntitySubject(
-                        entity_type="work",
-                        entity_id=0,
-                        source=source,
-                        source_record_id=source_id,
-                        relation_type="variant_title",
-                        raw_label=vt,
-                    )
+    for vt in parsed.get("variant_titles") or []:
+        if vt:
+            subjects.append(
+                EntitySubject(
+                    entity_type="work",
+                    entity_id=0,
+                    source=source,
+                    source_record_id=source_id,
+                    relation_type="variant_title",
+                    raw_label=vt,
                 )
+            )
 
     # Primary classification
     classification = None
@@ -2264,22 +2264,21 @@ def decompose_marc_wemi(
             key = uri or f"{vocab or ''}:{heading}"
             if key not in seen_mop_uris:
                 seen_mop_uris.add(key)
-                if subject_sink is not None:
-                    subject_sink.append(
-                        EntitySubject(
-                            entity_type="work",
-                            entity_id=0,
-                            entity_uri=work.work_uri,
-                            source=source,
-                            source_record_id=source_id,
-                            relation_type="medium_of_performance",
-                            vocabulary=vocab,
-                            concept_id=cid or uri,
-                            raw_label=heading,
-                            is_resolved=bool(vocab and (cid or uri)),
-                            is_primary=False,
-                        )
+                subjects.append(
+                    EntitySubject(
+                        entity_type="work",
+                        entity_id=0,
+                        entity_uri=work.work_uri,
+                        source=source,
+                        source_record_id=source_id,
+                        relation_type="medium_of_performance",
+                        vocabulary=vocab,
+                        concept_id=cid or uri,
+                        raw_label=heading,
+                        is_resolved=bool(vocab and (cid or uri)),
+                        is_primary=False,
                     )
+                )
 
     # Pre-render serializations using the WEMI Triad
     translators = [
@@ -2386,21 +2385,20 @@ def decompose_marc_wemi(
         if not ident.entity_uri:
             ident.entity_uri = _owner_uris.get(ident.entity_type)
 
-    if key_sink is not None:
-        _agents = parsed.get("agents") or []
-        _author_key = compute_author_key(
-            _agents[0]["name"] if _agents else None,
-            _agents[0].get("surname") if _agents else None,
+    _agents = parsed.get("agents") or []
+    _author_key = compute_author_key(
+        _agents[0]["name"] if _agents else None,
+        _agents[0].get("surname") if _agents else None,
+    )
+    _title_stem = compute_title_stem(
+        parsed.get("uniform_title") or parsed.get("title"), lang=parsed.get("language")
+    )
+    keys.extend(
+        to_manifestation_entity_keys(
+            manifestation.manifestation_uri,
+            derive_domain_keys(record_elem, parsed, work_type, _author_key, _title_stem),
         )
-        _title_stem = compute_title_stem(
-            parsed.get("uniform_title") or parsed.get("title"), lang=parsed.get("language")
-        )
-        key_sink.extend(
-            to_manifestation_entity_keys(
-                manifestation.manifestation_uri,
-                derive_domain_keys(record_elem, parsed, work_type, _author_key, _title_stem),
-            )
-        )
+    )
 
     # 600 personal name subjects -> Agent + Contribution (role="subject")
     for f in _get_datafields(record_elem, "600"):
@@ -2447,67 +2445,50 @@ def decompose_marc_wemi(
                 )
             )
 
-    if subject_sink is not None:
-        for s in parsed.get("subjects_folded") or []:
-            field = str(s.get("field") or "")
-            if field == "382" or s.get("category") == "medium_of_performance":
-                continue
-            relation_type = "topic"
-            if field == "651":
-                relation_type = "geographic"
-            elif field == "655":
-                relation_type = "genre_form"
-            elif field == "648":
-                relation_type = "temporal"
-            vocab = s.get("vocabulary")
-            cid = s.get("code") or s.get("concept_id")
-            raw_lbl = s.get("heading")
-            subject_sink.append(
-                EntitySubject(
-                    entity_type="work",
-                    entity_id=0,
-                    entity_uri=work.work_uri,
-                    source=source,
-                    source_record_id=source_id,
-                    relation_type=relation_type,
-                    vocabulary=vocab,
-                    concept_id=cid,
-                    raw_label=raw_lbl,
-                    is_resolved=bool(vocab and cid),
-                    is_primary=False,
-                )
+    for s in parsed.get("subjects_folded") or []:
+        field = str(s.get("field") or "")
+        if field == "382" or s.get("category") == "medium_of_performance":
+            continue
+        relation_type = "topic"
+        if field == "651":
+            relation_type = "geographic"
+        elif field == "655":
+            relation_type = "genre_form"
+        elif field == "648":
+            relation_type = "temporal"
+        vocab = s.get("vocabulary")
+        cid = s.get("code") or s.get("concept_id")
+        raw_lbl = s.get("heading")
+        subjects.append(
+            EntitySubject(
+                entity_type="work",
+                entity_id=0,
+                entity_uri=work.work_uri,
+                source=source,
+                source_record_id=source_id,
+                relation_type=relation_type,
+                vocabulary=vocab,
+                concept_id=cid,
+                raw_label=raw_lbl,
+                is_resolved=bool(vocab and cid),
+                is_primary=False,
             )
+        )
 
-    return (
-        work,
-        expression,
-        manifestation,
-        items,
-        agents_list,
-        relationships,
-        identifiers,
-        [assoc],
-        contributions,
+    return DecomposedWEMIResult(
+        work=work,
+        expression=expression,
+        manifestation=manifestation,
+        items=items,
+        agents=agents_list,
+        relationships=relationships,
+        identifiers=identifiers,
+        associations=[assoc],
+        contributions=contributions,
+        keys=keys,
+        subjects=subjects,
     )
 
-
-# Analytics are (title, creator) pairs but entity_keys stores one string per row,
-# so the pair is JSON-encoded. A control-character separator was tried first and
-# rejected: Python counts U+001C-U+001F as whitespace, so `.strip()` silently ate
-# it. JSON survives stripping, stays readable in the database, and cannot be
-# confused with subfield text whatever punctuation the title carries.
-def encode_analytic(title: str, creator: Optional[str]) -> str:
-    """Encode a constituent-work (title, creator) pair as one key value."""
-    return json.dumps([title, creator], ensure_ascii=False)
-
-
-def decode_analytic(value: str) -> tuple[str, Optional[str]]:
-    """Decode a key value written by `encode_analytic`."""
-    try:
-        title, creator = json.loads(value)
-    except ValueError, TypeError:
-        return value, None
-    return title, creator
 
 
 def _subfield_groups(
@@ -2576,42 +2557,42 @@ def extract_marc_constituents(
     """
     found: list[Constituent] = []
 
-    for precedence, field in enumerate(profile.fields):
-        if not field.tag:
+    for precedence, fld_spec in enumerate(profile.fields):
+        if not fld_spec.tag:
             continue  # an RDF entry; not this format's business
-        for datafield in _get_datafields(record_elem, field.tag):
-            if not _indicators_match(datafield, field.indicators):
+        for datafield in _get_datafields(record_elem, fld_spec.tag):
+            if not _indicators_match(datafield, fld_spec.indicators):
                 continue
-            for group, field_level in _subfield_groups(datafield, field.title or "t"):
+            for group, field_level in _subfield_groups(datafield, fld_spec.title or "t"):
 
                 def value(code: Optional[str]) -> Optional[str]:
                     if not code:
                         return None
                     return group.get(code) or field_level.get(code)
 
-                raw_title = value(field.title)
+                raw_title = value(fld_spec.title)
                 title = strip_isbd(raw_title).strip() if raw_title else None
                 if not title:
                     continue
-                raw_creator = value(field.creator)
+                raw_creator = value(fld_spec.creator)
                 creator = strip_isbd(raw_creator).strip() if raw_creator else None
                 found.append(
                     Constituent(
                         title=title,
                         creator=creator,
-                        ordinal=_stated_ordinal(field.ordinal, group, field_level),
-                        disc=_as_int(value(field.disc)),
-                        duration=_clean_duration(value(field.duration)),
-                        pagination=value(field.pagination),
-                        role=value(field.role),
-                        shape=profile.shape_of(field),
-                        component_type=field.component_type,
-                        container_key=field.container_key,
-                        container_ref=value(field.container_source_id),
-                        contributes_to_container=field.contributes_to_container,
-                        source_field=field.tag,
+                        ordinal=_stated_ordinal(fld_spec.ordinal, group, field_level),
+                        disc=_as_int(value(fld_spec.disc)),
+                        duration=_clean_duration(value(fld_spec.duration)),
+                        pagination=value(fld_spec.pagination),
+                        role=value(fld_spec.role),
+                        shape=profile.shape_of(fld_spec),
+                        component_type=fld_spec.component_type,
+                        container_key=fld_spec.container_key,
+                        container_ref=value(fld_spec.container_source_id),
+                        contributes_to_container=fld_spec.contributes_to_container,
+                        source_field=fld_spec.tag,
                         precedence=precedence,
-                        creator_controlled=field.creator_controlled,
+                        creator_controlled=fld_spec.creator_controlled,
                     )
                 )
 
@@ -2675,8 +2656,8 @@ def marc_main_entry_name(record_elem: etree._Element) -> Optional[str]:
     under title - which is exactly the case where inheriting would be wrong.
     """
     for tag in ("100", "110", "111"):
-        for field in _get_datafields(record_elem, tag):
-            name = strip_isbd(_get_subfield(field, "a"))
+        for df in _get_datafields(record_elem, tag):
+            name = strip_isbd(_get_subfield(df, "a"))
             if name:
                 return name
     return None
@@ -2696,113 +2677,6 @@ def extract_marc_analytics(record_elem: etree._Element) -> list[tuple[str, Optio
     """
     profile = get_constituent_profile("marc_legacy")
     return [(c.title, c.creator) for c in extract_marc_constituents(record_elem, profile)]
-
-
-def derive_domain_keys(
-    record_elem: etree._Element,
-    parsed: dict[str, Any],
-    work_type: str,
-    author_key: Optional[str],
-    title_stem: Optional[str],
-) -> dict[str, list[str]]:
-    """Derive every domain blocking key for one MARC record.
-
-    Single definition of the key bag, shared by the staged `MatchRecord` and by
-    the `entity_keys` rows written at ingest, so the two cannot drift apart.
-    """
-    keys: dict[str, list[str]] = {}
-
-    def _add(key_type: str, val: Optional[str]) -> None:
-        if val and str(val).strip():
-            clean = str(val).strip()
-            bucket = keys.setdefault(key_type, [])
-            if clean not in bucket:
-                bucket.append(clean)
-
-    idents = parsed.get("identifiers") or {}
-    first_issn = (idents.get("issn") or [None])[0]
-    first_isbn = (idents.get("isbn") or [None])[0]
-
-    uniform_title = parsed.get("uniform_title")
-    title = parsed.get("title")
-    agents = parsed.get("agents") or []
-    author_surname = agents[0].get("surname") if agents else None
-
-    # Persisted so a MatchRecord can be projected back out of WEMI rows exactly,
-    # rather than re-derived from stored titles and hoped to agree.
-    _add("author", author_key)
-    _add("title_stem", title_stem)
-    # Only when the record carries a 240/130. The work row stores the preferred
-    # title, which falls back to the 245, so projecting uniform_title from it
-    # would invent one for every record that has none.
-    _add("uniform_title", parsed.get("uniform_title"))
-
-    _add("work", compute_work_blocking_key(author_key, title_stem))
-
-    if work_type == "music":
-        _add("music_work", compute_music_work_key(author_key, uniform_title or title))
-
-    _add("series", compute_series_key(parsed.get("series_title"), first_issn))
-    _add("standard", first_isbn or first_issn)
-
-    pub_year = None
-    py_raw = parsed.get("publication_year") or ""
-    if str(py_raw).isdigit():
-        pub_year = int(py_raw)
-
-    start_page = None
-    for f in _get_datafields(record_elem, "773"):
-        q = _get_subfield(f, "q")
-        if q:
-            start_page = q
-            break
-    _add("citation", compute_host_citation_key(first_issn, pub_year, start_page, author_surname))
-
-    # Translators, from the same relator test the serialization engine already
-    # uses. The key type was declared on MatchRecord and consumed by the
-    # clusterer's pairwise scoring and funnel HH's dispatch, but nothing ever
-    # emitted it - so both read an always-empty value.
-    translator_names = [
-        a.get("name")
-        for a in agents
-        if "trl" in (a.get("role_counts") or {}) or a.get("role") == "trl"
-    ]
-    if translator_names:
-        _add(
-            "translators_signature",
-            " ".join(sorted(compute_author_key(n, None) for n in translator_names if n)).strip(),
-        )
-
-    # Bound-with, from 501 "Huomautus julkaisemisesta jonkin kanssa". The RDA
-    # guidance records this as a local field carrying $5 with the holding
-    # library's ISIL code, so it appears in institutional records rather than in
-    # shared Melinda ones - the key is read here because Melinda is not the only
-    # source a corpus comes from. A holdings-level fallback is still needed for
-    # sammelbands described only at item level.
-    for f in _get_datafields(record_elem, "501"):
-        note = _get_subfield(f, "a")
-        if note:
-            _add("sammelband", note)
-        # 014 links the bound-with relationship to the other record.
-        for linked in _get_subfields(f, "5"):
-            _add("sammelband_holder", linked)
-    for f in _get_datafields(record_elem, "014"):
-        for val in _get_subfields(f, "a"):
-            _add("sammelband", val)
-
-    _add("patent", (idents.get("patent_number") or [None])[0])
-    _add("fingerprint", (idents.get("fingerprint") or [None])[0])
-    _add("geodata_spatial", (parsed.get("cartographic_coordinates") or [None])[0])
-    _add("heritage_model", (parsed.get("digital_file_formats") or [None])[0])
-
-    for a_title, a_creator in extract_marc_analytics(record_elem):
-        _add("analytic", encode_analytic(a_title, a_creator))
-        # The title alone as well, so records sharing a track can be found by an
-        # exact key lookup. The paired form cannot serve that: two catalogues
-        # often disagree about a track's creator while agreeing on its title.
-        _add("analytic_title", a_title)
-
-    return keys
 
 
 def build_target_record_from_marc(
@@ -2858,7 +2732,7 @@ def build_target_record_from_marc(
 
     # Pre-render serializations
     engine = serialization_engine or WEMISerializationEngine()
-    work, expression, manifestation, *rest = decompose_marc_wemi(
+    decomp = decompose_marc_wemi(
         record_elem,
         source=source,
         id_source=id_source,
@@ -2867,6 +2741,7 @@ def build_target_record_from_marc(
         work_authority_sources=work_authority_sources,
         legacy_to_modern=legacy_to_modern,
     )
+    work, expression, manifestation = decomp.work, decomp.expression, decomp.manifestation
 
     if isinstance(record_elem, MarcRecordData):
         raw_payload = record_elem.to_xml_bytes()

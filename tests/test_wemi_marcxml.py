@@ -116,17 +116,13 @@ def test_decompose_monograph_wemi():
         ],
     )
 
-    (
-        work,
-        expr,
-        manif,
-        items,
-        agents,
-        relationships,
-        identifiers,
-        assoc,
-        contributions,
-    ) = decompose_marc_wemi(rec, source="melinda", include_items=False)
+    res = decompose_marc_wemi(rec, source="melinda", include_items=False)
+    work = res.work
+    expr = res.expression
+    manif = res.manifestation
+    identifiers = res.identifiers
+    assoc = res.associations
+    contributions = res.contributions
 
     assert work.title == "Sinuhe egyptiläinen"
     assert work.work_type == "text"
@@ -175,18 +171,10 @@ def test_decompose_music_wemi():
         ],
     )
 
-    subjs: list[EntitySubject] = []
-    (
-        work,
-        expr,
-        manif,
-        items,
-        agents,
-        relationships,
-        identifiers,
-        assoc,
-        contributions,
-    ) = decompose_marc_wemi(rec, source="fennica", subject_sink=subjs)
+    res = decompose_marc_wemi(rec, source="fennica")
+    work = res.work
+    identifiers = res.identifiers
+    subjs = res.subjects
 
     assert work.work_type == "music"
     assert work.title == "Finlandia"
@@ -231,7 +219,7 @@ def test_decompose_with_items():
     assert items[1].shelf_mark == "Vapaakappale B.44"
     assert items[1].barcode == "3987654321"
 
-    _, _, _, decomp_items, *rest = decompose_marc_wemi(rec, source="fennica", include_items=True)
+    decomp_items = decompose_marc_wemi(rec, source="fennica", include_items=True).items
     assert len(decomp_items) == 2
 
 
@@ -267,7 +255,8 @@ def test_decompose_marc_wemi_missing_id(caplog):
         ],
     )
     with caplog.at_level("WARNING"):
-        work, expr, manif, *_ = decompose_marc_wemi(rec, source="fennica")
+        res = decompose_marc_wemi(rec, source="fennica")
+        work, expr, manif = res.work, res.expression, res.manifestation
 
     # Derived from the record's own fields, so re-ingesting is idempotent.
     assert work.source_id.startswith("sha1:")
@@ -275,14 +264,14 @@ def test_decompose_marc_wemi_missing_id(caplog):
     assert manif.source_id == work.source_id
     assert any("carries no control number" in record.message for record in caplog.records)
 
-    again, *_ = decompose_marc_wemi(
+    again = decompose_marc_wemi(
         _build_marc_record(
             leader="00000cam a2200000 i 4500",
             controlfields={},
             datafields=[("245", "1", "0", [("a", "Nimetön kirja")])],
         ),
         source="fennica",
-    )
+    ).work
     assert again.source_id == work.source_id, "the same record must keep the same id"
 
 
@@ -408,7 +397,7 @@ def test_isbd_punctuation_is_stripped_consistently_on_both_paths():
         </record>""".encode()
     )
 
-    _w, _e, _m, _i, bib_agents, *_ = decompose_marc_wemi(bib, source="melinda")
+    bib_agents = decompose_marc_wemi(bib, source="melinda").agents
     _wl, _el, _ml, _il, auth_agents, *_ = decompose_marc_authority(auth, source="kanto")
 
     assert bib_agents[0].name == "Waltari, Mika"
@@ -430,9 +419,9 @@ def test_isbd_stripping_can_be_turned_off():
             <datafield tag="245" ind1="1" ind2="0"><subfield code="a">Sinuhe</subfield></datafield>
         </record>""".encode()
     )
-    _w, _e, _m, _i, agents, *_ = decompose_marc_wemi(
+    agents = decompose_marc_wemi(
         rec, source="melinda", strip_isbd_punctuation=False
-    )
+    ).agents
     assert agents[0].name == "Waltari, Mika,"
 
 
@@ -484,7 +473,7 @@ def test_configured_isbd_character_set_reaches_both_paths():
         </record>""".encode()
     )
     # Stripping spaces only must leave the comma, on both paths alike.
-    bib_agent = decompose_marc_wemi(bib, source="melinda", isbd_punctuation=" ")[4][0]
+    bib_agent = decompose_marc_wemi(bib, source="melinda", isbd_punctuation=" ").agents[0]
     auth_agent = decompose_marc_authority(auth, source="kanto", isbd_punctuation=" ")[4][0]
     assert bib_agent.name == "Waltari, Mika,"
     assert auth_agent.name == "Waltari, Mika,"
@@ -521,10 +510,10 @@ def test_agent_uri_does_not_depend_on_field_order():
     from reconciliator.loaders.marcxml import decompose_marc_wemi
 
     pair = [("Ahlqvist, August", "1826-1889"), ("Bergbom, Kaarlo", "1843-1906")]
-    forward = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
+    forward = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda").agents
     reverse = decompose_marc_wemi(
         _marc_with_contributors("R1", list(reversed(pair))), source="melinda"
-    )[4]
+    ).agents
 
     assert {a.name: a.agent_uri for a in forward} == {a.name: a.agent_uri for a in reverse}
 
@@ -533,8 +522,8 @@ def test_agent_uri_is_stable_across_identical_ingests():
     from reconciliator.loaders.marcxml import decompose_marc_wemi
 
     pair = [("Ahlqvist, August", "1826-1889")]
-    first = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
-    second = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
+    first = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda").agents
+    second = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda").agents
     assert [a.agent_uri for a in first] == [a.agent_uri for a in second]
 
 
@@ -556,8 +545,8 @@ def test_agent_ids_remain_scoped_to_their_record():
     from reconciliator.loaders.marcxml import decompose_marc_wemi
 
     pair = [("Ahlqvist, August", "1826-1889")]
-    a = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda")[4]
-    b = decompose_marc_wemi(_marc_with_contributors("R2", pair), source="melinda")[4]
+    a = decompose_marc_wemi(_marc_with_contributors("R1", pair), source="melinda").agents
+    b = decompose_marc_wemi(_marc_with_contributors("R2", pair), source="melinda").agents
     by_name_a = {x.name: x.agent_uri for x in a}
     by_name_b = {x.name: x.agent_uri for x in b}
     assert by_name_a["Ahlqvist, August"] != by_name_b["Ahlqvist, August"]
@@ -581,7 +570,7 @@ def test_an_authority_uri_beats_any_derived_id():
             <datafield tag="245" ind1="1" ind2="0"><subfield code="a">T</subfield></datafield>
         </record>""".encode()
     )
-    agent = decompose_marc_wemi(rec, source="melinda")[4][0]
+    agent = decompose_marc_wemi(rec, source="melinda").agents[0]
     assert agent.agent_uri == "kanto_pn:000123"
 
 
@@ -603,7 +592,7 @@ def test_all_decomposition_paths_mint_the_same_uri_shape():
         </record>""".encode()
     )
     shape = re.compile(r"^[^:]+:[^:]+:[0-9a-f]{16}$")
-    for agent in decompose_marc_wemi(bib, source="melinda")[4]:
+    for agent in decompose_marc_wemi(bib, source="melinda").agents:
         assert shape.match(agent.agent_uri), agent.agent_uri
     for agent in decompose_marc_authority(auth, source="kanto")[4]:
         assert shape.match(agent.agent_uri), agent.agent_uri

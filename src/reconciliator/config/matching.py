@@ -244,6 +244,16 @@ class BigClustConfig(BaseModel):
     device: str = Field(default="auto")
 
 
+class HybridClusterConfig(BaseModel):
+    """Configuration for hybrid BigClust coarse macro-partitioning + graph fine-reranking."""
+
+    boundary_margin: float = Field(default=0.15)
+    fine_threshold: float = Field(default=0.70)
+    max_candidates_per_boundary: int = Field(default=20)
+    twilight_lower: float = Field(default=0.55)
+    neural_boundary_threshold: float = Field(default=0.75)
+
+
 class WEMIClusterConfig(BaseModel):
     """Configuration for multiplex WEMI graph clustering and blocking."""
 
@@ -254,10 +264,13 @@ class WEMIClusterConfig(BaseModel):
         "dbscan",
         "hierarchical",
         "bigclust",
+        "hybrid_bigclust_graph",
+        "hybrid",
     ] = Field(
         default_factory=lambda: str(_CLUSTER_DEFAULTS.get("method", "multiplex_graph"))  # type: ignore[return-value]
     )
     bigclust: BigClustConfig = Field(default_factory=BigClustConfig)
+    hybrid: HybridClusterConfig = Field(default_factory=HybridClusterConfig)
     similarity_threshold: float = Field(
         default_factory=lambda: float(_CLUSTER_DEFAULTS.get("similarity_threshold", 0.85))
     )
@@ -387,6 +400,21 @@ class AgentClusterConfig(BaseModel):
     concept_similarity_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("concept_similarity_weight", 0.85)
+        )
+    )
+    enable_semantic_disambiguation: bool = Field(
+        default_factory=lambda: bool(
+            _AGENT_CLUSTERING_DEFAULTS.get("enable_semantic_disambiguation", True)
+        )
+    )
+    semantic_homonym_veto_threshold: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("semantic_homonym_veto_threshold", 0.40)
+        )
+    )
+    semantic_boost_threshold: float = Field(
+        default_factory=lambda: float(
+            _AGENT_CLUSTERING_DEFAULTS.get("semantic_boost_threshold", 0.85)
         )
     )
     max_blocking_bucket_size: int = Field(

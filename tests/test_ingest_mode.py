@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -48,21 +47,20 @@ def _record(control: str, title: str) -> etree._Element:
 
 
 def _ingest(store: WEMIRepository, source: str, control: str, title: str) -> None:
-    keys: list[Any] = []
-    w, e, m, itms, agts, rels, idents, assoc, contribs = decompose_marc_wemi(
-        _record(control, title), source=source, record_origin=source, key_sink=keys
+    res = decompose_marc_wemi(
+        _record(control, title), source=source, record_origin=source
     )
     store.insert_wemi_batch(
-        works=[w],
-        expressions=[e],
-        manifestations=[m],
-        items=itms,
-        agents=agts,
-        relationships=rels,
-        identifiers=idents,
-        manifestation_expressions=assoc,
-        contributions=contribs,
-        entity_keys=keys,
+        works=[res.work],
+        expressions=[res.expression],
+        manifestations=[res.manifestation],
+        items=res.items,
+        agents=res.agents,
+        relationships=res.relationships,
+        identifiers=res.identifiers,
+        manifestation_expressions=res.associations,
+        contributions=res.contributions,
+        entity_keys=res.keys,
         record_origin=source,
     )
 
