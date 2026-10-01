@@ -18,6 +18,10 @@ from reconciliator.clustering.agent.loader import (
     load_identifiers,
 )
 from reconciliator.clustering.agent.scoring import format_agent_text, score_agent_pair
+from reconciliator.clustering.common import (
+    CanonicalRepresentativeSelector,
+    InvertedIndexBlocker,
+)
 from reconciliator.config import AgentClusterConfig, AppConfig
 from reconciliator.database import (
     WEMIRepository,
@@ -32,7 +36,7 @@ from reconciliator.models import (
     ClusterRedirection,
 )
 from reconciliator.normalizers.linguistic import fold_diacritics
-from reconciliator.utils import UnionFind
+from reconciliator.utils import UnionFind, cluster_edges
 
 if TYPE_CHECKING:
     from reconciliator.embedding.protocol import VectorEmbedder
@@ -59,6 +63,14 @@ class AgentClusterer:
         self.hierarchy_service = hierarchy_service
         self.identity_manager = identity_manager or ClusterIdentityManager(repo)
         self.embedder = embedder
+        self._canonical_selector = CanonicalRepresentativeSelector[dict[str, Any]](
+            source_precedence=self.config.source_authority_precedence,
+            source_extractor=lambda a: str(a.get("source", "")),
+            tie_breaker=lambda a: (
+                0 if a.get("birth_year") is not None else 1,
+                str(a.get("source_id", "")),
+            ),
+        )
 
     def cluster_agents(self) -> AgentClusterResult:
         """Execute full agent clustering pipeline across sources."""
@@ -186,8 +198,8 @@ class AgentClusterer:
                 link_methods[pair_key] = method
                 link_confidences[pair_key] = score
 
-        # 6. Stage 4: Disjoint Set Partitioning
-        components = uf.get_components(all_agent_id_set)
+        # 6. Stage 4: Disjoint Set Partitioning via native Rust IntUnionFind
+        components = cluster_edges(all_agent_ids, list(link_methods.keys()))
 
         # 7. Stage 5: Canonical Hoisting & Attribute Aggregation
         clusters: list[AgentCluster] = []
@@ -451,15 +463,9 @@ class AgentClusterer:
             link_methods_breakdown=dict(method_counts),
         )
 
-    def _authority_rank(self, agent: dict[str, Any]) -> tuple[int, int, str]:
+    def _authority_rank(self, agent: dict[str, Any]) -> tuple[Any, ...]:
         """Rank agent for canonical representative election based on configured source precedence."""
-        src = str(agent.get("source", "")).lower()
-        try:
-            rank = self.config.source_authority_precedence.index(src)
-        except ValueError:
-            rank = len(self.config.source_authority_precedence) + 1
-        has_dates = 0 if agent.get("birth_year") is not None else 1
-        return (rank, has_dates, agent.get("source_id", ""))
+        return self._canonical_selector.compute_rank(agent)
 
     def _link_by_identifiers(
         self,
@@ -490,48 +496,54 @@ class AgentClusterer:
                     link_methods[pair_key] = f"identifier_{scheme}"
                     link_confidences[pair_key] = 1.0
 
+    def _extract_agent_blocking_keys(
+        self,
+        aid: int,
+        a: dict[str, Any],
+        attributes_by_agent: dict[int, dict[str, list[str]]],
+        blocking_keys: set[str],
+    ) -> list[str]:
+        keys = []
+        if "name_normalized" in blocking_keys:
+            n_norm = a.get("name_normalized")
+            if n_norm:
+                keys.append(f"name:{n_norm}")
+
+        if "surname_decade" in blocking_keys:
+            surname = a.get("surname")
+            birth = a.get("birth_year")
+            if surname and birth:
+                decade = birth // 10
+                keys.append(f"sur_decade:{surname.lower()}_{decade}x")
+
+        if "folded_surname" in blocking_keys:
+            surname = a.get("surname")
+            if surname:
+                folded = fold_diacritics(surname).lower().strip()
+                keys.append(f"folded_sur:{folded}")
+
+        if "variant_names" in blocking_keys:
+            for vn in attributes_by_agent.get(aid, {}).get("variant_name", []):
+                if vn:
+                    keys.append(f"var_name:{vn.strip().lower()}")
+        return keys
+
     def _generate_blocking_candidates(
         self,
         agents: dict[int, dict[str, Any]],
         attributes_by_agent: dict[int, dict[str, list[str]]],
     ) -> set[tuple[int, int]]:
         """Generate candidate pairs using configured multi-key blocking strategies."""
-        candidates: set[tuple[int, int]] = set()
         blocking_keys = set(self.config.blocking_keys)
-        buckets: dict[str, list[int]] = defaultdict(list)
-
-        for aid, a in agents.items():
-            if "name_normalized" in blocking_keys:
-                n_norm = a.get("name_normalized")
-                if n_norm:
-                    buckets[f"name:{n_norm}"].append(aid)
-
-            if "surname_decade" in blocking_keys:
-                surname = a.get("surname")
-                birth = a.get("birth_year")
-                if surname and birth:
-                    decade = birth // 10
-                    buckets[f"sur_decade:{surname.lower()}_{decade}x"].append(aid)
-
-            if "folded_surname" in blocking_keys:
-                surname = a.get("surname")
-                if surname:
-                    folded = fold_diacritics(surname).lower().strip()
-                    buckets[f"folded_sur:{folded}"].append(aid)
-
-            if "variant_names" in blocking_keys:
-                for vn in attributes_by_agent.get(aid, {}).get("variant_name", []):
-                    if vn:
-                        buckets[f"var_name:{vn.strip().lower()}"].append(aid)
-
-        max_bucket = self.config.max_blocking_bucket_size
-        for _, aids in buckets.items():
-            if 1 < len(aids) <= max_bucket:
-                for i in range(len(aids)):
-                    for j in range(i + 1, len(aids)):
-                        candidates.add((min(aids[i], aids[j]), max(aids[i], aids[j])))
-
-        return candidates
+        blocker = InvertedIndexBlocker[tuple[int, dict[str, Any]], int](
+            key_extractor=lambda item: self._extract_agent_blocking_keys(
+                item[0], item[1], attributes_by_agent, blocking_keys
+            ),
+            id_extractor=lambda item: item[0],
+            min_bucket_size=2,
+            max_bucket_size=self.config.max_blocking_bucket_size,
+        )
+        return blocker.generate_candidate_pairs(agents.items())
 
     def _score_pair(
         self,

@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from typing import Any, Optional
 
 from reconciliator.authority.lifecycle import ClusterIdentityManager
+from reconciliator.clustering.common import CanonicalRepresentativeSelector
 from reconciliator.database import WEMIRepository
 from reconciliator.models import (
     CorpusLinkage,
@@ -130,21 +131,21 @@ def extract_manifestation_key(target: MatchRecord) -> str:
     return f"raw::{target.record_id}::{t_stem}::{year}::{vol}"
 
 
+_work_canonical_selector = CanonicalRepresentativeSelector[MatchRecord](
+    tie_breaker=lambda r: (
+        -(1 if r.uniform_title else 0),
+        -(len(r.title or "")),
+        r.record_id,
+    )
+)
+
+
 def select_canonical_work_record(records: Sequence[MatchRecord]) -> MatchRecord:
     """Select the best representative MatchRecord for a Work cluster.
 
     Prefers uniform titles, longer display titles, and deterministic record_id sorting.
     """
-    if not records:
-        raise ValueError("Cannot select canonical record from an empty sequence.")
-    return sorted(
-        records,
-        key=lambda r: (
-            -(1 if r.uniform_title else 0),
-            -(len(r.title or "")),
-            r.record_id,
-        ),
-    )[0]
+    return _work_canonical_selector.select_canonical(records)
 
 
 class WEMIClusterBuilder:

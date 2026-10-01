@@ -17,6 +17,7 @@ from reconciliator._core.clustering import (
     py_lcs_length as _rust_lcs_length,
 )
 from reconciliator.authority.lifecycle import ClusterIdentityManager
+from reconciliator.clustering.common import InvertedIndexBlocker
 from reconciliator.clustering.evaluator import BibliographicalEdgeEvaluator
 from reconciliator.clustering.protocol import BaseCorpusClusterer
 from reconciliator.clustering.wemi_builder import (
@@ -43,6 +44,8 @@ from reconciliator.models import (
 )
 from reconciliator.reconciliation import WorkMatcher
 from reconciliator.utils import (
+    UnionFind,
+    clean_alphanumeric,
     cluster_edges,
     extract_identifiers_from_target,
 )
@@ -74,7 +77,12 @@ class MultiplexGraphClusterer(BaseCorpusClusterer):
         self.corpus_origins = corpus_origins
         self.identity_manager = identity_manager or ClusterIdentityManager(self.corpus_repo)
         self.builder = WEMIClusterBuilder(self.wemi_repo, self.identity_manager)
-        self.evaluator = BibliographicalEdgeEvaluator(config=self.config)
+        embedder = getattr(self.matcher, "embedder", None)
+        self.evaluator = BibliographicalEdgeEvaluator(
+            config=self.config,
+            embedder=embedder,
+            repo=self.corpus_repo,
+        )
 
     def generate_blocking_keys(self, target: MatchRecord) -> list[str]:
         """Generate deterministic blocking keys across all 35 key families and identifiers."""
@@ -219,47 +227,100 @@ class MultiplexGraphClusterer(BaseCorpusClusterer):
             r.record_id: extract_identifiers_from_target(r) for r in records
         }
 
-        # Step 1: Blocking
-        blocks: dict[str, list[str]] = defaultdict(list)
-        for r in records:
-            for b_key in self.generate_blocking_keys(r):
-                blocks[b_key].append(r.record_id)
+        # Step 1: Candidate Generation via common InvertedIndexBlocker
+        blocker = InvertedIndexBlocker[MatchRecord, str](
+            key_extractor=self.generate_blocking_keys,
+            id_extractor=lambda r: r.record_id,
+            min_bucket_size=2,
+            max_bucket_size=getattr(
+                self.config, "max_block_size", getattr(self.config, "max_cluster_size", 500)
+            ),
+        )
+        candidate_pairs = blocker.generate_candidate_pairs(records)
 
-        # Step 2: Edge Generation
+        # Step 2: Edge Generation with Deterministic Identifier Shortcut & Connected Skipping
         edges: list[ClusterEdge] = []
-        visited_pairs: set[tuple[str, str]] = set()
-
-        for _, member_ids in blocks.items():
-            if len(member_ids) < 2 or len(member_ids) > self.config.max_block_size:
-                continue
-            n_members = len(member_ids)
-            for i in range(n_members):
-                for j in range(i + 1, n_members):
-                    id_a, id_b = member_ids[i], member_ids[j]
-                    pair = (id_a, id_b) if id_a < id_b else (id_b, id_a)
-                    if pair in visited_pairs:
-                        continue
-                    visited_pairs.add(pair)
-
-                    r_a = records_map[id_a]
-                    r_b = records_map[id_b]
-                    score, method = self.compute_pairwise_score(
-                        r_a, r_b, ids_cache[id_a], ids_cache[id_b]
-                    )
-
-                    if score >= self.config.similarity_threshold:
-                        edges.append(
-                            ClusterEdge(
-                                source_record_id=pair[0],
-                                target_record_id=pair[1],
-                                similarity_score=score,
-                                match_method=method,
-                            )
-                        )
-
-        # Step 3: Connected Components
         all_ids = list(records_map.keys())
-        edge_pairs = [(e.source_record_id, e.target_record_id) for e in edges]
+        uf: UnionFind[str] = UnionFind(all_ids)
+        linked_pairs: set[tuple[str, str]] = set()
+
+        # 2a. Deterministic Pre-Linking Fast Path for exact standard identifiers
+        for scheme in self.config.common_schemes:
+            ident_index: dict[str, list[str]] = defaultdict(list)
+            for rid in all_ids:
+                for v in ids_cache[rid].get(scheme, []):
+                    clean_v = clean_alphanumeric(v)
+                    if clean_v:
+                        ident_index[clean_v].append(rid)
+            for _, aids in ident_index.items():
+                if len(aids) > 1:
+                    primary = aids[0]
+                    for other in aids[1:]:
+                        if uf.find(primary) != uf.find(other):
+                            uf.union(primary, other)
+                            pair = (primary, other) if primary < other else (other, primary)
+                            if pair not in linked_pairs:
+                                linked_pairs.add(pair)
+                                edges.append(
+                                    ClusterEdge(
+                                        source_node=pair[0],
+                                        target_node=pair[1],
+                                        weight=1.0,
+                                        evidence_type=f"identifier:{scheme}",
+                                    )
+                                )
+
+        # 2b. Deterministic Pre-Linking Fast Path for specialized domain keys
+        for k_type in set(self.config.domain_key_types):
+            domain_index: dict[str, list[str]] = defaultdict(list)
+            for r in records:
+                for v in r.keys.get(k_type, []):
+                    clean_v = v.strip().lower() if v else ""
+                    if clean_v:
+                        domain_index[clean_v].append(r.record_id)
+            for _, aids in domain_index.items():
+                if len(aids) > 1:
+                    primary = aids[0]
+                    for other in aids[1:]:
+                        if uf.find(primary) != uf.find(other):
+                            uf.union(primary, other)
+                            pair = (primary, other) if primary < other else (other, primary)
+                            if pair not in linked_pairs:
+                                linked_pairs.add(pair)
+                                edges.append(
+                                    ClusterEdge(
+                                        source_node=pair[0],
+                                        target_node=pair[1],
+                                        weight=1.0,
+                                        evidence_type=f"domain_key:{k_type}",
+                                    )
+                                )
+
+        # 2c. Candidate Scoring for remaining pairs (skipping already-unified components)
+        for pair in candidate_pairs:
+            id_a, id_b = pair
+            if uf.find(id_a) == uf.find(id_b):
+                continue
+
+            r_a = records_map[id_a]
+            r_b = records_map[id_b]
+            score, method = self.compute_pairwise_score(
+                r_a, r_b, ids_cache[id_a], ids_cache[id_b]
+            )
+
+            if score >= self.config.similarity_threshold:
+                uf.union(id_a, id_b)
+                edges.append(
+                    ClusterEdge(
+                        source_node=pair[0],
+                        target_node=pair[1],
+                        weight=score,
+                        evidence_type=method,
+                    )
+                )
+
+        # Step 3: Connected Components via native Rust IntUnionFind
+        edge_pairs = [(e.source_node, e.target_node) for e in edges]
         work_components = cluster_edges(all_ids, edge_pairs)
 
         # Step 4 & 5: WEMI Multi-tier entity creation

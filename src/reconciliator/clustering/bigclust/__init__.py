@@ -9,6 +9,10 @@ from reconciliator.clustering.bigclust.engine import (
     BigClustResult,
     IntermediateClusterSolution,
 )
+from reconciliator.clustering.bigclust.graph import (
+    SparseSimilarityGraph,
+    build_sparse_similarity_graph,
+)
 from reconciliator.clustering.bigclust.multiplex import BigClustMultiplexClusterer
 from reconciliator.clustering.bigclust.slmba import MetalSLMBAOptimizer, SLMBAParameters
 from reconciliator.clustering.bigclust.validity import (
@@ -25,4 +29,6 @@ __all__ = [
     "SLMBAParameters",
     "ClusterValidityMetrics",
     "compute_validity_indices",
+    "SparseSimilarityGraph",
+    "build_sparse_similarity_graph",
 ]

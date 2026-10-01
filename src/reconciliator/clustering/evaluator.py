@@ -8,43 +8,61 @@ fuzzy metadata similarity) between bibliographic records.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
+import numpy as np
 from rapidfuzz import fuzz
 
 from reconciliator._core.clustering import (
     py_evaluate_aggregate_overlap as _rust_evaluate_aggregate_overlap,
+)
+from reconciliator.clustering.common.evaluator import (
+    CompositeEdgeEvaluator,
+    FeatureScorer,
+    ModulatorRule,
+    ShortcutRule,
+    VetoRule,
 )
 from reconciliator.config import WEMIClusterConfig
 from reconciliator.models import MatchRecord
 from reconciliator.normalizers.record import normalize_volume
 from reconciliator.utils import clean_alphanumeric
 
+if TYPE_CHECKING:
+    from reconciliator.database import WEMIRepository
+    from reconciliator.embedding.protocol import VectorEmbedder
 
-class BibliographicalEdgeEvaluator:
-    """Evaluates pairwise edge weights, hard vetoes, and evidence between bibliographic records."""
 
-    def __init__(self, config: Optional[WEMIClusterConfig] = None) -> None:
-        self.config = config or WEMIClusterConfig()
+@dataclass
+class BibliographicalEvaluationContext:
+    """Context holding extracted identifiers and optional embedding services."""
 
-    def evaluate(
+    ids1: dict[str, list[str]]
+    ids2: dict[str, list[str]]
+    embedder: Optional[VectorEmbedder] = None
+    repo: Optional[WEMIRepository] = None
+
+
+class BibliographicalIdentifierShortcut(
+    ShortcutRule[MatchRecord, BibliographicalEvaluationContext]
+):
+    """Deterministic shortcut rule for exact standard identifiers and domain keys."""
+
+    def __init__(self, config: WEMIClusterConfig) -> None:
+        self.config = config
+
+    def evaluate_shortcut(
         self,
         r1: MatchRecord,
         r2: MatchRecord,
-        ids1: dict[str, list[str]],
-        ids2: dict[str, list[str]],
-    ) -> tuple[float, str]:
-        """Compute composite pairwise similarity score and evidence between two records.
-
-        Returns:
-            Tuple of (score, evidence_or_veto_reason).
-        """
+        context: BibliographicalEvaluationContext,
+    ) -> Optional[tuple[float, str]]:
         # 1. Exact standard identifier match
-        common_schemes = self.config.common_schemes
-        for scheme in common_schemes:
-            if scheme in ids1 and scheme in ids2:
-                v1_set = {clean_alphanumeric(x) for x in ids1[scheme]}
-                v2_set = {clean_alphanumeric(x) for x in ids2[scheme]}
+        for scheme in self.config.common_schemes:
+            if scheme in context.ids1 and scheme in context.ids2:
+                v1_set = {clean_alphanumeric(x) for x in context.ids1[scheme]}
+                v2_set = {clean_alphanumeric(x) for x in context.ids2[scheme]}
                 v1_set.discard("")
                 v2_set.discard("")
                 if v1_set & v2_set:
@@ -59,15 +77,35 @@ class BibliographicalEdgeEvaluator:
                 if s1 & s2:
                     return 1.0, f"domain_key:{k_type}"
 
-        # Check explicit volume designation compatibility (hard veto)
+        return None
+
+
+class BibliographicalVetoRule(VetoRule[MatchRecord, BibliographicalEvaluationContext]):
+    """Hard vetoes: volume designation conflict, numeric title conflict, aggregate overlap."""
+
+    def __init__(self, config: WEMIClusterConfig) -> None:
+        self.config = config
+
+    def evaluate_veto(
+        self,
+        r1: MatchRecord,
+        r2: MatchRecord,
+        context: BibliographicalEvaluationContext,
+    ) -> Optional[tuple[float, str]]:
+        # Explicit volume designation compatibility
         if r1.volume_designation and r2.volume_designation:
-            v1 = normalize_volume(r1.volume_designation) or r1.volume_designation.strip().lower()
-            v2 = normalize_volume(r2.volume_designation) or r2.volume_designation.strip().lower()
+            v1 = (
+                normalize_volume(r1.volume_designation)
+                or r1.volume_designation.strip().lower()
+            )
+            v2 = (
+                normalize_volume(r2.volume_designation)
+                or r2.volume_designation.strip().lower()
+            )
             if v1 != v2:
                 return 0.0, "volume_conflict"
 
-        # Check numeric title conflict (hard veto)
-        # Extract numeric tokens from titles, excluding publication years
+        # Numeric title conflict (excluding publication years)
         pub_years = {str(y) for y in (r1.year, r2.year) if y and 1000 <= y <= 9999}
         r1_title_nums = (
             set(re.findall(r"\b\d+\b", r1.title or ""))
@@ -85,7 +123,7 @@ class BibliographicalEdgeEvaluator:
         if diff1 and diff2:
             return 0.0, "numeric_title_conflict"
 
-        # Check aggregate constituent overlap and container-part collision
+        # Aggregate constituent overlap and container-part collision
         agg_cfg = getattr(self.config, "aggregates", None)
         if agg_cfg and agg_cfg.enabled:
             c1 = r1.constituent_cluster_ids or r1.keys.get("analytic", [])
@@ -105,8 +143,24 @@ class BibliographicalEdgeEvaluator:
             if res is not None:
                 return res
 
-        # 3. Composite metadata similarity
-        # Title similarity (cross-checking uniform_title, title, title_stem)
+        return None
+
+
+class BibliographicalMetadataScorer(
+    FeatureScorer[MatchRecord, BibliographicalEvaluationContext]
+):
+    """Computes composite metadata similarity (title, author, year, work type)."""
+
+    def __init__(self, config: WEMIClusterConfig) -> None:
+        self.config = config
+
+    def score_feature(
+        self,
+        r1: MatchRecord,
+        r2: MatchRecord,
+        context: BibliographicalEvaluationContext,
+    ) -> tuple[float, float]:
+        pub_years = {str(y) for y in (r1.year, r2.year) if y and 1000 <= y <= 9999}
         titles_r1 = [t for t in (r1.uniform_title, r1.title, r1.title_stem) if t]
         titles_r2 = [t for t in (r2.uniform_title, r2.title, r2.title_stem) if t]
         title_sim = 0.0
@@ -139,8 +193,9 @@ class BibliographicalEdgeEvaluator:
         # Work type compatibility
         if r1.work_type == r2.work_type:
             type_sim = 1.0
-        elif {r1.work_type, r2.work_type}.issubset({"text", "audio_nonmusic", "tactile"}):
-            # Cross-format: audiobook or braille realization of print work
+        elif {r1.work_type, r2.work_type}.issubset(
+            {"text", "audio_nonmusic", "tactile"}
+        ):
             type_sim = 1.0
         elif {r1.work_type, r2.work_type}.issubset({"text", "article", "chapter"}):
             type_sim = scoring.cross_format_type_similarity
@@ -150,10 +205,111 @@ class BibliographicalEdgeEvaluator:
         if r1.author_key and r2.author_key:
             w = scoring.with_author
             score = (
-                w.title * title_sim + w.author * author_sim + w.year * year_sim + w.type * type_sim
+                w.title * title_sim
+                + w.author * author_sim
+                + w.year * year_sim
+                + w.type * type_sim
             )
         else:
             w = scoring.without_author
             score = w.title * title_sim + w.year * year_sim + w.type * type_sim
 
-        return round(score, 4), "metadata_similarity"
+        return round(score, 4), 1.0
+
+
+class BibliographicalSemanticHomonymModulator(
+    ModulatorRule[MatchRecord, BibliographicalEvaluationContext]
+):
+    """Homonym divergence guard: vetoes matches if high title similarity but divergent embeddings."""
+
+    def __init__(self, veto_threshold: float = 0.40) -> None:
+        self.veto_threshold = veto_threshold
+
+    def modulate(
+        self,
+        score: float,
+        r1: MatchRecord,
+        r2: MatchRecord,
+        context: BibliographicalEvaluationContext,
+    ) -> tuple[float, str]:
+        if context.embedder is None or context.repo is None:
+            return score, "metadata_similarity"
+
+        # Check if titles are very similar but author keys differ or are missing
+        t1 = r1.uniform_title or r1.title or r1.title_stem
+        t2 = r2.uniform_title or r2.title or r2.title_stem
+        if not t1 or not t2:
+            return score, "metadata_similarity"
+
+        title_sim = fuzz.token_set_ratio(t1, t2) / 100.0
+        if title_sim >= 0.90:
+            author_shared = bool(
+                r1.author_key
+                and r2.author_key
+                and r1.author_key.strip().lower() == r2.author_key.strip().lower()
+            )
+            if not author_shared:
+                try:
+                    text1 = f"Title: {t1} | Author: {r1.author_key or ''} | Type: {r1.work_type}"
+                    text2 = f"Title: {t2} | Author: {r2.author_key or ''} | Type: {r2.work_type}"
+                    vecs = context.repo.embed_texts_cached(
+                        embedder=context.embedder,
+                        texts=[text1, text2],
+                        entity_type="work",
+                    )
+                    if len(vecs) == 2:
+                        v1, v2 = vecs[0], vecs[1]
+                        norm1 = float(np.linalg.norm(v1))
+                        norm2 = float(np.linalg.norm(v2))
+                        if norm1 > 0 and norm2 > 0:
+                            cos_sim = float(np.dot(v1, v2) / (norm1 * norm2))
+                            if cos_sim < self.veto_threshold:
+                                return 0.0, "veto_semantic_homonym_divergence"
+                except Exception:
+                    pass
+
+        return score, "metadata_similarity"
+
+
+class BibliographicalEdgeEvaluator:
+    """Evaluates pairwise edge weights, hard vetoes, and evidence between bibliographic records."""
+
+    def __init__(
+        self,
+        config: Optional[WEMIClusterConfig] = None,
+        embedder: Optional[VectorEmbedder] = None,
+        repo: Optional[WEMIRepository] = None,
+    ) -> None:
+        self.config = config or WEMIClusterConfig()
+        self.embedder = embedder
+        self.repo = repo
+
+        self.pipeline: CompositeEdgeEvaluator[
+            MatchRecord, BibliographicalEvaluationContext
+        ] = CompositeEdgeEvaluator(
+            shortcuts=[BibliographicalIdentifierShortcut(self.config)],
+            vetoes=[BibliographicalVetoRule(self.config)],
+            scorers=[BibliographicalMetadataScorer(self.config)],
+            modulators=[BibliographicalSemanticHomonymModulator()],
+            default_method="metadata_similarity",
+        )
+
+    def evaluate(
+        self,
+        r1: MatchRecord,
+        r2: MatchRecord,
+        ids1: dict[str, list[str]],
+        ids2: dict[str, list[str]],
+    ) -> tuple[float, str]:
+        """Compute composite pairwise similarity score and evidence between two records.
+
+        Returns:
+            Tuple of (score, evidence_or_veto_reason).
+        """
+        context = BibliographicalEvaluationContext(
+            ids1=ids1,
+            ids2=ids2,
+            embedder=self.embedder,
+            repo=self.repo,
+        )
+        return self.pipeline.evaluate(r1, r2, context)

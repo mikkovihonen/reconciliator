@@ -61,6 +61,11 @@ def extract_identifiers_from_target(target: MatchRecord) -> dict[str, list[str]]
         for value in values:
             _add(scheme, value)
 
+    for k_type, values in (target.keys or {}).items():
+        if k_type.lower() in ("isbn", "issn", "urn", "doi", "oclc", "isrc", "ismn"):
+            for v in values:
+                _add(k_type, v)
+
     return ids
 
 

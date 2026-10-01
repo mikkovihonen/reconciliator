@@ -79,6 +79,7 @@ config.yaml
 # Local model cache and weights
 .cache/
 models/
+!src/reconciliator/models
 
 # Documentation builds (Zensical site output and generated index)
 site/
