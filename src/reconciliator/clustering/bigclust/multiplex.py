@@ -63,14 +63,9 @@ class BigClustMultiplexClusterer(BaseCorpusClusterer):
         self.builder = WEMIClusterBuilder(self.wemi_repo, self.identity_manager)
         self._template_engine = None
 
-        if device is not None:
-            self.device = device
-        elif torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
+        from reconciliator.utils.device import resolve_compute_device
+
+        self.device = resolve_compute_device(device)
 
     @property
     def embedder(self) -> VectorEmbedder:

@@ -49,6 +49,15 @@ class IngestFilterConfig(BaseModel):
         default_factory=lambda: _INGEST_FILTER_DEFAULTS.get("until_year")
     )
 
+    @model_validator(mode="after")
+    def validate_year_range(self) -> IngestFilterConfig:
+        if self.from_year is not None and self.until_year is not None:
+            if self.from_year > self.until_year:
+                raise ValueError(
+                    f"from_year ({self.from_year}) must be less than or equal to until_year ({self.until_year})"
+                )
+        return self
+
     def accepts(
         self,
         work_type: Optional[str] = None,
@@ -351,3 +360,33 @@ class IngestionConfig(BaseModel):
             for k, v in (_INGESTION_DEFAULTS.get("skosmos") or {}).items()
         }
     )
+
+    @model_validator(mode="after")
+    def inherit_oai_defaults(self) -> IngestionConfig:
+        shared_fields = (
+            "workers",
+            "max_concurrent_requests",
+            "slice_days",
+            "batch_size",
+            "batch_flush_interval_seconds",
+            "batch_queue_size",
+            "request_delay",
+            "timeout",
+            "max_retries",
+            "base_delay",
+            "http2",
+            "prefetch",
+            "checkpoint_interval_records",
+            "checkpoint_interval_seconds",
+            "use_synchronous_commit_off",
+            "drop_indexes_during_replace",
+            "adopt_previous_task_id",
+            "truncate_overlong_values",
+            "truncation_marker",
+            "default_max_field_length",
+        )
+        for src_cfg in self.oai.values():
+            for f in shared_fields:
+                if f not in src_cfg.model_fields_set and hasattr(self.oai_defaults, f):
+                    setattr(src_cfg, f, getattr(self.oai_defaults, f))
+        return self

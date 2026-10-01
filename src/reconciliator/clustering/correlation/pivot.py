@@ -38,6 +38,12 @@ class CCPivotEngine:
         algorithm: str = "parallel_pivot",
         device: Optional[torch.device] = None,
     ) -> None:
+        if max_parallel_pivots < 1:
+            raise ValueError(f"max_parallel_pivots must be at least 1, got {max_parallel_pivots}")
+        if algorithm not in ("parallel_pivot", "serial_pivot"):
+            raise ValueError(
+                f"Unsupported algorithm: '{algorithm}'. Supported algorithms: 'parallel_pivot', 'serial_pivot'"
+            )
         self.positive_threshold = positive_threshold
         self.max_parallel_pivots = max_parallel_pivots
         self.algorithm = algorithm

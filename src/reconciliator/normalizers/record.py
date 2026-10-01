@@ -38,6 +38,17 @@ from reconciliator.normalizers.relators import RelatorRegistry
 from reconciliator.vocab import VocabFolder, extract_concept_id, normalize_subject_vocabulary
 
 
+_ISO_639_2_TO_1: dict[str, str] = {
+    "fin": "fi",
+    "swe": "sv",
+    "eng": "en",
+    "ger": "de",
+    "deu": "de",
+    "fre": "fr",
+    "fra": "fr",
+}
+
+
 def clean_title(
     title: str,
     strip_articles: bool = True,
@@ -55,8 +66,15 @@ def clean_title(
         active_articles = articles if articles is not None else DEFAULT_NON_FILING_ARTICLES
         if isinstance(active_articles, dict):
             target_articles: list[str] = []
-            if lang and lang in active_articles:
-                target_articles = list(active_articles[lang])
+            if lang:
+                norm_lang = lang.strip().lower()
+                norm_lang_2 = _ISO_639_2_TO_1.get(norm_lang, norm_lang)
+                if norm_lang in active_articles:
+                    target_articles = list(active_articles[norm_lang])
+                elif norm_lang_2 in active_articles:
+                    target_articles = list(active_articles[norm_lang_2])
+                else:
+                    target_articles = []
             else:
                 for arts in active_articles.values():
                     target_articles.extend(arts)

@@ -42,7 +42,17 @@ class GPUMarkovClusterEngine:
         pruning_threshold: float = 1e-4,
         device: Optional[torch.device] = None,
     ) -> None:
-        self.expansion_power = max(2, expansion_power)
+        if expansion_power < 2:
+            raise ValueError(f"expansion_power must be >= 2, got {expansion_power}")
+        if inflation_power <= 1.0:
+            raise ValueError(f"inflation_power must be > 1.0, got {inflation_power}")
+        if max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {max_iterations}")
+        if convergence_tol <= 0.0:
+            raise ValueError(f"convergence_tol must be > 0.0, got {convergence_tol}")
+        if not (0.0 <= pruning_threshold < 1.0):
+            raise ValueError(f"pruning_threshold must be in [0.0, 1.0), got {pruning_threshold}")
+        self.expansion_power = expansion_power
         self.inflation_power = inflation_power
         self.max_iterations = max_iterations
         self.convergence_tol = convergence_tol

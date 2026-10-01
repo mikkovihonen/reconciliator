@@ -40,6 +40,12 @@ class GPUDBSCANEngine:
         tile_size: int = 4096,
         device: Optional[torch.device] = None,
     ) -> None:
+        if eps <= 0:
+            raise ValueError(f"eps must be positive, got {eps}")
+        if min_samples < 1:
+            raise ValueError(f"min_samples must be at least 1, got {min_samples}")
+        if tile_size < 1:
+            raise ValueError(f"tile_size must be at least 1, got {tile_size}")
         self.eps = eps
         self.min_samples = min_samples
         self.metric = metric.lower()

@@ -156,11 +156,11 @@ class ReconcileConfig(IngestFilterConfig, FieldTruncationConfig):
     )
     translator_alignment_threshold: float = Field(
         default_factory=lambda: float(
-            _RECONCILE_DEFAULTS.get("translator_alignment_threshold", 0.80)
+            _RECONCILE_DEFAULTS.get("translator_alignment_threshold", 0.70)
         )
     )
     agent_aligner_threshold: float = Field(
-        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("agent_aligner_threshold", 0.85))
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("agent_aligner_threshold", 85.0))
     )
     life_date_tolerance_years: int = Field(
         default_factory=lambda: int(_RECONCILE_DEFAULTS.get("life_date_tolerance_years", 2))
@@ -170,14 +170,14 @@ class ReconcileConfig(IngestFilterConfig, FieldTruncationConfig):
     )
     qualifier_similarity_threshold: float = Field(
         default_factory=lambda: float(
-            _RECONCILE_DEFAULTS.get("qualifier_similarity_threshold", 0.80)
+            _RECONCILE_DEFAULTS.get("qualifier_similarity_threshold", 80.0)
         )
     )
     distribution_match_threshold: float = Field(
-        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("distribution_match_threshold", 0.85))
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("distribution_match_threshold", 80.0))
     )
     surname_similarity_threshold: float = Field(
-        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("surname_similarity_threshold", 0.85))
+        default_factory=lambda: float(_RECONCILE_DEFAULTS.get("surname_similarity_threshold", 85.0))
     )
     allow_pseudonym_author_match: bool = Field(
         default_factory=lambda: bool(_RECONCILE_DEFAULTS.get("allow_pseudonym_author_match", True))
@@ -202,6 +202,37 @@ class ReconcileConfig(IngestFilterConfig, FieldTruncationConfig):
         if not (0.0 <= self.agent_fallback_threshold <= 1.0):
             raise ValueError(
                 f"agent_fallback_threshold must be in [0.0, 1.0], got {self.agent_fallback_threshold}"
+            )
+        for attr in (
+            "agent_aligner_threshold",
+            "qualifier_similarity_threshold",
+            "distribution_match_threshold",
+            "surname_similarity_threshold",
+        ):
+            val = getattr(self, attr)
+            if not (0.0 <= val <= 100.0):
+                raise ValueError(f"{attr} must be in [0.0, 100.0], got {val}")
+            if 0.0 < val <= 1.0:
+                setattr(self, attr, val * 100.0)
+        if not (0.0 <= self.translator_alignment_threshold <= 1.0):
+            raise ValueError(
+                f"translator_alignment_threshold must be in [0.0, 1.0], got {self.translator_alignment_threshold}"
+            )
+        if not (0.0 <= self.pseudonym_author_match_weight <= 1.0):
+            raise ValueError(
+                f"pseudonym_author_match_weight must be in [0.0, 1.0], got {self.pseudonym_author_match_weight}"
+            )
+        if self.max_editions_compared < 1:
+            raise ValueError(
+                f"max_editions_compared must be at least 1, got {self.max_editions_compared}"
+            )
+        if self.life_date_tolerance_years < 0:
+            raise ValueError(
+                f"life_date_tolerance_years cannot be negative, got {self.life_date_tolerance_years}"
+            )
+        if self.homonym_score_margin < 0:
+            raise ValueError(
+                f"homonym_score_margin cannot be negative, got {self.homonym_score_margin}"
             )
         if self.chronology_min_author_age < 0:
             raise ValueError(
@@ -343,6 +374,22 @@ class AppConfig(BaseModel):
         if self.reconcile:
             if self.reconcile.rerank.device == "auto" and shared_dev != "auto":
                 self.reconcile.rerank.device = shared_dev
+
+            cluster = self.reconcile.cluster
+            if cluster.device == "auto" and shared_dev != "auto":
+                cluster.device = shared_dev
+            target_cluster_dev = cluster.device
+            if target_cluster_dev != "auto":
+                for sub in (
+                    cluster.bigclust,
+                    cluster.correlation,
+                    cluster.hierarchical,
+                    cluster.dbscan,
+                    cluster.mcl,
+                    cluster.bipartite,
+                ):
+                    if getattr(sub, "device", None) == "auto":
+                        sub.device = target_cluster_dev
 
         # Propagate linguistic configuration to record_normalization
         if self.linguistic and self.record_normalization:

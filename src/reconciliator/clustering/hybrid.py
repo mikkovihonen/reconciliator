@@ -122,14 +122,9 @@ class HybridBigClustGraphClusterer(BaseCorpusClusterer):
         self.edge_evaluator = edge_evaluator or BibliographicalEdgeEvaluator(config=self.config)
 
         # Hardware accelerator selection
-        if device is not None and device != "auto":
-            self.device = device
-        elif torch.backends.mps.is_available():
-            self.device = "mps"
-        elif torch.cuda.is_available():
-            self.device = "cuda"
-        else:
-            self.device = "cpu"
+        from reconciliator.utils.device import resolve_device
+
+        self.device = resolve_device(device if device is not None else getattr(getattr(self.config, "bigclust", None), "device", getattr(self.config, "device", "auto")))
 
     def _embed_texts_cached(
         self, texts: Sequence[str], entity_type: str = "work"

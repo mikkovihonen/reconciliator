@@ -49,78 +49,105 @@ def create_corpus_clusterer(
     id_mgr = identity_manager or ClusterIdentityManager(corpus_repo)
 
     method = getattr(cfg, "method", "multiplex_graph")
+    cluster_device_str = getattr(cfg, "device", "auto")
 
-    if method == "correlation_pivot":
+    if method in ("correlation_pivot", "correlation"):
         from reconciliator.clustering.correlation import CorrelationCorpusClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
+        corr_cfg = getattr(cfg, "correlation", None)
+        target_dev = resolve_compute_device(getattr(corr_cfg, "device", cluster_device_str) if corr_cfg and getattr(corr_cfg, "device", "auto") != "auto" else cluster_device_str)
         return CorrelationCorpusClusterer(
             corpus_repo=corpus_repo,
             wemi_repo=effective_wemi,
             embedder=actual_embedder,
-            config=getattr(cfg, "correlation", None),
+            config=corr_cfg,
             identity_manager=id_mgr,
+            device=target_dev,
         )
 
-    if method == "hierarchical_wemi":
+    if method in ("hierarchical_wemi", "hierarchical"):
         from reconciliator.clustering.hierarchical import HierarchicalWEMIClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
+        h_cfg = getattr(cfg, "hierarchical", None)
+        target_dev = resolve_compute_device(getattr(h_cfg, "device", cluster_device_str) if h_cfg and getattr(h_cfg, "device", "auto") != "auto" else cluster_device_str)
         return HierarchicalWEMIClusterer(
             corpus_repo=corpus_repo,
             wemi_repo=effective_wemi,
             embedder=actual_embedder,
-            config=getattr(cfg, "hierarchical", None),
+            config=h_cfg,
             identity_manager=id_mgr,
+            device=target_dev,
         )
 
-    if method == "gpu_dbscan":
+    if method in ("gpu_dbscan", "dbscan"):
         from reconciliator.clustering.density import DensityCorpusClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
+        db_cfg = getattr(cfg, "dbscan", None)
+        target_dev = resolve_compute_device(getattr(db_cfg, "device", cluster_device_str) if db_cfg and getattr(db_cfg, "device", "auto") != "auto" else cluster_device_str)
         return DensityCorpusClusterer(
             corpus_repo=corpus_repo,
             wemi_repo=effective_wemi,
             embedder=actual_embedder,
-            config=getattr(cfg, "dbscan", None),
+            config=db_cfg,
             identity_manager=id_mgr,
+            device=target_dev,
         )
 
-    if method == "gpu_mcl":
+    if method in ("gpu_mcl", "mcl"):
         from reconciliator.clustering.mcl import MarkovCorpusClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
+        mcl_cfg = getattr(cfg, "mcl", None)
+        target_dev = resolve_compute_device(getattr(mcl_cfg, "device", cluster_device_str) if mcl_cfg and getattr(mcl_cfg, "device", "auto") != "auto" else cluster_device_str)
         return MarkovCorpusClusterer(
             corpus_repo=corpus_repo,
             wemi_repo=effective_wemi,
             embedder=actual_embedder,
-            config=getattr(cfg, "mcl", None),
+            config=mcl_cfg,
             identity_manager=id_mgr,
+            device=target_dev,
         )
 
-    if method == "bipartite_coclust":
+    if method in ("bipartite_coclust", "bipartite"):
         from reconciliator.clustering.bipartite import BipartiteCoClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
+        bip_cfg = getattr(cfg, "bipartite", None)
+        target_dev = resolve_compute_device(getattr(bip_cfg, "device", cluster_device_str) if bip_cfg and getattr(bip_cfg, "device", "auto") != "auto" else cluster_device_str)
         return BipartiteCoClusterer(
             corpus_repo=corpus_repo,
             wemi_repo=effective_wemi,
             embedder=actual_embedder,
-            config=getattr(cfg, "bipartite", None),
+            config=bip_cfg,
             identity_manager=id_mgr,
+            device=target_dev,
         )
 
     if method == "bigclust":
         from reconciliator.clustering.bigclust import BigClustMultiplexClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
         bc_cfg = getattr(cfg, "bigclust", None)
         max_w = getattr(bc_cfg, "max_work_clusters", 50) if bc_cfg else 50
         max_e = getattr(bc_cfg, "max_expression_clusters_per_work", 10) if bc_cfg else 10
+        sim_thresh = getattr(cfg, "similarity_threshold", 0.70)
+        target_dev = resolve_compute_device(getattr(bc_cfg, "device", cluster_device_str) if bc_cfg and getattr(bc_cfg, "device", "auto") != "auto" else cluster_device_str)
         return BigClustMultiplexClusterer(
             corpus_repo=corpus_repo,
             embedder=actual_embedder,
             max_work_clusters=max_w,
             max_expression_clusters_per_work=max_e,
+            similarity_threshold=sim_thresh,
             identity_manager=id_mgr,
+            device=target_dev,
         )
 
     if method in ("hybrid", "hybrid_bigclust_graph"):
         from reconciliator.clustering.hybrid import HybridBigClustGraphClusterer
+        from reconciliator.utils.device import resolve_compute_device
 
         bc_cfg = getattr(cfg, "bigclust", None)
         hy_cfg = getattr(cfg, "hybrid", None)
@@ -131,6 +158,7 @@ def create_corpus_clusterer(
         fine_thresh = getattr(hy_cfg, "fine_threshold", 0.70) if hy_cfg else 0.70
         twilight_lower = getattr(hy_cfg, "twilight_lower", 0.55) if hy_cfg else 0.55
         neural_thresh = getattr(hy_cfg, "neural_boundary_threshold", 0.75) if hy_cfg else 0.75
+        target_dev = resolve_compute_device(getattr(bc_cfg, "device", cluster_device_str) if bc_cfg and getattr(bc_cfg, "device", "auto") != "auto" else cluster_device_str)
         return HybridBigClustGraphClusterer(
             corpus_repo=corpus_repo,
             wemi_repo=effective_wemi,
@@ -148,6 +176,7 @@ def create_corpus_clusterer(
             neural_boundary_threshold=neural_thresh,
             evaluator=evaluator or (getattr(matcher, "evaluator", None) if matcher else None),
             rerank_scorer=rerank_scorer,
+            device=str(target_dev),
         )
 
     return MultiplexGraphClusterer(

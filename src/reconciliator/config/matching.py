@@ -101,41 +101,62 @@ class WEMIScoringWeightsWithAuthor(BaseModel):
     title: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("title", 0.45)
-        )
+        ),
+        ge=0.0,
     )
     author: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("author", 0.35)
-        )
+        ),
+        ge=0.0,
     )
     year: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("year", 0.10)
-        )
+        ),
+        ge=0.0,
     )
     type: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("with_author", {}).get("type", 0.10)
-        )
+        ),
+        ge=0.0,
     )
+
+    @model_validator(mode="after")
+    def validate_sum(self) -> WEMIScoringWeightsWithAuthor:
+        total = self.title + self.author + self.year + self.type
+        if round(total, 4) != 1.0:
+            raise ValueError(f"WEMIScoringWeightsWithAuthor weights must sum to 1.0, got {total}")
+        return self
 
 
 class WEMIScoringWeightsWithoutAuthor(BaseModel):
     title: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("title", 0.70)
-        )
+        ),
+        ge=0.0,
     )
     year: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("year", 0.15)
-        )
+        ),
+        ge=0.0,
     )
     type: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("without_author", {}).get("type", 0.15)
-        )
+        ),
+        ge=0.0,
     )
+
+    @model_validator(mode="after")
+    def validate_sum(self) -> WEMIScoringWeightsWithoutAuthor:
+        total = self.title + self.year + self.type
+        if round(total, 4) != 1.0:
+            raise ValueError(f"WEMIScoringWeightsWithoutAuthor weights must sum to 1.0, got {total}")
+        return self
 
 
 class WEMIScoringConfig(BaseModel):
@@ -152,27 +173,36 @@ class WEMIScoringConfig(BaseModel):
     author_missing_similarity: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("author_missing_similarity", 0.60)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     year_missing_similarity: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("year_missing_similarity", 0.80)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     year_max_difference: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("year_max_difference", 20.0)
-        )
+        ),
+        ge=0.0,
     )
     cross_format_type_similarity: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("cross_format_type_similarity", 0.95)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     default_type_similarity: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("scoring", {}).get("default_type_similarity", 0.50)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
 
 
@@ -196,22 +226,29 @@ class AggregateClusteringConfig(BaseModel):
     min_constituents_for_overlap: int = Field(
         default_factory=lambda: int(
             _CLUSTER_DEFAULTS.get("aggregates", {}).get("min_constituents_for_overlap", 3)
-        )
+        ),
+        ge=1,
     )
     jaccard_merge_threshold: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("aggregates", {}).get("jaccard_merge_threshold", 0.80)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     jaccard_veto_threshold: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("aggregates", {}).get("jaccard_veto_threshold", 0.30)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     merge_bonus_score: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("aggregates", {}).get("merge_bonus_score", 0.95)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     sequence_alignment: bool = Field(
         default_factory=lambda: bool(
@@ -221,13 +258,24 @@ class AggregateClusteringConfig(BaseModel):
     lcs_threshold: float = Field(
         default_factory=lambda: float(
             _CLUSTER_DEFAULTS.get("aggregates", {}).get("lcs_threshold", 0.70)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     blocking_family: str = Field(
         default_factory=lambda: str(
             _CLUSTER_DEFAULTS.get("aggregates", {}).get("blocking_family", "constituent_work")
         )
     )
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> AggregateClusteringConfig:
+        if self.jaccard_veto_threshold > self.jaccard_merge_threshold:
+            raise ValueError(
+                f"jaccard_veto_threshold ({self.jaccard_veto_threshold}) cannot exceed "
+                f"jaccard_merge_threshold ({self.jaccard_merge_threshold})."
+            )
+        return self
 
 
 _CORRELATION_DEFAULTS = dict(_CLUSTER_DEFAULTS.get("correlation") or {})
@@ -246,49 +294,84 @@ class BigClustConfig(BaseModel):
         default_factory=lambda: bool(_BIGCLUST_DEFAULTS.get("enabled", True))
     )
     max_work_clusters: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_work_clusters", 50))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_work_clusters", 50)),
+        ge=1,
     )
     min_work_clusters: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("min_work_clusters", 2))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("min_work_clusters", 2)),
+        ge=1,
     )
     max_expression_clusters_per_work: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_expression_clusters_per_work", 10))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_expression_clusters_per_work", 10)),
+        ge=1,
     )
     batch_size: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("batch_size", 5000))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("batch_size", 5000)),
+        ge=1,
     )
     max_candidate_points: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_candidate_points", 20))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_candidate_points", 20)),
+        ge=1,
     )
     bundle_size: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("bundle_size", 7))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("bundle_size", 7)),
+        ge=1,
     )
     max_iter: int = Field(
-        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_iter", 300))
+        default_factory=lambda: int(_BIGCLUST_DEFAULTS.get("max_iter", 300)),
+        ge=1,
     )
-    device: str = Field(
-        default_factory=lambda: str(_BIGCLUST_DEFAULTS.get("device", "auto"))
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
+        default_factory=lambda: str(_BIGCLUST_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
+
+    @model_validator(mode="after")
+    def validate_cluster_counts(self) -> BigClustConfig:
+        if self.device is None:
+            self.device = "auto"
+        if self.min_work_clusters > self.max_work_clusters:
+            raise ValueError(
+                f"min_work_clusters ({self.min_work_clusters}) cannot exceed "
+                f"max_work_clusters ({self.max_work_clusters})."
+            )
+        return self
 
 
 class HybridClusterConfig(BaseModel):
     """Configuration for hybrid BigClust coarse macro-partitioning + graph fine-reranking."""
 
     boundary_margin: float = Field(
-        default_factory=lambda: float(_HYBRID_DEFAULTS.get("boundary_margin", 0.15))
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("boundary_margin", 0.15)),
+        ge=0.0,
     )
     fine_threshold: float = Field(
-        default_factory=lambda: float(_HYBRID_DEFAULTS.get("fine_threshold", 0.70))
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("fine_threshold", 0.70)),
+        ge=0.0,
+        le=1.0,
     )
     max_candidates_per_boundary: int = Field(
-        default_factory=lambda: int(_HYBRID_DEFAULTS.get("max_candidates_per_boundary", 20))
+        default_factory=lambda: int(_HYBRID_DEFAULTS.get("max_candidates_per_boundary", 20)),
+        ge=1,
     )
     twilight_lower: float = Field(
-        default_factory=lambda: float(_HYBRID_DEFAULTS.get("twilight_lower", 0.55))
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("twilight_lower", 0.55)),
+        ge=0.0,
+        le=1.0,
     )
     neural_boundary_threshold: float = Field(
-        default_factory=lambda: float(_HYBRID_DEFAULTS.get("neural_boundary_threshold", 0.75))
+        default_factory=lambda: float(_HYBRID_DEFAULTS.get("neural_boundary_threshold", 0.75)),
+        ge=0.0,
+        le=1.0,
     )
+
+    @model_validator(mode="after")
+    def validate_twilight_bounds(self) -> HybridClusterConfig:
+        if self.twilight_lower >= self.fine_threshold:
+            raise ValueError(
+                f"twilight_lower ({self.twilight_lower}) must be strictly less than "
+                f"fine_threshold ({self.fine_threshold})."
+            )
+        return self
 
 
 class CorrelationClusteringConfig(BaseModel):
@@ -301,14 +384,28 @@ class CorrelationClusteringConfig(BaseModel):
         default_factory=lambda: str(_CORRELATION_DEFAULTS.get("algorithm", "parallel_pivot"))  # type: ignore[return-value]
     )
     positive_threshold: float = Field(
-        default_factory=lambda: float(_CORRELATION_DEFAULTS.get("positive_threshold", 0.70))
+        default_factory=lambda: float(_CORRELATION_DEFAULTS.get("positive_threshold", 0.70)),
+        ge=0.0,
+        le=1.0,
     )
     max_parallel_pivots: int = Field(
-        default_factory=lambda: int(_CORRELATION_DEFAULTS.get("max_parallel_pivots", 256))
+        default_factory=lambda: int(_CORRELATION_DEFAULTS.get("max_parallel_pivots", 256)),
+        ge=1,
     )
-    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
         default_factory=lambda: str(_CORRELATION_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
+
+    @model_validator(mode="after")
+    def validate_algorithm(self) -> CorrelationClusteringConfig:
+        if self.device is None:
+            self.device = "auto"
+        if self.algorithm == "qp_relaxation":
+            raise ValueError(
+                "Correlation clustering algorithm 'qp_relaxation' is not supported in CCPivotEngine. "
+                "Supported algorithms: 'parallel_pivot', 'serial_pivot'."
+            )
+        return self
 
 
 class HierarchicalClusterConfig(BaseModel):
@@ -318,33 +415,54 @@ class HierarchicalClusterConfig(BaseModel):
         default_factory=lambda: str(_HIERARCHICAL_DEFAULTS.get("linkage", "average"))  # type: ignore[return-value]
     )
     work_distance_threshold: float = Field(
-        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("work_distance_threshold", 0.35))
+        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("work_distance_threshold", 0.35)),
+        ge=0.0,
     )
     expression_distance_threshold: float = Field(
-        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("expression_distance_threshold", 0.15))
+        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("expression_distance_threshold", 0.15)),
+        ge=0.0,
     )
     manifestation_distance_threshold: float = Field(
-        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("manifestation_distance_threshold", 0.05))
+        default_factory=lambda: float(_HIERARCHICAL_DEFAULTS.get("manifestation_distance_threshold", 0.05)),
+        ge=0.0,
     )
     metric: Literal["cosine", "euclidean"] = Field(
         default_factory=lambda: str(_HIERARCHICAL_DEFAULTS.get("metric", "cosine"))  # type: ignore[return-value]
     )
     batch_size: int = Field(
-        default_factory=lambda: int(_HIERARCHICAL_DEFAULTS.get("batch_size", 4096))
+        default_factory=lambda: int(_HIERARCHICAL_DEFAULTS.get("batch_size", 4096)),
+        ge=1,
     )
-    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
         default_factory=lambda: str(_HIERARCHICAL_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
+
+    @model_validator(mode="after")
+    def validate_hierarchy_and_metric(self) -> HierarchicalClusterConfig:
+        if self.device is None:
+            self.device = "auto"
+        if self.linkage == "ward" and self.metric != "euclidean":
+            raise ValueError(
+                f"Hierarchical clustering with linkage='ward' requires metric='euclidean', got '{self.metric}'."
+            )
+        if self.work_distance_threshold < self.expression_distance_threshold:
+            raise ValueError(
+                f"work_distance_threshold ({self.work_distance_threshold}) must be >= "
+                f"expression_distance_threshold ({self.expression_distance_threshold}) to preserve WEMI hierarchy."
+            )
+        return self
 
 
 class DBSCANClusterConfig(BaseModel):
     """Configuration for GPU-accelerated density-based clustering."""
 
     eps: float = Field(
-        default_factory=lambda: float(_DBSCAN_DEFAULTS.get("eps", 0.25))
+        default_factory=lambda: float(_DBSCAN_DEFAULTS.get("eps", 0.25)),
+        gt=0.0,
     )
     min_samples: int = Field(
-        default_factory=lambda: int(_DBSCAN_DEFAULTS.get("min_samples", 2))
+        default_factory=lambda: int(_DBSCAN_DEFAULTS.get("min_samples", 2)),
+        ge=1,
     )
     metric: Literal["cosine", "euclidean"] = Field(
         default_factory=lambda: str(_DBSCAN_DEFAULTS.get("metric", "cosine"))  # type: ignore[return-value]
@@ -353,54 +471,83 @@ class DBSCANClusterConfig(BaseModel):
         default_factory=lambda: str(_DBSCAN_DEFAULTS.get("noise_strategy", "singleton"))  # type: ignore[return-value]
     )
     tile_size: int = Field(
-        default_factory=lambda: int(_DBSCAN_DEFAULTS.get("tile_size", 4096))
+        default_factory=lambda: int(_DBSCAN_DEFAULTS.get("tile_size", 4096)),
+        ge=1,
     )
-    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
         default_factory=lambda: str(_DBSCAN_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
+
+    @model_validator(mode="after")
+    def validate_device(self) -> DBSCANClusterConfig:
+        if self.device is None:
+            self.device = "auto"
+        return self
 
 
 class MarkovClusterConfig(BaseModel):
     """Configuration for GPU-accelerated Markov Cluster Algorithm (MCL)."""
 
     expansion_power: int = Field(
-        default_factory=lambda: int(_MCL_DEFAULTS.get("expansion_power", 2))
+        default_factory=lambda: int(_MCL_DEFAULTS.get("expansion_power", 2)),
+        ge=2,
     )
     inflation_power: float = Field(
-        default_factory=lambda: float(_MCL_DEFAULTS.get("inflation_power", 2.0))
+        default_factory=lambda: float(_MCL_DEFAULTS.get("inflation_power", 2.0)),
+        gt=1.0,
     )
     max_iterations: int = Field(
-        default_factory=lambda: int(_MCL_DEFAULTS.get("max_iterations", 30))
+        default_factory=lambda: int(_MCL_DEFAULTS.get("max_iterations", 30)),
+        ge=1,
     )
     convergence_tol: float = Field(
-        default_factory=lambda: float(_MCL_DEFAULTS.get("convergence_tol", 1e-5))
+        default_factory=lambda: float(_MCL_DEFAULTS.get("convergence_tol", 1e-5)),
+        gt=0.0,
     )
     pruning_threshold: float = Field(
-        default_factory=lambda: float(_MCL_DEFAULTS.get("pruning_threshold", 1e-4))
+        default_factory=lambda: float(_MCL_DEFAULTS.get("pruning_threshold", 1e-4)),
+        ge=0.0,
+        lt=1.0,
     )
-    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
         default_factory=lambda: str(_MCL_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
+
+    @model_validator(mode="after")
+    def validate_device(self) -> MarkovClusterConfig:
+        if self.device is None:
+            self.device = "auto"
+        return self
 
 
 class BipartiteCoClusterConfig(BaseModel):
     """Configuration for joint Work-Agent bipartite spectral co-clustering."""
 
     latent_dimensions: int = Field(
-        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("latent_dimensions", 32))
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("latent_dimensions", 32)),
+        ge=1,
     )
     work_k: int = Field(
-        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("work_k", 50))
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("work_k", 50)),
+        ge=1,
     )
     agent_k: int = Field(
-        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("agent_k", 50))
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("agent_k", 50)),
+        ge=1,
     )
     iterations: int = Field(
-        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("iterations", 100))
+        default_factory=lambda: int(_BIPARTITE_DEFAULTS.get("iterations", 100)),
+        ge=1,
     )
-    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
         default_factory=lambda: str(_BIPARTITE_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
+
+    @model_validator(mode="after")
+    def validate_device(self) -> BipartiteCoClusterConfig:
+        if self.device is None:
+            self.device = "auto"
+        return self
 
 
 class WEMIClusterConfig(BaseModel):
@@ -423,7 +570,7 @@ class WEMIClusterConfig(BaseModel):
     ] = Field(
         default_factory=lambda: str(_CLUSTER_DEFAULTS.get("method", "multiplex_graph"))  # type: ignore[return-value]
     )
-    device: Literal["auto", "cuda", "mps", "cpu"] = Field(
+    device: Optional[Literal["auto", "cuda", "mps", "cpu"]] = Field(
         default_factory=lambda: str(_CLUSTER_DEFAULTS.get("device", "auto"))  # type: ignore[return-value]
     )
     bigclust: BigClustConfig = Field(default_factory=BigClustConfig)
@@ -434,10 +581,13 @@ class WEMIClusterConfig(BaseModel):
     mcl: MarkovClusterConfig = Field(default_factory=MarkovClusterConfig)
     bipartite: BipartiteCoClusterConfig = Field(default_factory=BipartiteCoClusterConfig)
     similarity_threshold: float = Field(
-        default_factory=lambda: float(_CLUSTER_DEFAULTS.get("similarity_threshold", 0.85))
+        default_factory=lambda: float(_CLUSTER_DEFAULTS.get("similarity_threshold", 0.85)),
+        ge=0.0,
+        le=1.0,
     )
     max_cluster_size: int = Field(
-        default_factory=lambda: int(_CLUSTER_DEFAULTS.get("max_cluster_size", 500))
+        default_factory=lambda: int(_CLUSTER_DEFAULTS.get("max_cluster_size", 500)),
+        ge=1,
     )
     blocking_families: Union[list[str], Literal["all"]] = Field(
         default_factory=lambda: [
@@ -468,6 +618,23 @@ class WEMIClusterConfig(BaseModel):
         default_factory=lambda: list(_CLUSTER_DEFAULTS.get("domain_key_types") or [])
     )
 
+    @model_validator(mode="after")
+    def sync_device_to_subclusters(self) -> WEMIClusterConfig:
+        if self.device is None:
+            self.device = "auto"
+        if self.device != "auto":
+            for sub in (
+                self.bigclust,
+                self.correlation,
+                self.hierarchical,
+                self.dbscan,
+                self.mcl,
+                self.bipartite,
+            ):
+                if getattr(sub, "device", None) in ("auto", None):
+                    sub.device = self.device
+        return self
+
 
 class AgentClusterScoringWeights(BaseModel):
     """Weights for multi-feature agent cluster scoring."""
@@ -475,38 +642,60 @@ class AgentClusterScoringWeights(BaseModel):
     name_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("name_weight", 0.40)
-        )
+        ),
+        ge=0.0,
     )
     dates_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("dates_weight", 0.20)
-        )
+        ),
+        ge=0.0,
     )
     work_cluster_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("work_cluster_weight", 0.15)
-        )
+        ),
+        ge=0.0,
     )
     coauthor_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("coauthor_weight", 0.10)
-        )
+        ),
+        ge=0.0,
     )
     affiliation_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("affiliation_weight", 0.05)
-        )
+        ),
+        ge=0.0,
     )
     concept_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("concept_weight", 0.05)
-        )
+        ),
+        ge=0.0,
     )
     qualifier_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("scoring_weights", {}).get("qualifier_weight", 0.05)
-        )
+        ),
+        ge=0.0,
     )
+
+    @model_validator(mode="after")
+    def validate_sum(self) -> AgentClusterScoringWeights:
+        total = (
+            self.name_weight
+            + self.dates_weight
+            + self.work_cluster_weight
+            + self.coauthor_weight
+            + self.affiliation_weight
+            + self.concept_weight
+            + self.qualifier_weight
+        )
+        if round(total, 4) != 1.0:
+            raise ValueError(f"AgentClusterScoringWeights weights must sum to 1.0, got {total}")
+        return self
 
 
 class AgentClusterConfig(BaseModel):
@@ -516,15 +705,19 @@ class AgentClusterConfig(BaseModel):
         default_factory=lambda: bool(_AGENT_CLUSTERING_DEFAULTS.get("enabled", True))
     )
     similarity_threshold: float = Field(
-        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("similarity_threshold", 0.85))
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("similarity_threshold", 0.85)),
+        ge=0.0,
+        le=1.0,
     )
     date_tolerance_years: int = Field(
-        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_years", 1))
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_years", 1)),
+        ge=0,
     )
     major_date_discrepancy_veto_years: int = Field(
         default_factory=lambda: int(
             _AGENT_CLUSTERING_DEFAULTS.get("major_date_discrepancy_veto_years", 2)
-        )
+        ),
+        ge=0,
     )
     require_corroboration_for_date_discrepancy: bool = Field(
         default_factory=lambda: bool(
@@ -534,10 +727,12 @@ class AgentClusterConfig(BaseModel):
     min_career_overlap_tolerance_years: int = Field(
         default_factory=lambda: int(
             _AGENT_CLUSTERING_DEFAULTS.get("min_career_overlap_tolerance_years", 40)
-        )
+        ),
+        ge=0,
     )
     batch_size: int = Field(
-        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("batch_size", 1000))
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("batch_size", 1000)),
+        ge=1,
     )
     token_matching_algorithm: str = Field(
         default_factory=lambda: str(
@@ -547,12 +742,16 @@ class AgentClusterConfig(BaseModel):
     affiliation_fuzzy_threshold: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_threshold", 80.0)
-        )
+        ),
+        ge=0.0,
+        le=100.0,
     )
     affiliation_fuzzy_score: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("affiliation_fuzzy_score", 0.85)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     enable_hierarchical_concepts: bool = Field(
         default_factory=lambda: bool(
@@ -562,7 +761,9 @@ class AgentClusterConfig(BaseModel):
     concept_similarity_weight: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("concept_similarity_weight", 0.85)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     enable_semantic_disambiguation: bool = Field(
         default_factory=lambda: bool(
@@ -572,21 +773,30 @@ class AgentClusterConfig(BaseModel):
     semantic_homonym_veto_threshold: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("semantic_homonym_veto_threshold", 0.40)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     semantic_boost_threshold: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("semantic_boost_threshold", 0.85)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     max_blocking_bucket_size: int = Field(
-        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("max_blocking_bucket_size", 200))
+        default_factory=lambda: int(_AGENT_CLUSTERING_DEFAULTS.get("max_blocking_bucket_size", 200)),
+        ge=1,
     )
     date_tolerance_score: float = Field(
-        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_score", 0.7))
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("date_tolerance_score", 0.7)),
+        ge=0.0,
+        le=1.0,
     )
     date_missing_score: float = Field(
-        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("date_missing_score", 0.5))
+        default_factory=lambda: float(_AGENT_CLUSTERING_DEFAULTS.get("date_missing_score", 0.5)),
+        ge=0.0,
+        le=1.0,
     )
     source_authority_precedence: list[str] = Field(
         default_factory=lambda: list(
@@ -620,7 +830,9 @@ class AgentClusterConfig(BaseModel):
     relationship_corroboration_score: float = Field(
         default_factory=lambda: float(
             _AGENT_CLUSTERING_DEFAULTS.get("relationship_corroboration_score", 0.90)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
 
 
@@ -754,6 +966,30 @@ class CascadeRouterConfig(BaseModel):
         ge=1,
     )
 
+    @model_validator(mode="after")
+    def validate_threshold_order(self) -> CascadeRouterConfig:
+        if self.low_confidence_threshold > self.high_confidence_threshold:
+            raise ValueError(
+                f"low_confidence_threshold ({self.low_confidence_threshold}) must be <= "
+                f"high_confidence_threshold ({self.high_confidence_threshold})"
+            )
+        if self.uncertainty_band_min > self.uncertainty_band_max:
+            raise ValueError(
+                f"uncertainty_band_min ({self.uncertainty_band_min}) must be <= "
+                f"uncertainty_band_max ({self.uncertainty_band_max})"
+            )
+        if self.uncertainty_band_min < self.low_confidence_threshold:
+            raise ValueError(
+                f"uncertainty_band_min ({self.uncertainty_band_min}) must be >= "
+                f"low_confidence_threshold ({self.low_confidence_threshold})"
+            )
+        if self.uncertainty_band_max > self.high_confidence_threshold:
+            raise ValueError(
+                f"uncertainty_band_max ({self.uncertainty_band_max}) must be <= "
+                f"high_confidence_threshold ({self.high_confidence_threshold})"
+            )
+        return self
+
 
 class RerankConfig(BaseModel):
     """Configuration for candidate reranking, metadata discriminators, and LLM judge."""
@@ -763,17 +999,21 @@ class RerankConfig(BaseModel):
         default_factory=lambda: str(_RERANK_DEFAULTS.get("engine", "cascade"))  # type: ignore[assignment]
     )
     model_name: Optional[str] = Field(default_factory=lambda: _RERANK_DEFAULTS.get("model_name"))
-    device: Literal["auto", "cpu", "cuda", "mps"] = Field(
+    device: Optional[Literal["auto", "cpu", "cuda", "mps"]] = Field(
         default_factory=lambda: _RERANK_DEFAULTS.get("device", "auto")
     )
-    batch_size: int = Field(default_factory=lambda: int(_RERANK_DEFAULTS.get("batch_size", 16)))
+    batch_size: int = Field(default_factory=lambda: int(_RERANK_DEFAULTS.get("batch_size", 16)), ge=1)
     dense_weight: float = Field(
-        default_factory=lambda: float(_RERANK_DEFAULTS.get("dense_weight", 0.5))
+        default_factory=lambda: float(_RERANK_DEFAULTS.get("dense_weight", 0.5)),
+        ge=0.0,
+        le=1.0,
     )
     rerank_weight: float = Field(
-        default_factory=lambda: float(_RERANK_DEFAULTS.get("rerank_weight", 0.5))
+        default_factory=lambda: float(_RERANK_DEFAULTS.get("rerank_weight", 0.5)),
+        ge=0.0,
+        le=1.0,
     )
-    top_k: int = Field(default_factory=lambda: int(_RERANK_DEFAULTS.get("top_k", 20)))
+    top_k: int = Field(default_factory=lambda: int(_RERANK_DEFAULTS.get("top_k", 20)), ge=1)
     short_circuit: ShortCircuitConfig = Field(default_factory=ShortCircuitConfig)
     require_volume_match: bool = Field(
         default_factory=lambda: bool(_RERANK_DEFAULTS.get("require_volume_match", True))
@@ -782,10 +1022,12 @@ class RerankConfig(BaseModel):
         default_factory=lambda: bool(_RERANK_DEFAULTS.get("require_surname_match", True))
     )
     max_year_difference: int = Field(
-        default_factory=lambda: int(_RERANK_DEFAULTS.get("max_year_difference", 5))
+        default_factory=lambda: int(_RERANK_DEFAULTS.get("max_year_difference", 5)),
+        ge=0,
     )
     year_penalty_threshold: int = Field(
-        default_factory=lambda: int(_RERANK_DEFAULTS.get("year_penalty_threshold", 1))
+        default_factory=lambda: int(_RERANK_DEFAULTS.get("year_penalty_threshold", 1)),
+        ge=0,
     )
     apply_pre_veto: bool = Field(
         default_factory=lambda: bool(_RERANK_DEFAULTS.get("apply_pre_veto", True))
@@ -795,6 +1037,8 @@ class RerankConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_weights(self) -> RerankConfig:
+        if self.device is None:
+            self.device = "auto"
         if not (0.0 <= self.dense_weight <= 1.0):
             raise ValueError(f"dense_weight must be in [0.0, 1.0], got {self.dense_weight}")
         if not (0.0 <= self.rerank_weight <= 1.0):
@@ -845,12 +1089,15 @@ class RecordedSoundFunnelConfig(BaseModel):
     jaccard_threshold: float = Field(
         default_factory=lambda: float(
             _FUNNELS_DEFAULTS.get("recorded_sound", {}).get("jaccard_threshold", 0.75)
-        )
+        ),
+        ge=0.0,
+        le=1.0,
     )
     max_candidates: int = Field(
         default_factory=lambda: int(
             _FUNNELS_DEFAULTS.get("recorded_sound", {}).get("max_candidates", 50)
-        )
+        ),
+        ge=1,
     )
     match_tier: str = Field(
         default_factory=lambda: str(
@@ -918,7 +1165,9 @@ class FunnelsConfig(BaseModel):
         default_factory=lambda: str(_FUNNELS_DEFAULTS.get("default_match_tier", "tier2_domain_key"))
     )
     default_confidence: float = Field(
-        default_factory=lambda: float(_FUNNELS_DEFAULTS.get("default_confidence", 0.90))
+        default_factory=lambda: float(_FUNNELS_DEFAULTS.get("default_confidence", 0.90)),
+        ge=0.0,
+        le=1.0,
     )
     audiobook: AudiobookFunnelConfig = Field(default_factory=AudiobookFunnelConfig)
     recorded_sound: RecordedSoundFunnelConfig = Field(default_factory=RecordedSoundFunnelConfig)

@@ -92,6 +92,10 @@ class GPUHierarchicalEngine:
     ) -> None:
         self.linkage = linkage.lower()
         self.metric = metric.lower()
+        if self.linkage == "ward" and self.metric != "euclidean":
+            raise ValueError(
+                f"Hierarchical clustering with linkage='ward' requires metric='euclidean', got '{self.metric}'"
+            )
         self.device = device or resolve_compute_device("auto")
 
     def fit(self, embeddings: torch.Tensor) -> HierarchicalTree:

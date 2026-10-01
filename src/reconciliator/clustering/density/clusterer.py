@@ -203,7 +203,7 @@ class DensityCorpusClusterer(BaseCorpusClusterer):
             work_clusters_count=len(work_clusters),
             expression_clusters_count=len(expression_clusters),
             manifestation_clusters_count=len(manifestation_clusters),
-            records_clustered=len(records),
+            records_clustered=len(corpus_linkages),
             elapsed_seconds=round(elapsed, 3),
         )
 
