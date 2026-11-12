@@ -3,7 +3,7 @@ name = "reconciliator"
 version = "0.1.0"
 description = "High-Performance Finnish Bibliographic Authority Reconciliation & Agent URI Enrichment Engine"
 readme = "README.md"
-license = "MIT"
+license = "GPL-2.0-or-later"
 authors = [
     { name = "Mikko Vihonen", email = "mikko.vihonen@iki.fi" }
 ]
