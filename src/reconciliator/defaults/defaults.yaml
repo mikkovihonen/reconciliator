@@ -553,6 +553,15 @@ record_normalization:
     de: ["der ", "die ", "das ", "ein ", "eine "]
     fr: ["le ", "la ", "les ", "un ", "une ", "l'"]
 
+  iso_639_2_to_1:
+    fin: "fi"
+    swe: "sv"
+    eng: "en"
+    ger: "de"
+    deu: "de"
+    fre: "fr"
+    fra: "fr"
+
   publisher_suffixes:
     - "oy"
     - "oyj"

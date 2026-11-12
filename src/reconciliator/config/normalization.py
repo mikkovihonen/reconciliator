@@ -20,6 +20,18 @@ _REC_DEFAULTS = get_bundled_record_defaults()
 DEFAULT_NON_FILING_ARTICLES: dict[str, list[str]] = dict(
     _REC_DEFAULTS.get("non_filing_articles") or {}
 )
+_DEFAULT_ISO_639_2_TO_1: dict[str, str] = {
+    "fin": "fi",
+    "swe": "sv",
+    "eng": "en",
+    "ger": "de",
+    "deu": "de",
+    "fre": "fr",
+    "fra": "fr",
+}
+DEFAULT_ISO_639_2_TO_1: dict[str, str] = dict(
+    _REC_DEFAULTS.get("iso_639_2_to_1") or _DEFAULT_ISO_639_2_TO_1
+)
 DEFAULT_PUBLISHER_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("publisher_suffixes") or [])
 DEFAULT_VOLUME_PREFIXES: list[str] = list(_REC_DEFAULTS.get("volume_prefixes") or [])
 DEFAULT_VOLUME_SUFFIXES: list[str] = list(_REC_DEFAULTS.get("volume_suffixes") or [])
@@ -49,6 +61,7 @@ class RecordNormalizationConfig(BaseModel):
     non_filing_articles: dict[str, list[str]] = Field(
         default_factory=lambda: {k: list(v) for k, v in DEFAULT_NON_FILING_ARTICLES.items()}
     )
+    iso_639_2_to_1: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_ISO_639_2_TO_1))
     publisher_suffixes: list[str] = Field(default_factory=lambda: list(DEFAULT_PUBLISHER_SUFFIXES))
     volume_prefixes: list[str] = Field(default_factory=lambda: list(DEFAULT_VOLUME_PREFIXES))
     volume_suffixes: list[str] = Field(default_factory=lambda: list(DEFAULT_VOLUME_SUFFIXES))

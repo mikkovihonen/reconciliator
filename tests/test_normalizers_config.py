@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from reconciliator.config import (
+    DEFAULT_ISO_639_2_TO_1,
     BiographicalDatesConfig,
     LinguisticConfig,
     RecordNormalizationConfig,
@@ -139,6 +140,14 @@ def test_clean_title_and_volume_options() -> None:
 
     # Custom volume template
     assert normalize_volume("Band 3", prefixes=["band"], format_template="Bd. {num}") == "Bd. 3"
+
+    # Default and custom ISO 639-2 to 639-1 mappings
+    assert "fin" in DEFAULT_ISO_639_2_TO_1
+    assert DEFAULT_ISO_639_2_TO_1["fin"] == "fi"
+    assert (
+        clean_title("En bok om kärlek", lang="svenska", iso_639_map={"svenska": "sv"})
+        == "bok om kärlek"
+    )
 
 
 def test_vocab_normalization_config_and_folding() -> None:
